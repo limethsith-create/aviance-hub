@@ -1526,4 +1526,13 @@ function submitMeeting(){
   const start=Number(val('mtStart')),end=Number(val('mtEnd'));
   if(end<=start)return errEl('mtErr','End time must be after start.');
   const att=[...document.querySelectorAll('#mtAtt .att-chip.on')].map(c=>Number(c.dataset.id));
-  if(!att.lengt
+  if(!att.length)return errEl('mtErr','Pick at least one attendee.');
+  const id=Math.max(0,...meetings.map(m=>m.id),0)+1;
+  meetings.push({id,title,type:val('mtType')||'internal',day:Number(val('mtDay')),start,end,att,loc:val('mtLoc')||'',client:val('mtClient')||'',notes:''});
+  saveDB();closeModal();render(currentView==='mycal'?'mycal':'teamcal');toast('Meeting scheduled');
+}
+
+boot();
+</script>
+</body>
+</html>
