@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="trials.css">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCI+PGRlZnM+PC9kZWZzPjxwb2x5Z29uIHBvaW50cz0iMjgsODggMTAwLDEyOCAxNzIsODggMTcyLDE1MCAxMDAsMTkwIDI4LDE1MCIgZmlsbD0iIzEwMTAxNSIgLz48cG9seWdvbiBwb2ludHM9IjI4LDg4IDEwMCwxMjggMTAwLDE5MCAyOCwxNTAiIGZpbGw9IiMxQzFDMjIiIC8+PHBvbHlnb24gcG9pbnRzPSIxMDAsMTI4IDE3Miw4OCAxNzIsMTUwIDEwMCwxOTAiIGZpbGw9IiMwQTBBMEMiIC8+PHBvbHlnb24gcG9pbnRzPSIzMCw3MiAxMDAsMTEwIDE3MCw3MiAxMDAsMzQiIGZpbGw9IiNFMDI5MEYiIC8+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMC4zNSwtMC4xOSwwLjM1LDAuMTksMzAsNzIpIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg0LDQpIHNjYWxlKDAuOTIpIj48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0xMDAgMTggTDE1NiAxNzIgTDEyOCAxNzIgTDExNyAxNDAgTDgzIDE0MCBMNzIgMTcyIEw0NCAxNzIgWiBNOTEgMTE0IEwxMDkgMTE0IEwxMDAgODQgWiIgZmlsbD0iI0ZGRkZGRiIvPjwvZz48L2c+PC9zdmc+">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -919,6 +920,8 @@ const I={
   crm:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>',
   mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
   inbox:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 13l3 0 2 3h8l2-3 3 0"/><path d="M3 13V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6M3 13v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/></svg>',
+  trials:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>',
+  bell:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>',
 };
 
 /* ===================== DATA (starts empty) ===================== */
@@ -1010,7 +1013,9 @@ function viewDashboard(){
   const dAwait=projects.filter(p=>p.approval==='await').length;
   const _t=new Date();const _t0=new Date(_t.getFullYear(),_t.getMonth(),_t.getDate());const _w=new Date(_t0.getTime()+7*864e5);
   const dSoon=projects.filter(p=>{const d=new Date(p.due);return !isNaN(d)&&d>=_t0&&d<=_w&&p.phase<5;}).length;
-  const healthStrip=`<div class="health-strip">
+  const trialsCard=typeof trialsHealthCard==='function'?trialsHealthCard():'';
+  const healthStrip=`<div class="health-strip ${trialsCard?'five':''}">
+    ${trialsCard}
     <div class="hcard" style="--hc:#E0290F;--hc-bg:rgba(224,41,15,.12)" onclick="render('projects')"><div class="hc-ic">${I.due}</div><div><div class="hc-lbl">Overdue</div><div class="hc-num">${dOverdue}</div><div class="hc-sub">${dOverdue?'need attention':'all on time'}</div></div></div>
     <div class="hcard" style="--hc:#A16207;--hc-bg:rgba(161,98,7,.13)" onclick="render('projects')"><div class="hc-ic">${I.check}</div><div><div class="hc-lbl">Awaiting approval</div><div class="hc-num">${dAwait}</div><div class="hc-sub">client review</div></div></div>
     <div class="hcard" style="--hc:#000000;--hc-bg:rgba(0,0,0,.14)" onclick="render('projects')"><div class="hc-ic">${I.cal}</div><div><div class="hc-lbl">Due this week</div><div class="hc-num">${dSoon}</div><div class="hc-sub">next 7 days</div></div></div>
@@ -1091,7 +1096,7 @@ function viewClients(){
   <div class="card client-table">
     <div class="crow chead"><div>Client</div><div>Industry</div><div>Active project</div><div>Value</div><div>Status</div></div>
     ${clients.map(c=>{const proj=projects.find(p=>p.client===c.name);return `<div class="crow">
-      <div class="cl-name"><div class="cl-logo" style="background:${c.color}22;color:${c.color}">${c.init}</div><div><b>${esc(c.name)}</b><small>${esc(clientContact[c.name]?clientContact[c.name].name:c.industry)}</small></div></div>
+      <div class="cl-name"><div class="cl-logo" style="background:${c.color}22;color:${c.color}">${c.init}</div><div><b>${esc(c.name)}</b><small>${esc(clientContact[c.name]?clientContact[c.name].name:c.industry)}</small>${typeof trialLineForName==='function'?trialLineForName(c.name):''}</div></div>
       <div class="muted" style="font-size:13px">${esc(c.industry)}</div>
       <div style="font-size:13px">${proj?esc(proj.name):'<span class="muted">—</span>'}</div>
       <div style="font-weight:700;font-size:13.5px">${esc(c.value||'—')}</div>
@@ -1366,7 +1371,7 @@ function leadTable(filter){
       <div><span class="pill" style="background:${stageColor[l.stage]}22;color:${stageColor[l.stage]}"><span class="pdot" style="background:${stageColor[l.stage]}"></span>${l.stage}</span></div>
       <div style="font-weight:700;font-size:13px">${esc(l.value||'—')}</div>
       <div class="muted" style="font-size:12.5px">${esc(l.lastTouch||'—')}</div>
-      <div onclick="event.stopPropagation()"><button class="btn ghost" style="padding:6px 11px;font-size:12px" onclick="composeGmail(${l.id})">Email</button></div>
+      <div onclick="event.stopPropagation()" style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn ghost" style="padding:6px 11px;font-size:12px" onclick="composeGmail(${l.id})">Email</button>${(authUser&&authUser.role==='admin'&&typeof trialStartFromLead==='function')?`<button class="btn ghost" style="padding:6px 11px;font-size:12px" onclick="trialStartFromLead(${l.id})" title="Start a trial on the machine">Trial</button>`:''}</div>
     </div>`).join('')}
   </div>`;
 }
@@ -1400,6 +1405,7 @@ function openLead(id){
       <div class="flex" style="margin-top:15px;gap:8px;flex-wrap:wrap"><span class="pill" style="background:${sc}22;color:${sc}"><span class="pdot" style="background:${sc}"></span>${l.stage}</span>${l.value?`<span class="pill grey">${esc(l.value)}</span>`:''}${l.source?`<span class="pill blue">${esc(l.source)}</span>`:''}</div></div>
     <div class="panel-body">
       <button class="btn" style="width:100%;justify-content:center;margin-bottom:14px" onclick="composeGmail(${l.id})">${I.mail}Compose email in Gmail</button>
+      ${(authUser&&authUser.role==='admin'&&typeof trialStartFromLead==='function')?`<button class="btn ghost" style="width:100%;justify-content:center;margin:-6px 0 14px" onclick="trialStartFromLead(${l.id})">${I.trials}Start a trial</button>`:''}
       <div class="pb-grid"><div class="pb-stat"><small>Email</small><b style="font-size:13px;word-break:break-all">${esc(l.email||'—')}</b></div><div class="pb-stat"><small>Phone</small><b style="font-size:14px">${esc(l.phone||'—')}</b></div></div>
       <div class="field" style="margin:6px 0 18px"><label>Stage</label><select onchange="changeStage(${l.id},this.value)">${crmStages.map(s=>`<option ${s===l.stage?'selected':''}>${s}</option>`).join('')}</select></div>
       ${l.notes?`<p class="muted" style="font-size:13px;line-height:1.6;margin-bottom:18px">${esc(l.notes)}</p>`:''}
@@ -1437,6 +1443,7 @@ function addLeadNote(id){
 function navConfig(){
   if(currentRole==='admin')return [
     {label:'Workspace',items:[['dashboard',I.grid,'Command Center'],['projects',I.folder,'Projects',projects.length||''],['team',I.users,'Team',team.length||''],['requests',I.inbox,'Requests',pending.length||''],['clients',I.bldg,'Clients']]},
+    {label:'Trials',items:[['trials',I.trials,'Trials',typeof trialsNavCount==='function'?trialsNavCount():''],['trialAlerts',I.bell,'Machine alerts',typeof trialsAlertCount==='function'?trialsAlertCount():'']]},
     {label:'Calendar',items:[['mycal',I.cal,'My Calendar'],['teamcal',I.cols,'Team Calendar']]},
     {label:'Sales & Billing',items:[['proposals',I.doc,'Proposals'],['invoices',I.inv,'Invoices']]},
     {label:'Outreach',items:[['crm',I.crm,'CRM',leads.length||'']]},
@@ -1491,6 +1498,11 @@ const views={
   myprojects:{fn:viewMyProjects,title:'My Projects',sub:'Projects you own end-to-end'},
   mytasks:{fn:viewMyTasks,title:'My Tasks',sub:'Everything assigned to you, by due date'},
   directory:{fn:viewDirectory,title:'Directory',sub:'Team & client contacts'},
+  /* Trials section — functions live in trials.js (loaded after this script), hence the lazy wrappers */
+  trials:{fn:()=>viewTrials(),title:'Trials',sub:'The trial machine — every trial, and what it needs from you'},
+  trial:{fn:()=>viewTrial(),title:'Trial',sub:'One trial in full'},
+  trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins'},
+  trialAlerts:{fn:()=>viewTrialAlerts(),title:'Machine alerts',sub:'Everything the machine told you'},
 };
 function render(v){
   currentView=v;const view=views[v];if(!view)return;
@@ -1499,6 +1511,7 @@ function render(v){
   document.getElementById('psub').textContent=view.sub;
   renderNav();document.getElementById('content').scrollTop=0;closeSidebar();
   try{updateNotifBadge();}catch(e){}
+  try{if(typeof trialsOnRender==='function')trialsOnRender(v);}catch(e){}
 }
 document.getElementById('overlay').addEventListener('click',closePanel);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closePanel();closeModal();}});
@@ -1513,6 +1526,8 @@ let TOKEN=null;
 const SUPA_URL='https://zjbxnkpktbghhudjbxhk.supabase.co';
 const SUPA_KEY='sb_publishable_WV4FANV2hNsmbzK3DbiLFg_9bjiB8Z1';
 const MASTER_EMAIL='limethsith@gmail.com';
+/* The trial machine (email-distributor). Override for testing: localStorage.setItem('avianceMachineUrl','http://localhost:3000') */
+const MACHINE_URL=(function(){try{return localStorage.getItem('avianceMachineUrl')||'https://email-distributor.vercel.app'}catch(e){return 'https://email-distributor.vercel.app'}})();
 const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY);
 function toast(msg){const t=document.getElementById('toast');t.innerHTML=`<span class="tdot"></span><span>${esc(msg)}</span>`;t.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),3600);}
 
@@ -1587,6 +1602,7 @@ function enterApp(){
   document.getElementById('login').style.display='none';document.getElementById('app').style.display='grid';
   applyRole(authUser.role==='admin'?'admin':authUser.id);
   if(authUser.role==='admin'&&pending.length)setTimeout(()=>toast(`${pending.length} join request${pending.length>1?'s':''} waiting — see Requests`),700);
+  if(authUser.role==='admin'&&typeof trialsBoot==='function')try{trialsBoot();}catch(e){}
 }
 function viewRequests(){
   if(!pending.length)return emptyState(I.inbox,'No pending requests','When someone requests to join from the sign-in screen, they show up here for you to approve.','',null);
@@ -1752,6 +1768,7 @@ function cmdkActions(){const a=[];if(currentRole==='admin'){
   a.push({type:'Create',label:'New project',icon:I.folder,sub:'Add a project',kw:'new project create',run:()=>{closeCmdk();openNewProject();}});
   a.push({type:'Create',label:'Schedule meeting',icon:I.cal,sub:'Add to the calendar',kw:'schedule meeting new event',run:()=>{closeCmdk();openScheduleMeeting();}});
   a.push({type:'Create',label:'Add lead',icon:I.crm,sub:'CRM outreach',kw:'add lead crm new outreach',run:()=>{closeCmdk();render('crm');setTimeout(openAddLead,80);}});
+  if(typeof trialsCmdkActions==='function')a.push(...trialsCmdkActions());
 }
   a.push({type:'Command',label:'Toggle light / dark',icon:I.gauge,sub:'Switch theme',kw:'theme dark light mode toggle',run:()=>{closeCmdk();toggleTheme();}});
   a.push({type:'Command',label:'Log out',icon:I.users,sub:'End your session',kw:'log out sign out logout',run:()=>{closeCmdk();logout();}});
@@ -1762,6 +1779,7 @@ function cmdkEntities(){const out=[];
     (clients||[]).forEach(c=>{const nm=c&&c.name?c.name:c;out.push({type:'Client',label:String(nm),icon:I.bldg,sub:'Client',kw:String(nm),run:()=>{closeCmdk();render('clients');}});});
     (team||[]).forEach(t=>out.push({type:'Person',label:t.name,icon:I.users,sub:t.role,kw:t.name+' '+t.role,run:()=>{closeCmdk();render('team');}}));
     (leads||[]).forEach(l=>out.push({type:'Lead',label:l.name||l.company||'Lead',icon:I.crm,sub:l.company||l.stage||'',kw:(l.name||'')+' '+(l.company||''),run:()=>{closeCmdk();render('crm');setTimeout(()=>openLead(l.id),50);}}));
+    if(typeof trialsCmdkEntities==='function')out.push(...trialsCmdkEntities());
   }
   return out;}
 function openCmdk(){if(!authUser)return;const w=document.getElementById('cmdkWrap');w.classList.add('open');const inp=document.getElementById('cmdkInput');inp.value='';renderCmdk('');setTimeout(()=>inp.focus(),30);}
@@ -1793,6 +1811,7 @@ function computeNotifs(){const n=[];if(!authUser)return n;
     if(pending.length)n.push({dot:'var(--blue)',t:`${pending.length} join request${pending.length>1?'s':''} waiting`,s:'Review & approve',go:()=>render('requests')});
     projects.forEach(p=>{if(p.approval==='await')n.push({dot:'#A16207',t:`${p.name} — awaiting approval`,s:p.client||'Client review',go:()=>{render('projects');setTimeout(()=>openProject(p.id),50);}});});
     projects.forEach(p=>{if(isOverdue(p.due)&&p.phase<5)n.push({dot:'var(--red)',t:`${p.name} is overdue`,s:'Was due '+(p.due||''),go:()=>{render('projects');setTimeout(()=>openProject(p.id),50);}});});
+    try{if(typeof trialsNotifs==='function')n.push(...trialsNotifs());}catch(e){}
   }else{
     projects.filter(p=>p.owner===currentRole).forEach(p=>{(p.tasks||[]).forEach(tk=>{if(tk.due&&!tk.done&&isOverdue(tk.due))n.push({dot:'var(--red)',t:'Overdue: '+tk.t,s:p.name,go:()=>{render('myprojects');setTimeout(()=>openProject(p.id),50);}});});});
   }
@@ -1818,5 +1837,6 @@ document.addEventListener('keydown',e=>{
 initTheme();
 boot();
 </script>
+<script src="trials.js"></script>
 </body>
 </html>

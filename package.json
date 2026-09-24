@@ -1,0 +1,9 @@
+{
+  "name": "aviance-hub",
+  "private": true,
+  "description": "Aviance Hub — the owner's command centre (static site, no build step).",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check trials.js"
+  }
+}
