@@ -39,6 +39,41 @@ export const cobalt = {
   todo: [{ id: 'paid:cobalt-hvac', text: 'Mark the month-one invoice paid once the money lands', detail: 'INV-0007 · $1,500 · due 2026-10-05', urgent: false, since: '2026-10-05T00:00:00Z', action: { type: 'api', method: 'POST', path: '/api/mc/clients/cobalt-hvac', body: { action: 'markPaid' }, confirm: 'Mark INV-0007 as paid?' } }],
   systems: systems({ closing: 'ok' }), nextUp: null,
 };
+// A website application held for the owner's review (state `applied`).
+export const fern = {
+  id: 'fern-it', name: 'Fern IT', state: 'applied', stateLabel: 'Applied — waiting for your review', plan: 'trial', trialDay: null,
+  day1Date: null, day30Date: null, contactName: 'Lee Park', contactEmail: 'lee@fernit.com', website: 'https://fernit.com',
+  health: 'yellow', healthReasons: ['application waiting 2 h'], five: null, inboxRate: null, openAlerts: 0, urgentAlerts: 0,
+  todo: [{ id: 'review:fern-it', clientId: 'fern-it', clientName: 'Fern IT', text: "Review Fern IT's trial application", detail: 'From the website 2 h ago · looks like a fit (3 checks unknown)', urgent: false, since: '2026-10-17T10:00:00Z', action: { type: 'view', view: 'detail', clientId: 'fern-it', section: 'application' } }],
+  systems: systems({ intake: 'waiting', market: 'off', purchase: 'off', setup: 'off', warmup: 'off', list: 'off', copy: 'off', canary: 'off', sending: 'off', replies: 'off', calls: 'off', reports: 'off', closing: 'off' }), nextUp: null,
+};
+export const fernApplication = {
+  receivedAt: '2026-10-17T10:00:00Z', source: 'website', review: 'pending', decidedAt: null, decision: null, declineReason: null,
+  answers: [
+    { q: 'What do you sell, and who to?', a: 'Managed IT for dental and medical practices in Texas.' },
+    { q: 'How many people work at the company?', a: '12' },
+    { q: 'What is a new customer worth in their first year?', a: '$5,000–$20,000' },
+    { q: 'Have you sold to people who did not know you (not referrals)?', a: 'Yes' },
+    { q: 'Name three dream customers', a: 'Smile Dental Austin\nNorth Clinic\nLakeview Ortho' },
+    { q: 'Can you meet a lead within 5 business days?', a: 'Yes' },
+    { q: 'How many sales calls a week can you take?', a: '6' },
+    { q: 'Is anyone else cold-emailing for you?', a: 'Not sure' },
+    { q: 'Will you leave a short review if the trial works?', a: '' },
+  ],
+  fit: {
+    verdict: 'unknown', summary: 'Looks like a fit — 3 checks unknown',
+    lines: [
+      { rule: 'employees', label: '5–50 people at the company', status: 'pass', note: 'They said 12' },
+      { rule: 'deal_value', label: 'Customer worth ≥ $2,000 in year one', status: 'pass', note: 'They said $5,000–$20,000' },
+      { rule: 'strangers', label: 'Has sold to strangers before', status: 'pass', note: 'They said yes' },
+      { rule: 'no_other_sender', label: 'Nobody else cold-emailing for them', status: 'unknown', note: 'They said "Not sure"' },
+      { rule: 'review_ask', label: 'Agrees to the review ask', status: 'unknown', note: 'Not answered' },
+      { rule: 'agency', label: 'Not a lead-gen or outbound agency', status: 'unknown', note: 'Website not checked yet' },
+    ],
+  },
+};
+export const fernDetail = { row: fern, application: fernApplication, holds: {}, links: {}, events: [{ at: '2026-10-17T10:00:00Z', system: 'gatekeeper', event: 'application_received', detail: 'source website' }] };
+
 export const stagesWith = (map) => [
   ['intake', 'Applied & queued', ['applied', 'queued']], ['onboard', 'Onboarding', ['onboarding']], ['setup', 'Buying & setup', ['awaiting_purchase', 'setup_check']],
   ['build', 'Warm-up & build', ['warming', 'ready']], ['live', 'Sending', ['sending', 'paused', 'extension']], ['decide', 'Deciding', ['deciding']],
@@ -55,11 +90,12 @@ export const fullHub = {
     queue: [{ id: 'delta-roofing', name: 'Delta Roofing', position: 1, expectedDate: '2026-10-20' }],
     others: [{ id: 'aviance', name: 'Aviance', state: 'sending', stateLabel: 'Sending', health: 'green', five: { sent: 5000, replies: 80, positive: 20, booked: 6, qualified: 4 }, todo: [], systems: [] }],
   },
-  stages: stagesWith({ setup: [bright], live: [acme], won: [cobalt] }),
+  stages: stagesWith({ intake: [fern], setup: [bright], live: [acme], won: [cobalt] }),
   todos: [
     Object.assign({ clientId: 'bright-dental', clientName: 'Bright Dental' }, bright.todo[0]),
     Object.assign({ clientId: 'acme-plumbing', clientName: 'Acme Plumbing' }, acme.todo[0]),
     Object.assign({ clientId: 'cobalt-hvac', clientName: 'Cobalt HVAC' }, cobalt.todo[0]),
+    fern.todo[0],
   ],
   alerts: [
     { id: 'a1', at: '2026-10-17T10:00:00Z', key: 'purchase_reminder', clientId: 'bright-dental', title: 'Shopping list unanswered for 14 h', urgent: true, delivered: true },
@@ -94,4 +130,7 @@ export const detail = {
   jobs: { send: { at: '2026-10-17T11:58:00Z', ms: 812, ok: true, error: null }, replies: { at: '2026-10-17T11:57:00Z', ms: 1200, ok: false, error: 'IMAP timeout' } },
   holds: { legalHoldAt: '2026-10-15T10:00:00Z', sendHold: null, emergencyActive: false, emergencyHalved: false, pausedReason: null },
   links: { onboarding: 'https://machine.test/c/tok1/onboard', approval: 'https://machine.test/c/tok2/approve' },
+  application: { receivedAt: '2026-09-20T14:00:00Z', source: 'website', review: 'approved', decidedAt: '2026-09-20T18:00:00Z', decision: 'approve', declineReason: null,
+    answers: [{ q: 'What do you sell, and who to?', a: 'Plumbing maintenance for restaurants in Ohio.' }],
+    fit: { verdict: 'fit', summary: 'Looks like a fit', lines: [{ rule: 'deal_value', label: 'Customer worth ≥ $2,000 in year one', status: 'pass', note: 'They said $8,000' }] } },
 };

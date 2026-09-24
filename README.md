@@ -23,7 +23,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, sidebar, ⌘K, notifications, theme. |
 | `trials.js` | The Trials section — everything the owner sees inside. Talks to the machine. |
 | `trials.css` | Styles for the Trials screens, on top of the shell's CSS variables (light + dark). |
-| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, nav, ⌘K) and the Trials render functions. |
+| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, nav, ⌘K), the Trials screens, application review, and the readability floor. |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract. |
 
 ## Screens
@@ -37,6 +37,15 @@ sees "This hub is for the Aviance owner." and is signed out.
 - **Trial** (one client) — header, that client's to-dos, the thirteen system
   cards, then tabs: Numbers, Inboxes, Calls, Replies, Copy, Setup, Reports,
   Promises, Timeline, Upcoming, Actions, plus copyable client links.
+- **Application review** — trial applications from the website arrive as
+  clients in `applied`, held for the owner. On the board their card carries a
+  "New application" marker; the "Review … application" to-do opens the trial
+  scrolled to the **Application** section: who applied and when, the fit check
+  (each rule pass / fail / unknown with a note) and every answer. While it is
+  pending it sits at the top of the trial with two buttons — **Approve — send
+  the onboarding link** (the machine starts onboarding, or queues them if three
+  trials are running) and **Decline…** (a one-sentence reason, emailed to the
+  applicant). Once decided it moves to an Application tab.
 - **Buy & paste** — the one manual step per trial: the shopping list the
   machine produced and the form to paste the domain and inbox logins.
 - **Machine alerts** — every alert the machine sent, with Acknowledge.
@@ -45,6 +54,34 @@ Sidebar: the two screens above under **Trials**, and under **Machine** five
 links that open signed-in inside the machine's own Mission Control (new tab):
 Queue, Warm-up circle, Config, Test Mode, Learning. Topbar: ⌘K (trials and
 commands), the bell (trial to-dos + open urgent alerts), theme, New client.
+
+## Readability floor (keep this in any redesign)
+
+The owner reads this hub a lot; text must be easy to see. Every size and
+colour comes from tokens in `index.html` (`:root`, and `body.dark` for dark
+mode), and the tests enforce the floor.
+
+- **Size:** nothing smaller than **13px** anywhere — labels, pills, badges,
+  table heads, timestamps, mono lines, sidebar nav. Body text is **15px**.
+  Scale: `--fs-min` 13 · `--fs-small` 14 · `--fs-base` 15 · `--fs-strong` 16 ·
+  `--fs-h3` 18 · `--fs-h2` 22 · `--fs-num` 18 (the five numbers, machine bar) ·
+  `--fs-num-lg` 24. Use a token, never a raw size under 13px.
+- **Contrast:** every text colour passes **WCAG AA, 4.5:1**, against every
+  background it sits on, in light and dark — including pill text on its pill
+  fill. Light: text #000, muted #3A3A3A, muted-2 #555555, green #17662F,
+  amber #8A5300, red #B01F06 on white / #F4F4F4 / #EAEAEA. Dark: text #FFF,
+  muted #C8C8C8, muted-2 #A3A3A3, green #5CCB83, amber #E6B03A, red #FF6A4D on
+  black / #121212 / #1D1D1D. Pill fills are solid tokens (`--green-bg`,
+  `--amber-bg`, `--red-bg`, `--blue-bg`), never see-through rgba, so their
+  contrast is fixed and testable. The lowest pair in use is 5.4:1.
+- **Spacing:** line-height ≈1.5 for reading text; to-do rows, cards and
+  table cells have room to breathe.
+- **Phones (≤560px):** long button labels wrap rather than clip; the topbar
+  "New client" button shows only its + icon.
+
+`npm test` fails if any `font-size` in `trials.css`, the shell styles or
+inline styles drops below 13px, or if any tested colour pair drops below
+4.5:1.
 
 ## `MACHINE_URL`
 

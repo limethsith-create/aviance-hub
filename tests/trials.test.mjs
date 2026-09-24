@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NOW, acme, bright, stagesWith, fullHub, emptyHub, detail } from './fixtures.mjs';
+import { NOW, acme, bright, fern, fernApplication, fernDetail, stagesWith, fullHub, emptyHub, detail } from './fixtures.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -322,7 +322,7 @@ test('notifications, nav counts, ⌘K entities and todo actions come from the ca
   n[0].go(); assert.equal(currentView, 'trialPurchase'); assert.equal(currentTrialId, 'bright-dental');
   assert.equal(trialsNavCount(), 2); assert.equal(trialsAlertCount(), 2);
   const ents = trialsCmdkEntities();
-  assert.equal(ents.length, 4, '3 trials + aviance');
+  assert.equal(ents.length, 5, '4 trials + aviance');
   assert.ok(ents.some((e) => e.kw.includes('trial:acme-plumbing') && e.label === 'Acme Plumbing'));
   assert.deepEqual(trialsCmdkActions().map((a) => a.label), ['New trial client', 'Trials board', 'Machine alerts']);
   trialsTodoAction('buy:bright-dental'); assert.equal(currentView, 'trialPurchase');
@@ -364,3 +364,155 @@ test('new-client modal posts the contract body, shows 400 {errors}, and opens th
   assert.ok(el('modalWrap').classList.contains('open'), 'modal stays open on errors');
   closeModal();
 });
+
+/* ───────────── application review (website applications) ───────────── */
+test('application pending: shown above Systems with the fit check, every answer and the two buttons', () => {
+  const html = renderTrialDetail(fernDetail, 'numbers', { now: NOW });
+  const iApp = html.indexOf('id="tkSec-application"'), iTodo = html.indexOf('What you need to do'), iSys = html.indexOf('<h3>Systems</h3>');
+  assert.ok(iApp > 0 && iApp < iTodo && iTodo < iSys, 'application section sits at the top, above the to-dos and Systems');
+  assert.ok(html.includes('Waiting for your review'));
+  assert.ok(html.includes('Looks like a fit — 3 checks unknown') && html.includes('Needs a look'), 'fit summary + verdict pill');
+  for (const l of fernApplication.fit.lines) assert.ok(html.includes(esc(l.label)) && html.includes(esc(l.note)), 'fit line ' + l.rule);
+  assert.equal((html.match(/class="pill green">Pass</g) || []).length, 3);
+  assert.equal((html.match(/class="pill amber">Unknown</g) || []).length, 3);
+  for (const x of fernApplication.answers) assert.ok(html.includes('<dt>' + esc(x.q) + '</dt>'), 'question ' + x.q);
+  assert.ok(html.includes('Managed IT for dental and medical practices in Texas.'));
+  assert.ok(html.includes('(no answer)'), 'an empty answer says so');
+  assert.ok(html.includes('from the website') && html.includes('lee@fernit.com'));
+  assert.ok(html.includes('Approve — send the onboarding link') && html.includes('Decline…'));
+  assert.ok(!html.includes("trialsSetTab(&quot;application&quot;)"), 'no Application tab while pending');
+});
+
+test('application decided: an Application tab, no buttons, the decision in words', () => {
+  const html = renderTrialDetail(detail, 'numbers', { now: NOW });
+  assert.ok(!html.includes('id="tkSec-application"'), 'not at the top once decided');
+  assert.ok(html.includes("trialsSetTab(&quot;application&quot;)"), 'Application tab offered');
+  const tab = renderTab(detail, 'application');
+  assert.ok(tab.includes('Approved') && tab.includes('the onboarding link went out'));
+  assert.ok(!tab.includes('Approve — send the onboarding link') && !tab.includes('Decline…'));
+  const declined = Object.assign({}, detail, { application: Object.assign({}, detail.application, { review: 'declined', decision: 'decline', declineReason: 'We only take companies with 5–50 people.' }) });
+  const dt = renderTab(declined, 'application');
+  assert.ok(dt.includes('Declined') && dt.includes('We only take companies with 5–50 people.'));
+  assert.ok(renderTrialDetail(detail, 'application').includes('the onboarding link went out'), 'tab can be opened directly');
+  assert.ok(!renderTrialDetail({ row: bright }, 'application').includes('tkSec-application'), 'no application → falls back to Numbers');
+});
+
+test('board: a client under review stands out with a "New application" marker', () => {
+  const html = renderBoard(fullHub, { now: NOW });
+  assert.ok(html.includes('class="tk-card review"') && html.includes('New application'));
+  assert.equal((html.match(/New application/g) || []).length, 1, 'only the client under review');
+  assert.ok(html.includes("Review Fern IT&#39;s trial application") || html.includes("Review Fern IT's trial application"), 'review to-do listed');
+  assert.ok(html.includes('Applied — waiting for your review'));
+});
+
+test('the review to-do opens the trial scrolled to the Application section', () => {
+  asOwner(); trialsIngestHub(fullHub);
+  tk.detail['fern-it'] = fernDetail; tk.detailAt['fern-it'] = Date.now();
+  let scrolled = 0; el('tkSec-application').scrollIntoView = () => { scrolled++; };
+  trialsTodoAction('review:fern-it');
+  assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'fern-it');
+  assert.ok(el('content').innerHTML.includes('id="tkSec-application"'));
+  assert.equal(scrolled, 1, 'scrolled to the section');
+  assert.equal(tk.scrollTo, null, 'scroll request consumed');
+});
+
+test('approve: confirm names the client, posts approveApplication, toasts the outcome in plain words', async () => {
+  asOwner(); trialsIngestHub(fullHub);
+  tk.detail['fern-it'] = fernDetail; tk.detailAt['fern-it'] = Date.now(); currentTrialId = 'fern-it';
+  let asked = ''; globalThis.confirm = (q) => { asked = q; return true; };
+  const calls = [];
+  const answer = (outcome) => async (url, init) => { calls.push({ url, init }); if (url.endsWith('/intake')) return { ok: true, status: 200, text: async () => JSON.stringify(outcome) }; return { ok: true, status: 200, text: async () => JSON.stringify(url.includes('/hub/') ? fernDetail : fullHub) }; };
+  globalThis.fetch = answer({ ok: true, outcome: 'queued', position: 2 });
+  await trialApproveApplication('fern-it');
+  assert.equal(asked, 'Send Fern IT the onboarding link now?');
+  assert.ok(calls[0].url.endsWith('/api/mc/clients/fern-it/intake'));
+  assert.deepEqual(JSON.parse(calls[0].init.body), { action: 'approveApplication' });
+  assert.ok(el('toast').innerHTML.includes('In the queue — position 2'));
+  assert.ok(calls.some((c) => c.url.endsWith('/api/mc/hub')) && calls.some((c) => c.url.endsWith('/api/mc/hub/fern-it')), 'board and detail reloaded');
+  globalThis.fetch = answer({ ok: true, outcome: 'onboarding' }); await trialApproveApplication('fern-it');
+  assert.ok(el('toast').innerHTML.includes('Onboarding link sent'));
+  globalThis.fetch = answer({ ok: true, outcome: 'declined' }); await trialApproveApplication('fern-it');
+  assert.ok(el('toast').innerHTML.includes('already had a trial'));
+  calls.length = 0; globalThis.confirm = () => false;
+  await trialApproveApplication('fern-it');
+  assert.equal(calls.length, 0, 'cancelled confirm sends nothing');
+  globalThis.confirm = () => true;
+});
+
+test('decline: modal prefilled from the first failing rule, reason required, posts it and toasts', async () => {
+  asOwner();
+  const failing = JSON.parse(JSON.stringify(fernDetail));
+  failing.application.fit.lines[1].status = 'fail'; failing.application.fit.lines[1].label = 'customer worth ≥ $2,000 in year one';
+  tk.detail['fern-it'] = failing; tk.detailAt['fern-it'] = Date.now();
+  openDeclineApplication('fern-it');
+  const modal = el('modal').innerHTML;
+  assert.ok(modal.includes("Decline Fern IT&#39;s application") || modal.includes("Decline Fern IT's application"));
+  assert.ok(modal.includes("They'll get this reason by email."));
+  assert.ok(modal.includes('>Customer worth ≥ $2,000 in year one.</textarea>'), 'first failing label, as a sentence');
+  tk.detail['fern-it'] = fernDetail;
+  assert.ok(renderDeclineModal(fernDetail).includes('"></textarea>'), 'no failing rule → empty box');
+  const calls = [];
+  globalThis.fetch = async (url, init) => { calls.push({ url, init }); if (url.endsWith('/intake')) return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, outcome: 'declined' }) }; return { ok: true, status: 200, text: async () => JSON.stringify(fullHub) }; };
+  el('tkDeclineReason').value = '   ';
+  await submitDeclineApplication('fern-it');
+  assert.equal(calls.length, 0, 'empty reason sends nothing');
+  assert.ok(el('tkDeclineErr').innerHTML.includes('Write the reason first'));
+  el('modalWrap').classList.add('open');
+  el('tkDeclineReason').value = 'We only run trials for teams of 5–50 people.';
+  await submitDeclineApplication('fern-it');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { action: 'declineApplication', reason: 'We only run trials for teams of 5–50 people.' });
+  assert.ok(el('toast').innerHTML.includes('Declined — email sent'));
+  assert.ok(!el('modalWrap').classList.contains('open'), 'modal closed');
+  globalThis.fetch = async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ error: 'reason is required' }) });
+  el('modalWrap').classList.add('open'); el('tkDeclineReason').value = 'x';
+  await submitDeclineApplication('fern-it');
+  assert.ok(el('tkDeclineErr').innerHTML.includes('reason is required'), 'machine 400 error shown in the modal');
+  assert.ok(el('modalWrap').classList.contains('open'), 'modal stays open');
+  closeModal();
+});
+
+/* ───────────── readability floor ───────────── */
+const css = fs.readFileSync(path.join(root, 'trials.css'), 'utf8');
+const shellCss = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
+const trialsJs = fs.readFileSync(path.join(root, 'trials.js'), 'utf8');
+const varsIn = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*([^;}]+)/g)].map((m) => [m[1], m[2].trim()]));
+const rootVars = varsIn(shellCss.match(/:root\{[\s\S]*?\n\}/)[0]);
+const darkVars = Object.assign({}, rootVars, varsIn(shellCss.match(/body\.dark\{[^}]*\}/)[0]));
+
+test('readability: no font size below 13px anywhere (CSS, shell styles, inline styles in JS)', () => {
+  const fs_ = Object.entries(rootVars).filter(([k]) => k.startsWith('fs-'));
+  assert.ok(fs_.length >= 6, 'type scale tokens exist');
+  for (const [k, v] of fs_) assert.ok(parseFloat(v) >= 13, `--${k} is ${v}`);
+  const sources = { 'trials.css': css, 'index.html <style>': shellCss, 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs };
+  let checked = 0;
+  for (const [name, src] of Object.entries(sources)) {
+    for (const m of src.matchAll(/font-size:\s*([^;"'}]+)/g)) {
+      const v = m[1].trim(); checked++;
+      const tok = /^var\(--(fs-[\w-]+)\)$/.exec(v);
+      if (tok) { assert.ok(rootVars[tok[1]], `${name}: unknown token ${v}`); assert.ok(parseFloat(rootVars[tok[1]]) >= 13, `${name}: ${v}`); continue; }
+      assert.match(v, /^\d+(\.\d+)?px$/, `${name}: font-size must be a --fs-* token or px, got "${v}"`);
+      assert.ok(parseFloat(v) >= 13, `${name}: font-size ${v} is below the 13px floor`);
+    }
+  }
+  assert.ok(checked > 100, 'scanned the real rules (' + checked + ')');
+  assert.ok(/body\{[^}]*font-size:var\(--fs-base\)/.test(shellCss) && rootVars['fs-base'] === '15px', 'body text is 15px');
+});
+
+test('readability: text colours pass WCAG AA (4.5:1) in light and dark, including pills', () => {
+  const rgb = (c) => { c = c.replace('#', ''); if (c.length === 3) c = [...c].map((x) => x + x).join(''); return [0, 2, 4].map((i) => parseInt(c.slice(i, i + 2), 16)); };
+  const lum = (c) => { const [r, g, b] = rgb(c).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const pairs = [['text', 'bg'], ['text', 'surface-2'], ['text', 'surface-3'], ['muted', 'bg'], ['muted', 'surface-2'], ['muted', 'surface-3'], ['muted-2', 'bg'], ['muted-2', 'surface-2'], ['muted-2', 'surface-3'],
+    ['green', 'bg'], ['amber', 'bg'], ['red', 'bg'], ['blue', 'bg'], ['green', 'green-bg'], ['amber', 'amber-bg'], ['red', 'red-bg'], ['blue', 'blue-bg'], ['muted', 'blue-bg'],
+    ['red', 'urgent-row'], ['muted', 'urgent-row'], ['text', 'urgent-row']];
+  for (const [mode, v] of [['light', rootVars], ['dark', darkVars]]) {
+    for (const [fg, bg] of pairs) {
+      const r = ratio(v[fg], v[bg]);
+      assert.ok(r >= 4.5, `${mode}: --${fg} (${v[fg]}) on --${bg} (${v[bg]}) is ${r.toFixed(2)}:1`);
+    }
+  }
+  assert.ok(ratio('#FFFFFF', rootVars.red) >= 4.5 && ratio('#000000', darkVars.red) >= 4.5, 'bell count badge');
+  for (const cls of ['green', 'amber', 'red', 'blue']) assert.ok(shellCss.includes(`.pill.${cls}{background:var(--${cls}-bg);color:var(--${cls})}`), `pill.${cls} uses the tested pair`);
+  assert.ok(!/rgba\([^)]*\)[^;]*;?\s*color/.test(css.match(/\.pill\.tk-st[^\n]*/g).join('')), 'status pills use tokens, not rgba fills');
+});
+
