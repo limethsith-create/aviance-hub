@@ -5,10 +5,10 @@
    machine does all the work; this file only shows and steers it through the
    contract in email-distributor/docs/HUB-API.md.
 
-   Loaded by index.html after the main script, so it can use the hub's globals:
-     esc, kpi, emptyState, toast, openModal, closeModal, render, renderNav,
-     updateNotifBadge, I (icons), sb (Supabase client), authUser, currentView,
-     currentRole, MACHINE_URL, leads, saveDB, todayShort, openLead.
+   Loaded by index.html after the shell script, so it can use the shell's globals:
+     esc, emptyState, toast, openModal, closeModal, render, renderNav,
+     updateNotifBadge, closeCmdk, I (icons), sb (Supabase client), authUser,
+     currentView, MACHINE_URL.
 
    Layout of this file
      0. constants + in-memory cache
@@ -16,9 +16,9 @@
      2. machine client: machineFetch + SSO opener   — network plumbing
      3. loaders (fill the cache)
      4. pure renderers (data → HTML string)          — what the tests call
-     5. views the hub router calls (viewTrials …)
+     5. views the shell router calls (viewTrials …)
      6. actions wired to buttons
-     7. hub integration (nav counts, notifications, ⌘K, dashboard, CRM, timer)
+     7. shell integration (nav counts, notifications, ⌘K, auto-refresh timer)
 
    Rules: every user-supplied string goes through esc(); render functions
    never touch the DOM; nothing runs at load time.
@@ -37,7 +37,7 @@ const TK_REFRESH_MS=60000;   // auto-refresh while a trials view is open
 const TK_FRESH_MS=15000;     // a cached answer younger than this is not re-fetched on navigation
 
 /* Last good answers live here so navigating back is instant. */
-const tk={hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},timer:null,busy:false,newLeadId:null};
+const tk={hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},timer:null,busy:false};
 let currentTrialId=null;
 let trialTab='numbers';
 let trialsAlertFilter='open';
@@ -241,7 +241,7 @@ function renderBoard(hub,meta){
   const toolbar=`<div class="toolbar"><span class="muted" style="font-size:12.5px">${rows.length} trial${rows.length!==1?'s':''} on the machine · ${(hub.todos||[]).length} thing${(hub.todos||[]).length!==1?'s':''} waiting on you</span>
     <div style="margin-left:auto" class="tk-inline"><button class="btn ghost" onclick="render('trialAlerts')">${I.bell||''}Machine alerts${machine.openAlerts?` <span class="badge" style="background:var(--surface-3);color:var(--muted);font-size:10px;padding:1px 6px">${tkNum(machine.openAlerts)}</span>`:''}</button><button class="btn" onclick="openNewTrialClient()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>New client</button></div></div>`;
   const stages=renderStages(hub.stages);
-  const board=rows.length?stages:emptyState(I.trials||I.grid,'No trials yet','Add the first client — the machine takes it from application to booked calls, and tells you here whenever it needs you.','New client','openNewTrialClient()');
+  const board=rows.length?stages:emptyState(I.trials||'','No trials yet','Add the first client — the machine takes it from application to booked calls, and tells you here whenever it needs you.','New client','openNewTrialClient()');
   return toolbar+renderMachineBar(machine,{at:meta.at,now:meta.now})+renderTodos(hub.todos,{now:meta.now})+
     `<div class="section-head tk-section"><h3>Stages</h3><span class="count">${rows.length}</span></div>`+board+renderQueue(machine.queue)+renderOthers(machine.others);
 }
@@ -481,34 +481,15 @@ function renderAlerts(alerts,filter,meta){
     <div class="tk-alert-act">${a.acknowledged?'':`<button class="btn ghost" onclick="trialsAckAlert(${tkAttr(a.id)})">Acknowledge</button>`}</div></div>`).join('')}</div>`;
 }
 
-/* -- hub bits -- */
-function trialsHealthCard(){
-  const hub=tk.hub;let num='—',sub='loading…',hc='#000000',bg='rgba(0,0,0,.14)';
-  if(hub){
-    const rows=tkAllRows({stages:(hub.stages||[]).filter(s=>s.key!=='ended')});
-    const g=rows.filter(r=>tkHealthClass(r.health)==='green').length,y=rows.filter(r=>tkHealthClass(r.health)==='amber').length,r=rows.filter(x=>tkHealthClass(x.health)==='red').length;
-    const todos=(hub.todos||[]).length;
-    num=String(hub.machine&&hub.machine.activeTrials!=null?hub.machine.activeTrials:rows.length);
-    sub=`${g} green · ${y} yellow · ${r} red · ${todos} to-do${todos!==1?'s':''}`;
-    if(r){hc='#E0290F';bg='rgba(224,41,15,.12)';}else if(y||todos){hc='#A16207';bg='rgba(161,98,7,.13)';}else{hc='#1E7A3B';bg='rgba(30,122,59,.13)';}
-  }else if(tk.hubErr){sub='machine unreachable';hc='#E0290F';bg='rgba(224,41,15,.12)';}
-  return `<div class="hcard" id="tkHealthCard" style="--hc:${hc};--hc-bg:${bg}" onclick="render('trials')"><div class="hc-ic">${I.trials||I.grid}</div><div><div class="hc-lbl">Trials</div><div class="hc-num">${esc(num)}</div><div class="hc-sub">${esc(sub)}</div></div></div>`;
-}
-function trialLineForName(name){
-  if(!name||!tk.hub)return '';const n=String(name).trim().toLowerCase();if(!n)return '';
-  const row=tkAllRows(tk.hub).find(r=>String(r.name||'').trim().toLowerCase()===n);
-  return row?`<span class="tk-trial-line" onclick="event.stopPropagation();openTrial(${tkAttr(row.id)})">Trial: ${esc(tkStateLabel(row))}</span>`:'';
-}
-
-/* ===================== 5. VIEWS (called by the hub router) ===================== */
+/* ===================== 5. VIEWS (called by the shell router) ===================== */
 function trialsIsAdmin(){return !!(typeof authUser!=='undefined'&&authUser&&authUser.role==='admin')}
-function trialsNotAdminHTML(){return emptyState(I.trials||I.grid,'Admins only','The trial machine is run by the founder. Nothing here is visible to employees.','',null)}
+function trialsNotAdminHTML(){return emptyState(I.trials||'','Owner only','This hub is for the Aviance owner.','',null)}
 function trialsHostHTML(view){
   switch(view){
     case 'trials':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderBoard(tk.hub,{at:tk.hubAt}):tk.hubErr?renderMachineError(tk.hubErr):renderLoading();
-    case 'trial':{const id=currentTrialId;if(!id)return emptyState(I.trials||I.grid,'Pick a trial','Open one from the board.','Trials board',"render('trials')");
+    case 'trial':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the board.','Trials board',"render('trials')");
       const d=tk.detail[id];return d?renderStaleNote(tk.detailErr[id],tk.detailAt[id])+renderTrialDetail(d,trialTab,{at:tk.detailAt[id]}):tk.detailErr[id]?renderMachineError(tk.detailErr[id]):renderLoading();}
-    case 'trialPurchase':{const id=currentTrialId;if(!id)return emptyState(I.trials||I.grid,'Pick a trial','Open one from the board first.','Trials board',"render('trials')");
+    case 'trialPurchase':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the board first.','Trials board',"render('trials')");
       const p=tk.purchase[id];return p?renderStaleNote(tk.purchaseErr[id],tk.purchaseAt[id])+renderPurchase(p,id,{at:tk.purchaseAt[id]}):tk.purchaseErr[id]?renderMachineError(tk.purchaseErr[id]):renderLoading();}
     case 'trialAlerts':return tk.alerts?renderStaleNote(tk.alertsErr,tk.alertsAt)+renderAlerts(tk.alerts,trialsAlertFilter,{at:tk.alertsAt}):tk.alertsErr?renderMachineError(tk.alertsErr):renderLoading();
   }
@@ -632,9 +613,9 @@ async function submitTrialPurchase(id){
   else if(r&&r.data&&r.data.errors)show(tkErrorList(r.data.errors));
   else if(r&&r.error)show([r.error]);
 }
-/* New client modal (also used by the CRM "Start a trial" button, prefilled) */
+/* New client modal (topbar button, ⌘K, the empty board). `prefill` is optional. */
 function openNewTrialClient(prefill){
-  if(!trialsIsAdmin())return;prefill=prefill||{};tk.newLeadId=prefill.leadId||null;
+  if(!trialsIsAdmin())return;prefill=prefill||{};
   openModal(`<div class="modal-head"><div class="pj-ic" style="background:#0000001f;color:#000000;width:40px;height:40px">+</div><div><h3>New trial client</h3><p>Pre-approved — the machine skips the fit rules and starts onboarding (or queues them if three trials are running).</p></div></div>
     <div class="modal-body">
       <div class="field"><label>Company name</label><input id="ntCompany" value="${esc(prefill.companyName||'')}" placeholder="Acme Plumbing"></div>
@@ -661,22 +642,11 @@ async function submitNewTrialClient(){
   const clientId=r.data&&r.data.clientId;const state=r.data&&r.data.state;
   closeModal();
   toast(`${body.companyName} created${state?' — '+(TK_STATE_LABEL[state]||state):''}`);
-  if(tk.newLeadId!=null)trialsNoteOnLead(tk.newLeadId,clientId);
-  tk.newLeadId=null;
   await loadHub(true);
   if(clientId)openTrial(clientId);else render('trials');
 }
-/* CRM hook: the lead keeps its stage; it just gets a note. */
-function trialStartFromLead(leadId){
-  if(!trialsIsAdmin())return;const l=(typeof leads!=='undefined'?leads:[]).find(x=>x.id===leadId);if(!l)return;
-  openNewTrialClient({companyName:l.company||'',contactName:l.contact||'',contactEmail:l.email||'',website:l.website||'',leadId:l.id});
-}
-function trialsNoteOnLead(leadId,clientId){
-  try{const l=(typeof leads!=='undefined'?leads:[]).find(x=>x.id===leadId);if(!l)return;l.history=l.history||[];l.history.push({date:typeof todayShort==='function'?todayShort():new Date().toLocaleDateString(),type:'note',text:'Trial started: '+(clientId||'?')});l.lastTouch=typeof todayShort==='function'?todayShort():l.lastTouch;if(typeof saveDB==='function')saveDB();
-    const panel=document.getElementById('panel');if(panel&&panel.classList.contains('open')&&typeof openLead==='function')openLead(leadId);}catch(e){}
-}
 
-/* ===================== 7. HUB INTEGRATION ===================== */
+/* ===================== 7. SHELL INTEGRATION ===================== */
 function trialsNavCount(){const m=tk.hub&&tk.hub.machine;if(!m||m.activeTrials==null)return '';const n=Number(m.activeTrials);return n>0?n:''}
 function trialsAlertCount(){const m=tk.hub&&tk.hub.machine;let n=m&&m.openAlerts!=null?Number(m.openAlerts):(tk.hub?(tk.hub.alerts||[]).length:0);return n>0?n:''}
 function trialsNotifs(){
@@ -687,18 +657,14 @@ function trialsNotifs(){
 }
 function trialsCmdkActions(){
   return [
-    {type:'Create',label:'New trial client',icon:I.trials||I.grid,sub:'Start a trial on the machine',kw:'new trial client create start',run:()=>{closeCmdk();openNewTrialClient();}},
-    {type:'Go to',label:'Trials board',icon:I.trials||I.grid,sub:'Trials',kw:'trials board machine',run:()=>{closeCmdk();render('trials');}},
-    {type:'Go to',label:'Machine alerts',icon:I.bell||I.grid,sub:'Trials',kw:'machine alerts trials',run:()=>{closeCmdk();render('trialAlerts');}},
+    {type:'Create',label:'New trial client',icon:I.trials||'',sub:'Start a trial on the machine',kw:'new trial client create start',run:()=>{closeCmdk();openNewTrialClient();}},
+    {type:'Go to',label:'Trials board',icon:I.trials||'',sub:'Trials',kw:'trials board machine',run:()=>{closeCmdk();render('trials');}},
+    {type:'Go to',label:'Machine alerts',icon:I.bell||'',sub:'Trials',kw:'machine alerts trials',run:()=>{closeCmdk();render('trialAlerts');}},
   ];
 }
 function trialsCmdkEntities(){
   if(!tk.hub)return [];
-  return tkAllRows(tk.hub).map(r=>({type:'Trial',label:r.name||r.id,icon:I.trials||I.grid,sub:tkStateLabel(r)+' · trial:'+r.id,kw:'trial:'+r.id+' '+(r.name||'')+' '+tkStateLabel(r)+' '+(r.contactName||''),run:()=>{closeCmdk();openTrial(r.id);}}));
-}
-function trialsBoot(){
-  if(!trialsIsAdmin())return;
-  loadHub(true).then(()=>{try{renderNav();updateNotifBadge();const el=document.getElementById('tkHealthCard');if(el)el.outerHTML=trialsHealthCard();}catch(e){}});
+  return tkAllRows(tk.hub).map(r=>({type:'Trial',label:r.name||r.id,icon:I.trials||'',sub:tkStateLabel(r)+' · trial:'+r.id,kw:'trial:'+r.id+' '+(r.name||'')+' '+tkStateLabel(r)+' '+(r.contactName||''),run:()=>{closeCmdk();openTrial(r.id);}}));
 }
 function trialsOnRender(v){if(TK_TRIAL_VIEWS.includes(v))trialsStartTimer();else trialsStopTimer();}
 function trialsStartTimer(){if(tk.timer)return;tk.timer=setInterval(trialsTick,TK_REFRESH_MS);}

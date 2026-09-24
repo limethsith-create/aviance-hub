@@ -189,11 +189,6 @@
 fieldset.tk-fs{border:none;padding:0;margin:0;min-width:0}
 fieldset.tk-fs:disabled{opacity:.5}
 
-/* ── hub integration ────────────────────────────────────────────────────── */
-.health-strip.five{grid-template-columns:repeat(5,1fr)}
-@media(max-width:1100px){.health-strip.five{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:820px){.health-strip.five{grid-template-columns:1fr 1fr}}
-.tk-trial-line{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:2px;cursor:pointer;text-transform:uppercase;letter-spacing:.04em}
-.tk-trial-line:hover{color:var(--red-deep);text-decoration:underline}
+/* ── modal bits ─────────────────────────────────────────────────────────── */
 .tk-modal-errs{font-family:var(--mono);font-size:11.5px;color:var(--red);line-height:1.6;margin-top:4px}
 .tk-modal-errs:empty{display:none}

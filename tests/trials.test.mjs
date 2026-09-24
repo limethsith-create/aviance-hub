@@ -1,8 +1,11 @@
-/* Tests for trials.js — run with:  npm test   (= node --test tests/*.test.mjs)
-   trials.js is a plain browser script, so we load it into this process with a
-   tiny fake DOM and the hub globals it touches, then call the pure render
-   functions with data shaped exactly like docs/HUB-API.md. */
-import test from 'node:test';
+/* Tests for the hub shell (index.html's inline script) and trials.js.
+   Run with:  npm test   (= node --test tests/*.test.mjs)
+
+   Both are plain browser scripts, so we load them into this process — shell
+   first, then trials.js, exactly like the browser — with a tiny fake DOM and a
+   fake Supabase client, then call the pure render functions with data shaped
+   exactly like email-distributor/docs/HUB-API.md. No network. */
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -10,36 +13,126 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NOW, acme, bright, stagesWith, fullHub, emptyHub, detail } from './fixtures.mjs';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/* ───────────── fake DOM + hub globals ───────────── */
+/* ───────────── fake DOM ───────────── */
 const elements = {};
 function fakeEl(id) {
-  return { id, value: '', defaultValue: '', checked: false, innerHTML: '', outerHTML: '', textContent: '', style: {}, type: '', disabled: false,
-    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
-    querySelectorAll() { return []; }, querySelector() { return null; }, appendChild() {}, remove() {}, insertAdjacentHTML() {}, contains() { return false; }, focus() {}, select() {}, submit() {} };
+  const el = { id, tagName: 'DIV', value: '', defaultValue: '', checked: false, innerHTML: '', outerHTML: '', textContent: '', style: {}, type: '', disabled: false, _classes: new Set(),
+    querySelectorAll() { return []; }, querySelector() { return null; }, appendChild() {}, remove() {}, insertAdjacentHTML() {}, contains() { return false; }, focus() {}, select() {}, submit() {}, addEventListener() {}, scrollIntoView() {}, closest() { return null; } };
+  el.classList = { add: (c) => el._classes.add(c), remove: (c) => el._classes.delete(c), contains: (c) => el._classes.has(c), toggle(c, f) { const on = f === undefined ? !el._classes.has(c) : !!f; on ? el._classes.add(c) : el._classes.delete(c); return on; } };
+  return el;
 }
+const el = (id) => (elements[id] ||= fakeEl(id));
 globalThis.window = globalThis;
-globalThis.document = { hidden: false, activeElement: null, body: { appendChild() {} }, getElementById: (id) => elements[id] || null, createElement: () => fakeEl(''), querySelectorAll: () => [], addEventListener() {} };
+globalThis.document = { hidden: false, activeElement: null, body: fakeEl('body'), getElementById: el, createElement: () => fakeEl(''), querySelectorAll: () => [], addEventListener() {} };
 globalThis.localStorage = { _s: {}, getItem(k) { return Object.prototype.hasOwnProperty.call(this._s, k) ? this._s[k] : null; }, setItem(k, v) { this._s[k] = String(v); }, removeItem(k) { delete this._s[k]; } };
 Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async () => {} } }, configurable: true }); // getter-only in Node 21+
-globalThis.esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-globalThis.kpi = (label, val) => `<div class="kpi">${label}:${val}</div>`;
-globalThis.emptyState = (icon, title, sub) => `<div class="card"><div class="empty">${icon}<h3>${title}</h3><p>${sub}</p></div></div>`;
-const toasts = []; globalThis.toast = (m) => toasts.push(m);
-globalThis.openModal = (html) => { globalThis.__modal = html; }; globalThis.closeModal = () => {};
-const renders = []; globalThis.render = (v) => { renders.push(v); globalThis.currentView = v; };
-globalThis.renderNav = () => {}; globalThis.updateNotifBadge = () => {}; globalThis.closeCmdk = () => {};
-globalThis.I = { grid: '<svg data-i="grid"></svg>', trials: '<svg data-i="trials"></svg>', bell: '<svg data-i="bell"></svg>' };
-globalThis.sb = { auth: { getSession: async () => ({ data: { session: { access_token: 'test-token' } } }) } };
-globalThis.MACHINE_URL = 'https://machine.test';
-globalThis.authUser = { role: 'admin', email: 'owner@example.com' };
-globalThis.currentView = 'trials'; globalThis.currentRole = 'admin';
-globalThis.leads = []; globalThis.clients = []; globalThis.saveDB = () => {}; globalThis.todayShort = () => 'Sep 25';
+globalThis.location = { hash: '', origin: 'https://aviance.store', pathname: '/', search: '' };
+globalThis.history = { replaceState() {} };
 globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
 globalThis.confirm = () => true; globalThis.prompt = () => 'a reason';
 
-vm.runInThisContext(fs.readFileSync(path.join(here, '..', 'trials.js'), 'utf8'), { filename: 'trials.js' });
+/* ───────────── fake Supabase ───────────── */
+const supa = { session: null, user: null, profile: null, signOuts: 0 };
+const fakeSb = {
+  auth: {
+    getSession: async () => ({ data: { session: supa.session } }),
+    getUser: async () => ({ data: { user: supa.user } }),
+    signInWithPassword: async () => ({ error: null }),
+    signOut: async () => { supa.signOuts++; supa.session = null; },
+    resetPasswordForEmail: async () => ({ error: null }),
+    updateUser: async () => ({ error: null }),
+  },
+  from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: supa.profile }) }) }) }),
+};
+globalThis.supabase = { createClient: () => fakeSb };
+
+/* ───────────── load the shell, then trials.js ───────────── */
+const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
+vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
+vm.runInThisContext(fs.readFileSync(path.join(root, 'trials.js'), 'utf8'), { filename: 'trials.js' });
+supa.session = { access_token: 'test-token' }; // boot() has already seen "no session" and shown the login screen
+after(() => trialsStopTimer());
+const asOwner = () => { authUser = { uid: 'u1', name: 'Owner', role: 'admin', email: 'owner@example.com' }; };
+
+/* ───────────── shell ───────────── */
+test('shell: title, router knows only the four trial views, nothing from the old workspace remains', () => {
+  assert.ok(html.includes('<title>Aviance Hub — Trials</title>'));
+  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'trialPurchase', 'trialAlerts']);
+  for (const gone of ['viewDashboard', 'viewProjects', 'viewTeam', 'viewClients', 'viewCRM', 'viewProposals', 'viewInvoices', 'viewMyDay', 'viewDirectory', 'workspace_shared', 'workspace_admin', 'loadData', 'saveDB', 'openNewProject', 'composeGmail', 'submitJoin', 'approveJoin', 'applyRole', 'employeePersona', 'printDoc', 'crmStages', 'phases', 'Request to join', 'joinPane', 'roleMenu']) {
+    assert.ok(!html.includes(gone), gone + ' is gone');
+  }
+  const trialsSrc = fs.readFileSync(path.join(root, 'trials.js'), 'utf8');
+  for (const gone of [/typeof leads/, /\bleads\.find/, /\bsaveDB\b/, /\btodayShort\b/, /\bopenLead\b/, /trialsHealthCard/, /trialLineForName/, /trialStartFromLead/, /trialsBoot/, /I\.grid/]) {
+    assert.ok(!gone.test(trialsSrc), 'trials.js no longer references ' + gone);
+  }
+});
+
+test('shell: sidebar is Trials + Machine only; machine pages are SSO links with an arrow', () => {
+  const groups = navConfig();
+  assert.deepEqual(groups.map((g) => g.label), ['Trials', 'Machine']);
+  assert.deepEqual(groups[0].items.map((i) => i.view), ['trials', 'trialAlerts']);
+  assert.deepEqual(groups[1].items.map((i) => i.path), ['/mc/queue', '/mc/warmup', '/mc/config', '/mc/test', '/mc/learning']);
+  asOwner(); renderNav();
+  const nav = el('navArea').innerHTML;
+  assert.ok(nav.includes("openMachine('/mc/config')") && nav.includes('<span class="ext">↗</span>'));
+  assert.ok(nav.includes("render('trials')") && nav.includes("render('trialAlerts')"));
+  assert.ok(!/Projects|CRM|Calendar|Invoices/.test(nav));
+});
+
+test('shell: only an approved admin profile gets in; anyone else is signed out with one line', async () => {
+  authUser = null;
+  supa.user = { id: 'u1', email: 'emp@example.com' };
+  supa.profile = { id: 'u1', name: 'Emp', approved: true, role: 'employee', email: 'emp@example.com' };
+  let before = supa.signOuts;
+  await routeUser('loginErr');
+  assert.equal(authUser, null);
+  assert.equal(supa.signOuts, before + 1, 'employee is signed out');
+  assert.equal(el('loginErr').textContent, 'This hub is for the Aviance owner.');
+  assert.equal(el('login').style.display, 'flex');
+  supa.profile = { id: 'u1', name: 'Nope', approved: false, role: 'admin' };
+  before = supa.signOuts;
+  await routeUser('loginErr');
+  assert.equal(authUser, null); assert.equal(supa.signOuts, before + 1, 'unapproved admin is signed out');
+  supa.session = { access_token: 'test-token' };
+  supa.profile = { id: 'u1', name: 'Limethsith', approved: true, role: 'admin', email: 'owner@example.com' };
+  await routeUser('loginErr');
+  assert.equal(authUser.role, 'admin');
+  assert.equal(el('app').style.display, 'grid');
+  assert.equal(el('login').style.display, 'none');
+  assert.equal(currentView, 'trials', 'lands on the Trials board');
+  assert.equal(el('ptitle').textContent, 'Trials');
+  assert.equal(el('whoName').textContent, 'Limethsith');
+  assert.equal(el('whoEmail').textContent, 'owner@example.com');
+  assert.equal(el('whoAvatar').textContent, 'L');
+});
+
+test('shell: render() ignores unknown views and needs a signed-in owner', () => {
+  asOwner();
+  render('trials'); assert.equal(currentView, 'trials');
+  render('dashboard'); assert.equal(currentView, 'trials');
+  render('crm'); assert.equal(currentView, 'trials');
+  render('trialAlerts'); assert.equal(currentView, 'trialAlerts');
+  authUser = null; render('trials'); assert.equal(currentView, 'trialAlerts', 'signed out: no navigation');
+  asOwner(); render('trials');
+});
+
+test('shell: ⌘K lists trials and actions only; the bell shows trial to-dos and urgent alerts', () => {
+  asOwner(); trialsIngestHub(fullHub);
+  renderCmdk('');
+  let list = el('cmdkList').innerHTML;
+  for (const s of ['Acme Plumbing', 'Bright Dental', 'New trial client', 'Trials board', 'Machine alerts', 'Warm-up circle', 'Test Mode', 'Toggle light / dark', 'Log out']) assert.ok(list.includes(s), '⌘K has ' + s);
+  assert.ok(!/New project|Add lead|Schedule meeting/.test(list));
+  renderCmdk('bright'); list = el('cmdkList').innerHTML;
+  assert.ok(list.includes('Bright Dental') && !list.includes('Acme Plumbing'));
+  renderCmdk('trial:cobalt'); assert.ok(el('cmdkList').innerHTML.includes('Cobalt HVAC'));
+  assert.equal(computeNotifs().length, 2);
+  updateNotifBadge();
+  assert.equal(String(el('notifDot').textContent), '2'); assert.equal(el('notifDot').style.display, 'grid');
+  authUser = null; assert.equal(computeNotifs().length, 0); asOwner();
+});
 
 /* ───────────── helpers ───────────── */
 test('helpers: numbers, rates, relative times, error lists, attribute escaping', () => {
@@ -76,13 +169,11 @@ test('renderBoard: full board with 3 clients across stages', () => {
   assert.ok(html.includes('Also on the machine') && html.includes('>Aviance<'), 'others');
   assert.ok(html.includes('Reoon 12 left') && html.includes('Places 12%'), 'usage');
   assert.ok(html.includes('2 <span>/ 3</span>'), 'active / max');
-  // Bright Dental has five:null → dashes, never zeros
   const cardStart = html.indexOf('class="tk-card" onclick="openTrial(&quot;bright-dental&quot;)"');
   assert.ok(cardStart > 0, 'Bright Dental card present');
   const brightCard = html.slice(cardStart, html.indexOf('</div>\n  </div>', cardStart) + 1);
-  assert.ok(brightCard.includes('<b>—</b>'), 'null five renders as —');
+  assert.ok(brightCard.includes('<b>—</b>'), 'null five renders as —, never 0');
   assert.ok(brightCard.includes('Inbox rate —'));
-  // urgent todo sorted first
   assert.ok(html.indexOf('Buy bright-team.com') < html.indexOf('Decide the dispute'), 'urgent first');
 });
 
@@ -117,9 +208,7 @@ test('renderTrialDetail: header, todos, every system in contract order, all tabs
   assert.ok(html.includes('tk-st blocked') && html.includes('tk-st working') && html.includes('tk-st off'), 'status pills');
   assert.ok(html.includes('Day 1') && html.includes('Day 30'));
   assert.ok(html.includes('https://machine.test/c/tok1/onboard'), 'client links');
-  // numbers tab
   assert.ok(html.includes('>230<') && html.includes('interested · 4') && html.includes('unsent · 380') && html.includes('Pace checks'));
-  // every other tab renders and carries its key strings
   const tabs = {
     inboxes: ['ann@acme-team.com', 'inbox rate under 80%', 'Add inbox', 'checked'],
     calls: ['bob@example.com', 'Uphold', 'Overturn', 'wrong fit'],
@@ -136,12 +225,9 @@ test('renderTrialDetail: header, todos, every system in contract order, all tabs
     const h = renderTab(detail, tab);
     for (const n of needles) assert.ok(h.includes(n), `tab ${tab} contains "${n}"`);
   }
-  // timeline is newest first
   const tl = renderTab(detail, 'timeline');
   assert.ok(tl.indexOf('sent') < tl.indexOf('dispute_opened'), 'newest event first');
-  // paused client offers Resume
   assert.ok(renderTab(Object.assign({}, detail, { row: Object.assign({}, acme, { state: 'paused' }) }), 'actions').includes('Resume sending'));
-  // no send hold → no clear button
   assert.ok(!renderTab(detail, 'actions').includes('Clear send hold'));
 });
 
@@ -184,16 +270,16 @@ test('renderAlerts: open filter hides acknowledged, all shows them', () => {
 });
 
 /* ───────────── machine-error state + machineFetch ───────────── */
-test('machine unreachable: loadHub records the reason and the view shows one clear card', async () => {
+test('machine unreachable on first load: one clear card with the reason and Try again', async () => {
+  tk.hub = null; tk.hubErr = null;
   globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
   const r = await loadHub(true);
   assert.equal(r.ok, false);
-  assert.ok(r.error.includes('Could not reach the machine at https://machine.test'));
+  assert.ok(r.error.includes('Could not reach the machine at https://email-distributor.vercel.app'));
   const html = trialsHostHTML('trials');
   assert.ok(html.includes("The machine isn't reachable from the hub yet"));
   assert.ok(html.includes('Could not reach the machine') && html.includes('Try again'));
   assert.ok(renderMachineError('CORS said no').includes('CORS said no'));
-  assert.ok(trialsHealthCard().includes('machine unreachable'));
 });
 
 test('machineFetch: bearer token, JSON bodies, 401/503/non-JSON/ok:false handling', async () => {
@@ -202,7 +288,7 @@ test('machineFetch: bearer token, JSON bodies, 401/503/non-JSON/ok:false handlin
   globalThis.fetch = respond(200, { ok: true, clientId: 'x' });
   let r = await machineFetch('/api/mc/clients/new', { body: { companyName: 'Acme' } });
   assert.equal(r.ok, true); assert.equal(r.data.clientId, 'x');
-  assert.equal(calls[0].url, 'https://machine.test/api/mc/clients/new');
+  assert.equal(calls[0].url, 'https://email-distributor.vercel.app/api/mc/clients/new');
   assert.equal(calls[0].init.method, 'POST');
   assert.equal(calls[0].init.headers.authorization, 'Bearer test-token');
   assert.equal(calls[0].init.headers['content-type'], 'application/json');
@@ -221,36 +307,29 @@ test('machineFetch: bearer token, JSON bodies, 401/503/non-JSON/ok:false handlin
   r = await machineFetch('/api/mc/clients/new', { body: {} }); assert.equal(r.ok, false); assert.equal(r.status, 400); assert.ok(r.error.includes('Company name is required.')); assert.deepEqual(r.data.errors, { companyName: 'Company name is required.' });
   globalThis.fetch = respond(200, { ok: false, error: 'client is in sending' });
   r = await machineFetch('/api/mc/x', { body: {} }); assert.equal(r.ok, false); assert.equal(r.error, 'client is in sending');
-  const savedSb = globalThis.sb; globalThis.sb = { auth: { getSession: async () => ({ data: { session: null } }) } };
+  supa.session = null;
   r = await machineFetch('/api/mc/hub'); assert.equal(r.ok, false); assert.ok(r.error.includes('not signed in'));
-  globalThis.sb = savedSb;
+  supa.session = { access_token: 'test-token' };
 });
 
-/* ───────────── hub integration ───────────── */
-test('notifications, nav counts, ⌘K, health card, client line come from the cached hub data', () => {
-  trialsIngestHub(fullHub);
+/* ───────────── integration ───────────── */
+test('notifications, nav counts, ⌘K entities and todo actions come from the cached hub data', () => {
+  asOwner(); trialsIngestHub(fullHub);
   const n = trialsNotifs();
   assert.equal(n.length, 2, 'one per urgent todo + one per urgent open alert');
   assert.equal(n[0].t, 'Buy bright-team.com and 2 inboxes, then paste the logins');
   assert.equal(n[1].t, 'Shopping list unanswered for 14 h');
-  n[0].go(); assert.equal(renders.at(-1), 'trialPurchase'); assert.equal(currentTrialId, 'bright-dental');
+  n[0].go(); assert.equal(currentView, 'trialPurchase'); assert.equal(currentTrialId, 'bright-dental');
   assert.equal(trialsNavCount(), 2); assert.equal(trialsAlertCount(), 2);
   const ents = trialsCmdkEntities();
   assert.equal(ents.length, 4, '3 trials + aviance');
   assert.ok(ents.some((e) => e.kw.includes('trial:acme-plumbing') && e.label === 'Acme Plumbing'));
-  assert.ok(trialsCmdkActions().map((a) => a.label).join(',').includes('New trial client,Trials board,Machine alerts'));
-  const card = trialsHealthCard();
-  assert.ok(card.includes('>2<') && card.includes('1 green · 1 yellow · 1 red · 3 to-dos'));
-  assert.ok(card.includes('--hc:#E0290F'), 'red when any trial is red');
-  assert.ok(trialLineForName('ACME plumbing').includes('Trial: Sending — Day 12 of 30'), 'case-insensitive name match');
-  assert.equal(trialLineForName('Nobody Inc'), '');
-  // todo action routing
-  trialsTodoAction('buy:bright-dental'); assert.equal(renders.at(-1), 'trialPurchase');
-  trialsTodoAction('dispute:acme-plumbing:b1'); assert.equal(renders.at(-1), 'trial'); assert.equal(currentTrialId, 'acme-plumbing');
-  // employees never see it
-  const saved = globalThis.authUser; globalThis.authUser = { role: 'employee' };
-  assert.ok(viewTrials().includes('Admins only')); assert.equal(trialsNotifs().length, 0);
-  globalThis.authUser = saved;
+  assert.deepEqual(trialsCmdkActions().map((a) => a.label), ['New trial client', 'Trials board', 'Machine alerts']);
+  trialsTodoAction('buy:bright-dental'); assert.equal(currentView, 'trialPurchase');
+  trialsTodoAction('dispute:acme-plumbing:b1'); assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'acme-plumbing');
+  authUser = { role: 'employee' };
+  assert.ok(viewTrials().includes('Owner only')); assert.equal(trialsNotifs().length, 0);
+  asOwner();
 });
 
 test('a failed refresh keeps the cached board and says so, instead of blanking the screen', async () => {
@@ -266,26 +345,22 @@ test('a failed refresh keeps the cached board and says so, instead of blanking t
   assert.ok(!trialsHostHTML('trials').includes("Couldn't refresh"), 'banner clears on the next good answer');
 });
 
-test('new-client modal prefills from a CRM lead and posts the contract body', async () => {
-  globalThis.leads = [{ id: 7, company: 'Delta Roofing', contact: 'Sam Ito', email: 'sam@delta.com', history: [] }];
-  trialStartFromLead(7);
-  assert.ok(globalThis.__modal.includes('value="Delta Roofing"') && globalThis.__modal.includes('value="sam@delta.com"'));
-  elements.ntCompany = Object.assign(fakeEl('ntCompany'), { value: 'Delta Roofing' });
-  elements.ntContact = Object.assign(fakeEl('ntContact'), { value: 'Sam Ito' });
-  elements.ntEmail = Object.assign(fakeEl('ntEmail'), { value: 'sam@delta.com' });
-  elements.ntWebsite = Object.assign(fakeEl('ntWebsite'), { value: 'https://delta.com' });
-  elements.ntOverride = Object.assign(fakeEl('ntOverride'), { checked: true });
-  elements.ntErr = fakeEl('ntErr');
+test('new-client modal posts the contract body, shows 400 {errors}, and opens the new trial', async () => {
+  asOwner();
+  openNewTrialClient({ companyName: 'Delta Roofing', contactName: 'Sam Ito', contactEmail: 'sam@delta.com', website: 'https://delta.com' });
+  assert.ok(el('modal').innerHTML.includes('value="Delta Roofing"') && el('modal').innerHTML.includes('value="sam@delta.com"'));
+  assert.ok(el('modalWrap').classList.contains('open'));
+  el('ntCompany').value = 'Delta Roofing'; el('ntContact').value = 'Sam Ito'; el('ntEmail').value = 'sam@delta.com'; el('ntWebsite').value = 'https://delta.com'; el('ntOverride').checked = true;
   const calls = [];
   globalThis.fetch = async (url, init) => { calls.push({ url, init }); if (url.endsWith('/clients/new')) return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, clientId: 'delta-roofing', state: 'onboarding' }) }; return { ok: true, status: 200, text: async () => JSON.stringify(fullHub) }; };
   await submitNewTrialClient();
   assert.deepEqual(JSON.parse(calls[0].init.body), { companyName: 'Delta Roofing', contactName: 'Sam Ito', contactEmail: 'sam@delta.com', website: 'https://delta.com', override: true });
-  assert.equal(globalThis.leads[0].history.at(-1).text, 'Trial started: delta-roofing', 'lead gets a note, stage untouched');
-  assert.equal(globalThis.leads[0].stage, undefined);
-  assert.equal(renders.at(-1), 'trial'); assert.equal(currentTrialId, 'delta-roofing');
-  // 400 {errors} shows them in the modal instead of closing
+  assert.ok(!el('modalWrap').classList.contains('open'), 'modal closed');
+  assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'delta-roofing');
   globalThis.fetch = async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ ok: false, errors: { contactEmail: 'A valid email address is required.' } }) });
-  elements.ntEmail.value = 'sam@delta.com';
+  openNewTrialClient(); el('ntCompany').value = 'X'; el('ntContact').value = 'Y'; el('ntEmail').value = 'z@z.zz'; el('ntWebsite').value = 'https://z.zz';
   await submitNewTrialClient();
-  assert.ok(elements.ntErr.innerHTML.includes('A valid email address is required.'));
+  assert.ok(el('ntErr').innerHTML.includes('A valid email address is required.'));
+  assert.ok(el('modalWrap').classList.contains('open'), 'modal stays open on errors');
+  closeModal();
 });
