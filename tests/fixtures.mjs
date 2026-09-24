@@ -134,3 +134,108 @@ export const detail = {
     answers: [{ q: 'What do you sell, and who to?', a: 'Plumbing maintenance for restaurants in Ohio.' }],
     fit: { verdict: 'fit', summary: 'Looks like a fit', lines: [{ rule: 'deal_value', label: 'Customer worth ≥ $2,000 in year one', status: 'pass', note: 'They said $8,000' }] } },
 };
+
+/* ───────────── v2 additions (HUB-API.md "v2 additions") ───────────── */
+
+/* Tiny growth payload with every kind of null, for exact mapping tests:
+   day 0 and day 4: nothing recorded (gap) · day 2: sent but no sentD0/replies field (a recorded day → 0)
+   day 3: only a reply came in (a recorded day → sent 0) · warm-up day 3: outage (gap). */
+export const tinyGrowth = {
+  days: ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17'],
+  email: { sent: [null, 40, 38, null, null, 45], sentD0: [null, 22, null, null, null, 20], replies: [null, 2, null, 1, null, 3], positive: [null, 1, null, null, null, 2], booked: [null, null, null, null, null, 1], held: [null, null, null, null, null, null], qualified: [null, null, null, null, null, 1], bounces: [null, 1, null, null, null, null] },
+  warmup: { sent: [null, 30, 30, null, 30, 31], inbox: [null, 27, 28, null, 29, 30], spam: [null, 3, 2, null, 1, 1], rate: [null, 0.9, 0.92, null, 0.94, 0.95] },
+  inboxes: [{ email: 'ann@acme-team.com', dailyCap: 12, warmupStartedAt: '2026-09-22T09:10:00Z', sent: [null, 15, 15, null, 15, 16], rate: [null, 0.9, 0.93, null, 0.95, 0.96] }],
+  placement: [{ day: '2026-10-13', at: '2026-10-13T11:30:00Z', tool: 'seed', inboxRate: 0.9, score: null, min: 0.8, perProvider: { gmail: 1, outlook: 0.67 } }, { day: '2026-10-16', at: '2026-10-16T12:00:00Z', tool: 'mail-tester', inboxRate: null, score: 9.1, min: null, perProvider: null }],
+};
+
+/* Realistic growth history, deterministic. Warm-up from warmStart (one outage day = null),
+   sending on weekdays from day1 (weekends = null, one weekend reply), two inboxes. */
+export function makeGrowth(days = 45, { end = '2026-10-17', warmStart = '2026-09-22', day1 = '2026-10-06', outage = '2026-10-01', inboxes = [['ann@acme-team.com', 12], ['hello@acme-team.com', 8]] } = {}) {
+  let seed = 11; const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  const endMs = Date.parse(end + 'T12:00:00Z'); const keys = [];
+  for (let i = days - 1; i >= 0; i--) keys.push(new Date(endMs - i * 864e5).toISOString().slice(0, 10));
+  const age = (k, from) => Math.round((Date.parse(k) - Date.parse(from)) / 864e5);
+  const email = { sent: [], sentD0: [], replies: [], positive: [], booked: [], held: [], qualified: [], bounces: [] };
+  const per = inboxes.map(() => ({ sent: [], inbox: [], spam: [] }));
+  keys.forEach((k) => {
+    const dow = new Date(k + 'T12:00:00Z').getUTCDay(); const weekend = dow === 0 || dow === 6;
+    const warming = k >= warmStart && k !== outage;
+    per.forEach((ib, j) => {
+      if (!warming) { ib.sent.push(null); ib.inbox.push(null); ib.spam.push(null); return; }
+      const a = age(k, warmStart); const q = a < 3 ? 3 : a < 7 ? 8 : a < 14 ? 15 : 8;
+      const spam = Math.round(q * (a < 6 ? 0.22 : a < 12 ? 0.1 : 0.05) * (0.5 + rnd()) * (1 + j * 0.9));
+      ib.sent.push(q); ib.spam.push(spam); ib.inbox.push(Math.max(0, q - spam));
+    });
+    const sending = k >= day1 && !weekend;
+    if (sending) {
+      const d = age(k, day1); const s = Math.min(50, 16 + d * 3); const d0 = Math.round(s * (d < 3 ? 1 : 0.5));
+      const r = rnd() < 0.55 ? 1 + Math.floor(rnd() * 3) : null;
+      email.sent.push(s); email.sentD0.push(d0); email.replies.push(r); email.positive.push(r && rnd() < 0.6 ? 1 : null);
+      email.booked.push(r && rnd() < 0.35 ? 1 : null); email.held.push(null); email.qualified.push(null); email.bounces.push(rnd() < 0.3 ? 1 : null);
+    } else if (k >= day1 && weekend && dow === 6) {
+      email.sent.push(null); email.sentD0.push(null); email.replies.push(1); email.positive.push(null); email.booked.push(null); email.held.push(null); email.qualified.push(null); email.bounces.push(null);
+    } else { Object.keys(email).forEach((f) => email[f].push(null)); }
+  });
+  const sumAt = (f, i) => { let any = false, t = 0; per.forEach((ib) => { if (ib[f][i] != null) { any = true; t += ib[f][i]; } }); return any ? t : null; };
+  const rolling = (inbox, spam, i) => { let a = 0, b = 0, seen = false; for (let j = Math.max(0, i - 6); j <= i; j++) { if (inbox[j] != null || spam[j] != null) seen = true; a += inbox[j] || 0; b += spam[j] || 0; } return seen && a + b > 0 ? Math.round((a / (a + b)) * 1000) / 1000 : null; };
+  const wInbox = keys.map((_, i) => sumAt('inbox', i)), wSpam = keys.map((_, i) => sumAt('spam', i));
+  const placement = [];
+  keys.forEach((k, i) => {
+    if (k >= warmStart && age(k, warmStart) >= 10 && age(k, warmStart) % 3 === 1) placement.push({ day: k, at: k + 'T11:30:00Z', tool: 'seed', inboxRate: Math.round((0.8 + rnd() * 0.18) * 100) / 100, score: null, min: 0.67, perProvider: null });
+    if (k === day1 || (k > day1 && age(k, day1) === 7)) placement.push({ day: k, at: k + 'T12:00:00Z', tool: 'mail-tester', inboxRate: null, score: Math.round((8.6 + rnd()) * 10) / 10, min: null, perProvider: null });
+  });
+  return {
+    days: keys, email,
+    warmup: { sent: keys.map((_, i) => sumAt('sent', i)), inbox: wInbox, spam: wSpam, rate: keys.map((_, i) => rolling(wInbox, wSpam, i)) },
+    inboxes: inboxes.map(([addr, cap], j) => ({ email: addr, dailyCap: cap, warmupStartedAt: warmStart + 'T09:10:00Z', sent: per[j].sent, rate: keys.map((_, i) => rolling(per[j].inbox, per[j].spam, i)) })),
+    placement,
+  };
+}
+
+export const research = {
+  status: 'done', at: '2026-10-17T10:05:00Z', error: null,
+  summary: 'Fern IT is a managed IT company in Austin, TX (4.8★, 57 Google reviews) that looks after dental and medical practices; about 12 people on the team.',
+  website: { url: 'https://fernit.com', title: 'Fern IT — Managed IT for clinics', description: 'Managed IT, cybersecurity and HIPAA compliance for dental and medical practices across Texas.', headline: 'IT that keeps your practice running', services: ['Managed IT', 'Cybersecurity', 'HIPAA compliance', 'Cloud backup'], locations: ['Austin, TX', 'San Antonio, TX'], phones: ['(512) 555-0142'], emails: ['hello@fernit.com'], socials: { linkedin: 'https://www.linkedin.com/company/fernit', facebook: 'https://facebook.com/fernit', x: 'javascript:alert(1)' }, teamHint: '12 people on the team page', yearsHint: 'Since 2011', pagesRead: 4 },
+  business: { name: 'Fern IT', address: '1200 Congress Ave, Austin, TX 78701', category: 'Computer support and services', rating: 4.8, reviews: 57, mapsUrl: 'https://maps.google.com/?cid=123456', phone: '(512) 555-0142' },
+  market: { query: 'dental practices in Texas', estimate: 4820, source: 'places' },
+  flags: [{ level: 'warn', text: "Website mentions 'lead generation' once — could be an agency" }, { level: 'info', text: 'Two office locations listed' }],
+};
+fernApplication.research = research;
+
+export const shoppingV2 = {
+  chosenDomain: 'getbrightdental.com', backups: ['brightdentalhq.com'], registrarQuotes: [], inboxQuotes: [], senderAddresses: ['raj@getbrightdental.com', 'hello@getbrightdental.com'], total: 16.73, sentAt: '2026-10-16T22:00:00Z', boughtAt: null, unconfirmed: [],
+  offers: [
+    { domain: 'getbrightdental.com', tld: 'com', available: true, score: 92, why: "Short, brand + 'get', .com", best: { registrar: 'Porkbun', firstYear: 9.73, renewal: 11.08 },
+      prices: [{ registrar: 'Porkbun', firstYear: 9.73, renewal: 11.08, promo: null, url: 'https://porkbun.com/checkout/search?q=getbrightdental.com', confirmedAt: '2026-10-16T21:00:00Z', source: 'live' }, { registrar: 'Cloudflare', firstYear: 10.44, renewal: 10.44, promo: null, url: 'https://www.cloudflare.com/products/registrar/', confirmedAt: null, source: 'table' }, { registrar: 'Namecheap', firstYear: 11.28, renewal: 15.88, promo: 'NEWCOM598', url: 'https://www.namecheap.com', confirmedAt: null, source: 'table' }] },
+    { domain: 'brightdentalhq.com', tld: 'com', available: true, score: 85, why: "Brand + 'hq', .com", best: { registrar: 'Cloudflare', firstYear: 10.44, renewal: 10.44 },
+      prices: [{ registrar: 'Cloudflare', firstYear: 10.44, renewal: 10.44, promo: null, url: 'https://www.cloudflare.com/products/registrar/', confirmedAt: null, source: 'table' }, { registrar: 'Porkbun', firstYear: 11.06, renewal: 11.08, promo: null, url: 'https://porkbun.com', confirmedAt: '2026-10-16T21:00:00Z', source: 'live' }] },
+    { domain: 'bright-dental.co', tld: 'co', available: true, score: 71, why: '.co is cheap in year one but renews high', best: { registrar: 'Porkbun', firstYear: 8.64, renewal: 26.48 }, prices: [{ registrar: 'Porkbun', firstYear: 8.64, renewal: 26.48, promo: null, url: 'javascript:alert(2)', confirmedAt: null, source: 'live' }] },
+    { domain: 'trybrightdental.com', tld: 'com', available: false, score: 60, why: 'Taken', best: null, prices: [] },
+  ],
+  registrars: [{ name: 'Porkbun', why: 'Cheapest .com, free WHOIS privacy', url: 'https://porkbun.com' }, { name: 'Cloudflare', why: 'At-cost renewals', url: 'https://www.cloudflare.com/products/registrar/' }, { name: 'Namecheap', why: 'Frequent promo codes', url: 'https://www.namecheap.com' }, { name: 'Spaceship', why: 'Low first year', url: 'https://www.spaceship.com' }, { name: 'Dynadot', why: 'Simple checkout', url: 'https://www.dynadot.com' }],
+  inboxes: { provider: 'CheapInboxes', url: 'https://cheapinboxes.com', perInbox: 3.5, count: 2, monthly: 7, notes: 'Google Workspace inboxes with app passwords; cancel any time from their dashboard.', steps: ['Create an account at cheapinboxes.com', 'Add the domain getbrightdental.com and set the DNS records they show', 'Create raj@getbrightdental.com — display name "Raj Patel"', 'Create hello@getbrightdental.com — display name "Raj Patel"', 'Turn on 2-step verification and make an app password for each inbox', 'Paste both logins below'] },
+  totals: { domainFirstYear: 9.73, inboxesMonthly: 7, firstMonth: 16.73 },
+};
+export const brightPurchase = { client: { id: 'bright-dental', name: 'Bright Dental', state: 'awaiting_purchase', mainDomain: 'brightdental.com' }, shopping: shoppingV2, setup: { domain: { name: null, setupPhase: null }, checks: {}, senderName: 'Raj Patel' }, inboxes: [], encKey: true };
+
+detail.deliverability = {
+  warmup: { pool: 14, helpers: 10, providers: { gmail: 4, outlook: 3, yahoo: 2, zoho: 2, workspace: 3 }, todayPairs: 11, external: { name: 'Outside warm-up network', status: 'not connected' } },
+  placement: [
+    { at: '2026-10-16T12:00:00Z', tool: 'mail-tester', score: 9.1, inboxRate: null, detail: ['SPF pass', 'DKIM pass', 'DMARC pass', 'No broken links'], reportUrl: 'https://www.mail-tester.com/test-abc123' },
+    { at: '2026-10-15T11:30:00Z', tool: 'seed', score: null, inboxRate: 0.9, detail: ['gmail 3/3', 'outlook 2/3', 'yahoo 2/2'], reportUrl: 'javascript:alert(3)' },
+  ],
+  blacklists: { checkedAt: '2026-10-17T06:10:00Z', listed: [], clean: 7, lists: ['bl.spamcop.net', 'b.barracudacentral.org', 'dnsbl.sorbs.net', 'spam.dnsbl.sorbs.net', 'psbl.surriel.com', 'dnsbl-1.uceprotect.net', 'bl.mailspike.net'] },
+  bounce: { rate7d: 0.012, pauseAt: 0.015, stopAt: 0.02 },
+};
+detail.leadQuality = {
+  graded: 812, grades: { A: 140, B: 210, C: 90, rejected: 372 }, sendable: 350,
+  verification: { valid: 330, risky: 40, catchall: 25, invalid: 60, unknown: 12, pending: 30, budgetLeftToday: 45 },
+  rejectReasons: [{ reason: 'Role address (info@)', count: 120 }, { reason: 'No website', count: 88 }, { reason: 'Chain or franchise', count: 64 }, { reason: 'Outside the service area', count: 52 }, { reason: 'Email did not verify', count: 48 }],
+  sources: [{ source: 'google-places', count: 600 }, { source: 'website crawl', count: 180 }, { source: 'referral', count: 32 }],
+  sample: [
+    { email: 'jim@rivertonbistro.com', name: 'Jim Reyes', title: 'Owner', company: 'Riverton Bistro', city: 'Columbus, OH', grade: 'A', score: 91, reasons: ['Owner title', 'Verified email', 'Matches a dream customer'] },
+    { email: 'sara@elmstreetcafe.com', name: 'Sara Kim', title: 'General manager', company: 'Elm Street Cafe', city: 'Dayton, OH', grade: 'B', score: 74, reasons: ['Manager title', 'Verified email'] },
+    { email: 'info@oakgrill.com', name: '', title: '', company: 'Oak Grill', city: 'Toledo, OH', grade: 'C', score: 41, reasons: ['Role address', 'Verified email'] },
+  ],
+};
+detail.shopping = shoppingV2;
