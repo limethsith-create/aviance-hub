@@ -48,16 +48,33 @@ sees "This hub is for the Aviance owner." and is signed out.
   scale — never two scales on one chart), warm-up emails per day (landed in
   the inbox vs spam, with the number sent) and the rolling 7-day inbox rate
   against the 90% "ready" and 80% "low" lines, one small chart per inbox (rate
-  + today's cap), and every placement test (seed inbox rate against the 85%
-  Day-1 line; mail-tester score out of 10). Hover or tap a day for the numbers
-  in plain words; arrow keys work too; "Show the numbers" gives the same data
-  as a table. A day with nothing recorded is a gap, never a 0.
-- **Leads tab** — lead grades (A / B / C / rejected), how many are ready to
-  send, email checks and today's check budget, top reject reasons, where
-  leads come from, and the 25 best leads with why.
-- **Deliverability tab** — bounce rate against the 1.5% pause and 2% stop
-  lines, blacklists, the warm-up circle (pool, helpers, providers, today's
-  pairs), placement tests with report links, and the domain's DNS checks.
+  + today's cap), and every placement test: the seed test (share that landed
+  in the inbox, against the 85% Day-1 line), the SpamAssassin points from
+  DKIM Validator (lower is better; Day 1 needs 2 or less, 5 or more = spam)
+  and the mail-tester score (out of 10; Day 1 needs 8 or more), each dot
+  coloured pass / too high / spam, with each inbox's own result in the
+  tooltip. Hover or tap a day for the numbers in plain words; arrow keys work
+  too; "Show the numbers" gives the same data as a table. A day with nothing
+  recorded is a gap; a recorded day where nothing happened is a real 0 (the
+  warm-up days before Day 1 show 0 emails, and "Starts on Day 1").
+  The Day-1 lines are the machine's defaults (CANARY.gate 0.85,
+  PLACEMENT.minScore 8, PLACEMENT.maxSpamAssassin 2); the payload does not
+  carry them yet, and a test's own `pass` from the machine always wins.
+- **Leads tab** — "Ready to send" (good leads not yet emailed), good leads in
+  total, lead grades (A / B / C / rejected), when the leads were last graded,
+  email checks and today's check budget, top reject reasons, where leads come
+  from, and the 25 best leads with why. Before the first list arrives it says
+  so instead of showing zeros.
+- **Deliverability tab** — bounce rate for the last 7 days (with how many
+  were sent and when it was worked out) against the pause and stop lines from
+  the machine, and "Half speed" when the machine has slowed sending;
+  blacklists (Clean / Listed / "Couldn't check", with which lists were listed
+  or couldn't be checked); the spam tests with a plain "Day 1 check passes /
+  not passed yet" line (every inbox's newest test must pass); every placement
+  test with its tool, result and report link (a test that couldn't finish says
+  so); the warm-up circle (pool, helpers, this trial's and Aviance's inboxes,
+  provider families, providers, today's pairs, and the outside warm-up network
+  — connected or not, and how many a day); and the domain's DNS checks.
 - **Application review** — trial applications from the website arrive as
   clients in `applied`, held for the owner. On the board their card carries a
   "New application" marker; the "Review … application" to-do opens the trial
@@ -65,16 +82,18 @@ sees "This hub is for the Aviance owner." and is signed out.
   (each rule pass / fail / unknown with a note), **what the machine found**
   about the company (summary, services, locations, Google rating with a Maps
   link, team size and age hints, socials, their market size, and warnings in
-  amber) and every answer. While it is
+  amber) and every answer. **Research again** (small button beside "What we
+  found") asks the machine to look the company up again. While it is
   pending it sits at the top of the trial with two buttons — **Approve — send
   the onboarding link** (the machine starts onboarding, or queues them if three
   trials are running) and **Decline…** (a one-sentence reason, emailed to the
   applicant). Once decided it moves to an Application tab.
 - **Buy & paste** — the one manual step per trial: the total for the first
   month, a comparison of the best domain names (why, the best first-year and
-  renewal price with a link to that registrar, every other registrar's price
-  marked *live* or *price list*) with a **Use this domain** button that fills
-  the form, the inbox order (CheapInboxes: price, count, monthly cost and a
+  renewal price with a **Buy at {registrar}** link straight to that
+  registrar's search for the name, any promo code as a small chip, every other
+  registrar's price marked *live* or *price list*) with a **Use this domain**
+  button that fills the form, the inbox order (CheapInboxes: price, count, monthly cost and a
   step-by-step checklist with the sender names), then the form to paste the
   domain and inbox logins. Older machines without the comparison still show
   the plain shopping list.
@@ -179,8 +198,11 @@ npm run check     # node --check trials.js
 
 The tests load the shell's inline script and `trials.js` into a tiny fake DOM
 with a fake Supabase client, then exercise the router, the admin gate, the
-chart data mapping (null = gap), when growth is and isn't fetched, and the
+chart data mapping (null = gap, 0 = a real zero), spam-test verdicts for
+both tools, when growth is and isn't fetched, and the
 pure render functions with `tests/fixtures.mjs`; no network.
 
 Charts are hand-drawn SVG in `trials.js` (no chart library, no build step):
 `renderChart()` for the Growth tab, `renderSpark()` for the tiny ones.
+Lines and bars are SVG stretched to the width; dots are small HTML circles
+laid over the chart so they stay round and visible on a phone.

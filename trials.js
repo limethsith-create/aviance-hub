@@ -222,51 +222,66 @@ function tkSliceGrowth(g,n){
   const first=g.days[k];
   return {days:g.days.slice(k),email:obj(g.email),warmup:obj(g.warmup),inboxes:(g.inboxes||[]).map(ib=>Object.assign({},ib,{sent:sl(ib.sent),rate:sl(ib.rate)})),placement:(g.placement||[]).filter(p=>!p||!p.day||!first||p.day>=first)};
 }
-/* A day is "recorded" when any field of the group has a value. Inside a recorded day a missing
-   field means that counter never moved, so it is 0 (e.g. a day of follow-ups has no sentD0).
-   A day with nothing recorded stays null for every field — drawn as a gap, never as 0. */
-function tkGroup(src,keys,n){
-  const out={};keys.forEach(k=>{out[k]=[];});
-  for(let i=0;i<n;i++){
-    const vals=keys.map(k=>src&&Array.isArray(src[k])?tkNorm(src[k][i]):null);
-    const rec=vals.some(v=>v!=null);
-    keys.forEach((k,j)=>out[k].push(rec?(vals[j]==null?0:vals[j]):null));
-  }
-  return out;
-}
+/* One series from the growth payload. The machine sends 0 for a counter that did not move on a
+   recorded day and null only when nothing was recorded that day — null stays a gap, never a 0. */
+function tkSeries(src,key,n){return Array.from({length:n},(_,i)=>src&&Array.isArray(src[key])?tkNorm(src[key][i]):null)}
 function tkSendingModel(g){
-  const days=(g&&g.days)||[];const n=days.length;
-  const e=tkGroup(g&&g.email,['sent','sentD0','replies','positive','booked','held','qualified','bounces'],n);
-  const first=e.sentD0.map((v,i)=>v==null?null:Math.min(v,e.sent[i]==null?v:e.sent[i]));
-  const follow=e.sent.map((v,i)=>v==null?null:Math.max(0,v-(first[i]||0)));
-  return {days,first,follow,sent:e.sent,replies:e.replies,positive:e.positive,booked:e.booked,held:e.held,qualified:e.qualified,bounces:e.bounces,
-    totals:{sent:tkSum(e.sent),first:tkSum(first),follow:tkSum(follow),replies:tkSum(e.replies),positive:tkSum(e.positive),booked:tkSum(e.booked),qualified:tkSum(e.qualified)},
-    running:{sent:tkRunning(e.sent),replies:tkRunning(e.replies),positive:tkRunning(e.positive),booked:tkRunning(e.booked)},
-    any:tkHasAny(e.sent)};
+  const days=(g&&g.days)||[];const n=days.length;const e=(g&&g.email)||{};const S=k=>tkSeries(e,k,n);
+  const sent=S('sent'),d0=S('sentD0'),replies=S('replies'),positive=S('positive'),booked=S('booked'),held=S('held'),qualified=S('qualified'),bounces=S('bounces');
+  const first=d0.map((v,i)=>v==null?null:(sent[i]==null?v:Math.min(v,sent[i])));
+  const follow=sent.map((v,i)=>v==null?null:Math.max(0,v-(d0[i]||0)));
+  return {days,first,follow,sent,replies,positive,booked,held,qualified,bounces,
+    totals:{sent:tkSum(sent),first:tkSum(first),follow:tkSum(follow),replies:tkSum(replies),positive:tkSum(positive),booked:tkSum(booked),qualified:tkSum(qualified)},
+    running:{sent:tkRunning(sent),replies:tkRunning(replies),positive:tkRunning(positive),booked:tkRunning(booked)},
+    /* warm-up writes the same daily record, so pre-Day-1 days carry sent 0 — "any" means something actually went out */
+    any:(tkSum(sent)||0)>0||(tkSum(replies)||0)>0};
 }
 function tkWarmupModel(g){
   const days=(g&&g.days)||[];const n=days.length;const w=(g&&g.warmup)||{};
-  const c=tkGroup(w,['sent','inbox','spam'],n);
-  const rate=days.map((_,i)=>Array.isArray(w.rate)?tkNorm(w.rate[i]):null);
-  return {days,sent:c.sent,inbox:c.inbox,spam:c.spam,rate,any:tkHasAny(c.sent)||tkHasAny(rate),
-    totals:{sent:tkSum(c.sent),inbox:tkSum(c.inbox),spam:tkSum(c.spam)},lastRate:tkLast(rate)};
+  const sent=tkSeries(w,'sent',n),inbox=tkSeries(w,'inbox',n),spam=tkSeries(w,'spam',n),rate=tkSeries(w,'rate',n);
+  return {days,sent,inbox,spam,rate,any:(tkSum(sent)||0)>0||tkHasAny(rate),
+    totals:{sent:tkSum(sent),inbox:tkSum(inbox),spam:tkSum(spam)},lastRate:tkLast(rate)};
 }
-/* Placement tests → one value per day (last test that day) per tool. */
+/* Day-1 lines. The payload does not carry them, so these are the machine's defaults
+   (config.js CANARY.gate, PLACEMENT.minScore, PLACEMENT.maxSpamAssassin; SpamAssassin's own spam line is 5). */
+const TK_RULES={seedGate:.85,minScore:8,maxSpamAssassin:2,spamLine:5};
+const TK_TOOL_NAME={seed:'Seed test','mail-tester':'mail-tester',dkimvalidator:'DKIM Validator'};
+function tkToolName(t){return TK_TOOL_NAME[String(t||'').toLowerCase()]||String(t||'Test')}
+/* A spam test's verdict in plain words. `pass` from the machine wins when present (it also
+   knows the DKIM/SPF result); otherwise the number is judged against the Day-1 line. */
+function tkSpamVerdict(p){
+  p=p||{};const sc=tkNorm(p.score),sa=tkNorm(p.spamAssassin);
+  if(sc!=null){const ok=p.pass!=null?!!p.pass:sc>=TK_RULES.minScore;
+    return ok?{level:'pass',value:sc+'/10',text:sc+'/10 — passes (Day 1 needs '+TK_RULES.minScore+'+)'}:{level:'fail',value:sc+'/10',text:sc+'/10 — too low for Day 1 (needs '+TK_RULES.minScore+'+)'};}
+  if(sa!=null){const pts=sa+' SpamAssassin point'+(sa===1?'':'s');
+    if(sa>=TK_RULES.spamLine)return {level:'spam',value:sa+' pts',text:pts+' — marked as spam (5 or more)'};
+    if(sa>TK_RULES.maxSpamAssassin)return {level:'high',value:sa+' pts',text:pts+' — too high for Day 1 (needs '+TK_RULES.maxSpamAssassin+' or less)'};
+    if(p.pass===false)return {level:'fail',value:sa+' pts',text:pts+' — fails: DKIM or SPF did not pass'};
+    return {level:'pass',value:sa+' pts',text:pts+' — passes (Day 1 needs '+TK_RULES.maxSpamAssassin+' or less)'};}
+  if(p.error)return {level:'none',value:'—',text:"Couldn't finish: "+p.error};
+  return {level:'none',value:'—',text:'No result yet'};
+}
+function tkSpamPill(v){const m={pass:['green','Passes'],high:['amber','Too high'],fail:['red','Fails'],spam:['red','Spam'],none:['grey','No result']}[v.level]||['grey','—'];return `<span class="pill ${m[0]}">${m[1]}</span>`}
+/* Placement tests → one value per day per series (last test that day), coloured by verdict. */
 function tkPlacementModel(g){
   const days=(g&&g.days)||[];const idx={};days.forEach((d,i)=>{idx[d]=i;});
-  const seed=days.map(()=>null),mt=days.map(()=>null),tests=days.map(()=>[]);
+  const blank=()=>days.map(()=>null);
+  const seed=blank(),mt={pass:blank(),fail:blank()},sa={pass:blank(),high:blank(),spam:blank()},tests=days.map(()=>[]);
   ((g&&g.placement)||[]).forEach(p=>{if(!p)return;const i=idx[p.day];if(i==null)return;tests[i].push(p);
     const tool=String(p.tool||'seed').toLowerCase();
-    if(tool==='mail-tester'){const s=tkNorm(p.score);if(s!=null)mt[i]=s;}
-    else{const r=tkNorm(p.inboxRate);if(r!=null)seed[i]=r;}});
-  return {days,seed,mt,tests,anySeed:tkHasAny(seed),anyMt:tkHasAny(mt)};
+    if(tool==='seed'){const r=tkNorm(p.inboxRate);if(r!=null)seed[i]=r;return;}
+    const v=tkSpamVerdict(p);
+    if(tkNorm(p.score)!=null){mt.pass[i]=null;mt.fail[i]=null;mt[v.level==='pass'?'pass':'fail'][i]=tkNorm(p.score);}
+    else if(tkNorm(p.spamAssassin)!=null){sa.pass[i]=sa.high[i]=sa.spam[i]=null;sa[v.level==='pass'?'pass':v.level==='spam'?'spam':'high'][i]=tkNorm(p.spamAssassin);}
+  });
+  const any=o=>Object.values(o).some(tkHasAny);
+  return {days,seed,mt,sa,tests,anySeed:tkHasAny(seed),anyMt:any(mt),anySa:any(sa)};
 }
 function tkBarPath(x,y,w,h,r,color){
   const f=v=>v.toFixed(1);
   if(r<=0)return `<rect x="${f(x)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" style="fill:var(${color})"/>`;
   return `<path d="M${f(x)} ${f(y+h)}V${f(y+r)}Q${f(x)} ${f(y)} ${f(x+r)} ${f(y)}H${f(x+w-r)}Q${f(x+w)} ${f(y)} ${f(x+w)} ${f(y+r)}V${f(y+h)}Z" style="fill:var(${color})"/>`;
 }
-function tkDotPath(x,y,color){const d=`M${x.toFixed(1)} ${y.toFixed(1)}h0`;return `<path d="${d}" class="tk-dot-ring" vector-effect="non-scaling-stroke"/><path d="${d}" class="tk-dot-mark" style="stroke:var(${color})" vector-effect="non-scaling-stroke"/>`}
 /* Tooltip rows: [value, words, series-colour-token|null]. */
 function tkTip(day,rows,note){return {d:tkDayName(day),r:rows||[],note:note||''}}
 /*
@@ -293,7 +308,9 @@ function renderChart(o){
   const Y=v=>H-(Math.max(0,Math.min(v,max))/max)*H;
   const X=i=>(i+.5)*slot;
   const f=v=>v.toFixed(1);
-  const parts=[];
+  const parts=[],pts=[];
+  /* dots are HTML circles over the plot: an SVG dot would be squashed (or dropped) when a narrow screen stretches the chart */
+  const pt=(i,v,color)=>pts.push(`<i class="tk-pt" style="left:${(X(i)/TK_W*100).toFixed(3)}%;top:${(Y(v)/H*100).toFixed(3)}%;background:var(${color})"></i>`);
   [0,.5,1].forEach(k=>{const y=f(H-k*H);parts.push(`<line x1="0" x2="${TK_W}" y1="${y}" y2="${y}" class="tk-gridline" vector-effect="non-scaling-stroke"/>`);});
   for(let i=0;i<n;i++){
     let base=0,rec=false;const x=X(i)-bw/2;const segs=[];
@@ -303,10 +320,10 @@ function renderChart(o){
   }
   refs.forEach(r=>{const y=f(Y(r.value));parts.push(`<line x1="0" x2="${TK_W}" y1="${y}" y2="${y}" class="tk-refline" vector-effect="non-scaling-stroke"/>`);});
   lines.forEach(l=>tkSegments(l.values).forEach(seg=>{
-    if(seg.length===1){parts.push(tkDotPath(X(seg[0][0]),Y(seg[0][1]),l.color));return;}
+    if(seg.length===1){pt(seg[0][0],seg[0][1],l.color);return;}
     parts.push(`<path d="${seg.map(([i,v],k)=>(k?'L':'M')+f(X(i))+' '+f(Y(v))).join('')}" class="tk-line" style="stroke:var(${l.color})" vector-effect="non-scaling-stroke"/>`);
   }));
-  dots.forEach(dt=>dt.values.forEach((v,i)=>{if(v!=null)parts.push(tkDotPath(X(i),Y(v),dt.color));}));
+  dots.forEach(dt=>dt.values.forEach((v,i)=>{if(v!=null)pt(i,v,dt.color);}));
   const fmt=o.fmt||(o.percent?(v=>Math.round(v*100)+'%'):(v=>tkNum(v)));
   const ylab=[[max,0],[max/2,50],[0,100]].filter(([v])=>o.percent||o.fmt||Number.isInteger(v)).map(([v,t])=>`<span style="top:${t}%">${esc(fmt(v))}</span>`).join('');
   const xi=n>2?[0,Math.floor((n-1)/2),n-1]:n===2?[0,1]:[0];
@@ -316,7 +333,7 @@ function renderChart(o){
   return `<figure class="tk-chart">${legend}<div class="tk-chart-body">
     <div class="tk-chart-y" style="height:${H}px">${ylab}</div>
     <div class="tk-chart-plot" style="height:${H}px" tabindex="0" role="img" aria-label="${esc(o.label||'Chart')}. Use the arrow keys to read each day." data-n="${n}" data-tips="${esc(JSON.stringify(o.tips||[]))}" onpointermove="tkChartTip(event,this)" onpointerdown="tkChartTip(event,this)" onpointerleave="tkChartTipHide(this)" onfocus="tkChartTipAt(this,${n-1})" onblur="tkChartTipHide(this)" onkeydown="tkChartKey(event,this)">
-      <svg viewBox="0 0 ${TK_W} ${H}" preserveAspectRatio="none" aria-hidden="true">${parts.join('')}</svg>${refLabels}<div class="tk-cursor"></div><div class="tk-tip"></div>
+      <svg viewBox="0 0 ${TK_W} ${H}" preserveAspectRatio="none" aria-hidden="true">${parts.join('')}</svg>${pts.join('')}${refLabels}<div class="tk-cursor"></div><div class="tk-tip"></div>
     </div>
     <div></div><div class="tk-chart-x">${xi.map(i=>`<span>${esc(tkDayShort(days[i]))}</span>`).join('')}</div>
   </div></figure>`;
@@ -332,15 +349,15 @@ function renderSpark(values,o){
   const W=140,H=32;const slot=W/n;const color=o.color||'--c1';
   const max=o.percent?1:Math.max(1,...values.filter(v=>v!=null));const min=o.min!=null?o.min:0;
   const Y=v=>H-1-((Math.max(min,Math.min(v,max))-min)/(max-min))*(H-2);const f=v=>v.toFixed(1);
-  let body='';
+  let body='',pts='';
   if(o.kind==='line'){
     if(o.ref!=null)body+=`<line x1="0" x2="${W}" y1="${f(Y(o.ref))}" y2="${f(Y(o.ref))}" class="tk-refline" vector-effect="non-scaling-stroke"/>`;
-    tkSegments(values).forEach(seg=>{body+=seg.length===1?tkDotPath((seg[0][0]+.5)*slot,Y(seg[0][1]),color):`<path d="${seg.map(([i,v],k)=>(k?'L':'M')+f((i+.5)*slot)+' '+f(Y(v))).join('')}" class="tk-line" style="stroke:var(${color})" vector-effect="non-scaling-stroke"/>`;});
+    tkSegments(values).forEach(seg=>{if(seg.length===1){pts+=`<i class="tk-pt tk-pt-s" style="left:${((seg[0][0]+.5)/n*100).toFixed(3)}%;top:${(Y(seg[0][1])/H*100).toFixed(3)}%;background:var(${color})"></i>`;return;}body+=`<path d="${seg.map(([i,v],k)=>(k?'L':'M')+f((i+.5)*slot)+' '+f(Y(v))).join('')}" class="tk-line" style="stroke:var(${color})" vector-effect="non-scaling-stroke"/>`;});
   }else{
     const bw=Math.max(1,slot*0.7);
     values.forEach((v,i)=>{if(v==null)return;const x=i*slot+(slot-bw)/2;body+=v>0?`<rect x="${f(x)}" y="${f(Y(v))}" width="${f(bw)}" height="${f(H-1-Y(v))}" style="fill:var(${color})"/>`:`<rect x="${f(x)}" y="${H-2}" width="${f(bw)}" height="1.5" class="tk-zero"/>`;});
   }
-  return `<svg class="tk-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(o.label||'Last 14 days')}">${body}</svg>`;
+  return `<span class="tk-spark" role="img" aria-label="${esc(o.label||'Last 14 days')}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${body}</svg>${pts}</span>`;
 }
 function tkEmptyChart(msg){return `<div class="card tk-chart-empty">${esc(msg)}</div>`}
 
@@ -404,7 +421,7 @@ function renderCardSpark(g){
   const sm=tkSendingModel(g),wm=tkWarmupModel(g);
   if(!sm.any&&!wm.any)return '<div class="tk-card-spark-empty">Nothing sent or warmed in the last 14 days</div>';
   return `<div class="tk-card-spark">
-    <div><small>Sent · 14 days</small><b>${tkNum(sm.totals.sent)}</b>${renderSpark(sm.sent,{label:'Emails sent per day, last 14 days'})||'<span class="tk-spark-none">Not sending yet</span>'}</div>
+    <div><small>Sent · 14 days</small><b>${tkNum(sm.totals.sent)}</b>${(sm.any&&renderSpark(sm.sent,{label:'Emails sent per day, last 14 days'}))||'<span class="tk-spark-none">Not sending yet</span>'}</div>
     <div><small>Inbox rate</small><b>${tkRate(wm.lastRate)}</b>${renderSpark(wm.rate,{kind:'line',percent:true,min:.5,ref:.9,label:'Warm-up inbox rate, last 14 days (50–100%)'})||'<span class="tk-spark-none">No warm-up yet</span>'}</div>
   </div>`;
 }
@@ -481,11 +498,12 @@ function renderKeyNumbers(row,ov){
   const sm=g?tkSendingModel(g):null,wm=g?tkWarmupModel(g):null;
   const none=ov.state==='loading'?'Loading the last 14 days…':ov.state==='error'?'History not available right now':ov.state==='pre'?'Starts once warm-up begins':'Nothing yet';
   const spark=(vals,o)=>(vals&&renderSpark(vals,o))||`<span class="tk-spark-none">${esc(none)}</span>`;
+  const sendSpark=(vals,o)=>sm&&!sm.any?`<span class="tk-spark-none">Starts on Day 1</span>`:spark(vals,o);
   const last7=a=>a?tkSum(a.slice(-7)):null;
   const tiles=[
-    ['Emails sent',tkNum(five.sent),sm&&last7(sm.sent)!=null?tkNum(last7(sm.sent))+' in the last 7 days':'',spark(sm&&sm.sent,{label:'Emails sent per day'})],
-    ['Replies',tkNum(five.replies),five.positive!=null?tkNum(five.positive)+' positive':'',spark(sm&&sm.replies,{label:'Replies per day'})],
-    ['Calls booked',tkNum(five.booked),five.qualified!=null?tkNum(five.qualified)+' qualified':'',spark(sm&&sm.booked,{label:'Calls booked per day'})],
+    ['Emails sent',tkNum(five.sent),sm&&sm.any&&last7(sm.sent)!=null?tkNum(last7(sm.sent))+' in the last 7 days':'',sendSpark(sm&&sm.sent,{label:'Emails sent per day'})],
+    ['Replies',tkNum(five.replies),five.positive!=null?tkNum(five.positive)+' positive':'',sendSpark(sm&&sm.replies,{label:'Replies per day'})],
+    ['Calls booked',tkNum(five.booked),five.qualified!=null?tkNum(five.qualified)+' qualified':'',sendSpark(sm&&sm.booked,{label:'Calls booked per day'})],
     ['Warm-up inbox rate',tkRate(row.inboxRate!=null?row.inboxRate:(wm&&wm.lastRate)),'Ready at 90% · low under 80%',spark(wm&&wm.rate,{kind:'line',percent:true,min:.5,ref:.9,label:'Warm-up inbox rate, 50–100%'})],
   ];
   return `<div class="tk-keys">${tiles.map(([l,v,sub,sp])=>`<button class="card tk-key" onclick="trialsSetTab('growth')"><small>${esc(l)}</small><b>${v}</b><span class="tk-key-sub">${esc(sub)}</span>${sp}</button>`).join('')}</div>`;
@@ -536,13 +554,21 @@ function renderInboxGrowth(g){
     </div>`}).join('')}</div><p class="tk-help">Dashed lines: 90% is ready to send, under 80% is low.</p>`;
 }
 function renderPlacementGrowth(g){
-  const m=tkPlacementModel(g);if(!m.anySeed&&!m.anyMt)return tkEmptyChart('No placement tests yet — the first runs a few days before Day 1.');
+  const m=tkPlacementModel(g);if(!m.anySeed&&!m.anyMt&&!m.anySa)return tkEmptyChart('No placement tests yet — the first run a few days before Day 1.');
   const tips=m.days.map((d,i)=>{const ts=m.tests[i];if(!ts.length)return tkTip(d,[],'No test this day');
-    return tkTip(d,ts.map(p=>String(p.tool||'seed')==='mail-tester'?[p.score!=null?p.score+'/10':'—','mail-tester score',null]:[tkRate(p.inboxRate),'seed test: landed in the inbox'+(p.min!=null?' (worst provider '+tkRate(p.min)+')':''),null]))});
+    const rows=[];
+    ts.forEach(p=>{const tool=String(p.tool||'seed').toLowerCase();
+      if(tool==='seed'){rows.push([tkRate(p.inboxRate),'seed test: landed in the inbox'+(p.min!=null?' (worst provider '+tkRate(p.min)+')':''),'--c1']);return;}
+      const v=tkSpamVerdict(p);rows.push([v.value,tkToolName(tool)+': '+v.text.replace(/^[^—]*— /,''),v.level==='pass'?'--green':v.level==='high'?'--amber':'--red']);
+      Object.keys(p.perInbox||{}).forEach(ib=>{const x=p.perInbox[ib];rows.push([x==null?'—':tkNorm(p.score)!=null?x+'/10':x+' pts','  '+ib,null]);});});
+    return tkTip(d,rows);});
+  const saMax=Math.max(10,tkNiceMax(Math.max(0,...Object.values(m.sa).flat().filter(v=>v!=null))));
   return `<div class="card tk-chart-card">
-    ${m.anySeed?`<h4>Seed test — share that landed in the inbox</h4>${renderChart({days:m.days,height:130,percent:true,dots:[{label:'Seed test',color:'--c1',values:m.seed}],refs:[{value:.85,label:'Needed for Day 1 · 85%'}],tips,label:'Seed placement tests'})}`:''}
-    ${m.anyMt?`<h4>Mail-tester score (out of 10)</h4>${renderChart({days:m.days,height:110,max:10,fmt:v=>tkNum(v),dots:[{label:'Mail-tester',color:'--c3',values:m.mt}],tips,label:'Mail-tester scores'})}`:''}
-    ${renderChartTable(m.days,[{label:'Seed inbox rate',values:m.seed,fmt:tkRate},{label:'Mail-tester /10',values:m.mt}])}
+    ${m.anySeed?`<h4>Seed test — share that landed in the inbox</h4>${renderChart({days:m.days,height:130,percent:true,dots:[{label:'Seed test',color:'--c1',values:m.seed}],refs:[{value:TK_RULES.seedGate,label:'Needed for Day 1 · '+Math.round(TK_RULES.seedGate*100)+'%'}],tips,label:'Seed placement tests'})}`:''}
+    ${m.anySa?`<h4>Spam test — SpamAssassin points (lower is better)</h4>${renderChart({days:m.days,height:130,max:saMax,fmt:v=>tkNum(v),dots:[{label:'Passes',color:'--green',values:m.sa.pass},{label:'Too high for Day 1',color:'--amber',values:m.sa.high},{label:'Marked as spam',color:'--red',values:m.sa.spam}].filter(x=>tkHasAny(x.values)),refs:[{value:TK_RULES.maxSpamAssassin,label:'Day 1 needs '+TK_RULES.maxSpamAssassin+' or less'},{value:TK_RULES.spamLine,label:'5+ = spam'}],tips,label:'SpamAssassin points from DKIM Validator'})}`:''}
+    ${m.anyMt?`<h4>Spam test — mail-tester score (out of 10, higher is better)</h4>${renderChart({days:m.days,height:110,max:10,fmt:v=>tkNum(v),dots:[{label:'Passes',color:'--green',values:m.mt.pass},{label:'Too low for Day 1',color:'--red',values:m.mt.fail}].filter(x=>tkHasAny(x.values)),refs:[{value:TK_RULES.minScore,label:'Day 1 needs '+TK_RULES.minScore+'+'}],tips,label:'mail-tester scores'})}`:''}
+    <p class="tk-help">Day 1 needs every inbox's latest spam test to pass, and the seed test at ${Math.round(TK_RULES.seedGate*100)}% or more.</p>
+    ${renderChartTable(m.days,[{label:'Seed inbox rate',values:m.seed,fmt:tkRate},{label:'SpamAssassin points',values:m.days.map((_,i)=>m.sa.pass[i]??m.sa.high[i]??m.sa.spam[i])},{label:'mail-tester /10',values:m.days.map((_,i)=>m.mt.pass[i]??m.mt.fail[i])}])}
   </div>`;
 }
 /* st = {g, days, loading, error, at} */
@@ -572,7 +598,7 @@ function tkGradePill(gr){gr=String(gr||'').toUpperCase();const m={A:'green',B:'b
 function renderLeadsTab(d){
   const lq=d.leadQuality||null;const lbs=d.leadsByStatus||{};const lst=Object.keys(lbs);const lf=d.leadfinder||null;
   const pipeline=`<div class="section-head tk-section"><h3>Lead list</h3></div><div class="card tk-pad"><div class="tk-pills">${lst.length?lst.map(k=>`<span class="pill grey">${esc(k.replace(/_/g,' '))} · ${tkNum(lbs[k])}</span>`).join(''):'<span class="tk-muted">No leads loaded yet.</span>'}</div>${lf?`<p class="tk-help">Lead Finder · ${esc(lf.status||'—')} · found ${tkNum(lf.found)} of ${tkNum(lf.need)} needed${lf.lastRunAt?' · last run '+esc(tkRel(lf.lastRunAt)):''}</p>`:''}</div>`;
-  if(!lq)return `<div class="tk-note">Lead grading shows here once the machine starts grading leads.</div>`+pipeline;
+  if(!lq)return `<div class="card tk-chart-empty">No leads yet — grading starts when the Lead Finder brings in the first list.</div>`+pipeline;
   const gr=lq.grades||{};const order=[['A','--g-a'],['B','--g-b'],['C','--g-c'],['rejected','--c-none']];
   const total=order.reduce((s,[k])=>s+(Number(gr[k])||0),0)||Number(lq.graded)||0;
   const bar=total?`<div class="tk-gradebar" role="img" aria-label="${esc(order.map(([k])=>k+' '+(gr[k]||0)).join(', '))}">${order.filter(([k])=>Number(gr[k])>0).map(([k,c])=>`<span style="flex:${Number(gr[k])};background:var(${c})" title="${esc(k)}: ${tkNum(gr[k])}"></span>`).join('')}</div>`:'';
@@ -580,7 +606,8 @@ function renderLeadsTab(d){
   const v=lq.verification||{};const vk=[['valid','green','Valid'],['risky','amber','Risky'],['catchall','amber','Catch-all'],['invalid','red','Invalid'],['unknown','grey','Unknown'],['pending','grey','Waiting to check']];
   const reasons=(lq.rejectReasons||[]).slice(0,8);const rmax=Math.max(1,...reasons.map(r=>Number(r.count)||0));
   const sources=lq.sources||[];const sample=(lq.sample||[]).slice(0,25);
-  return `<div class="card tk-pad"><div class="tk-lead-head"><div><small>Ready to send</small><b>${tkNum(lq.sendable)}</b><span class="tk-muted">A and B leads that passed verification</span></div><div><small>Graded</small><b>${tkNum(lq.graded)}</b></div></div>${legend}${bar}</div>
+  const ready=lq.sendableUnsent!=null?lq.sendableUnsent:lq.sendable;
+  return `<div class="card tk-pad"><div class="tk-lead-head"><div><small>Ready to send</small><b>${tkNum(ready)}</b><span class="tk-muted">A and B leads that passed the checks and have not been emailed yet</span></div>${lq.sendableUnsent!=null?`<div><small>Good leads in total</small><b>${tkNum(lq.sendable)}</b><span class="tk-muted">including ones already emailed</span></div>`:''}<div><small>Graded</small><b>${tkNum(lq.graded)}</b>${lq.builtAt?`<span class="tk-muted" title="${esc(tkFull(lq.builtAt))}">Last graded ${esc(tkRel(lq.builtAt))}</span>`:''}</div></div>${legend}${bar}</div>
     <div class="tk-two">
       <div><div class="section-head tk-section"><h3>Email checks</h3></div><div class="card tk-pad"><div class="tk-pills">${vk.map(([k,c,l])=>`<span class="pill ${c}">${esc(l)} · ${tkNum(v[k]!=null?v[k]:0)}</span>`).join('')}</div><p class="tk-help">Checks left today: <b>${tkNum(v.budgetLeftToday)}</b></p></div></div>
       <div><div class="section-head tk-section"><h3>Where leads come from</h3></div><div class="card tk-pad">${sources.length?`<ul class="tk-plain">${sources.map(s=>`<li><span>${esc(s.source||'—')}</span><b>${tkNum(s.count)}</b></li>`).join('')}</ul>`:'<span class="tk-muted">No sources recorded.</span>'}</div></div>
@@ -591,15 +618,36 @@ function renderLeadsTab(d){
     <div class="card tk-scroll"><table class="tk-table"><tr><th>Lead</th><th>Company</th><th>City</th><th>Grade</th><th>Score</th><th>Why</th></tr>${sample.length?sample.map(s=>`<tr><td class="wrap"><b>${esc(s.name||'—')}</b><div class="tk-muted tk-small">${esc(s.title||'')}</div><div class="tk-small tk-break">${esc(s.email||'')}</div></td><td class="wrap">${esc(s.company||'—')}</td><td>${esc(s.city||'—')}</td><td>${tkGradePill(s.grade)}</td><td class="num">${tkNum(s.score)}</td><td class="wrap tk-small">${(s.reasons||[]).map(esc).join(' · ')}</td></tr>`).join(''):'<tr><td colspan="6" class="tk-muted">No graded leads yet.</td></tr>'}</table></div>`+pipeline;
 }
 
-/* -- Deliverability tab -- */
+/* -- Deliverability tab (deliverabilityView: warm-up summary, placement list, blacklists, bounce) -- */
 function renderBounceMeter(b){
-  if(!b||tkNorm(b.rate7d)==null)return '<div class="tk-muted">No bounce data yet.</div>';
-  const rate=Number(b.rate7d),pause=tkNorm(b.pauseAt)!=null?Number(b.pauseAt):.015,stop=tkNorm(b.stopAt)!=null?Number(b.stopAt):.02;
-  const scale=Math.max(stop*1.5,rate*1.1,.03);const pct=v=>Math.min(100,v/scale*100).toFixed(1);
-  const st=rate>=stop?['red','Over the stop line — sending stops']:rate>=pause?['amber','Over the pause line — sending pauses']:['green','Healthy'];
-  return `<div class="tk-meter-head"><b class="tk-big">${tkPct1(rate)}</b><span class="pill ${st[0]}">${esc(st[1])}</span></div>
-    <div class="tk-meter" role="img" aria-label="Bounce rate ${tkPct1(rate)}; pauses at ${tkPct1(pause)}, stops at ${tkPct1(stop)}"><i class="tk-meter-fill ${st[0]}" style="width:${pct(rate)}%"></i><i class="tk-meter-mark" style="left:${pct(pause)}%"></i><i class="tk-meter-mark" style="left:${pct(stop)}%"></i></div>
-    <p class="tk-help">Bounce rate over the last 7 days. Sending pauses at ${tkPct1(pause)} and stops at ${tkPct1(stop)} (the two marks).</p>`;
+  b=b||{};const pause=tkNorm(b.pauseAt)!=null?Number(b.pauseAt):.015,stop=tkNorm(b.stopAt)!=null?Number(b.stopAt):.02;
+  const halved=b.halved===true||b.halved==='1';
+  const halvedNote=halved?`<div class="tk-note tk-gap-s">Sending at half speed: bounces passed ${tkPct1(pause)}, so every inbox's daily cap was halved. Full speed comes back after 3 good days in a row.</div>`:'';
+  if(tkNorm(b.rate7d)==null)return `<div class="tk-muted">No bounce rate yet — it is measured once sending starts.</div><p class="tk-help">Sending pauses at ${tkPct1(pause)} and stops at ${tkPct1(stop)}.</p>`+halvedNote;
+  const rate=Number(b.rate7d);const scale=Math.max(stop*1.5,rate*1.1,.03);const pct=v=>Math.min(100,v/scale*100).toFixed(1);
+  const st=rate>stop?['red','Over the stop line — sending stops']:rate>=pause?['amber','Over the pause line — sending slows']:['green','Healthy'];
+  return `<div class="tk-meter-head"><b class="tk-big">${tkPct1(rate)}</b><span class="pill ${st[0]}">${esc(st[1])}</span>${halved?'<span class="pill amber">Half speed</span>':''}</div>
+    <div class="tk-meter" role="img" aria-label="Bounce rate ${tkPct1(rate)}; slows at ${tkPct1(pause)}, stops over ${tkPct1(stop)}"><i class="tk-meter-fill ${st[0]}" style="width:${pct(rate)}%"></i><i class="tk-meter-mark" style="left:${pct(pause)}%"></i><i class="tk-meter-mark" style="left:${pct(stop)}%"></i></div>
+    <p class="tk-help">Bounce rate over the last 7 days${tkNorm(b.sent7d)!=null?` (${tkNum(b.sent7d)} emails sent)`:''}${b.at?`, measured ${esc(tkRel(b.at))}`:''}. At ${tkPct1(pause)} sending slows to half speed; over ${tkPct1(stop)} it stops (the two marks).</p>${halvedNote}`;
+}
+function renderBlacklists(bl){
+  if(!bl)return '<span class="tk-muted">Not checked yet.</span>';
+  const listed=Array.isArray(bl.listed)?bl.listed:[],warn=Array.isArray(bl.warnings)?bl.warnings:[],unknown=Array.isArray(bl.unknown)?bl.unknown:[],lists=Array.isArray(bl.lists)?bl.lists:[];
+  const status=String(bl.status||(listed.length?'listed':'clean')).toLowerCase();
+  const pill=status==='listed'?`<span class="pill red">Listed</span>`:status==='unknown'?`<span class="pill grey">Couldn't check</span>`:'<span class="pill green">Clean</span>';
+  const clean=tkNorm(bl.clean);
+  return `<div class="tk-meter-head">${pill}<span class="tk-muted tk-small">${bl.checkedAt?'Checked '+esc(tkRel(bl.checkedAt)):''}</span></div>
+    ${listed.length?`<p><b>Listed on:</b> ${listed.map(esc).join('; ')}</p>`:''}
+    ${status==='unknown'?'<p class="tk-help">No list gave an answer this time — it is checked again tomorrow. Nothing was paused.</p>':clean!=null?`<p class="tk-help">Clean on ${tkNum(clean)} of ${tkNum(lists.length||clean)} lists${lists.length?': '+lists.map(esc).join(', '):''}.</p>`:''}
+    ${unknown.length&&status!=='unknown'?`<p class="tk-help">Couldn't check: ${unknown.map(esc).join(', ')} (no answer this time).</p>`:''}
+    ${warn.length?`<div class="tk-note tk-gap-s">Warning, nothing paused: ${warn.map(esc).join('; ')}. These are the domain's web-forwarding or mail-server addresses, not the addresses your mail is sent from.</div>`:''}`;
+}
+/* Day 1 needs each inbox's newest spam test to pass (newest first in the list). */
+function tkSpamGate(tests){
+  const latest={};(tests||[]).forEach(p=>{if(!p||String(p.tool||'').toLowerCase()==='seed')return;const k=p.inbox||'(inbox)';if(!latest[k])latest[k]=p;});
+  const inboxes=Object.keys(latest);if(!inboxes.length)return null;
+  const rows=inboxes.map(ib=>({inbox:ib,test:latest[ib],v:tkSpamVerdict(latest[ib])}));
+  return {ok:rows.every(r=>r.v.level==='pass'),rows};
 }
 function renderDeliverabilityTab(d){
   const dv=d.deliverability||null;const dom=d.domain||{};const id=(d.row||{}).id;
@@ -611,19 +659,25 @@ function renderDeliverabilityTab(d){
       ${dom.retiredAt?`<small>Retired</small><span>${esc(tkDateTime(dom.retiredAt))}</span>`:''}
     </div></div><div class="card tk-scroll tk-gap">${renderChecksTable(dom.checks)}</div>
     <div class="tk-inline tk-gap"><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunSetup')">Re-run setup check</button>${((d.shopping||{}).total!=null||['awaiting_purchase','setup_check'].includes((d.row||{}).state))?`<button class="btn ghost" onclick="openTrialPurchase(${tkAttr(id)})">Buy & paste</button>`:''}</div>`;
-  if(!dv)return `<div class="tk-note">Warm-up, placement and blacklist details show here once the machine sends them.</div>`+(dom.blacklist?`<div class="card tk-pad">Blacklist: <span class="pill ${dom.blacklist==='clean'?'green':'red'}">${esc(dom.blacklist)}</span></div>`:'')+dns;
-  const w=dv.warmup||null;const pl=(dv.placement||[]).slice(0,10);const bl=dv.blacklists||null;
-  const prov=w&&w.providers?Object.keys(w.providers):[];
-  const listed=bl&&Array.isArray(bl.listed)?bl.listed:[];
+  if(!dv)return `<div class="tk-note">Warm-up, placement and blacklist details show here once the machine sends them.</div>`+dns;
+  const w=dv.warmup||null;const pl=(dv.placement||[]).slice(0,10);
+  const prov=w&&w.providers&&typeof w.providers==='object'?Object.keys(w.providers):[];
+  const gate=tkSpamGate(pl);const ext=w&&w.external;
+  const wkv=w?[['Inboxes in the circle',tkNum(w.pool)],['Helper inboxes',tkNum(w.helpers)],['Trial inboxes',tkNum(w.trialInboxes)],['Aviance inboxes',tkNum(w.avianceInboxes)],['Provider families',tkNum(w.families)],['Pairs today',tkNum(w.todayPairs)]].filter(([,v])=>v!=='—'):[];
   return `<div class="tk-two">
       <div><div class="section-head tk-section"><h3>Bounces</h3></div><div class="card tk-pad">${renderBounceMeter(dv.bounce)}</div></div>
-      <div><div class="section-head tk-section"><h3>Blacklists</h3></div><div class="card tk-pad">${bl?`<div class="tk-meter-head">${listed.length?`<span class="pill red">Listed on ${listed.length}</span>`:'<span class="pill green">Clean</span>'}<span class="tk-muted tk-small">${bl.checkedAt?'Checked '+esc(tkRel(bl.checkedAt)):''}</span></div>${listed.length?`<p><b>Listed on:</b> ${listed.map(esc).join(', ')}</p>`:''}<p class="tk-help">Clean on ${tkNum(bl.clean)} of ${tkNum((bl.lists||[]).length||bl.clean)} lists${(bl.lists||[]).length?': '+(bl.lists||[]).map(esc).join(', '):''}.</p>`:'<span class="tk-muted">Not checked yet.</span>'}</div></div>
+      <div><div class="section-head tk-section"><h3>Blacklists</h3></div><div class="card tk-pad">${renderBlacklists(dv.blacklists)}</div></div>
     </div>
-    <div class="section-head tk-section"><h3>Warm-up circle</h3></div>
-    <div class="card tk-pad">${w?`<div class="tk-kv"><small>Inboxes in the circle</small><span>${tkNum(w.pool)}</span><small>Helper inboxes</small><span>${tkNum(w.helpers)}</span><small>Pairs today</small><span>${tkNum(w.todayPairs)}</span><small>Providers</small><span>${prov.length?`<span class="tk-pills">${prov.map(k=>`<span class="pill grey">${esc(k)} · ${tkNum(w.providers[k])}</span>`).join('')}</span>`:'—'}</span>${w.external?`<small>Outside warm-up</small><span>${esc(w.external.name||'—')} <span class="pill ${String(w.external.status)==='connected'?'green':'grey'}">${esc(w.external.status||'—')}</span></span>`:''}</div>`:'<span class="tk-muted">No warm-up circle data yet.</span>'}
-      <div class="tk-inline tk-gap"><button class="btn ghost" onclick="openMachine('/mc/warmup')">Open the warm-up circle ↗</button></div></div>
-    <div class="section-head tk-section"><h3>Placement tests</h3><span class="count">${pl.length}</span></div>
-    <div class="card tk-scroll"><table class="tk-table"><tr><th>When</th><th>Tool</th><th>Score</th><th>Inbox rate</th><th>Details</th><th>Report</th></tr>${pl.length?pl.map(p=>`<tr><td class="num">${esc(tkDateTime(p.at))}</td><td>${esc(p.tool||'—')}</td><td class="num">${p.score!=null?esc(p.score)+'/10':'—'}</td><td class="num">${tkRate(p.inboxRate)}</td><td class="wrap tk-small">${(p.detail||[]).map(esc).join(' · ')||'—'}</td><td>${tkSafeUrl(p.reportUrl)?tkLink(p.reportUrl,'Open ↗'):'—'}</td></tr>`).join(''):'<tr><td colspan="6" class="tk-muted">No placement tests yet.</td></tr>'}</table></div>`+dns;
+    <div class="section-head tk-section"><h3>Spam tests</h3>${gate?(gate.ok?'<span class="pill green">Day 1 check passes</span>':'<span class="pill red">Day 1 check not passed yet</span>'):''}</div>
+    ${gate?`<div class="card tk-pad tk-gap-b">${gate.rows.map(r=>`<div class="tk-gate-row">${tkSpamPill(r.v)}<b class="tk-break">${esc(r.inbox)}</b><span>${esc(tkToolName(r.test.tool))}: ${esc(r.v.text)}</span></div>`).join('')}<p class="tk-help">Day 1 needs every inbox's latest spam test to pass, and the seed test at ${Math.round(TK_RULES.seedGate*100)}% or more. A failed test is repeated the next day.</p></div>`:''}
+    <div class="card tk-scroll"><table class="tk-table"><tr><th>When</th><th>Test</th><th>Inbox</th><th>Result</th><th>Details</th><th>Report</th></tr>${pl.length?pl.map(p=>{const seed=String(p.tool||'').toLowerCase()==='seed';const v=seed?null:tkSpamVerdict(p);
+      return `<tr><td class="num">${esc(tkDateTime(p.at))}</td><td>${esc(tkToolName(p.tool))}</td><td class="wrap tk-small">${esc(p.inbox||'—')}</td>
+      <td class="wrap">${seed?`${tkRate(p.inboxRate)} landed in the inbox${p.pass===true?' <span class="pill green">Passes</span>':p.pass===false?' <span class="pill red">Too low</span>':''}`:p.error&&v.level==='none'?`${tkSpamPill(v)} Couldn't finish`:`${tkSpamPill(v)} ${esc(v.text)}`}</td>
+      <td class="wrap tk-small">${p.error?`<span class="tk-red">Couldn't finish: ${esc(p.error)}</span>`:(p.detail||[]).map(esc).join(' · ')||'—'}</td><td>${tkSafeUrl(p.reportUrl)?tkLink(p.reportUrl,'Open ↗'):'—'}</td></tr>`}).join(''):'<tr><td colspan="6" class="tk-muted">No placement tests yet.</td></tr>'}</table></div>
+    <div class="section-head tk-section"><h3>Warm-up circle</h3>${w&&w.at?`<span class="tk-updated">Updated ${esc(tkRel(w.at))}</span>`:''}</div>
+    <div class="card tk-pad">${w?`<div class="tk-kv">${wkv.map(([k,v])=>`<small>${esc(k)}</small><span>${v}</span>`).join('')}<small>Providers</small><span>${prov.length?`<span class="tk-pills">${prov.map(k=>`<span class="pill grey">${esc(k)} · ${tkNum(w.providers[k])}</span>`).join('')}</span>`:'—'}</span>
+      <small>Outside warm-up network</small><span>${ext?`${esc(ext.name||'—')} <span class="pill ${String(ext.status)==='connected'?'green':'grey'}">${esc(String(ext.status)==='connected'?'Connected':'Not connected')}</span>${tkNorm(ext.perDay)?` <span class="tk-muted tk-small">adds ${tkNum(ext.perDay)} warm-up emails a day</span>`:''}`:'<span class="tk-muted">None declared</span>'}</span></div>`:'<span class="tk-muted">No warm-up circle data yet.</span>'}
+      <div class="tk-inline tk-gap"><button class="btn ghost" onclick="openMachine('/mc/warmup')">Open the warm-up circle ↗</button></div></div>`+dns;
 }
 
 /* -- other tabs -- */
@@ -763,11 +817,12 @@ function tkSourceText(src){return {website:'the website',form:'the application f
 /* Turn a fit-rule label into a starting sentence for the decline reason. */
 function tkSentence(s){s=String(s||'').trim();if(!s)return '';s=s.charAt(0).toUpperCase()+s.slice(1);return /[.!?]$/.test(s)?s:s+'.'}
 /* What the machine found out about the applicant (website crawl + Google Places + market count). */
-function renderResearch(r){
-  if(!r)return '';
+function renderResearch(r,id){
+  const head=`<div class="tk-research-head"><h4>What we found</h4>${id?`<button class="btn ghost tk-btn-s" onclick="trialResearchAgain(${tkAttr(id)})">Research again</button>`:''}</div>`;
+  if(!r)return id?head+'<div class="tk-research-pending">No research yet.</div>':'';
   const st=String(r.status||'').toLowerCase();
-  if(st==='pending')return `<h4>What we found</h4><div class="tk-research-pending">Researching their website…</div>`;
-  if(st==='failed')return `<h4>What we found</h4><div class="tk-note">Couldn't research their website${r.error?': '+esc(r.error):''}. Check it yourself before deciding.</div>`;
+  if(st==='pending')return head+'<div class="tk-research-pending">Researching their website…</div>';
+  if(st==='failed')return head+`<div class="tk-note">Couldn't research their website${r.error?': '+esc(r.error):''}. Check it yourself before deciding.</div>`;
   const w=r.website||{};const b=r.business||null;const m=r.market||null;const flags=(r.flags||[]).filter(f=>f&&f.text);
   const socials=w.socials&&typeof w.socials==='object'?Object.keys(w.socials).filter(k=>tkSafeUrl(w.socials[k])):[];
   const rows=[];
@@ -781,7 +836,7 @@ function renderResearch(r){
   const phone=(b&&b.phone)||(w.phones||[])[0];if(phone)rows.push(['Phone',esc(phone)]);
   if((w.emails||[]).length)rows.push(['Emails on the site',esc(w.emails.join(', '))]);
   if(socials.length)rows.push(['Social',socials.map(k=>tkLink(w.socials[k],k.charAt(0).toUpperCase()+k.slice(1))).join(' · ')]);
-  return `<h4>What we found</h4>
+  return head+`
     ${r.summary?`<p class="tk-research-summary">${esc(r.summary)}</p>`:''}
     ${flags.length?`<div class="tk-flags">${flags.map(f=>`<div class="tk-flag ${String(f.level)==='warn'?'warn':'info'}"><span class="pill ${String(f.level)==='warn'?'amber':'grey'}">${String(f.level)==='warn'?'Check':'Note'}</span><span>${esc(f.text)}</span></div>`).join('')}</div>`:''}
     ${rows.length?`<div class="tk-about"><h5>About the company</h5><div class="tk-kv">${rows.map(([k,v])=>`<small>${esc(k)}</small><span>${v}</span>`).join('')}</div></div>`:''}
@@ -800,7 +855,7 @@ function renderApplication(d){
     <h4>Fit check</h4>
     <div class="tk-fit-summary">${tkVerdictPill(fit.verdict)}<span>${esc(fit.summary||'')}</span></div>
     ${lines.length?`<div class="tk-fit">${lines.map(l=>`<div class="tk-fit-line"><div>${tkFitPill(l.status)}</div><div><b>${esc(l.label||l.rule||'')}</b>${l.note?`<small>${esc(l.note)}</small>`:''}</div></div>`).join('')}</div>`:''}
-    ${renderResearch(app.research)}
+    ${renderResearch(app.research,id)}
     <h4>Their answers</h4>
     ${answers.length?`<dl class="tk-answers">${answers.map(x=>`<dt>${esc(x.q||'')}</dt><dd>${x.a!=null&&x.a!==''?esc(x.a):'<span class="tk-muted">(no answer)</span>'}</dd>`).join('')}</dl>`:'<div class="tk-muted">No answers stored.</div>'}
     ${pending?`<div class="tk-app-actions"><button class="btn" onclick="trialApproveApplication(${tkAttr(id)})">Approve — send the onboarding link</button><button class="btn ghost" onclick="openDeclineApplication(${tkAttr(id)})">Decline…</button></div>`:decided?`<div class="tk-app-decided">${decided}</div>`:''}
@@ -834,18 +889,22 @@ function renderQuoteLine(q,unconfirmed){
 }
 function tkSourcePill(src,confirmedAt){src=String(src||'').toLowerCase();return src==='live'?`<span class="pill green" title="${esc(confirmedAt?'Checked '+tkFull(confirmedAt):'Checked live')}">Live price</span>`:src==='table'?`<span class="pill grey" title="From the machine's price list">Price list</span>`:''}
 function tkRegistrarUrl(sh,name,prices){const p=(prices||[]).find(x=>x&&x.registrar===name&&tkSafeUrl(x.url));if(p)return p.url;const r=(sh.registrars||[]).find(x=>x&&x.name===name&&tkSafeUrl(x.url));return r?r.url:''}
+/* A registrar promo: the machine sends {code, firstYear, note}; older data may be a bare code. Shown, never counted in the price. */
+function tkPromoText(pr){if(!pr)return '';if(typeof pr!=='object')return 'Code '+String(pr);return ['Code '+(pr.code||'?'),tkNorm(pr.firstYear)!=null?tkMoney(pr.firstYear)+' first year':'',pr.note||''].filter(Boolean).join(' · ')}
+function tkPromoChip(pr){const t=tkPromoText(pr);return t?`<span class="pill amber tk-promo" title="Promo codes may have ended — not counted in the price">${esc(t)}</span>`:''}
 /* The domain comparison (shopping.offers): best names first, each with every registrar's price. */
 function renderOffers(sh,canUse){
   const offers=(sh.offers||[]).filter(o=>o&&o.domain);if(!offers.length)return '';
   return `<div class="section-head tk-section"><h3>Pick a domain</h3><span class="tk-muted tk-small">Best first · first-year price / renewal</span></div>
   <div class="card tk-scroll"><table class="tk-table tk-offers"><tr><th>Domain</th><th>Why</th><th>Best price</th><th>Other registrars</th><th></th></tr>${offers.map((o,idx)=>{
     const best=o.best||null;const prices=(o.prices||[]).filter(p=>p&&(!best||p.registrar!==best.registrar));
-    const bestUrl=best?tkRegistrarUrl(sh,best.registrar,o.prices):'';const taken=o.available===false;
-    return `<tr class="tk-offer${idx===0?' first':''}" data-domain="${esc(o.domain)}"><td><b class="tk-break">${esc(o.domain)}</b>${idx===0?' <span class="pill green">Top pick</span>':''}${taken?' <span class="pill red">Taken</span>':''}${o.score!=null?`<div class="tk-muted tk-small">Score ${tkNum(o.score)}</div>`:''}</td>
+    const buyUrl=best?(tkSafeUrl(best.url)||tkRegistrarUrl(sh,best.registrar,o.prices)):'';const taken=o.available===false;const unsure=o.available==null;
+    return `<tr class="tk-offer${idx===0?' first':''}" data-domain="${esc(o.domain)}"><td><b class="tk-break">${esc(o.domain)}</b>${idx===0?' <span class="pill green">Top pick</span>':''}${taken?' <span class="pill red">Taken</span>':unsure?' <span class="pill amber">Availability not confirmed</span>':''}${o.score!=null?`<div class="tk-muted tk-small">Score ${tkNum(o.score)}</div>`:''}</td>
       <td class="wrap tk-small" data-label="Why">${esc(o.why||'')}</td>
-      <td data-label="Best price">${best?`<b>${tkMoney(best.firstYear)}</b> at ${bestUrl?tkLink(bestUrl,best.registrar):esc(best.registrar||'—')}<div class="tk-muted tk-small">renews ${tkMoney(best.renewal)}</div>`:'—'}</td>
-      <td class="wrap tk-small" data-label="Other registrars">${prices.length?prices.map(p=>`<div class="tk-price">${tkSafeUrl(p.url)?tkLink(p.url,p.registrar):esc(p.registrar||'—')} ${tkMoney(p.firstYear)} / ${tkMoney(p.renewal)}${p.promo?` <span class="tk-muted">(promo ${esc(p.promo)})</span>`:''} ${tkSourcePill(p.source,p.confirmedAt)}</div>`).join(''):'—'}</td>
+      <td data-label="Best price">${best?`<b>${tkMoney(best.firstYear)}</b> at ${esc(best.registrar||'—')}<div class="tk-muted tk-small">renews ${tkMoney(best.renewal)}</div>${best.promo?`<div class="tk-gap-s">${tkPromoChip(best.promo)}</div>`:''}${buyUrl&&!taken?`<a class="btn ghost tk-buy" href="${esc(buyUrl)}" target="_blank" rel="noopener noreferrer">Buy at ${esc(best.registrar)} ↗</a>`:''}`:'<span class="tk-muted">No price known</span>'}</td>
+      <td class="wrap tk-small" data-label="Other registrars">${prices.length?prices.map(p=>`<div class="tk-price">${tkSafeUrl(p.url)?tkLink(p.url,p.registrar):esc(p.registrar||'—')} ${tkMoney(p.firstYear)} / ${tkMoney(p.renewal)} ${tkSourcePill(p.source,p.confirmedAt)}${p.promo?' '+tkPromoChip(p.promo):''}</div>`).join(''):'—'}</td>
       <td>${taken?'':`<button class="btn ${idx===0?'':'ghost'}" ${canUse?'':'disabled'} onclick="trialsUseDomain(${tkAttr(o.domain)})">Use this domain</button>`}</td></tr>`}).join('')}</table></div>
+  <p class="tk-help">Promo codes are shown, never counted in the price — they may have ended. Auto-renew must be off when you buy.</p>
   ${(sh.registrars||[]).length?`<details class="tk-tv"><summary>Registrars compared (${(sh.registrars||[]).length})</summary><ul class="tk-plain">${(sh.registrars||[]).map(r=>`<li><span>${tkSafeUrl(r.url)?tkLink(r.url,r.name):esc(r.name||'—')}</span><span class="tk-muted tk-small">${esc(r.why||'')}</span></li>`).join('')}</ul></details>`:''}`;
 }
 function renderInboxOrder(ib,senders,senderName){
@@ -873,7 +932,7 @@ function renderPurchase(p,id,meta){
   if(state&&!canPaste)notes.push(`<div class="tk-note">This client is in "${esc(tkStateLabel({state}))}" — the paste form only applies while it waits for the purchase or the setup check.</div>`);
   const disabled=!enc||!canPaste;
   const t=sh.totals||null;const v2=(sh.offers||[]).length>0||!!(sh.inboxes&&typeof sh.inboxes==='object')||!!t;
-  const totals=t?`<div class="card tk-totals"><span>Domain <b>${tkMoney(t.domainFirstYear)}</b> first year</span><span>+ inboxes <b>${tkMoney(t.inboxesMonthly)}</b> a month</span><span>= <b class="tk-big">${tkMoney(t.firstMonth)}</b> for the first month</span></div>`:'';
+  const totals=t?`<div class="card tk-totals"><span>Domain <b>${tkMoney(t.domainFirstYear)}</b> first year</span><span>+ inboxes <b>${tkMoney(t.inboxesMonthly)}</b> a month</span><span>= ${tkNorm(t.firstMonth)!=null?`<b class="tk-big">${tkMoney(t.firstMonth)}</b> for the first month`:'<b>first month not known yet</b> (a price is missing)'}</span></div>`:'';
   const legacy=`<div class="section-head tk-section"><h3>Shopping list</h3>${tkUpdatedStamp(meta.at)}</div>
   <div class="card tk-shop"><div class="tk-kv">
     <small>Domain</small><span><b class="tk-break">${esc(sh.chosenDomain||'—')}</b>${(sh.backups||[]).length?` <span class="tk-muted">· backups: ${(sh.backups||[]).map(esc).join(', ')}</span>`:''}</span>
@@ -1087,6 +1146,10 @@ async function submitDeclineApplication(id){
   closeModal();toast(tkOutcomeText(r.data,'decline'));
   await trialsAfterAction();
   return r;
+}
+/* Research the applicant again (website + Google listing). The machine answers {ok, result:{status}}. */
+function trialResearchAgain(id){
+  return trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/intake',{action:'rerunResearch'},{done:data=>{const st=String((data.result&&data.result.status)||'').toLowerCase();return st==='done'?'Research finished':st==='failed'?'Research could not finish — see the note':'Research started — it carries on in the background; refresh in a minute';},fail:'Research did not start'});
 }
 function trialsQueueAction(id,action){
   if(action==='decline'){const reason=typeof prompt==='function'?prompt('Reason for declining '+tkClientName(id)+' (the applicant is told this):',''):null;if(reason===null)return;trialPost('/api/mc/queue',{action:'decline',clientId:id,reason},{done:'Declined'});return;}

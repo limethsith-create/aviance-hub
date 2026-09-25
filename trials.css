@@ -153,7 +153,8 @@
 .tk-key small{display:block;font-size:var(--fs-small);color:var(--muted)}
 .tk-key b{display:block;font-size:28px;font-weight:600;margin-top:4px;line-height:1.15}
 .tk-key-sub{display:block;font-size:var(--fs-min);color:var(--muted);margin-top:3px;min-height:1.5em}
-.tk-spark{display:block;width:100%;height:32px;margin-top:8px}
+.tk-spark{display:block;position:relative;width:100%;height:32px;margin-top:8px}
+.tk-spark svg{display:block;width:100%;height:100%}
 .tk-spark-none{display:block;font-size:var(--fs-min);color:var(--muted-2);margin-top:8px;min-height:32px}
 
 /* Systems tab */
@@ -185,14 +186,16 @@
 .tk-refline{stroke:var(--muted-2);stroke-width:1;stroke-dasharray:5 4}
 .tk-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .tk-zero{fill:var(--c-none)}
-.tk-dot-ring{fill:none;stroke:var(--surface);stroke-width:13;stroke-linecap:round}
-.tk-dot-mark{fill:none;stroke-width:9;stroke-linecap:round}
-.tk-ref{position:absolute;right:4px;transform:translateY(-115%);font-size:var(--fs-min);color:var(--muted);background:var(--surface);padding:0 4px;pointer-events:none;line-height:1.3;white-space:nowrap}
+.tk-pt{position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%!important;box-shadow:0 0 0 2px var(--surface);pointer-events:none}
+.tk-pt-s{width:7px;height:7px;margin:-3.5px 0 0 -3.5px;box-shadow:none}
+/* threshold labels sit on the left (recent data is on the right) with a halo, never a box that hides a point */
+.tk-ref{position:absolute;left:4px;transform:translateY(-115%);font-size:var(--fs-min);color:var(--muted);pointer-events:none;line-height:1.3;white-space:nowrap;text-shadow:0 0 3px var(--surface),0 0 3px var(--surface),0 0 3px var(--surface)}
 .tk-cursor{position:absolute;top:0;bottom:0;width:1px;background:var(--muted);display:none;pointer-events:none}
 .tk-tip{position:absolute;top:4px;z-index:5;display:none;pointer-events:none;background:var(--surface);border:1px solid var(--border);padding:9px 11px;font-size:var(--fs-small);line-height:1.5;min-width:190px;max-width:290px;box-shadow:0 6px 18px rgba(0,0,0,.14)}
 .tk-tip-day{font-weight:600;margin-bottom:3px}
 .tk-tip-row{display:flex;align-items:center;gap:6px}
-.tk-tip-row b{font-weight:600}
+.tk-tip-row{align-items:baseline}
+.tk-tip-row b{font-weight:600;white-space:nowrap}
 .tk-tip-note{color:var(--muted);margin-top:4px;font-size:var(--fs-min)}
 .tk-legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:var(--fs-small);color:var(--muted);margin-bottom:10px}
 .tk-legend span{display:inline-flex;align-items:center;gap:7px}
@@ -224,7 +227,7 @@
 .tk-table td{padding:11px 14px;border-bottom:1px solid var(--border-soft);vertical-align:top;line-height:1.5}
 .tk-table tr:last-child td{border-bottom:none}
 .tk-table td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
-.tk-table td.wrap{overflow-wrap:anywhere}
+.tk-table td.wrap{overflow-wrap:break-word}
 .tk-table .btn{padding:6px 10px}
 .tk-table input[type=checkbox]{width:18px;height:18px;accent-color:var(--text)}
 .tk-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
@@ -299,6 +302,14 @@
 .tk-fit-line:last-child{border-bottom:none}
 .tk-fit-line b{font-size:var(--fs-base);font-weight:600;display:block}
 .tk-fit-line small{font-size:var(--fs-small);color:var(--muted);display:block;margin-top:2px}
+.tk-research-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:22px 0 10px}
+.tk-research-head h4{margin:0}
+.tk-btn-s{padding:6px 11px}
+.tk-buy{margin-top:8px;padding:7px 11px}
+.pill.tk-promo{white-space:normal;text-align:left}
+@media(min-width:701px){.tk-offers{min-width:820px}.tk-offers td[data-label="Why"]{min-width:150px}.tk-offers td[data-label="Other registrars"]{min-width:220px}.tk-offers td[data-label="Best price"]{min-width:160px}}
+.tk-gate-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:6px 0;font-size:var(--fs-small)}
+.tk-gate-row b{font-weight:600}
 .tk-research-summary{font-size:var(--fs-base);line-height:1.6;margin:0 0 12px}
 .tk-research-pending{font-size:var(--fs-base);color:var(--muted)}
 .tk-flags{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}

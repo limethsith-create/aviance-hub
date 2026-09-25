@@ -152,35 +152,58 @@ test('helpers: numbers, rates, relative times, error lists, attribute escaping, 
 });
 
 /* ───────────── chart data mapping ───────────── */
-test('charts: null is a gap, a recorded day with a missing field is 0, never the other way round', () => {
+test('charts: null is a gap, 0 is a recorded zero — mapped straight from the machine', () => {
   assert.deepEqual(tkSegments([1, null, 2, 3, null]), [[[0, 1]], [[2, 2], [3, 3]]]);
   assert.deepEqual(tkSegments([null, null]), []);
   assert.equal(tkNiceMax(3), 5); assert.equal(tkNiceMax(47), 50); assert.equal(tkNiceMax(0), 1);
   const m = tkSendingModel(tinyGrowth);
-  assert.deepEqual(m.sent, [null, 40, 38, 0, null, 45], 'day 3 had only a reply → recorded, 0 sent');
-  assert.deepEqual(m.first, [null, 22, 0, 0, null, 20], 'no sentD0 field on a sending day = 0 first emails');
-  assert.deepEqual(m.follow, [null, 18, 38, 0, null, 25]);
-  assert.deepEqual(m.replies, [null, 2, 0, 1, null, 3]);
+  assert.deepEqual(m.sent, [null, 0, 38, 0, null, 45]);
+  assert.deepEqual(m.first, [null, 0, 0, 0, null, 20]);
+  assert.deepEqual(m.follow, [null, 0, 38, 0, null, 25]);
+  assert.deepEqual(m.replies, [null, 0, 0, 1, null, 3]);
   assert.deepEqual(m.booked, [null, 0, 0, 0, null, 1]);
-  assert.equal(m.totals.sent, 123); assert.equal(m.totals.replies, 6);
-  assert.deepEqual(m.running.sent, [0, 40, 78, 78, 78, 123], 'running total holds through gaps');
+  assert.equal(m.totals.sent, 83); assert.equal(m.totals.replies, 4); assert.equal(m.any, true);
+  assert.deepEqual(m.running.sent, [0, 0, 38, 38, 38, 83], 'running total holds through gaps');
+  const warmOnly = { days: tinyGrowth.days, email: Object.fromEntries(Object.keys(tinyGrowth.email).map((k) => [k, [null, 0, 0, 0, null, 0]])), warmup: tinyGrowth.warmup };
+  assert.equal(tkSendingModel(warmOnly).any, false, 'warm-up days carry email zeros — that is not sending');
   const w = tkWarmupModel(tinyGrowth);
-  assert.deepEqual(w.sent, [null, 30, 30, null, 30, 31]); assert.deepEqual(w.rate, [null, 0.9, 0.92, null, 0.94, 0.95]);
-  assert.equal(w.lastRate, 0.95);
-  const p = tkPlacementModel(tinyGrowth);
-  assert.deepEqual(p.seed, [null, 0.9, null, null, null, null]); assert.deepEqual(p.mt, [null, null, null, null, 9.1, null]);
+  assert.deepEqual(w.sent, [null, 30, 30, null, 30, 31]); assert.deepEqual(w.rate, [null, 0.9, 0.92, null, 0.94, 0.95]); assert.equal(w.lastRate, 0.95);
   const sl = tkSliceGrowth(makeGrowth(45), 14);
   assert.equal(sl.days.length, 14); assert.equal(sl.email.sent.length, 14); assert.equal(sl.inboxes[0].rate.length, 14);
   assert.ok(sl.placement.every((x) => x.day >= sl.days[0]), 'placement trimmed to the range');
 });
 
+test('placement: seed, DKIM Validator (SpamAssassin, lower is better) and mail-tester (/10) each judged against the Day-1 line', () => {
+  const p = tkPlacementModel(tinyGrowth);
+  assert.deepEqual(p.seed, [null, 0.9, null, null, null, null]);
+  assert.deepEqual(p.sa.high, [null, null, 3.2, null, null, null], '3.2 points: too high for Day 1');
+  assert.deepEqual(p.sa.pass, [null, null, null, 1.4, null, null]);
+  assert.deepEqual(p.sa.spam, [null, null, null, null, null, 5.6], '5+ points: spam');
+  assert.deepEqual(p.mt.pass, [null, null, null, null, 9.1, null]);
+  assert.ok(p.anySeed && p.anySa && p.anyMt);
+  const v = (x) => tkSpamVerdict(x);
+  assert.equal(v({ tool: 'mail-tester', score: 9.1 }).level, 'pass'); assert.ok(v({ tool: 'mail-tester', score: 9.1 }).text.includes('Day 1 needs 8+'));
+  assert.equal(v({ tool: 'mail-tester', score: 7.5 }).level, 'fail'); assert.ok(v({ score: 7.5 }).text.includes('too low for Day 1'));
+  assert.equal(v({ tool: 'dkimvalidator', spamAssassin: 1.4 }).level, 'pass'); assert.ok(v({ spamAssassin: 1.4 }).text.includes('1.4 SpamAssassin points — passes (Day 1 needs 2 or less)'));
+  assert.equal(v({ spamAssassin: 3.2 }).level, 'high'); assert.equal(v({ spamAssassin: 5 }).level, 'spam'); assert.ok(v({ spamAssassin: 5.6 }).text.includes('marked as spam'));
+  assert.equal(v({ spamAssassin: 1.4, pass: false }).level, 'fail', "the machine's pass=false wins (DKIM/SPF failed)");
+  assert.equal(v({ score: 7.9, pass: true }).level, 'pass', "the machine's pass=true wins");
+  assert.ok(v({ error: 'no answer' }).text.includes("Couldn't finish: no answer"));
+  const html = renderPlacementGrowth(tinyGrowth);
+  for (const s of ['Seed test — share that landed in the inbox', 'Spam test — SpamAssassin points (lower is better)', 'Spam test — mail-tester score (out of 10, higher is better)', 'Day 1 needs 2 or less', '5+ = spam', 'Day 1 needs 8+', 'Needed for Day 1 · 85%']) assert.ok(html.includes(s), s);
+  assert.ok(html.includes('Passes') && html.includes('Too high for Day 1') && html.includes('Marked as spam'), 'legend names each verdict colour');
+  assert.ok(!html.includes('Too low for Day 1'), 'a verdict that never happened is not in the legend');
+  const tips = JSON.parse([...html.matchAll(/data-tips="([^"]*)"/g)][0][1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+  assert.ok(tips[2].r.some((r) => r[1].includes('DKIM Validator') && r[1].includes('too high')), 'tooltip names the tool');
+  assert.ok(tips[2].r.some((r) => r[1].includes('hello@acme-team.com') && r[0] === '1.1 pts'), 'per inbox in the tooltip');
+});
+
 test('charts: the SVG draws nothing on gap days, a thin tick on zero days, and breaks lines at gaps', () => {
   const m = tkSendingModel(tinyGrowth);
   const svg = renderChart({ days: m.days, height: 160, bars: [{ label: 'First emails', color: '--c1', values: m.first }, { label: 'Follow-ups', color: '--c2', values: m.follow }] });
-  assert.equal(count(svg, /class="tk-zero"/g), 1, 'one recorded-zero day → one tick');
-  assert.equal(count(svg, /style="fill:var\(--c[12]\)"/g), 5, '5 bar segments: day1 ×2, day2 ×1 (0 first skipped), day5 ×2');
-  const slot = 1000 / 6; const gapX = ((0.5) * slot - 15).toFixed(1);
-  assert.ok(!svg.includes(`x="${gapX}"`) && !svg.includes(`M${gapX} `), 'nothing at all on day 0 (gap)');
+  assert.equal(count(svg, /class="tk-zero"/g), 2, 'two recorded-zero days → two ticks');
+  assert.equal(count(svg, /style="fill:var\(--c[12]\)"/g), 3, '3 bar segments: day 2 ×1 (0 first emails), day 5 ×2');
+  const slot = 1000 / 6; for (const i of [0, 4]) { const gapX = ((i + 0.5) * slot - 15).toFixed(1); assert.ok(!svg.includes(`x="${gapX}"`) && !svg.includes(`M${gapX} `), 'nothing at all on gap day ' + i); }
   assert.ok(svg.includes('tk-legend') && svg.includes('First emails') && svg.includes('Follow-ups'), 'legend for two series');
   const w = tkWarmupModel(tinyGrowth);
   const rate = renderChart({ days: w.days, percent: true, lines: [{ label: 'Inbox rate', color: '--c1', values: w.rate }], refs: [{ value: 0.9, label: 'Ready · 90%' }, { value: 0.8, label: 'Low · 80%' }] });
@@ -189,8 +212,8 @@ test('charts: the SVG draws nothing on gap days, a thin tick on zero days, and b
   assert.ok(!rate.includes('tk-legend'), 'single series: no legend box');
   assert.ok(rate.includes('>100%<') && rate.includes('>0%<'), 'percent axis labels in HTML');
   assert.ok(!/<text/.test(svg + rate), 'no SVG text — labels stay HTML so they never shrink below 13px');
-  const one = renderChart({ days: ['2026-10-17', '2026-10-18'], lines: [{ label: 'x', color: '--c1', values: [null, 5] }] });
-  assert.ok(one.includes('tk-dot-mark'), 'a single isolated value is drawn as a dot');
+  assert.ok(renderChart({ days: ['2026-10-17', '2026-10-18'], lines: [{ label: 'x', color: '--c1', values: [null, 5] }] }).includes('class="tk-pt"'), 'an isolated value is a dot');
+  assert.ok(renderSpark([null, 0.9, null], { kind: 'line', percent: true }).includes('tk-pt tk-pt-s'), 'a lone sparkline value is a small dot');
 });
 
 test('charts: tooltips say plain words and a null day says "Nothing recorded"; a table twin exists', () => {
@@ -198,11 +221,12 @@ test('charts: tooltips say plain words and a null day says "Nothing recorded"; a
   const tips = JSON.parse(html.match(/data-tips="([^"]*)"/)[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
   assert.equal(tips.length, 6);
   assert.equal(tips[0].note, 'Nothing recorded'); assert.deepEqual(tips[0].r, []);
-  assert.deepEqual(tips[1].r.map((r) => r[1]), ['emails sent', 'first emails', 'follow-ups', 'replies', 'positive replies', 'calls booked']);
-  assert.equal(tips[1].r[0][0], '40');
-  assert.ok(tips[5].note.includes('123 sent'), 'running totals in the tooltip');
+  assert.deepEqual(tips[2].r.map((r) => r[1]), ['emails sent', 'first emails', 'follow-ups', 'replies', 'positive replies', 'calls booked']);
+  assert.equal(tips[2].r[0][0], '38'); assert.equal(tips[1].r[0][0], '0', 'a recorded zero says 0, not "nothing recorded"');
+  assert.ok(tips[5].note.includes('83 sent'), 'running totals in the tooltip');
   assert.ok(html.includes('Show the numbers') && html.includes('<th>Follow-ups</th>'), 'table view');
-  assert.ok(html.includes('Replies') && html.includes('Positive replies') && html.includes('Calls booked'), 'aligned small multiples, one scale each');
+  const warmOnly = { days: tinyGrowth.days, email: Object.fromEntries(Object.keys(tinyGrowth.email).map((k) => [k, [null, 0, 0, 0, null, 0]])) };
+  assert.ok(renderSendingGrowth(tkSendingModel(warmOnly), acme).includes('No sending yet — starts on Day 1'));
 });
 
 /* ───────────── board ───────────── */
@@ -263,11 +287,11 @@ test('Growth tab: sending, warm-up, each inbox and placement charts, with a rang
   const html = renderGrowthTab(detail, { g, days: 45, at: Date.now() });
   for (const n of [7, 30, 45, 90]) assert.ok(html.includes(`trialsGrowthRange(${n})`), 'range ' + n);
   assert.ok(html.includes('class="active" onclick="trialsGrowthRange(45)"'), '45 days selected');
-  for (const s of ['Emails sent per day', 'Warm-up emails per day', 'Inbox rate, rolling 7 days', 'Seed test — share that landed in the inbox', 'Mail-tester score (out of 10)']) assert.ok(html.includes(s), s);
+  for (const s of ['Emails sent per day', 'Warm-up emails per day', 'Inbox rate, rolling 7 days', 'Seed test — share that landed in the inbox', 'Spam test — SpamAssassin points (lower is better)', 'Spam test — mail-tester score (out of 10, higher is better)']) assert.ok(html.includes(s), s);
   assert.ok(html.includes('Landed in the inbox') && html.includes('Landed in spam'), 'warm-up legend');
   assert.ok(html.includes('Ready · 90%') && html.includes('Low · 80%') && html.includes('Needed for Day 1 · 85%'));
   assert.equal(count(html, /class="card tk-mini-chart"/g), 2, 'one small chart per inbox');
-  assert.ok(html.includes('ann@acme-team.com') && html.includes('Cap today <b>12 a day</b>') && html.includes('Cap today <b>8 a day</b>'));
+  assert.ok(html.includes('Cap today <b>12 a day</b>') && html.includes('Cap today <b>8 a day</b>'));
   assert.ok(html.includes('All-time counters') && html.includes('Pace checks'));
   const none = { days: g.days, email: {}, warmup: {}, inboxes: [], placement: [] };
   const empty = renderGrowthTab({ row: bright }, { g: none, days: 45 });
@@ -287,41 +311,56 @@ test('tabs: systems, inboxes, calls, replies, copy, coming up, timeline, actions
     copy: ['Open the copy editor', 'Send approval link', 'Dispatch Lead Finder', 'both'],
     comingup: ['Friday update', 'Day 29 report', 'Answer Ann about the calendar', 'Add a note', 'friday:2026-10-10', 'counters.held missing'],
     timeline: ['dispute_opened', 'scorekeeper', 'd0 to bob@example.com'],
-    actions: ['Pause sending', 'Clear legal hold', 'Run a job now', 'IMAP timeout', 'Mark paid', 'Log time', 'Override market count', 'Client links', 'https://machine.test/c/tok1/onboard'],
+    actions: ['Pause sending', 'Clear legal hold', 'Run a job now', 'IMAP timeout', 'Mark paid', 'Log time', 'Override market count'],
   };
   for (const [tab, needles] of Object.entries(tabs)) { const h = renderTab(detail, tab); for (const n of needles) assert.ok(h.includes(n), `tab ${tab} contains "${n}"`); }
   const tl = renderTab(detail, 'timeline'); assert.ok(tl.indexOf('sent') < tl.indexOf('dispute_opened'), 'newest event first');
   assert.ok(renderTab(Object.assign({}, detail, { row: Object.assign({}, acme, { state: 'paused' }) }), 'actions').includes('Resume sending'));
   for (const old of ['setup', 'promises', 'upcoming', 'reports']) assert.ok(renderTab(detail, old).length > 100, 'old tab name ' + old + ' still lands somewhere');
+  assert.ok(!renderTab(detail, 'actions').includes('Client links'), 'the machine sends links: {} — no empty section');
+  assert.ok(renderLinks({ onboarding: 'https://machine.test/c/tok1/onboard' }).includes('https://machine.test/c/tok1/onboard'), 'links still render when present');
   for (const tab of ['overview', 'growth', 'systems', 'leads', 'deliverability', 'inboxes', 'calls', 'replies', 'copy', 'comingup', 'timeline', 'actions']) assert.doesNotThrow(() => renderTab({ row: bright }, tab, {}), 'sparse detail: ' + tab);
 });
 
-test('Leads tab: grade bar, ready-to-send count, checks, reasons, sources, best-leads table', () => {
+test('Leads tab: ready to send (not yet emailed), last graded, grade bar, checks, reasons, sources, best leads; null → empty state', () => {
   const h = renderLeadsTab(detail);
-  assert.ok(h.includes('Ready to send') && h.includes('>350<') && h.includes('>812<'));
+  assert.ok(h.includes('<small>Ready to send</small><b>212</b>') && h.includes('have not been emailed yet'), 'sendableUnsent is the headline');
+  assert.ok(h.includes('Good leads in total</small><b>350</b>') && h.includes('>812<'));
+  assert.ok(h.includes('Last graded'), 'builtAt shown');
   for (const s of ['Grade A · 140', 'Grade B · 210', 'Grade C · 90', 'Rejected · 372']) assert.ok(h.includes(s), s);
   assert.ok(h.includes('tk-gradebar') && count(h, /flex:\d+;background:var\(--(g-[abc]|c-none)\)/g) === 4, 'four grade segments');
   assert.ok(h.includes('Valid · 330') && h.includes('Catch-all · 25') && h.includes('Checks left today: <b>45</b>'));
   assert.ok(h.includes('Role address (info@)') && h.includes('google-places') && h.includes('>600<'));
-  assert.ok(h.includes('Jim Reyes') && h.includes('Riverton Bistro') && h.includes('Matches a dream customer'));
-  assert.ok(h.includes('class="pill green">A<') && h.includes('class="pill blue">B<') && h.includes('class="pill amber">C<'));
+  assert.ok(h.includes('Jim Reyes') && h.includes('Riverton Bistro') && h.includes('class="pill green">A<'));
   assert.ok(h.includes('in sequence · 120'), 'the lead list by status stays');
-  const none = renderLeadsTab(Object.assign({}, detail, { leadQuality: undefined }));
-  assert.ok(none.includes('Lead grading shows here once') && none.includes('unsent · 380'));
+  const none = renderLeadsTab(Object.assign({}, detail, { leadQuality: null }));
+  assert.ok(none.includes('No leads yet — grading starts when the Lead Finder brings in the first list') && none.includes('unsent · 380'));
+  const old = renderLeadsTab(Object.assign({}, detail, { leadQuality: Object.assign({}, detail.leadQuality, { sendableUnsent: undefined, builtAt: undefined }) }));
+  assert.ok(old.includes('<small>Ready to send</small><b>350</b>') && !old.includes('Last graded'), 'older machine: falls back to sendable');
 });
 
-test('Deliverability tab: bounce meter vs the pause/stop lines, blacklists, warm-up circle, placement list, DNS', () => {
+test('Deliverability tab: bounce (sent, measured, half speed), blacklists (couldn\'t check, warnings), spam-test Day-1 check, warm-up circle extras, DNS', () => {
   const h = renderDeliverabilityTab(detail);
-  assert.ok(h.includes('1.2%') && h.includes('Healthy') && h.includes('pauses at 1.5%') && h.includes('stops at 2%'));
+  assert.ok(h.includes('1.2%') && h.includes('Healthy') && h.includes('(1,240 emails sent)') && h.includes('measured'));
   assert.equal(count(h, /class="tk-meter-mark"/g), 2);
-  assert.ok(h.includes('class="pill green">Clean<') && h.includes('Clean on 7 of 7 lists'));
-  assert.ok(h.includes('Inboxes in the circle') && h.includes('>14<') && h.includes('gmail · 4') && h.includes('Pairs today'));
-  assert.ok(h.includes('9.1/10') && h.includes('SPF pass') && h.includes('https://www.mail-tester.com/test-abc123'));
-  assert.ok(!h.includes('javascript:'), 'unsafe report link is dropped');
-  assert.ok(h.includes('Domain and DNS') && h.includes('spf') && h.includes('Re-run setup check'));
-  const over = renderBounceMeter({ rate7d: 0.021, pauseAt: 0.015, stopAt: 0.02 });
-  assert.ok(over.includes('Over the stop line') && over.includes('pill red'));
-  assert.ok(renderBounceMeter({ rate7d: 0.016, pauseAt: 0.015, stopAt: 0.02 }).includes('Over the pause line'));
+  assert.ok(h.includes('class="pill green">Clean<') && h.includes('Clean on 5 of 7 lists'));
+  assert.ok(h.includes("Couldn't check: dnsbl.sorbs.net, b.barracudacentral.org"), 'unknown verdicts are "couldn\'t check", not clean');
+  assert.ok(h.includes('Warning, nothing paused: bl.spamcop.net: 192.0.2.10 (A record)'));
+  for (const s of ['Trial inboxes', 'Aviance inboxes', 'Provider families', 'Pairs today', 'Outside warm-up network', 'Connected', 'adds 10 warm-up emails a day']) assert.ok(h.includes(s), s);
+  assert.ok(h.includes('Day 1 check not passed yet'), 'hello@ latest spam test is 3.2 points');
+  assert.ok(h.includes('1.4 SpamAssassin points — passes') && h.includes('3.2 SpamAssassin points — too high for Day 1'));
+  assert.ok(h.includes('DKIM Validator') && h.includes('9.1/10 — passes') && h.includes('https://www.mail-tester.com/test-abc123'));
+  assert.ok(h.includes("Couldn't finish: dkimvalidator did not answer in 20 minutes"));
+  assert.ok(!h.includes('javascript:'), 'unsafe report link dropped');
+  assert.ok(h.includes('Domain and DNS') && h.includes('Re-run setup check'));
+  const passing = JSON.parse(JSON.stringify(detail.deliverability)); passing.placement[1].spamAssassin = 1.0; passing.placement[1].pass = true;
+  assert.ok(renderDeliverabilityTab(Object.assign({}, detail, { deliverability: passing })).includes('Day 1 check passes'));
+  assert.ok(renderBounceMeter({ rate7d: 0.021, pauseAt: 0.015, stopAt: 0.02 }).includes('Over the stop line'));
+  const slow = renderBounceMeter({ rate7d: 0.016, pauseAt: 0.015, stopAt: 0.02, halved: true });
+  assert.ok(slow.includes('Over the pause line') && slow.includes('Half speed') && slow.includes('daily cap was halved'));
+  assert.ok(renderBounceMeter({ rate7d: null, pauseAt: 0.015, stopAt: 0.02 }).includes('No bounce rate yet'));
+  assert.ok(renderBlacklists({ status: 'unknown', listed: [], warnings: [], clean: 0, unknown: ['a', 'b'], lists: ['a', 'b'] }).includes("Couldn't check"));
+  assert.ok(renderBlacklists({ status: 'listed', listed: ['dbl.spamhaus.org'], warnings: [], clean: 6, unknown: [], lists: [] }).includes('Listed on:</b> dbl.spamhaus.org'));
   const none = renderDeliverabilityTab(Object.assign({}, detail, { deliverability: null }));
   assert.ok(none.includes('show here once the machine sends them') && none.includes('Domain and DNS'));
 });
@@ -340,8 +379,8 @@ test('application pending: shown above the tabs with the fit check, the research
   assert.ok(iResearch > 0 && iResearch < iAnswers, 'research above the answers');
 });
 
-test('application research: summary, about the company, Google rating + Maps link, market, flags; pending and failed', () => {
-  const h = renderResearch(research);
+test('application research: summary, about the company, Google rating + Maps link, market, flags, Research again; pending and failed', () => {
+  const h = renderResearch(research, 'fern-it');
   assert.ok(h.includes(esc(research.summary)));
   assert.ok(h.includes('About the company') && h.includes('Managed IT, Cybersecurity, HIPAA compliance, Cloud backup') && h.includes('Austin, TX · San Antonio, TX'));
   assert.ok(h.includes('4.8★') && h.includes('57 reviews') && h.includes('href="https://maps.google.com/?cid=123456"') && h.includes('Google Maps ↗'));
@@ -349,10 +388,23 @@ test('application research: summary, about the company, Google rating + Maps lin
   assert.ok(h.includes('href="https://www.linkedin.com/company/fernit"') && !h.includes('javascript:'), 'socials: safe links only');
   assert.ok(h.includes('About <b>4,820</b> matching companies') && h.includes('Google Places'));
   assert.ok(h.includes('class="pill amber">Check<') && h.includes('could be an agency') && h.includes('class="pill grey">Note<'));
-  assert.ok(renderResearch({ status: 'pending' }).includes('Researching their website…'));
-  const f = renderResearch({ status: 'failed', error: 'Site timed out' }); assert.ok(f.includes("Couldn't research their website: Site timed out"));
+  assert.ok(h.includes('trialResearchAgain(&quot;fern-it&quot;)') && h.includes('Research again'));
+  assert.ok(renderResearch({ status: 'pending' }, 'x').includes('Researching their website…'));
+  const f = renderResearch({ status: 'failed', error: 'Site timed out' }, 'x'); assert.ok(f.includes("Couldn't research their website: Site timed out") && f.includes('Research again'));
+  const missing = renderResearch(null, 'x'); assert.ok(missing.includes('No research yet') && missing.includes('Research again'));
   assert.equal(renderResearch(null), '');
-  assert.ok(renderResearch({ status: 'done', website: { url: 'https://x.com' }, business: null }).includes('Not found on Google Maps'));
+  assert.ok(renderResearch({ status: 'done', website: { url: 'https://x.com' }, business: null }, 'x').includes('Not found on Google Maps'));
+});
+
+test('Research again posts rerunResearch and says what happened', async () => {
+  asOwner(); trialsIngestHub(fullHub); tk.detail['fern-it'] = fernDetail; tk.detailAt['fern-it'] = Date.now(); currentTrialId = 'fern-it';
+  const calls = [];
+  const answer = (status) => async (url, init) => { calls.push({ url, init }); if (url.endsWith('/intake')) return ok({ ok: true, result: { status } })(); return ok(url.includes('/hub/') ? fernDetail : fullHub)(); };
+  globalThis.fetch = answer('pending'); await trialResearchAgain('fern-it');
+  assert.ok(calls[0].url.endsWith('/api/mc/clients/fern-it/intake')); assert.deepEqual(JSON.parse(calls[0].init.body), { action: 'rerunResearch' });
+  assert.ok(el('toast').innerHTML.includes('Research started'));
+  globalThis.fetch = answer('done'); await trialResearchAgain('fern-it'); assert.ok(el('toast').innerHTML.includes('Research finished'));
+  globalThis.fetch = answer('failed'); await trialResearchAgain('fern-it'); assert.ok(el('toast').innerHTML.includes('could not finish'));
 });
 
 test('application decided: an Application tab, no buttons, the decision in words', () => {
@@ -398,24 +450,31 @@ test('approve + decline post the contract bodies and toast the outcome in plain 
 });
 
 /* ───────────── Buy & paste v2 ───────────── */
-test('Buy & paste: domain comparison, registrar links, live vs price-list prices, inbox order, totals', () => {
+test('Buy & paste: domain comparison with "Buy at" links, promo chips, live vs price-list prices, inbox order, totals', () => {
   const h = renderPurchase(brightPurchase, 'bright-dental', { at: Date.now() });
-  assert.ok(h.includes('Pick a domain') && count(h, /class="tk-offer/g) === 4);
-  assert.ok(h.includes('getbrightdental.com') && h.includes('Top pick') && h.includes("Short, brand + &#39;get&#39;, .com") || h.includes("Short, brand + 'get', .com"));
-  assert.ok(h.includes('<b>$9.73</b> at <a href="https://porkbun.com/checkout/search?q=getbrightdental.com"') && h.includes('renews $11.08'));
-  assert.ok(h.includes('$10.44 / $10.44') && h.includes('Live price') && h.includes('Price list') && h.includes('promo NEWCOM598'));
-  assert.ok(!h.includes('javascript:'), 'unsafe registrar link dropped');
-  assert.equal(count(h, /trialsUseDomain\(/g), 3, 'a "Use this domain" button per available name (not the taken one)');
-  assert.ok(h.includes('class="pill red">Taken<'));
+  assert.ok(h.includes('Pick a domain') && count(h, /class="tk-offer/g) === 3);
+  assert.ok(h.includes('Top pick') && h.includes('<b>$9.73</b> at Porkbun') && h.includes('renews $11.08'));
+  assert.ok(h.includes('href="https://porkbun.com/checkout/search?q=getbrightdental.com"') && h.includes('Buy at Porkbun ↗'), 'best.url → Buy at');
+  assert.ok(h.includes('Buy at Spaceship ↗') && h.includes('Code SPACE10 · $6.98 first year'), 'best.promo chip');
+  assert.ok(h.includes('Code NEWCOM598 · $5.98 first year · new customers'), 'per-price promo object');
+  assert.ok(!h.includes('[object Object]'), 'promo objects never print as [object Object]');
+  assert.ok(h.includes('$10.44 / $10.44') && h.includes('Live price') && h.includes('Price list'));
+  assert.ok(h.includes('Availability not confirmed'), 'available: null');
+  assert.ok(!h.includes('javascript:'), 'an unsafe best.url is never used');
+  const coRow = h.slice(h.indexOf('data-domain="usebrightdental.co"'));
+  assert.ok(coRow.includes('href="https://porkbun.com" target="_blank" rel="noopener noreferrer">Buy at Porkbun'), "unsafe best.url → falls back to the registrar's home page");
+  assert.equal(count(h, /Buy at /g), 3);
+  assert.equal(count(h, /trialsUseDomain\(/g), 3);
+  assert.ok(h.includes('Promo codes are shown, never counted'));
   assert.ok(h.includes('Registrars compared (5)') && h.includes('At-cost renewals'));
-  assert.ok(h.includes('CheapInboxes') && h.includes('$3.50 per inbox × 2 = <b>$7.00 a month</b>') && count(h, /<li><label><input type="checkbox"/g) === 6);
-  assert.ok(h.includes('raj@getbrightdental.com') && h.includes('display name <b>Raj Patel</b>'));
-  assert.ok(h.includes('<b>$9.73</b> first year') && h.includes('<b>$7.00</b> a month') && h.includes('<b class="tk-big">$16.73</b> for the first month'));
-  assert.equal(count(h, /class="pc-email"/g), 2);
+  assert.ok(h.includes('CheapInboxes') && h.includes('$3.50 per inbox × 2 = <b>$7.00 a month</b>') && count(h, /<li><label><input type="checkbox"/g) === 5);
+  assert.ok(h.includes('<b>$9.73</b> first year') && h.includes('<b class="tk-big">$16.73</b> for the first month'));
+  const unknownTotal = renderPurchase(Object.assign({}, brightPurchase, { shopping: Object.assign({}, shoppingV2, { totals: { domainFirstYear: 9.73, inboxesMonthly: null, firstMonth: null } }) }), 'bright-dental');
+  assert.ok(unknownTotal.includes('first month not known yet'));
   const legacy = renderPurchase({ client: brightPurchase.client, shopping: { chosenDomain: 'bright-team.com', registrarQuotes: [{ name: 'Porkbun', price: 9.13 }], total: 16.13 }, setup: {}, inboxes: [], encKey: true }, 'bright-dental');
-  assert.ok(legacy.includes('Shopping list') && legacy.includes('bright-team.com') && !legacy.includes('Pick a domain'), 'older machines: the v1 list still shows');
+  assert.ok(legacy.includes('Shopping list') && !legacy.includes('Pick a domain'), 'older machines: the v1 list still shows');
   const closed = renderPurchase(Object.assign({}, brightPurchase, { encKey: false }), 'bright-dental');
-  assert.ok(closed.includes('id="tkPcForm" disabled') && count(closed, /disabled onclick="trialsUseDomain/g) === 3, 'form closed → use buttons disabled');
+  assert.ok(closed.includes('id="tkPcForm" disabled') && count(closed, /disabled onclick="trialsUseDomain/g) === 3);
 });
 
 test('"Use this domain" fills the paste form and marks the row', () => {
