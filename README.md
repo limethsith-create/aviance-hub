@@ -23,6 +23,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, sidebar, ⌘K, notifications, theme. |
 | `trials.js` | The Trials section — everything the owner sees inside. Talks to the machine. |
 | `trials.css` | Styles for the Trials screens, on top of the shell's CSS variables (light + dark). |
+| `inquiries.js` | Inquiries: paid-plan calls booked from the website — list, detail, status/notes, "Start a trial instead", the board strip. |
 | `push.js` | Phone alerts: the panel, turning Web Push on/off with the machine, the quiet re-subscribe after sign-in. |
 | `sw.js` | Service worker (site root, scope `/`): shows the machine's push messages as notifications and opens the hub on a tap. Caches nothing. |
 | `manifest.webmanifest` | Makes the hub installable (Add to Home Screen) — iPhone only allows alerts for installed web apps. |
@@ -104,11 +105,34 @@ sees "This hub is for the Aviance owner." and is signed out.
   domain and inbox logins. Older machines without the comparison still show
   the plain shopping list.
 - **Machine alerts** — every alert the machine sent, with Acknowledge.
+- **Inquiries** — people who want a paid plan (Starter / Growth / Scale)
+  without a trial, from the website's "Book a call" form. The machine saves
+  each one and pops it up on the owner's phone; nothing is sent to them.
+  - The list: New / Contacted / Won / Lost counts (tap one to filter), filter
+    chips (Open is the default: new + contacted), and a card per inquiry,
+    newest first — company, name, plan, the booked call in the owner's time
+    (the website's own text) with "call in 3 h" / "was 2 days ago", what they
+    sell, and a red New marker until someone moves it on.
+  - One inquiry (`#inquiry/{id}`, what the phone alert opens): **Reply by
+    email** (mailto, subject "Your Aviance call"), their time and time zone,
+    email, website, what they sell, plan; **Where it stands** — Mark
+    contacted / won / lost or Back to New, with an optional note; **Start a
+    trial instead** (asks "Email {name} the trial onboarding link now?", then
+    says in plain words what the machine did and links to the new trial);
+    **Notes** (newest first) + Add note.
+  - On the Trials board a strip — "2 new inquiries — Stone Roofing, call Tue
+    7:30 PM" (the soonest upcoming call, in Sri Lanka time) — opens the list;
+    each new one is also an urgent to-do ("Open inquiry"), in the bell, and in
+    ⌘K. The sidebar badge counts new ones.
+  - Machine: `GET /api/mc/inquiries`, `POST /api/mc/inquiries`
+    `{action:'status'|'note'|'toTrial', …}`, and `inquiries` on
+    `GET /api/mc/hub` (see HUB-API.md "## Plan inquiries"). An older machine
+    without it simply shows no strip and no badge.
 
 - **Phone alerts** — a small panel (sidebar → Machine → Phone alerts, or ⌘K)
   that turns on push notifications for this device. See below.
 
-Sidebar: the two screens above under **Trials**, and under **Machine** five
+Sidebar: **Trials**, **Inquiries** (red badge = new ones) and **Machine alerts** under **Trials**, and under **Machine** five
 links that open signed-in inside the machine's own Mission Control (new tab):
 Queue, Warm-up circle, Config, Test Mode, Learning — then **Phone alerts**
 ("On" beside it when this device gets alerts). Topbar: ⌘K (trials and
@@ -132,8 +156,8 @@ only works for the hub **added to the Home Screen and opened from there**
 4. Menu (☰) → **Phone alerts** → **Turn on phone alerts** → **Allow**.
 5. Tap **Send a test**. "Test alert from Aviance" should pop up within seconds.
 
-Tapping an alert opens the trial it is about (`/#trial/{id}`), the Machine
-alerts screen (`/#alerts`) or the board (`/#trials`) — signing in first if
+Tapping an alert opens the trial it is about (`/#trial/{id}`), the inquiry
+(`/#inquiry/{id}`), the Machine alerts screen (`/#alerts`) or the board (`/#trials`) — signing in first if
 needed. Urgent alerts stay on screen until tapped; a repeat of the same alert
 replaces the previous one. If alerts are blocked later: iPhone Settings →
 Notifications → Aviance → Allow Notifications.
@@ -248,13 +272,14 @@ Sign-in needs the real Supabase project.
 
 ```
 npm test          # node --test tests/*.test.mjs
-npm run check     # node --check trials.js, push.js, sw.js
+npm run check     # node --check trials.js, inquiries.js, push.js, sw.js
 ```
 
-The tests load the shell's inline script, `trials.js` and `push.js` into a tiny fake DOM
+The tests load the shell's inline script, `trials.js`, `inquiries.js` and `push.js` into a tiny fake DOM
 with a fake Supabase client, then exercise the router, the admin gate, the
 chart data mapping (null = gap, 0 = a real zero), spam-test verdicts for
-both tools, when growth is and isn't fetched, and the
+both tools, when growth is and isn't fetched, the Inquiries screens and
+actions (incl. the empty state and an older machine without inquiries), and the
 pure render functions with `tests/fixtures.mjs`; no network.
 
 Charts are hand-drawn SVG in `trials.js` (no chart library, no build step):

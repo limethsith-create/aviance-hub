@@ -35,7 +35,7 @@ const TK_FIVE=[['sent','Sent','Emails sent'],['replies','Replies','Replies'],['p
 const TK_COUNTERS=[['sent','Sent'],['companiesContacted','Companies'],['bounces','Bounces'],['replies','Replies'],['positive','Positive'],['booked','Booked'],['held','Held'],['qualified','Qualified'],['noshows','No-shows'],['wrongfit','Wrong fit'],['warmupSent','Warm-up sent'],['warmupInbox','Warm-up inbox'],['warmupSpam','Warm-up spam'],['warmupRescued','Warm-up rescued']];
 const TK_TABS=[['overview','Overview'],['growth','Growth'],['systems','Systems'],['leads','Leads'],['deliverability','Deliverability'],['inboxes','Inboxes'],['calls','Calls'],['replies','Replies'],['copy','Copy'],['comingup','Coming up'],['timeline','Timeline'],['actions','Actions']];
 const TK_TAB_ALIAS={numbers:'overview',setup:'deliverability',promises:'comingup',upcoming:'comingup',reports:'comingup'};
-const TK_TRIAL_VIEWS=['trials','trial','trialPurchase','trialAlerts'];
+const TK_TRIAL_VIEWS=['trials','trial','trialPurchase','trialAlerts','inquiries','inquiry']; // inquiries.js hosts the last two
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
@@ -92,7 +92,7 @@ function tkFindRow(id){if(!id)return null;const rows=tkAllRows(tk.hub);let r=row
 function tkClientName(id){const r=tkFindRow(id);return r&&r.name?r.name:(id||'')}
 function tkSortedStages(stages){return (stages||[]).slice().sort((a,b)=>{const ia=TK_STAGE_ORDER.indexOf(a.key),ib=TK_STAGE_ORDER.indexOf(b.key);return (ia<0?99:ia)-(ib<0?99:ib)})}
 function tkSortedSystems(systems){return (systems||[]).slice().sort((a,b)=>{const ia=TK_SYSTEM_ORDER.indexOf(a.key),ib=TK_SYSTEM_ORDER.indexOf(b.key);return (ia<0?99:ia)-(ib<0?99:ib)})}
-function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return 'Do it';case 'view':return a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open copy':a.section==='application'?'Review application':'Open trial';case 'mc':return 'Open in Mission Control';case 'link':return 'Open link';default:return ''}}
+function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return 'Do it';case 'view':return a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open copy':a.view==='inquiry'?'Open inquiry':a.section==='application'?'Review application':'Open trial';case 'mc':return 'Open in Mission Control';case 'link':return 'Open link';default:return ''}}
 function tkFindTodo(id){const all=[];if(tk.hub)(tk.hub.todos||[]).forEach(t=>all.push(t));tkAllRows(tk.hub).forEach(r=>(r.todo||[]).forEach(t=>all.push(Object.assign({clientId:r.id,clientName:r.name},t))));Object.keys(tk.detail).forEach(k=>{const d=tk.detail[k];if(d&&d.row)(d.row.todo||[]).forEach(t=>all.push(Object.assign({clientId:d.row.id,clientName:d.row.name},t)))});return all.find(t=>t.id===id)||null}
 function tkTabKey(tab){tab=TK_TAB_ALIAS[tab]||tab;return tab}
 
@@ -410,7 +410,8 @@ function renderTodos(todos,opts){
   opts=opts||{};todos=(todos||[]).slice().sort((a,b)=>(b.urgent?1:0)-(a.urgent?1:0));
   const title=opts.title||'What you need to do';
   const body=todos.length?todos.map(t=>{
-    const client=!opts.hideClient&&(t.clientName||t.clientId)?`<span class="tk-client" onclick="openTrial(${tkAttr(t.clientId)})">${esc(t.clientName||t.clientId)}</span> · `:'';
+    const inq=t.action&&t.action.view==='inquiry'&&t.action.inquiryId;
+    const client=!opts.hideClient&&(t.clientName||t.clientId)?`<span class="tk-client" onclick="${inq?`openInquiry(${tkAttr(inq)})`:`openTrial(${tkAttr(t.clientId)})`}">${esc(t.clientName||t.clientId)}</span> · `:'';
     return `<div class="tk-todo ${t.urgent?'urgent':''}">
       ${t.urgent?'<span class="pill red">Urgent</span>':tkDot('grey')}
       <div class="tk-todo-main"><b>${esc(t.text||'')}</b><small>${client}${t.detail?esc(t.detail)+' · ':''}<span class="tk-since" title="Due since ${esc(tkFull(t.since))}">${esc(tkRel(t.since,opts.now))}</span></small></div>
@@ -467,7 +468,7 @@ function renderBoard(hub,meta){
   const toolbar=`<div class="toolbar"><span class="muted tk-small">${rows.length} trial${rows.length!==1?'s':''} on the machine · ${(hub.todos||[]).length} thing${(hub.todos||[]).length!==1?'s':''} waiting on you</span>
     <div style="margin-left:auto" class="tk-inline"><button class="btn ghost" onclick="render('trialAlerts')">${I.bell||''}Machine alerts${machine.openAlerts?` · ${tkNum(machine.openAlerts)}`:''}</button><button class="btn" onclick="openNewTrialClient()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>New client</button></div></div>`;
   const board=rows.length?renderStages(hub.stages,meta.sparks):emptyState(I.trials||'','No trials yet','Add the first client — the machine takes it from application to booked calls, and tells you here whenever it needs you.','New client','openNewTrialClient()');
-  return toolbar+renderMachineBar(machine,{at:meta.at,now:meta.now})+renderTodos(hub.todos,{now:meta.now})+
+  return toolbar+renderMachineBar(machine,{at:meta.at,now:meta.now})+(typeof renderInquiryStrip==='function'?renderInquiryStrip(hub.inquiries,{now:meta.now}):'')+renderTodos(hub.todos,{now:meta.now})+
     `<div class="section-head tk-section"><h3>Stages</h3><span class="count">${rows.length}</span></div>`+board+renderQueue(machine.queue)+renderOthers(machine.others,meta.sparks);
 }
 
@@ -996,6 +997,7 @@ function trialsHostHTML(view){
       const d=tk.detail[id];return d?renderStaleNote(tk.detailErr[id],tk.detailAt[id])+renderTrialDetail(d,trialTab,Object.assign({at:tk.detailAt[id]},trialsCtx(id))):tk.detailErr[id]?renderMachineError(tk.detailErr[id]):renderLoading();}
     case 'trialPurchase':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the board first.','Trials board',"render('trials')");
       const p=tk.purchase[id];return p?renderStaleNote(tk.purchaseErr[id],tk.purchaseAt[id])+renderPurchase(p,id,{at:tk.purchaseAt[id]}):tk.purchaseErr[id]?renderMachineError(tk.purchaseErr[id]):renderLoading();}
+    case 'inquiries':case 'inquiry':return inquiriesHostHTML(view);
     case 'trialAlerts':return tk.alerts?renderStaleNote(tk.alertsErr,tk.alertsAt)+renderAlerts(tk.alerts,trialsAlertFilter,{at:tk.alertsAt}):tk.alertsErr?renderMachineError(tk.alertsErr):renderLoading();
   }
   return '';
@@ -1006,6 +1008,7 @@ function trialsRepaint(view,opts){
   const h=document.getElementById('tkHost');if(!h)return;
   if(opts.soft&&tkFormDirty())return;   // never wipe something the owner is typing
   h.innerHTML=trialsHostHTML(view);
+  if(view==='inquiry')inquiryTitle();
   if(view==='trial'&&currentTrialId&&tk.detail[currentTrialId]){const row=tk.detail[currentTrialId].row||{};const t=document.getElementById('ptitle'),s=document.getElementById('psub');if(t)t.textContent=row.name||'Trial';if(s)s.textContent=tkStateLabel(row);}
   try{renderNav();updateNotifBadge();}catch(e){}
   trialsApplyScroll();
@@ -1029,6 +1032,7 @@ async function trialsKick(view,force){
   else if(view==='trial')r=await loadTrial(currentTrialId,force);
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
   else if(view==='trialAlerts')r=await loadAlerts(force);
+  else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
   trialsRepaint(view,{soft:true});
   return r;
 }
@@ -1074,7 +1078,7 @@ async function trialsSparkBoot(){
 function openTrial(id,tab,section){if(!id)return;id=String(id);if(id!==currentTrialId&&!tab)trialTab='overview';currentTrialId=id;if(tab)trialTab=tkTabKey(tab);if(section){tk.scrollTo=section;if(section==='application')trialTab='application';}render('trial')}
 function openTrialPurchase(id){if(!id)return;currentTrialId=String(id);render('trialPurchase')}
 function trialsRetry(){const h=document.getElementById('tkHost');if(h&&!trialsHasData(currentView))h.innerHTML=renderLoading('Trying again…');trialsKick(currentView,true).then(()=>trialsRepaint(currentView))}
-function trialsHasData(v){if(v==='trials')return !!tk.hub;if(v==='trial')return !!tk.detail[currentTrialId];if(v==='trialPurchase')return !!tk.purchase[currentTrialId];if(v==='trialAlerts')return !!tk.alerts;return false}
+function trialsHasData(v){if(v==='trials')return !!tk.hub;if(v==='trial')return !!tk.detail[currentTrialId];if(v==='trialPurchase')return !!tk.purchase[currentTrialId];if(v==='trialAlerts')return !!tk.alerts;if(v==='inquiries')return !!iq.list;if(v==='inquiry')return !!iqFind(currentInquiryId);return false}
 async function trialsRefresh(){
   const v=currentView;const r=await trialsKick(v,true);trialsRepaint(v);
   if(v==='trial'&&currentTrialId){const t=tkTabKey(trialTab);if(t==='growth')trialsEnsureGrowth(currentTrialId,true);else if(t==='overview'){loadSpark(currentTrialId,0).then(()=>trialsRepaintTab('overview'));}}
@@ -1092,7 +1096,7 @@ function trialsSetAlertFilter(f){trialsAlertFilter=f;trialsRepaint('trialAlerts'
 /* After a machine action: refresh the data behind the current screen (and the board cache) */
 async function trialsAfterAction(){
   const v=currentView;
-  if(v==='trial'||v==='trialPurchase'){await Promise.all([trialsKick(v,true),loadHub(true)]);}
+  if(v==='trial'||v==='trialPurchase'||v==='inquiries'||v==='inquiry'){await Promise.all([trialsKick(v,true),loadHub(true)]);}
   else if(TK_TRIAL_VIEWS.includes(v))await trialsKick(v,true);
   else await loadHub(true);
   trialsRepaint(v);
@@ -1124,7 +1128,9 @@ function trialsTodoAction(id){
 }
 /* Open the hub screen a to-do points at (used by the to-do buttons and the bell). */
 function tkOpenTodoTarget(t){
-  const a=(t&&t.action)||{};const cid=a.clientId||t.clientId;if(!cid){render('trials');return;}
+  const a=(t&&t.action)||{};
+  if(a.type==='view'&&a.view==='inquiry'){if(a.inquiryId)openInquiry(a.inquiryId);else render('inquiries');return;}
+  const cid=a.clientId||t.clientId;if(!cid){render('trials');return;}
   if(a.type==='view'&&a.view==='purchase')openTrialPurchase(cid);
   else if(a.type==='view'&&a.view==='sequence')openTrial(cid,'copy');
   else openTrial(cid,null,a.section||null);
@@ -1268,12 +1274,14 @@ function trialsCmdkActions(){
   return [
     {type:'Create',label:'New trial client',icon:I.trials||'',sub:'Start a trial on the machine',kw:'new trial client create start',run:()=>{closeCmdk();openNewTrialClient();}},
     {type:'Go to',label:'Trials board',icon:I.trials||'',sub:'Trials',kw:'trials board machine',run:()=>{closeCmdk();render('trials');}},
+    {type:'Go to',label:'Inquiries',icon:I.inquiry||'',sub:'Paid-plan calls booked from the website',kw:'inquiries plan paid book a call starter growth scale',run:()=>{closeCmdk();render('inquiries');}},
     {type:'Go to',label:'Machine alerts',icon:I.bell||'',sub:'Trials',kw:'machine alerts trials',run:()=>{closeCmdk();render('trialAlerts');}},
   ];
 }
 function trialsCmdkEntities(){
-  if(!tk.hub)return [];
-  return tkAllRows(tk.hub).map(r=>({type:'Trial',label:r.name||r.id,icon:I.trials||'',sub:tkStateLabel(r)+' · trial:'+r.id,kw:'trial:'+r.id+' '+(r.name||'')+' '+tkStateLabel(r)+' '+(r.contactName||''),run:()=>{closeCmdk();openTrial(r.id);}}));
+  const inq=typeof inquiriesCmdkEntities==='function'?inquiriesCmdkEntities():[];
+  if(!tk.hub)return inq;
+  return tkAllRows(tk.hub).map(r=>({type:'Trial',label:r.name||r.id,icon:I.trials||'',sub:tkStateLabel(r)+' · trial:'+r.id,kw:'trial:'+r.id+' '+(r.name||'')+' '+tkStateLabel(r)+' '+(r.contactName||''),run:()=>{closeCmdk();openTrial(r.id);}})).concat(inq);
 }
 /* Called by the shell's render(): explicit navigation — the only place growth fetches start. */
 function trialsOnRender(v){
@@ -1286,6 +1294,7 @@ function trialsForget(){
   trialsStopTimer();
   Object.assign(tk,{hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{}});
   currentTrialId=null;trialTab='overview';
+  try{inquiriesForget();}catch(e){}
   try{localStorage.removeItem(TK_SPARK_KEY);}catch(e){}
 }
 function trialsStartTimer(){if(tk.timer)return;tk.timer=setInterval(trialsTick,TK_REFRESH_MS);}

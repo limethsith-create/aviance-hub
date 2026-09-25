@@ -268,3 +268,56 @@ detail.leadQuality = {
 };
 detail.shopping = shoppingV2;
 detail.links = {};
+
+/* ───── Plan inquiries (HUB-API "## Plan inquiries"; email-distributor src/lib/systems/inquiries.js) ─────
+   NOW is Sat 17 Oct 2026 12:00 UTC = 5:30 PM in Sri Lanka (the owner's time). */
+export const inquiryRecords = [
+  { id: 'qmgv1stone', at: '2026-10-17T10:00:00Z', source: 'website', status: 'new', statusAt: '2026-10-17T10:00:00Z', notes: [],
+    name: 'Dana Stone', email: 'dana@stoneroofing.com', company: 'Stone Roofing', website: 'stoneroofing.com',
+    sells: 'Roof replacement and storm-damage repair for homeowners around Dallas–Fort Worth.', plan: 'growth',
+    slotStart: '2026-10-20T14:00:00Z', slotEnd: '2026-10-20T14:15:00Z', theirTz: 'America/Chicago',
+    whenTheirs: 'Tuesday, October 20, 2026 at 9:00 AM', whenHost: 'Tuesday, October 20, 2026 at 7:30 PM', page: '/' },
+  { id: 'qmgu9birch', at: '2026-10-16T09:30:00Z', source: 'website', status: 'new', statusAt: '2026-10-16T09:30:00Z', notes: [],
+    name: 'Omar Birch', email: 'omar@birchlegal.co.uk', company: 'Birch Legal', website: 'https://birchlegal.co.uk',
+    sells: 'Employment law for small UK businesses', plan: null,
+    slotStart: '2026-10-17T15:00:00Z', slotEnd: '2026-10-17T15:15:00Z', theirTz: 'Europe/London',
+    whenTheirs: 'Saturday, October 17, 2026 at 4:00 PM', whenHost: 'Saturday, October 17, 2026 at 8:30 PM', page: '/' },
+  { id: 'qmgp2cedar', at: '2026-10-14T08:00:00Z', source: 'website', status: 'contacted', statusAt: '2026-10-15T11:00:00Z',
+    notes: [{ at: '2026-10-15T11:00:00Z', text: 'Good call. Not ready to pay yet, so I offered a trial.' }],
+    name: 'Priya Nair', email: 'priya@cedarhvac.com', company: 'Cedar HVAC', website: 'cedarhvac.com',
+    sells: 'Commercial HVAC maintenance contracts', plan: 'starter',
+    slotStart: '2026-10-15T10:30:00Z', slotEnd: '2026-10-15T10:45:00Z', theirTz: 'Asia/Dubai',
+    whenTheirs: 'Thursday, October 15, 2026 at 2:30 PM', whenHost: 'Thursday, October 15, 2026 at 4:00 PM', clientId: 'cedar-hvac', trialOutcome: 'queued' },
+  { id: 'qmgn1harbor', at: '2026-10-12T07:00:00Z', source: 'website', status: 'contacted', statusAt: '2026-10-15T09:00:00Z',
+    notes: [{ at: '2026-10-15T09:00:00Z', text: 'Called. They want a proposal for 3 clinics — send by Monday.' }, { at: '2026-10-16T08:00:00Z', text: 'Proposal drafted.' }],
+    name: 'Grace Lee', email: 'grace@harbordental.com', company: 'Harbor Dental Group', website: 'https://harbordental.com',
+    sells: 'Dental implants and Invisalign across three clinics in San Diego', plan: 'scale',
+    slotStart: '2026-10-15T16:00:00Z', slotEnd: '2026-10-15T16:15:00Z', theirTz: 'America/Los_Angeles',
+    whenTheirs: 'Thursday, October 15, 2026 at 9:00 AM', whenHost: 'Thursday, October 15, 2026 at 9:30 PM' },
+  { id: 'qmgk4north', at: '2026-10-08T12:00:00Z', source: 'website', status: 'won', statusAt: '2026-10-10T12:00:00Z',
+    notes: [{ at: '2026-10-10T12:00:00Z', text: 'Signed Starter. First invoice sent.' }],
+    name: 'Tom Reed', email: 'tom@northwind.io', company: 'Northwind Logistics', website: 'northwind.io',
+    sells: 'Freight brokerage for mid-size manufacturers', plan: 'starter',
+    slotStart: '2026-10-09T13:00:00Z', slotEnd: '2026-10-09T13:15:00Z', theirTz: 'America/New_York',
+    whenTheirs: 'Friday, October 9, 2026 at 9:00 AM', whenHost: 'Friday, October 9, 2026 at 6:30 PM' },
+  { id: 'qmgj2pixel', at: '2026-10-05T12:00:00Z', source: 'website', status: 'lost', statusAt: '2026-10-07T12:00:00Z',
+    notes: [{ at: '2026-10-07T12:00:00Z', text: 'Went with an agency <script>x</script>' }],
+    name: 'Sam Ortiz', email: 'sam@pixelandco.com', company: 'Pixel & Co', website: 'javascript:alert(1)',
+    sells: '<b>Brand design</b> for startups', plan: 'growth',
+    slotStart: null, slotEnd: null, theirTz: null, whenTheirs: null, whenHost: null },
+];
+export const inquiryCounts = { new: 2, contacted: 2, won: 1, lost: 1 };
+/* Mirrors inquirySummary() + the to-dos hubBoard() adds for each new one. */
+export function inquirySummaryOf(list) {
+  const counts = { new: 0, contacted: 0, won: 0, lost: 0 }; for (const q of list) counts[q.status]++;
+  const open = list.filter((q) => q.status === 'new' || q.status === 'contacted');
+  return { counts, open: open.length, latest: open.slice(0, 5).map((q) => ({ id: q.id, at: q.at, name: q.name, company: q.company, plan: q.plan, status: q.status, slotStart: q.slotStart, whenHost: q.whenHost })) };
+}
+export function inquiryTodosOf(summary) {
+  return (summary.latest || []).filter((x) => x.status === 'new').map((q) => ({ id: `inquiry:${q.id}`, clientId: null, clientName: q.company, text: `New plan inquiry from ${q.company} — call them back`,
+    detail: `${q.name}${q.plan ? ` · ${q.plan[0].toUpperCase()}${q.plan.slice(1)}` : ''}${q.whenHost ? ` · booked for ${q.whenHost}` : ''}`,
+    urgent: true, since: q.at, action: { type: 'view', view: 'inquiry', inquiryId: q.id } }));
+}
+const inquiryHubSummary = inquirySummaryOf(inquiryRecords);
+export const hubWithInquiries = Object.assign({}, fullHub, { inquiries: inquiryHubSummary, todos: inquiryTodosOf(inquiryHubSummary).concat(fullHub.todos) });
+export const noInquiries = { inquiries: [], counts: { new: 0, contacted: 0, won: 0, lost: 0 } };

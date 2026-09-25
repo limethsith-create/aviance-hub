@@ -68,6 +68,7 @@ h1,h2,h3,h4{font-weight:600}
 .nav-item.active::before{content:"";position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:18px;background:var(--red-brand)}
 .nav-item .badge{margin-left:auto;background:var(--surface-3);color:var(--muted);font-size:var(--fs-min);font-weight:600;padding:1px 7px}
 .nav-item.active .badge{background:var(--accent);color:#fff}
+.nav-item .badge.new{background:var(--red);color:#fff}
 .nav-item .ext{margin-left:auto;color:var(--muted-2);font-size:var(--fs-min)}
 .sidebar-foot{border-top:1px solid var(--border-soft);padding-top:10px;margin-top:6px}
 .who{display:flex;align-items:center;gap:10px;padding:8px}
@@ -241,6 +242,7 @@ body.dark .btn.ghost{background:transparent;color:#fff;border-color:rgba(255,255
 body.dark .btn.ghost:hover{background:#fff;color:#000}
 body.dark .nav-item.active{color:var(--text)}
 body.dark .nav-item.active .badge{background:#FF5C3D;color:#000}
+body.dark .nav-item .badge.new{background:var(--red);color:#000}
 body.dark .seg button.active{background:#fff;color:#000}
 body.dark .toast{background:#fff;color:#000;border-color:#fff}
 body.dark .toast .tdot{background:#E0290F}
@@ -359,6 +361,7 @@ const I={
   chart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19V5M4 19h16M8 16l3-4 3 2 4-6"/></svg>',
   check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5 9-11"/></svg>',
   moon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+  inquiry:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z"/><path d="M8.5 11h7M8.5 14.5h4.5"/></svg>',
   bellRing:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/><path d="M2.5 6.5A9 9 0 0 1 5 3M21.5 6.5A9 9 0 0 0 19 3"/></svg>',
   logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
 };
@@ -385,12 +388,14 @@ function openModal(html){document.getElementById('modal').innerHTML=html;documen
 function closeModal(){document.getElementById('modalWrap').classList.remove('open');}
 document.getElementById('modalWrap').addEventListener('click',e=>{if(e.target.id==='modalWrap')closeModal();});
 
-/* ---- Router: the four Trials views (functions in trials.js, hence the lazy wrappers) ---- */
+/* ---- Router: the Trials views (trials.js) and Inquiries (inquiries.js) — lazy wrappers, the files load after this ---- */
 const views={
   trials:{fn:()=>viewTrials(),title:'Trials',sub:'The trial machine — every trial, and what it needs from you'},
   trial:{fn:()=>viewTrial(),title:'Trial',sub:'One trial in full'},
   trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins'},
   trialAlerts:{fn:()=>viewTrialAlerts(),title:'Machine alerts',sub:'Everything the machine told you'},
+  inquiries:{fn:()=>viewInquiries(),title:'Inquiries',sub:'Paid-plan calls booked from the website'},
+  inquiry:{fn:()=>viewInquiry(),title:'Inquiry',sub:'One plan inquiry'},
 };
 function render(v){
   const view=views[v];if(!view||!authUser)return;
@@ -403,15 +408,16 @@ function render(v){
   try{trialsOnRender(v);}catch(e){}
 }
 
-/* ---- Deep links: #trial/{id}, #alerts, #trials (what a phone alert opens) ----
+/* ---- Deep links: #trial/{id}, #inquiry/{id}, #alerts, #inquiries, #trials (what a phone alert opens) ----
    Honoured on load and on hashchange; when signed out, kept until sign-in. */
 function parseDeepLink(h){
   h=String(h||'');const at=h.indexOf('#');if(at<0)return null;h=h.slice(at+1).replace(/^\/+/,'').replace(/\/+$/,'');
   if(h==='trials')return {view:'trials'};
   if(h==='alerts')return {view:'trialAlerts'};
-  const m=h.match(/^trial\/([^/?#&=]+)$/);if(!m)return null;
-  let id='';try{id=decodeURIComponent(m[1]);}catch(e){return null;}
-  return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:'trial',id}:null;
+  if(h==='inquiries')return {view:'inquiries'};
+  const m=h.match(/^(trial|inquiry)\/([^/?#&=]+)$/);if(!m)return null;
+  let id='';try{id=decodeURIComponent(m[2]);}catch(e){return null;}
+  return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:m[1],id}:null;
 }
 let pendingDeepLink=parseDeepLink(INITIAL_HASH);
 function goDeepLink(d){
@@ -420,7 +426,7 @@ function goDeepLink(d){
   pendingDeepLink=null;
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same alert can open it again
   closeModal();closeCmdk();
-  if(d.view==='trial')openTrial(d.id);else render(d.view);
+  if(d.view==='trial')openTrial(d.id);else if(d.view==='inquiry')openInquiry(d.id);else render(d.view);
   return true;
 }
 if(typeof window.addEventListener==='function')window.addEventListener('hashchange',()=>{const d=parseDeepLink(location.hash);if(d)goDeepLink(d);});
@@ -429,15 +435,15 @@ function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.s
 
 /* ---- Sidebar ---- */
 function navConfig(){
-  const n=typeof trialsNavCount==='function'?trialsNavCount():'',a=typeof trialsAlertCount==='function'?trialsAlertCount():'';
+  const n=typeof trialsNavCount==='function'?trialsNavCount():'',a=typeof trialsAlertCount==='function'?trialsAlertCount():'',q=typeof inquiriesNavCount==='function'?inquiriesNavCount():'';
   return [
-    {label:'Trials',items:[{view:'trials',icon:I.trials,label:'Trials',badge:n},{view:'trialAlerts',icon:I.bell,label:'Machine alerts',badge:a}]},
+    {label:'Trials',items:[{view:'trials',icon:I.trials,label:'Trials',badge:n,also:['trial','trialPurchase']},{view:'inquiries',icon:I.inquiry,label:'Inquiries',badge:q,also:['inquiry'],badgeNew:true},{view:'trialAlerts',icon:I.bell,label:'Machine alerts',badge:a}]},
     {label:'Machine',items:[...MACHINE_PAGES.map(([path,icon,label])=>({path,icon,label})),{run:'openPhoneAlerts()',icon:I.bellRing,label:'Phone alerts',note:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():''}]},
   ];
 }
 function renderNav(){
   document.getElementById('navArea').innerHTML=navConfig().map(g=>`<div class="nav-label">${g.label}</div>`+g.items.map(it=>it.view
-    ?`<div class="nav-item ${it.view===currentView?'active':''}" onclick="render('${it.view}')">${it.icon}${it.label}${it.badge?`<span class="badge">${it.badge}</span>`:''}</div>`
+    ?`<div class="nav-item ${it.view===currentView||(it.also||[]).includes(currentView)?'active':''}" onclick="render('${it.view}')">${it.icon}${it.label}${it.badge?`<span class="badge${it.badgeNew?' new':''}"${it.badgeNew?` title="${esc(it.badge)} new"`:''}>${it.badge}</span>`:''}</div>`
     :it.run?`<div class="nav-item" onclick="${it.run}">${it.icon}${it.label}${it.note?`<span class="ext">${esc(it.note)}</span>`:''}</div>`
     :`<div class="nav-item" onclick="openMachine('${it.path}')" title="Opens in Mission Control, in a new tab">${it.icon}${it.label}<span class="ext">↗</span></div>`).join('')).join('');
 }
@@ -584,6 +590,7 @@ initTheme();
 boot();
 </script>
 <script src="trials.js"></script>
+<script src="inquiries.js"></script>
 <script src="push.js"></script>
 </body>
 </html>

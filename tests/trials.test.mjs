@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NOW, acme, bright, fern, fernApplication, fernDetail, stagesWith, fullHub, emptyHub, detail, tinyGrowth, makeGrowth, research, shoppingV2, brightPurchase } from './fixtures.mjs';
+import { NOW, acme, bright, fern, fernApplication, fernDetail, stagesWith, fullHub, emptyHub, detail, tinyGrowth, makeGrowth, research, shoppingV2, brightPurchase, inquiryRecords, inquiryCounts, inquirySummaryOf, hubWithInquiries, noInquiries } from './fixtures.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -54,6 +54,7 @@ const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'trials.js'), 'utf8'), { filename: 'trials.js' });
+vm.runInThisContext(fs.readFileSync(path.join(root, 'inquiries.js'), 'utf8'), { filename: 'inquiries.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'push.js'), 'utf8'), { filename: 'push.js' });
 supa.session = { access_token: 'test-token' }; // boot() has already seen "no session" and shown the login screen
 after(() => trialsStopTimer());
@@ -62,9 +63,9 @@ const count = (s, re) => (s.match(re) || []).length;
 const ok = (body) => async () => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
 
 /* ───────────── shell ───────────── */
-test('shell: title, router knows only the four trial views, nothing from the old workspace remains', () => {
+test('shell: title, router knows only the trial + inquiry views, nothing from the old workspace remains', () => {
   assert.ok(html.includes('<title>Aviance Hub — Trials</title>'));
-  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'trialPurchase', 'trialAlerts']);
+  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'trialPurchase', 'trialAlerts', 'inquiries', 'inquiry']);
   for (const gone of ['viewDashboard', 'viewProjects', 'viewTeam', 'viewClients', 'viewCRM', 'viewProposals', 'viewInvoices', 'viewMyDay', 'viewDirectory', 'workspace_shared', 'workspace_admin', 'loadData', 'saveDB', 'openNewProject', 'composeGmail', 'submitJoin', 'approveJoin', 'applyRole', 'employeePersona', 'printDoc', 'crmStages', 'phases', 'Request to join', 'joinPane', 'roleMenu']) {
     assert.ok(!html.includes(gone), gone + ' is gone');
   }
@@ -77,7 +78,7 @@ test('shell: title, router knows only the four trial views, nothing from the old
 test('shell: sidebar is Trials + Machine only; machine pages are SSO links with an arrow', () => {
   const groups = navConfig();
   assert.deepEqual(groups.map((g) => g.label), ['Trials', 'Machine']);
-  assert.deepEqual(groups[0].items.map((i) => i.view), ['trials', 'trialAlerts']);
+  assert.deepEqual(groups[0].items.map((i) => i.view), ['trials', 'inquiries', 'trialAlerts']);
   assert.deepEqual(groups[1].items.filter((i) => i.path).map((i) => i.path), ['/mc/queue', '/mc/warmup', '/mc/config', '/mc/test', '/mc/learning']);
   const phone = groups[1].items[groups[1].items.length - 1];
   assert.equal(phone.label, 'Phone alerts'); assert.equal(phone.run, 'openPhoneAlerts()'); assert.equal(phone.icon, I.bellRing);
@@ -833,4 +834,180 @@ test('push: the home-screen app shows "First time in the app? Sign in once here.
   Object.defineProperty(globalThis, 'navigator', { value: { standalone: true }, configurable: true });
   try { assert.equal(hubStandalone(), true); el('loginAppNote').style.display = 'none'; boot(); assert.equal(el('loginAppNote').style.display, 'block'); }
   finally { Object.defineProperty(globalThis, 'navigator', { value: realNav, configurable: true }); }
+});
+
+/* ───────────── Inquiries (inquiries.js) ───────────── */
+const Q = (id) => JSON.parse(JSON.stringify(inquiryRecords.find((q) => q.id === id)));
+
+test('inquiries: call times read "call in 3 h" / "call is now" / "was 2 days ago"; the board uses the owner\'s short time', () => {
+  assert.equal(iqCallRel('2026-10-17T15:00:00Z', '2026-10-17T15:15:00Z', NOW), 'call in 3 h');
+  assert.equal(iqCallRel('2026-10-17T11:55:00Z', '2026-10-17T12:10:00Z', NOW), 'call is now');
+  assert.equal(iqCallRel('2026-10-15T16:00:00Z', null, NOW), 'was 2 days ago');
+  assert.equal(iqCallRel('2026-10-17T12:40:00Z', null, NOW), 'call in 40 min');
+  assert.equal(iqCallRel('2026-10-20T14:00:00Z', null, NOW), 'call in 3 days');
+  assert.equal(iqCallRel(null, null, NOW), '');
+  assert.equal(iqHostShort('2026-10-20T14:00:00Z', NOW), 'Tue 7:30 PM', 'Sri Lanka time, this week');
+  assert.equal(iqHostShort('2026-10-30T14:00:00Z', NOW), 'Oct 30, 7:30 PM', 'further out: the date');
+  assert.equal(iqSiteUrl('stoneroofing.com'), 'https://stoneroofing.com');
+  assert.equal(iqSiteUrl('https://birchlegal.co.uk'), 'https://birchlegal.co.uk');
+  assert.equal(iqSiteUrl('javascript:alert(1)'), '');
+  assert.equal(iqMailto(Q('qmgv1stone')), 'mailto:dana@stoneroofing.com?subject=Your%20Aviance%20call');
+  assert.equal(iqMailto({ email: 'x" onclick="y@z.com' }), '', 'odd addresses are not linked');
+  assert.deepEqual(iqCountsOf(inquiryRecords), inquiryCounts);
+});
+
+test('inquiries list: counts strip, filter chips, newest-first cards with plan, call time, what they sell, and a New marker', () => {
+  const html = renderInquiries(inquiryRecords, inquiryCounts, 'open', { now: NOW });
+  for (const [label, n] of [['New', 2], ['Contacted', 2], ['Won', 1], ['Lost', 1]]) assert.ok(html.includes(`<small>${label}</small><b>${n}</b>`), label + ' tile');
+  for (const chip of ['Open · 4', 'All · 6', 'New · 2', 'Contacted · 2', 'Won · 1', 'Lost · 1']) assert.ok(html.includes(chip), chip);
+  const order = ['Stone Roofing', 'Birch Legal', 'Cedar HVAC', 'Harbor Dental Group'].map((c) => html.indexOf(c));
+  assert.ok(order.every((x, i) => x > 0 && (i === 0 || x > order[i - 1])), 'open ones, newest first');
+  assert.ok(!html.includes('Northwind') && !html.includes('Pixel'), 'won/lost hidden under Open');
+  assert.equal(count(html, /class="card iq-card iq-new"/g), 2, 'two New markers');
+  assert.equal(count(html, /<span class="pill red">New<\/span>/g), 2);
+  assert.ok(html.includes('Growth plan') && html.includes('Scale plan') && html.includes('No plan picked'));
+  assert.ok(html.includes('<b>Saturday, October 17, 2026 at 8:30 PM</b> <span class="muted">your time</span>') && html.includes('call in 3 h'));
+  assert.ok(html.includes('was 2 days ago'), 'Harbor: the call already happened');
+  assert.ok(html.includes('Roof replacement and storm-damage repair'));
+  assert.ok(html.includes('Now a trial'), 'Cedar became a trial');
+  assert.ok(html.includes('openInquiry(&quot;qmgv1stone&quot;)'));
+  const lost = renderInquiries(inquiryRecords, inquiryCounts, 'lost', { now: NOW });
+  assert.ok(lost.includes('Pixel &amp; Co') && lost.includes('&lt;b&gt;Brand design&lt;/b&gt;') && !lost.includes('<b>Brand design'), 'escaped');
+  assert.ok(lost.includes('No call booked'));
+  assert.equal(count(renderInquiries(inquiryRecords, inquiryCounts, 'all', { now: NOW }), /class="card iq-card/g), 6);
+  const none = renderInquiries(inquiryRecords.filter((q) => q.status === 'won'), { new: 0, contacted: 0, won: 1, lost: 0 }, 'open', { now: NOW });
+  assert.ok(none.includes('Nothing open. Every inquiry has been answered.') && none.includes("inquiriesSetFilter('all')"));
+  assert.ok(html.includes('class="iq-count new has"'), 'new count in red when there are new ones');
+  const empty = renderInquiries(noInquiries.inquiries, noInquiries.counts, 'open', { now: NOW });
+  assert.ok(empty.includes('class="iq-count new"'), 'no red for zero');
+  assert.ok(empty.includes('No inquiries yet') && empty.includes('Book a call') && !empty.includes('iq-card'));
+});
+
+test('inquiry detail: reply by email, their time, website, notes, status moves, and Start a trial instead', () => {
+  const s = renderInquiry(Q('qmgv1stone'), { now: NOW });
+  assert.ok(s.includes('<h3 class="iq-company">Stone Roofing</h3>') && s.includes('Dana Stone') && s.includes('Growth plan'));
+  assert.ok(s.includes('href="mailto:dana@stoneroofing.com?subject=Your%20Aviance%20call">Reply by email</a>'));
+  assert.ok(s.includes('Tuesday, October 20, 2026 at 7:30 PM') && s.includes('call in 3 days'));
+  assert.ok(s.includes('Tuesday, October 20, 2026 at 9:00 AM <span class="muted">(America/Chicago)</span>'), 'their time + zone');
+  assert.ok(s.includes('href="https://stoneroofing.com"') && s.includes('>stoneroofing.com</a>'));
+  assert.ok(s.includes('No notes yet.') && s.includes('id="iqNoteText"') && s.includes('Add note'));
+  assert.ok(s.includes('>Mark contacted</button>') && s.includes('>Mark won</button>') && s.includes('>Mark lost</button>') && !s.includes('Back to New'), 'moves away from New');
+  assert.ok(s.includes('id="iqStatusNote"') && s.includes('Note with the change (optional)'));
+  assert.ok(s.includes('>Start a trial instead</button>') && s.includes('inquiryToTrial(&quot;qmgv1stone&quot;)'));
+  const c = renderInquiry(Q('qmgp2cedar'), { now: NOW });
+  assert.ok(c.includes('<b>Now a trial</b> — waiting in the queue') && c.includes('openTrial(&quot;cedar-hvac&quot;)') && c.includes('Open the trial →'));
+  assert.ok(!c.includes('Start a trial instead') && c.includes('Back to New') && !c.includes('>Mark contacted<'));
+  assert.ok(c.includes('Good call. Not ready to pay yet'));
+  const h = renderInquiry(Q('qmgn1harbor'), { now: NOW });
+  assert.ok(h.indexOf('Proposal drafted.') < h.indexOf('Called. They want a proposal'), 'newest note first');
+  const p = renderInquiry(Q('qmgj2pixel'), { now: NOW });
+  assert.ok(!p.includes('href="javascript') && p.includes('javascript:alert(1)'), 'unsafe website shown as text, not linked');
+  assert.ok(p.includes('&lt;script&gt;x&lt;/script&gt;') && !p.includes('<script>x'));
+  assert.ok(p.includes('No call booked') && p.includes('Not picked') === false && p.includes('Growth'));
+  assert.ok(renderInquiry(null).includes('Inquiry not found'));
+});
+
+test('inquiries on the board: a strip ("2 new inquiries — Birch Legal, call Sat 8:30 PM"), to-dos open the inquiry, bell and ⌘K include them', () => {
+  asOwner(); trialsIngestHub(hubWithInquiries); iq.list = null; iq.counts = null; iq.at = 0;
+  const board = renderBoard(hubWithInquiries, { now: NOW });
+  assert.ok(board.includes('<b>2 new inquiries — Birch Legal, call Sat 8:30 PM</b>'), 'the soonest upcoming call');
+  assert.ok(board.includes('2 more in progress') && board.includes('onclick="render(\'inquiries\')"'));
+  assert.ok(board.includes('New plan inquiry from Stone Roofing — call them back') && board.includes('>Open inquiry</button>'));
+  assert.ok(board.includes('<span class="tk-client" onclick="openInquiry(&quot;qmgv1stone&quot;)">Stone Roofing</span>'), 'the company opens the inquiry, not a trial');
+  assert.ok(!renderBoard(fullHub, { now: NOW }).includes('iq-strip'), 'an older machine without inquiries: no strip');
+  const quiet = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'won' || q.status === 'lost'));
+  assert.equal(renderInquiryStrip(quiet, { now: NOW }), '', 'nothing open: no strip');
+  const contactedOnly = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'contacted'));
+  assert.ok(renderInquiryStrip(contactedOnly, { now: NOW }).includes('2 open inquiries'));
+  assert.equal(inquiriesNavCount(), 2); renderNav();
+  assert.ok(el('navArea').innerHTML.includes('Inquiries<span class="badge new" title="2 new">2</span>'));
+  const bell = trialsNotifs().filter((n) => /plan inquiry/.test(n.t));
+  assert.equal(bell.length, 2); bell[0].go();
+  assert.equal(currentView, 'inquiry'); assert.ok(['qmgv1stone', 'qmgu9birch'].includes(currentInquiryId));
+  trialsTodoAction('inquiry:qmgu9birch'); assert.equal(currentInquiryId, 'qmgu9birch');
+  const ents = trialsCmdkEntities().filter((e) => e.type === 'Inquiry');
+  assert.deepEqual(ents.map((e) => e.label), ['Stone Roofing', 'Birch Legal', 'Cedar HVAC', 'Harbor Dental Group']);
+  assert.ok(trialsCmdkActions().some((a) => a.label === 'Inquiries'));
+  trialsIngestHub(emptyHub); assert.equal(inquiriesNavCount(), '', 'no inquiries block → no badge');
+  trialsStopTimer();
+});
+
+test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail and every action post the contract bodies', async () => {
+  assert.deepEqual(parseDeepLink('/#inquiry/qmgv1stone'), { view: 'inquiry', id: 'qmgv1stone' });
+  assert.deepEqual(parseDeepLink('#inquiries'), { view: 'inquiries' });
+  assert.equal(parseDeepLink('#inquiry/<x>'), null);
+  asOwner();
+  const recs = JSON.parse(JSON.stringify(inquiryRecords)); const calls = [];
+  let toTrialReply = { status: 200, body: { ok: true, clientId: 'stone-roofing', outcome: 'onboarding' } };
+  globalThis.fetch = async (url, init) => {
+    const u = new URL(url); const body = init.body ? JSON.parse(init.body) : null; calls.push([init.method, u.pathname, body]);
+    let reply = { status: 404, body: { error: 'no' } };
+    if (u.pathname === '/api/mc/hub') reply = { status: 200, body: Object.assign({}, fullHub, { inquiries: inquirySummaryOf(recs) }) };
+    if (u.pathname === '/api/mc/inquiries' && init.method === 'GET') reply = { status: 200, body: { inquiries: recs, counts: inquirySummaryOf(recs).counts } };
+    if (u.pathname === '/api/mc/inquiries' && init.method === 'POST') {
+      const q = recs.find((r) => r.id === body.id);
+      if (body.action === 'status') { q.status = body.status; if (body.note) q.notes.push({ at: NOW.toISOString(), text: body.note }); reply = { status: 200, body: { ok: true, inquiry: q } }; }
+      if (body.action === 'note') { q.notes.push({ at: NOW.toISOString(), text: body.text }); reply = { status: 200, body: { ok: true, inquiry: q } }; }
+      if (body.action === 'toTrial') { reply = toTrialReply; if (reply.body.clientId) Object.assign(q, { clientId: reply.body.clientId, trialOutcome: reply.body.outcome }); }
+    }
+    return { ok: reply.status < 400, status: reply.status, text: async () => JSON.stringify(reply.body) };
+  };
+  try {
+    inquiriesForget();
+    location.hash = '#inquiry/qmgv1stone'; winListeners.hashchange.forEach((f) => f()); location.hash = '';
+    assert.equal(currentView, 'inquiry'); assert.equal(currentInquiryId, 'qmgv1stone');
+    await loadInquiries(true); trialsRepaint('inquiry');
+    assert.ok(el('tkHost').innerHTML.includes('Stone Roofing') && el('ptitle').textContent === 'Stone Roofing' && el('psub').textContent === 'Plan inquiry · New');
+    // status with a note
+    el('iqStatusNote').value = 'Called, sending a proposal';
+    await inquirySetStatus('qmgv1stone', 'contacted');
+    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'contacted', note: 'Called, sending a proposal' });
+    assert.ok(el('toast').innerHTML.includes('Marked contacted'));
+    assert.ok(calls.filter((c) => c[1] === '/api/mc/hub').length >= 1, 'the board (badge, to-dos) is refreshed too');
+    el('iqStatusNote').value = '';
+    await inquirySetStatus('qmgv1stone', 'new');
+    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'new' }, 'no empty note is sent');
+    // notes
+    el('iqNoteText').value = '   '; const before = calls.length;
+    await inquiryAddNote('qmgv1stone');
+    assert.equal(calls.length, before, 'an empty note is not sent'); assert.ok(el('toast').innerHTML.includes('Write the note first'));
+    el('iqNoteText').value = 'Wants to start in November';
+    await inquiryAddNote('qmgv1stone');
+    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'note', id: 'qmgv1stone', text: 'Wants to start in November' });
+    // Start a trial instead
+    let asked = ''; globalThis.confirm = (m) => { asked = m; return true; };
+    await inquiryToTrial('qmgv1stone');
+    assert.equal(asked, 'Email Dana Stone the trial onboarding link now?');
+    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'toTrial', id: 'qmgv1stone' });
+    assert.ok(el('toast').innerHTML.includes('Trial started. Dana Stone was emailed the onboarding link'));
+    assert.ok(el('tkHost').innerHTML.includes('Open the trial →') && el('tkHost').innerHTML.includes('openTrial(&quot;stone-roofing&quot;)'), 'links to the new trial');
+    toTrialReply = { status: 200, body: { ok: true, clientId: 'birch-legal', outcome: 'queued', position: 2 } };
+    await inquiryToTrial('qmgu9birch');
+    assert.ok(el('toast').innerHTML.includes('In the queue at position 2'));
+    toTrialReply = { status: 400, body: { ok: false, errors: { website: 'A website is required.' } } };
+    await inquiryToTrial('qmgn1harbor');
+    assert.ok(el('toast').innerHTML.includes('Trial not started: website: A website is required.'));
+    globalThis.confirm = () => false; const n = calls.length;
+    await inquiryToTrial('qmgn1harbor'); assert.equal(calls.length, n, 'cancel sends nothing');
+    globalThis.confirm = () => true;
+    // the list view + filters
+    render('inquiries'); await new Promise((r) => setTimeout(r, 5));
+    assert.ok(el('tkHost').innerHTML.includes('iq-counts'));
+    inquiriesSetFilter('won'); assert.ok(el('tkHost').innerHTML.includes('Northwind Logistics') && !el('tkHost').innerHTML.includes('Stone Roofing'));
+    inquiriesSetFilter('open');
+    assert.equal(iqTrialToast({ already: true }), 'This inquiry is already a trial');
+    assert.ok(/moments ago/.test(iqTrialToast({ ok: true, duplicate: true, outcome: 'received' }, 'Omar')));
+    assert.ok(/declined/.test(iqTrialToast({ outcome: 'declined', reason: 'already_had_trial' })));
+    assert.ok(/finish it/.test(iqTrialToast({ outcome: 'manual' })));
+    // unknown id
+    openInquiry('qnope'); await new Promise((r) => setTimeout(r, 5));
+    assert.ok(el('tkHost').innerHTML.includes('Inquiry not found'));
+    // machine down
+    inquiriesForget(); globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+    render('inquiries'); await new Promise((r) => setTimeout(r, 5));
+    assert.ok(el('tkHost').innerHTML.includes("The machine isn't reachable"));
+  } finally {
+    globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); }; globalThis.confirm = () => true;
+    inquiriesForget(); trialsStopTimer(); render('trials'); trialsStopTimer();
+  }
 });
