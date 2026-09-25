@@ -618,3 +618,13 @@ test('readability: text passes WCAG AA (4.5:1) and chart marks pass 3:1, in ligh
   }
   for (const cls of ['green', 'amber', 'red', 'blue']) assert.ok(shellCss.includes(`.pill.${cls}{background:var(--${cls}-bg);color:var(--${cls})}`));
 });
+
+test('Day-1 limits follow the machine settings (deliverability.gates)', () => {
+  assert.equal(tkSpamVerdict({ score: 8.5 }).level, 'pass', 'default mail-tester line is 8');
+  tkApplyGates({ deliverability: { gates: { seedPlacement: 0.9, mailTesterMin: 9, spamAssassinMax: 1.5, spamTestRequired: true } } });
+  assert.equal(tkSpamVerdict({ score: 8.5 }).level, 'fail', 'machine says 9, so 8.5 is too low');
+  assert.equal(tkSpamVerdict({ spamAssassin: 1.8 }).level, 'high', 'machine says 1.5 points or less');
+  tkApplyGates({ deliverability: { gates: { seedPlacement: 0.85, mailTesterMin: 8, spamAssassinMax: 2 } } });
+  tkApplyGates({ deliverability: null }); // missing gates keep the current lines
+  assert.equal(tkSpamVerdict({ score: 8.5 }).level, 'pass');
+});

@@ -157,7 +157,7 @@ async function loadTrial(id,force){
   if(!id)return {ok:false,error:'No trial selected.'};
   if(!force&&tk.detail[id]&&Date.now()-(tk.detailAt[id]||0)<TK_FRESH_MS)return {ok:true,data:tk.detail[id]};
   const r=await machineFetch('/api/mc/hub/'+encodeURIComponent(id));
-  if(r.ok&&r.data&&r.data.row){tk.detail[id]=r.data;tk.detailAt[id]=Date.now();delete tk.detailErr[id];}
+  if(r.ok&&r.data&&r.data.row){tk.detail[id]=r.data;tk.detailAt[id]=Date.now();delete tk.detailErr[id];tkApplyGates(r.data);}
   else{tk.detailErr[id]=r.error||'The machine answered without the trial data (no "row").';if(r.ok)r.ok=false;}
   return r;
 }
@@ -242,9 +242,15 @@ function tkWarmupModel(g){
   return {days,sent,inbox,spam,rate,any:(tkSum(sent)||0)>0||tkHasAny(rate),
     totals:{sent:tkSum(sent),inbox:tkSum(inbox),spam:tkSum(spam)},lastRate:tkLast(rate)};
 }
-/* Day-1 lines. The payload does not carry them, so these are the machine's defaults
-   (config.js CANARY.gate, PLACEMENT.minScore, PLACEMENT.maxSpamAssassin; SpamAssassin's own spam line is 5). */
+/* Day-1 lines: the machine's defaults (config.js CANARY.gate, PLACEMENT.minScore,
+   PLACEMENT.maxSpamAssassin; SpamAssassin's own spam line is 5), replaced by the
+   machine's real settings from `deliverability.gates` whenever a trial loads. */
 const TK_RULES={seedGate:.85,minScore:8,maxSpamAssassin:2,spamLine:5};
+function tkApplyGates(d){const g=d&&d.deliverability&&d.deliverability.gates;if(!g)return;
+  const n=v=>(typeof v==='number'&&isFinite(v))?v:null;
+  if(n(g.seedPlacement)!=null)TK_RULES.seedGate=g.seedPlacement;
+  if(n(g.mailTesterMin)!=null)TK_RULES.minScore=g.mailTesterMin;
+  if(n(g.spamAssassinMax)!=null)TK_RULES.maxSpamAssassin=g.spamAssassinMax;}
 const TK_TOOL_NAME={seed:'Seed test','mail-tester':'mail-tester',dkimvalidator:'DKIM Validator'};
 function tkToolName(t){return TK_TOOL_NAME[String(t||'').toLowerCase()]||String(t||'Test')}
 /* A spam test's verdict in plain words. `pass` from the machine wins when present (it also
