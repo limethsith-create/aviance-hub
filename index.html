@@ -14,7 +14,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#FFFFFF" id="themeColor">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCI+PGRlZnM+PC9kZWZzPjxwb2x5Z29uIHBvaW50cz0iMjgsODggMTAwLDEyOCAxNzIsODggMTcyLDE1MCAxMDAsMTkwIDI4LDE1MCIgZmlsbD0iIzEwMTAxNSIgLz48cG9seWdvbiBwb2ludHM9IjI4LDg4IDEwMCwxMjggMTAwLDE5MCAyOCwxNTAiIGZpbGw9IiMxQzFDMjIiIC8+PHBvbHlnb24gcG9pbnRzPSIxMDAsMTI4IDE3Miw4OCAxNzIsMTUwIDEwMCwxOTAiIGZpbGw9IiMwQTBBMEMiIC8+PHBvbHlnb24gcG9pbnRzPSIzMCw3MiAxMDAsMTEwIDE3MCw3MiAxMDAsMzQiIGZpbGw9IiNFMDI5MEYiIC8+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMC4zNSwtMC4xOSwwLjM1LDAuMTksMzAsNzIpIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg0LDQpIHNjYWxlKDAuOTIpIj48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0xMDAgMTggTDE1NiAxNzIgTDEyOCAxNzIgTDExNyAxNDAgTDgzIDE0MCBMNzIgMTcyIEw0NCAxNzIgWiBNOTEgMTE0IEwxMDkgMTE0IEwxMDAgODQgWiIgZmlsbD0iI0ZGRkZGRiIvPjwvZz48L2c+PC9zdmc+">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Pinned to one exact version with an integrity hash (checked against the npm package): a changed file on the CDN will not run. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
 <style>
 /* ===================== AVIANCE HUB — shell styles =====================
    Black/white, red-brand accent, one plain system font (--font), sentence case,
@@ -504,7 +505,7 @@ async function forgotPassword(){
 function openResetPassword(){
   openModal(`<div class="modal-head"><div class="pj-ic" style="background:#0000000f;color:#000000;width:40px;height:40px">${I.check}</div><div><h3>Set a new password</h3><p>You followed a recovery link — choose a new password for your account.</p></div></div>
     <div class="modal-body">
-      <div class="field"><label>New password</label><input id="npw1" type="password" placeholder="Min 6 characters" autocomplete="new-password"></div>
+      <div class="field"><label>New password</label><input id="npw1" type="password" placeholder="At least 12 characters" autocomplete="new-password"></div>
       <div class="field"><label>Confirm password</label><input id="npw2" type="password" placeholder="Repeat it" autocomplete="new-password" onkeydown="if(event.key==='Enter')submitNewPassword()"></div>
       <div id="npwErr" class="login-err"></div>
     </div>
@@ -514,7 +515,7 @@ function openResetPassword(){
 async function submitNewPassword(){
   const p1=(document.getElementById('npw1')||{}).value||'',p2=(document.getElementById('npw2')||{}).value||'';
   errEl('npwErr','');
-  if(p1.length<6)return errEl('npwErr','Password must be at least 6 characters.');
+  if(p1.length<12)return errEl('npwErr','Password must be at least 12 characters.');
   if(p1!==p2)return errEl('npwErr','Passwords do not match.');
   try{
     const {error}=await sb.auth.updateUser({password:p1});
