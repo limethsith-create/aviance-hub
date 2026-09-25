@@ -23,7 +23,13 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, sidebar, ⌘K, notifications, theme. |
 | `trials.js` | The Trials section — everything the owner sees inside. Talks to the machine. |
 | `trials.css` | Styles for the Trials screens, on top of the shell's CSS variables (light + dark). |
-| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, nav, ⌘K), the Trials screens, application review, and the readability floor. |
+| `push.js` | Phone alerts: the panel, turning Web Push on/off with the machine, the quiet re-subscribe after sign-in. |
+| `sw.js` | Service worker (site root, scope `/`): shows the machine's push messages as notifications and opens the hub on a tap. Caches nothing. |
+| `manifest.webmanifest` | Makes the hub installable (Add to Home Screen) — iPhone only allows alerts for installed web apps. |
+| `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | The brand cube from the website, flattened onto white (see *Phone alerts*). |
+| `badge-96.png` | One-colour "A" (white on transparent) for Android's status bar. |
+| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, nav, ⌘K, deep links), the Trials screens, application review, phone alerts (`push.js`) and the readability floor. |
+| `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and `sw.js` (run in a sandbox with a fake service-worker global). |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
 
 ## Screens
@@ -99,10 +105,59 @@ sees "This hub is for the Aviance owner." and is signed out.
   the plain shopping list.
 - **Machine alerts** — every alert the machine sent, with Acknowledge.
 
+- **Phone alerts** — a small panel (sidebar → Machine → Phone alerts, or ⌘K)
+  that turns on push notifications for this device. See below.
+
 Sidebar: the two screens above under **Trials**, and under **Machine** five
 links that open signed-in inside the machine's own Mission Control (new tab):
-Queue, Warm-up circle, Config, Test Mode, Learning. Topbar: ⌘K (trials and
+Queue, Warm-up circle, Config, Test Mode, Learning — then **Phone alerts**
+("On" beside it when this device gets alerts). Topbar: ⌘K (trials and
 commands), the bell (trial to-dos + open urgent alerts), theme, New client.
+
+## Phone alerts (Web Push)
+
+Every machine alert can pop up on the owner's iPhone as a normal notification —
+no Telegram, WhatsApp or SMS. It is standard Web Push. On iPhone and iPad it
+only works for the hub **added to the Home Screen and opened from there**
+(iOS 16.4 or later).
+
+**On the iPhone, once:**
+
+1. Open https://aviance.store in **Safari**.
+2. Tap the **Share** button (the square with an arrow pointing up; on newer
+   iPhones it is inside the ••• menu at the bottom), then **Add to Home Screen**
+   → **Add**.
+3. Open **Aviance** from the home screen and **sign in** (the home-screen app
+   keeps its own sign-in, separate from Safari — the login screen says so).
+4. Menu (☰) → **Phone alerts** → **Turn on phone alerts** → **Allow**.
+5. Tap **Send a test**. "Test alert from Aviance" should pop up within seconds.
+
+Tapping an alert opens the trial it is about (`/#trial/{id}`), the Machine
+alerts screen (`/#alerts`) or the board (`/#trials`) — signing in first if
+needed. Urgent alerts stay on screen until tapped; a repeat of the same alert
+replaces the previous one. If alerts are blocked later: iPhone Settings →
+Notifications → Aviance → Allow Notifications.
+
+How it fits together:
+
+- `push.js` asks the machine for its public key (`GET /api/mc/push/key`, 503
+  until the machine has VAPID keys), asks the phone for permission *inside the
+  tap*, registers `/sw.js` (only then — just looking at the panel registers
+  nothing), subscribes, and posts `{subscription, device}` to
+  `/api/mc/push/subscribe`. "Send a test" → `/api/mc/push/test`; "Turn off" →
+  `/api/mc/push/unsubscribe` and drops the subscription on the phone. After
+  every sign-in it quietly re-posts an existing subscription (endpoints can
+  rotate). All calls use the same Supabase bearer token as the rest of
+  `/api/mc/*`.
+- `sw.js` has no fetch handler and uses no cache, so the hub itself is never
+  served stale; bump `SW_VERSION` when changing it. The push payload is
+  `{title, body, url, tag, urgent, at}`; only hub paths are followed.
+- Deep links (`#trial/{id}`, `#alerts`, `#trials`) work on load and on
+  `hashchange`; the hash is cleared once handled so the same alert can open it
+  again.
+- The brand PNGs on the website have a transparent background (and a
+  transparent stripe under the red top). iOS paints transparency black on the
+  home screen, so the hub's icons are the same cube flattened onto white.
 
 ## Readability floor (keep this in any redesign)
 
@@ -193,10 +248,10 @@ Sign-in needs the real Supabase project.
 
 ```
 npm test          # node --test tests/*.test.mjs
-npm run check     # node --check trials.js
+npm run check     # node --check trials.js, push.js, sw.js
 ```
 
-The tests load the shell's inline script and `trials.js` into a tiny fake DOM
+The tests load the shell's inline script, `trials.js` and `push.js` into a tiny fake DOM
 with a fake Supabase client, then exercise the router, the admin gate, the
 chart data mapping (null = gap, 0 = a real zero), spam-test verdicts for
 both tools, when growth is and isn't fetched, and the

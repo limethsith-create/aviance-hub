@@ -375,3 +375,17 @@ fieldset.tk-fs:disabled{opacity:.6}
 /* ── modal bits ─────────────────────────────────────────────────────────── */
 .tk-modal-errs{font-size:var(--fs-small);color:var(--red);line-height:1.6;margin-top:6px}
 .tk-modal-errs:empty{display:none}
+
+/* ===================== Phone alerts panel (push.js) ===================== */
+.pa-ic{width:40px;height:40px;background:var(--surface-2);color:var(--text)}
+.pa-ic svg{width:20px;height:20px;stroke-width:2}
+.pa-body{display:flex;flex-direction:column;gap:12px}
+.pa-lead{font-size:var(--fs-strong);font-weight:600;line-height:1.45}
+.pa-small{font-size:var(--fs-small);color:var(--muted);line-height:1.55}
+.pa-note{font-size:var(--fs-small);color:var(--amber);background:var(--amber-bg);padding:9px 11px;line-height:1.5}
+.pa-err{font-size:var(--fs-small);color:var(--red);background:var(--red-bg);padding:9px 11px;line-height:1.5;overflow-wrap:anywhere}
+.pa-state{display:flex;align-items:center;gap:8px}
+.pa-state .pill{font-size:var(--fs-small)}
+.pa-steps{list-style:none;counter-reset:pa;display:flex;flex-direction:column;gap:10px}
+.pa-steps li{counter-increment:pa;display:grid;grid-template-columns:28px 1fr;gap:10px;font-size:var(--fs-base);line-height:1.5}
+.pa-steps li::before{content:counter(pa);width:28px;height:28px;display:grid;place-items:center;border:1px solid var(--border);font-weight:600;font-size:var(--fs-small)}
