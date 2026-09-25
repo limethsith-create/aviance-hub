@@ -1036,3 +1036,38 @@ test('fit score: number, label, how much was checked, six parts with evidence, d
   assert.ok(tkScoreBadge({ score: 64, grade: 'C', label: 'Borderline' }).includes('64/100 · Borderline'));
   assert.equal(tkScoreBadge(null), '');
 });
+
+test('full company file: money with its basis, offers, history, people, proof, tools, documents — all escaped', () => {
+  const d = {
+    facts: 212, pagesRead: 48, words: 31240,
+    money: {
+      revenue: [{ low: 2520000, high: 4500000, basis: '18 people × $140,000–$250,000 revenue per employee for IT services / MSPs (Census SUSB 2022)', floor: false }],
+      federal: { searched: ['Hill IT'], state: 'NC', payroll: { annual: 720000, basis: 'PPP loan ÷ 2.5 × 12' }, ppp: [{ amount: 150000, date: '2020-04-20', forgiven: true, recipient: 'HILL IT LLC' }], contracts: [{ amount: 250000, agency: 'Department of Veterans Affairs', date: '2023-02-01', what: 'NETWORK <SUPPORT>' }], grants: [], federalTotal: 250000 },
+      sec: { filings: [], raisedMoney: false },
+    },
+    offers: { promos: [{ offer: 'No long-term contracts', quote: 'No long-term contracts, ever.', page: '/pricing' }], plans: [{ name: 'Essentials', price: '$99 per user / month', page: '/pricing' }], ctas: ['Get a free network assessment'], magnets: [] },
+    ads: ['Meta Pixel'],
+    company: { founded: '2011', employees: 18 },
+    history: { firstSeen: '2012-03-04', monthsCaptured: 120 },
+    timeline: [{ year: 2012, title: 'Hill Computer Repair', headline: 'Home & office', url: 'https://web.archive.org/web/2012/x' }, { year: 2025, title: 'Hill IT | Managed IT', changed: ['title'], url: 'https://web.archive.org/web/2025/x' }],
+    blog: { posts: 30, latest: '2026-08-01', first: '2019-02-01' },
+    people: [{ name: 'Jane Hill', title: 'Founder & CEO', page: '/team' }], jobs: [{ title: 'Account Executive', sales: true, page: '/careers' }],
+    clients: [{ name: 'Smith & Lowe' }], testimonials: [{ quote: 'Fast <b>fix</b>', by: 'Ann', page: '/' }], caseStudies: [], industries: ['law firms'],
+    credentials: [{ name: 'SOC 2', quote: 'SOC 2 aligned', page: '/about' }], tech: [{ name: 'HubSpot', kind: 'crm / marketing' }],
+    emailSetup: { mailHost: 'Microsoft 365', senders: ['HubSpot'], dmarc: 'quarantine', verifiedTools: ['DocuSign'] },
+    lookalikes: [{ domain: 'gethillit.com', mail: true, pointsHome: true }],
+    documents: [{ url: 'https://hill-it.com/cap.pdf', title: 'Capabilities', pages: 2, words: 800, credentials: ['CMMC'] }], addresses: ['100 Main St, Charlotte, NC 28202'],
+  };
+  const h = renderDeep(d);
+  assert.ok(h.includes('212 facts from 48 pages and 1 document'));
+  assert.ok(h.includes('<b>$2.5M–$4.5M</b>') && h.includes('18 people × $140,000–$250,000'));
+  assert.ok(h.includes('Payroll $720k a year (2019)') && h.includes('$150k · 2020-04-20 · forgiven'));
+  assert.ok(h.includes('Department of Veterans Affairs') && h.includes('NETWORK &lt;SUPPORT&gt;'));
+  assert.ok(h.includes('No long-term contracts') && h.includes('Essentials · $99 per user / month') && h.includes('Get a free network assessment') && h.includes('tracking for Meta Pixel'));
+  assert.ok(h.includes('Founded <b>2011</b>') && h.includes('online since <b>2012-03-04</b>') && h.includes('class="pill amber">changed<'));
+  assert.ok(h.includes('<b>Jane Hill</b> — Founder &amp; CEO') && h.includes('class="pill blue">sales<'));
+  assert.ok(h.includes('“Fast &lt;b&gt;fix&lt;/b&gt;”'), 'testimonial escaped');
+  assert.ok(h.includes('Hosted by Microsoft 365') && h.includes('gethillit.com · has mail servers · <b>points at their site</b>'));
+  assert.ok(h.includes('href="https://hill-it.com/cap.pdf"') && h.includes('mentions CMMC'));
+  assert.equal(renderDeep(null), '');
+});

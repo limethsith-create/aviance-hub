@@ -851,6 +851,60 @@ function renderFitScore(r){
     <p class="tk-help">Scored by fixed rules against your fit gate — their answers, their website's own words and Google. No AI, nothing guessed: what could not be checked is left out and listed as a question.</p>
   </div>`;
 }
+/* The full company file (machine Research v3): the whole site, documents, money on the public record, offers, history. */
+function tkBig(n){n=Number(n);if(!isFinite(n))return '—';return '$'+(n>=1e6?(Math.round(n/1e5)/10)+'M':n>=1e4?Math.round(n/1e3)+'k':n.toLocaleString())}
+function tkGroup(title,count,body,open){if(!body)return '';return `<details class="tk-file-group"${open?' open':''}><summary><span class="tk-file-title">${esc(title)}</span>${count!=null?`<span class="tk-file-count">${esc(count)}</span>`:''}</summary><div class="tk-file-body">${body}</div></details>`}
+function tkList(items,fn){items=(items||[]).filter(Boolean);return items.length?`<ul class="tk-file-list">${items.map(x=>`<li>${fn(x)}</li>`).join('')}</ul>`:''}
+function tkSrc(page){return page?` <span class="tk-muted">— ${esc(page)}</span>`:''}
+function renderDeep(d){
+  if(!d||typeof d!=='object')return '';
+  const m=d.money||{};const fed=m.federal||null;const sec=m.sec||null;const o=d.offers||{};const e=d.emailSetup||null;const h=d.history||null;
+  const money=[
+    (m.revenue||[]).length?`<div class="tk-file-note"><b>Estimated revenue</b> (a range from public facts, not their books):${tkList(m.revenue,r=>`<b>${tkBig(r.low)}–${tkBig(r.high)}</b>${r.floor?' <span class="tk-muted">(at least)</span>':''}${r.year?` <span class="tk-muted">in ${esc(r.year)}</span>`:''}<br><span class="tk-muted">${esc(r.basis)}</span>`)}</div>`:'',
+    fed&&fed.payroll?`<div class="tk-file-note"><b>Payroll ${tkBig(fed.payroll.annual)} a year (2019)</b><br><span class="tk-muted">${esc(fed.payroll.basis)}</span></div>`:'',
+    fed&&(fed.ppp||[]).length?`<div class="tk-file-note"><b>PPP loans</b>${tkList(fed.ppp,l=>`${tkBig(l.amount)} · ${esc(l.date||'')}${l.forgiven?' · forgiven':''} <span class="tk-muted">(${esc(l.recipient||'')})</span>`)}</div>`:'',
+    fed&&((fed.contracts||[]).length||(fed.grants||[]).length)?`<div class="tk-file-note"><b>Federal contracts and grants</b>${fed.federalTotal?` — ${tkBig(fed.federalTotal)} in total`:''}${tkList([...(fed.contracts||[]),...(fed.grants||[])],a=>`${tkBig(a.amount)} · ${esc(a.agency||'')} · ${esc(a.date||'')}${a.what?`<br><span class="tk-muted">${esc(a.what)}</span>`:''}`)}</div>`:'',
+    sec&&(sec.filings||[]).length?`<div class="tk-file-note"><b>SEC filings</b>${sec.raisedMoney?' — they raised money privately (Form D)':''}${tkList(sec.filings,f=>`${esc(f.form||'')} · ${esc(f.date||'')} · ${f.url?tkLink(f.url,f.entity):esc(f.entity)}`)}</div>`:'',
+    (d.prices||[]).length?`<div class="tk-file-note"><b>Prices on their site</b>${tkList(d.prices,p=>esc(p.text)+tkSrc(p.page))}</div>`:'',
+    fed||sec?`<p class="tk-help">Checked: USAspending.gov (PPP loans, federal contracts, grants)${fed&&fed.state?` in ${esc(fed.state)}`:''} for ${esc((fed&&fed.searched||[]).join(' / '))}; SEC EDGAR. ${fed&&!(fed.ppp||[]).length&&!(fed.contracts||[]).length&&!(fed.grants||[]).length?'Nothing on the federal record in that name.':''}</p>`:'',
+  ].filter(Boolean).join('');
+  const offers=[
+    (o.promos||[]).length?`<div class="tk-file-note"><b>Offers and guarantees</b>${tkList(o.promos,p=>`<b>${esc(p.offer)}</b><br><span class="tk-muted">“${esc(p.quote)}”${p.page?' — '+esc(p.page):''}</span>`)}</div>`:'',
+    (o.plans||[]).length?`<div class="tk-file-note"><b>Packages</b>${tkList(o.plans,p=>`${esc(p.name)}${p.price?' · '+esc(p.price):''}${tkSrc(p.page)}`)}</div>`:'',
+    (o.ctas||[]).length?`<div class="tk-file-note"><b>What their buttons ask for</b>${tkList(o.ctas,c=>esc(c))}</div>`:'',
+    (o.magnets||[]).length?`<div class="tk-file-note"><b>Free downloads they give away</b>${tkList(o.magnets,x=>esc(x.title)+tkSrc(x.page))}</div>`:'',
+    (d.ads||[]).length?`<div class="tk-file-note"><b>They run ads</b> — tracking for ${esc(d.ads.join(', '))} is on their site</div>`:'',
+  ].filter(Boolean).join('');
+  const hist=[
+    d.company&&(d.company.founded||d.company.employees)?`<div class="tk-file-note">${d.company.founded?`Founded <b>${esc(d.company.founded)}</b>`:''}${d.company.employees?` · ${esc(d.company.employees)} employees (their site's company data)`:''}</div>`:'',
+    h&&h.firstSeen?`<div class="tk-file-note">Website online since <b>${esc(h.firstSeen)}</b> · captured in ${esc(h.monthsCaptured)} months by the Wayback Machine</div>`:'',
+    (d.timeline||[]).length?`<div class="tk-file-note"><b>Their home page, year by year</b>${tkList(d.timeline,y=>`<b>${esc(y.year)}</b>${(y.changed||[]).length?' <span class="pill amber">changed</span>':''} · ${tkLink(y.url,y.title||'(no title)')}${y.headline?`<br><span class="tk-muted">${esc(y.headline)}</span>`:''}`)}</div>`:'',
+    d.blog&&d.blog.posts?`<div class="tk-file-note">Blog: <b>${esc(d.blog.posts)}</b> posts read${d.blog.latest?` · latest ${esc(d.blog.latest)}`:''}${d.blog.first?` · earliest seen ${esc(d.blog.first)}`:''}</div>`:'',
+  ].filter(Boolean).join('');
+  const people=[tkList(d.people,p=>`<b>${esc(p.name)}</b>${p.title?' — '+esc(p.title):''}${tkSrc(p.page)}`),(d.jobs||[]).length?`<div class="tk-file-note"><b>Open jobs</b>${tkList(d.jobs,j=>esc(j.title)+(j.sales?' <span class="pill blue">sales</span>':'')+tkSrc(j.page))}</div>`:''].filter(Boolean).join('');
+  const proof=[
+    (d.clients||[]).length?`<div class="tk-file-note"><b>Named clients</b> ${esc(d.clients.map(c=>c.name).join(' · '))}</div>`:'',
+    (d.testimonials||[]).length?`<div class="tk-file-note"><b>Testimonials</b>${tkList(d.testimonials,t=>`“${esc(t.quote)}”${t.by?` — ${esc(t.by)}`:''}${tkSrc(t.page)}`)}</div>`:'',
+    (d.caseStudies||[]).length?`<div class="tk-file-note"><b>Case studies</b>${tkList(d.caseStudies,c=>esc(c.title)+tkSrc(c.page))}</div>`:'',
+    (d.industries||[]).length?`<div class="tk-file-note"><b>Industries they name</b> ${esc(d.industries.join(', '))}</div>`:'',
+  ].filter(Boolean).join('');
+  const creds=tkList(d.credentials,c=>`<b>${esc(c.name)}</b><br><span class="tk-muted">“${esc(c.quote||'')}”${c.page?' — '+esc(c.page):''}</span>`);
+  const kinds={};(d.tech||[]).forEach(t=>{(kinds[t.kind]=kinds[t.kind]||[]).push(t.name)});
+  const tools=[
+    Object.keys(kinds).length?`<div class="tk-file-note"><b>On their website</b>${tkList(Object.keys(kinds),k=>`${esc(k)}: ${esc(kinds[k].join(', '))}`)}</div>`:'',
+    e?`<div class="tk-file-note"><b>Their email</b>${tkList([`Hosted by ${esc(e.mailHost||'unknown')}`,(e.senders||[]).length?`Allowed to send as them: ${esc(e.senders.join(', '))}`:null,`DMARC: ${esc(e.dmarc)}`,(e.verifiedTools||[]).length?`Tools that verified their domain: ${esc(e.verifiedTools.join(', '))}`:null],x=>x)}</div>`:'',
+    (d.lookalikes||[]).length?`<div class="tk-file-note"><b>Look-alike domains registered</b>${tkList(d.lookalikes,l=>`${esc(l.domain)}${l.mail?' · has mail servers':''}${l.pointsHome?' · <b>points at their site</b>':''}`)}</div>`:'',
+  ].filter(Boolean).join('');
+  const docs=tkList(d.documents,x=>`${tkLink(x.url,x.title||'Document')}${x.pages?` · ${esc(x.pages)} page${x.pages!==1?'s':''}`:''}${x.words?` · ${esc(x.words)} words`:''}${(x.credentials||[]).length?` · mentions ${esc(x.credentials.join(', '))}`:''}${x.excerpt?`<br><span class="tk-muted">${esc(x.excerpt)}</span>`:''}`);
+  const places=[tkList(d.addresses,a=>esc(a))].filter(Boolean).join('');
+  const oCount=(o.promos||[]).length+(o.plans||[]).length+(o.ctas||[]).length+(o.magnets||[]).length;
+  return `<div class="tk-file"><div class="tk-file-head"><h5>Full company file</h5><span class="tk-muted">${esc(d.facts||0)} facts from ${esc(d.pagesRead||0)} pages${(d.documents||[]).length?` and ${d.documents.length} document${d.documents.length!==1?'s':''}`:''} · ${esc(Number(d.words||0).toLocaleString())} words read</span></div>
+    ${tkGroup('Money',null,money,true)}${tkGroup('Offers',oCount||null,offers,true)}${tkGroup('History',(d.timeline||[]).length?d.timeline.length+' years':null,hist)}
+    ${tkGroup('People',(d.people||[]).length||null,people)}${tkGroup('Customers and proof',((d.clients||[]).length+(d.testimonials||[]).length+(d.caseStudies||[]).length)||null,proof)}
+    ${tkGroup('Certifications, partners, awards',(d.credentials||[]).length||null,creds)}${tkGroup('Tools and email setup',(d.tech||[]).length||null,tools)}
+    ${tkGroup('Documents',(d.documents||[]).length||null,docs)}${tkGroup('Addresses',(d.addresses||[]).length||null,places)}
+    <p class="tk-help">Collected by the machine the moment they applied: every page of their site it may read, their PDFs, their DNS, the Wayback Machine, USAspending.gov and SEC EDGAR. Fixed rules, no AI; every line keeps where it came from.</p></div>`;
+}
 /* What the machine found out about the applicant (website crawl + Google Places + market count). */
 function renderResearch(r,id){
   const head=`<div class="tk-research-head"><h4>What we found</h4>${id?`<button class="btn ghost tk-btn-s" onclick="trialResearchAgain(${tkAttr(id)})">Research again</button>`:''}</div>`;
@@ -875,6 +929,7 @@ function renderResearch(r,id){
     ${r.summary?`<p class="tk-research-summary">${esc(r.summary)}</p>`:''}
     ${flags.length?`<div class="tk-flags">${flags.map(f=>`<div class="tk-flag ${String(f.level)==='warn'?'warn':'info'}"><span class="pill ${String(f.level)==='warn'?'amber':'grey'}">${String(f.level)==='warn'?'Check':'Note'}</span><span>${esc(f.text)}</span></div>`).join('')}</div>`:''}
     ${rows.length?`<div class="tk-about"><h5>About the company</h5><div class="tk-kv">${rows.map(([k,v])=>`<small>${esc(k)}</small><span>${v}</span>`).join('')}</div></div>`:''}
+    ${renderDeep(r.deep)}
     ${m&&m.estimate!=null?`<div class="tk-market"><h5>Their market</h5><p>About <b>${tkNum(m.estimate)}</b> matching companies for “${esc(m.query||'')}”${m.source?` <span class="tk-muted">(${esc(m.source==='places'?'Google Places':m.source==='overpass'?'OpenStreetMap':m.source)})</span>`:''}.</p></div>`:''}
     ${r.at?`<p class="tk-help">Researched ${esc(tkRel(r.at))}. Facts copied from their site and Google — nothing guessed.</p>`:''}`;
 }
