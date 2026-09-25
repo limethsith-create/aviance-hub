@@ -236,7 +236,7 @@
 .tk-behind-body{padding:4px 18px 18px}
 @media(max-width:560px){.tk-behind>summary{padding:12px 14px}.tk-behind-body{padding:4px 12px 14px}}
 
-/* onboarding call card: steps, the conversation (theirs on grey at the left, ours outlined at the right), reply box */
+/* onboarding call card: steps, "Book by", the owner's buttons (the emails live under Messages) */
 .tk-oc{padding:20px 22px;margin-bottom:18px}
 .tk-oc h3{font-size:var(--fs-h3);font-weight:600}
 .tk-oc h4{font-size:var(--fs-strong);font-weight:600;margin:24px 0 10px}
@@ -251,28 +251,65 @@
 .tk-oc-at{font-size:var(--fs-small);color:var(--muted);white-space:nowrap}
 .tk-oc-facts{font-size:var(--fs-small);color:var(--muted);line-height:1.65;margin-top:14px;overflow-wrap:anywhere}
 .tk-oc-facts a{color:var(--text)}
-.tk-oc-empty{font-size:var(--fs-base);color:var(--muted)}
-.tk-thread{display:flex;flex-direction:column;gap:10px}
-.tk-msg{max-width:88%;padding:12px 14px;border:1px solid var(--border-soft)}
-.tk-msg.in{align-self:flex-start;background:var(--surface-2);border-left:4px solid var(--muted-2)}
-.tk-msg.out{align-self:flex-end;background:var(--surface);border:1px solid var(--border-soft);border-right:4px solid var(--muted-2)}
-.tk-msg-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:var(--fs-small)}
-.tk-msg-at{color:var(--muted)}
-.tk-msg-subj{font-size:var(--fs-small);color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
-.tk-msg-text{font-size:var(--fs-base);line-height:1.55;margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere}
-.tk-oc-reply{margin-top:16px}
-.tk-oc-reply label,.tk-oc-book label{display:block;font-size:var(--fs-small);font-weight:600;margin-bottom:7px}
+.tk-oc-msgs{font-size:var(--fs-base);line-height:1.5;margin-top:12px}
+.tk-oc-book label{display:block;font-size:var(--fs-small);font-weight:600;margin-bottom:7px}
 /* 16px in the boxes: iPhone Safari zooms the page into anything smaller */
-.tk-oc-reply textarea{display:block;width:100%;min-height:112px;padding:11px 12px;background:var(--surface);color:var(--text);border:1px solid var(--border);font:inherit;font-size:var(--fs-strong);line-height:1.55;resize:vertical;outline:none}
 .tk-oc-book input{flex:1 1 220px;min-width:0;min-height:46px;padding:10px 12px;background:var(--surface);color:var(--text);border:1px solid var(--border);font:inherit;font-size:var(--fs-strong);outline:none}
-.tk-oc-reply textarea:focus,.tk-oc-book input:focus{border-color:var(--text)}
-.tk-oc-reply-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
-.tk-oc-count{font-size:var(--fs-small);color:var(--muted)}
-.tk-oc-count.over{color:var(--red);font-weight:600}
+.tk-oc-book input:focus{border-color:var(--text)}
 .tk-oc .btn{min-height:46px;padding:11px 18px;font-size:var(--fs-base)}
 .tk-oc-book-row{display:flex;flex-wrap:wrap;gap:10px}
 .tk-oc-acts{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
-@media(max-width:560px){.tk-oc{padding:16px 14px}.tk-msg{max-width:100%}.tk-oc-steps li{grid-template-columns:28px 1fr}.tk-oc-at{grid-column:2}.tk-oc-acts .btn,.tk-oc-book .btn{flex:1 1 100%;justify-content:center}.tk-oc-reply-foot .btn{flex:0 0 auto}}
+@media(max-width:560px){.tk-oc{padding:16px 14px}.tk-oc-steps li{grid-template-columns:28px 1fr}.tk-oc-at{grid-column:2}.tk-oc-acts .btn,.tk-oc-book .btn{flex:1 1 100%;justify-content:center}}
+
+/* ── Messages (messages.js): the conversation as a chat — theirs on the left (grey), ours on the right
+   (outlined), the reply bot's dashed, automatic emails folded to one centred line — then the reply box
+   and the reply-bot switch. The chat scrolls inside its own box, so the newest email can sit in view. ── */
+.tk-msgs{padding:20px 22px;margin-bottom:18px;scroll-margin-top:12px}
+.tk-msgs-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-bottom:12px}
+.tk-msgs-head h3{font-size:var(--fs-h3);font-weight:600}
+.tk-msgs-sub{font-size:var(--fs-small);color:var(--muted);line-height:1.45}
+.tk-chat{display:flex;flex-direction:column;gap:10px;max-height:min(70vh,560px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:12px;border:1px solid var(--border-soft);background:var(--surface)}
+.tk-chat:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.tk-chat-empty{font-size:var(--fs-base);color:var(--muted);line-height:1.5}
+.tk-cm{max-width:86%;min-width:0;padding:10px 14px;flex:none}
+.tk-cm.in{align-self:flex-start;background:var(--surface-2);border-left:4px solid var(--muted-2)}
+.tk-cm.out{align-self:flex-end;background:var(--surface);border:1px solid var(--border)}
+.tk-cm.out.auto{border-style:dashed}
+.tk-cm-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:var(--fs-small);line-height:1.45}
+.tk-cm-who{min-width:0}
+.tk-cm-rule{color:var(--muted)}
+.tk-cm-at{color:var(--muted)}
+.tk-cm-at small{font-size:var(--fs-min)}
+.tk-cm-subj{font-size:var(--fs-small);color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
+.tk-cm-text{font-size:var(--fs-base);line-height:1.55;margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.tk-cm-sys{align-self:stretch;flex:none;font-size:var(--fs-small);color:var(--muted)}
+.tk-cm-sys>summary{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:2px 10px;min-height:44px;padding:4px 8px;cursor:pointer;list-style:none;text-align:center;line-height:1.45}
+.tk-cm-sys>summary::-webkit-details-marker{display:none}
+.tk-cm-sys>summary:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+.tk-cm-sys-t{color:var(--text);overflow-wrap:anywhere}
+.tk-cm-show{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+.tk-cm-sys[open] .tk-cm-open,.tk-cm-sys:not([open]) .tk-cm-close{display:none}
+.tk-cm-sys .tk-cm-text{max-width:86%;margin:4px auto 8px;padding:10px 14px;border:1px dashed var(--border-soft);color:var(--text);text-align:left}
+.tk-msgs-wait{font-size:var(--fs-base);font-weight:600;color:var(--red);line-height:1.5;margin-top:12px}
+.tk-msgs-reply{margin-top:14px}
+.tk-msgs-reply label{display:block;font-size:var(--fs-small);font-weight:600;margin-bottom:7px}
+.tk-msgs-reply textarea{display:block;width:100%;min-height:112px;padding:11px 12px;background:var(--surface);color:var(--text);border:1px solid var(--border);font:inherit;font-size:var(--fs-strong);line-height:1.55;resize:vertical;outline:none}
+.tk-msgs-reply textarea:focus{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
+.tk-msgs-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
+.tk-msgs-count{font-size:var(--fs-small);color:var(--muted)}
+.tk-msgs-count.over{color:var(--red);font-weight:600}
+.tk-msgs-foot .btn{min-height:46px;padding:11px 18px}
+.tk-msgs-from{font-size:var(--fs-small);color:var(--muted);line-height:1.5;margin-top:6px;overflow-wrap:anywhere}
+.tk-msgs-cant{font-size:var(--fs-base);line-height:1.5;margin-top:14px;padding:10px 12px;background:var(--amber-bg);color:var(--text)}
+.tk-bot{margin-top:18px;padding-top:12px;border-top:1px solid var(--border-soft)}
+.tk-switch{display:inline-flex;align-items:center;gap:12px;min-height:44px;padding:4px 0;background:none;border:none;color:var(--text);font:inherit;font-size:var(--fs-base);text-align:left;cursor:pointer}
+.tk-switch:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.tk-switch-track{position:relative;flex:none;width:50px;height:28px;border:1px solid var(--border);background:var(--surface-3)}
+.tk-switch-knob{position:absolute;top:3px;left:3px;width:20px;height:20px;background:var(--muted-2)}
+.tk-switch.on .tk-switch-track{background:var(--green);border-color:var(--green)}
+.tk-switch.on .tk-switch-knob{left:25px;background:var(--bg)}
+.tk-bot-note{font-size:var(--fs-small);color:var(--muted);line-height:1.5;margin-top:2px}
+@media(max-width:560px){.tk-msgs{padding:16px 14px}.tk-chat{padding:8px;max-height:65vh}.tk-cm{max-width:94%}.tk-cm-sys .tk-cm-text{max-width:100%}}
 
 /* Overview */
 .tk-strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
@@ -523,6 +560,30 @@
 .tk-status.green{color:var(--green);background:var(--green-bg)}
 .tk-status.amber{color:var(--amber);background:var(--amber-bg)}
 .tk-status.red{color:var(--red);background:var(--red-bg)}
+.tk-status.grey{background:var(--surface-2);color:var(--text)}
+.tk-set-h4{font-size:var(--fs-strong);font-weight:600;margin:20px 0 8px}
+/* Settings › Google Meet: the status, the buttons, the numbered set-up steps with the address to copy and the two boxes */
+.tk-gm-acts{margin-top:14px}
+.tk-gm-steps{margin:16px 0 0;padding-left:26px;font-size:var(--fs-base);line-height:1.6}
+.tk-gm-steps li{margin:0 0 16px;padding-left:4px;overflow-wrap:anywhere}
+.tk-gm-steps a{color:var(--text)}
+.tk-gm-copy{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.tk-gm-uri{flex:1 1 260px;min-width:0;min-height:44px;padding:10px 12px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);font:inherit;font-size:var(--fs-base);outline:none}
+.tk-gm-uri:focus{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
+.tk-gm-saved{display:block;color:var(--green);font-weight:600;margin-top:4px}
+.tk-gm-lock{font-size:var(--fs-base);line-height:1.5;margin-top:8px;padding:8px 12px;background:var(--amber-bg);color:var(--text)}
+.tk-gm-form{max-width:520px;margin-top:10px}
+.tk-gm-form .field label{font-size:var(--fs-small)}
+.tk-gm-more{margin-top:18px;border-top:1px solid var(--border-soft)}
+.tk-gm-more>summary{display:flex;align-items:center;min-height:48px;padding:6px 0;cursor:pointer;list-style:none;font-size:var(--fs-base);font-weight:600}
+.tk-gm-more>summary::-webkit-details-marker{display:none}
+.tk-gm-more>summary::before{content:'▸ ';color:var(--muted);white-space:pre}
+.tk-gm-more[open]>summary::before{content:'▾ '}
+.tk-gm-more>summary:focus-visible{outline:2px solid var(--text)}
+/* Settings › Reply bot */
+.tk-bot-rules{margin:0;padding-left:22px;font-size:var(--fs-base);line-height:1.55}
+.tk-bot-rules li{margin-bottom:8px}
+@media(max-width:560px){.tk-gm-copy .btn,.tk-gm-form .btn,.tk-gm-acts .btn{flex:1 1 100%;width:100%;justify-content:center}.tk-gm-steps{padding-left:22px}}
 @media(max-width:560px){.tk-set>summary{padding:12px 14px}.tk-set-body{padding:4px 14px 18px}.tk-set-links .btn{flex:1 1 100%;justify-content:center}}
 @media(max-width:560px){.tk-alert{grid-template-columns:auto 1fr}.tk-alert .tk-alert-act{grid-column:2}}
 

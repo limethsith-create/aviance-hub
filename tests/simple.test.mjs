@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NOW, acme, bright, fullHub, simpleRows, simpleHub, stagesWith, onboardCall, ecreekDetail, fernDetail, detail, inquirySummaryOf, inquiryRecords, calWeek, calSettingsFixture, CAL_NOW } from './fixtures.mjs';
+import { NOW, acme, bright, fullHub, simpleRows, simpleHub, stagesWith, onboardCall, ecreekDetail, ecreekConvDetail, fernDetail, detail, inquirySummaryOf, inquiryRecords, calWeek, calSettingsFixture, CAL_NOW } from './fixtures.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -44,7 +44,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 /* ───────────── load the shell, then the section scripts ───────────── */
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
-const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'push.js'];
+const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'push.js'];
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 for (const f of FILES) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
@@ -185,9 +185,9 @@ test('three questions: every trial page asks the same three, in the same order, 
 test('the one big button, for each situation (and the order when several apply)', () => {
   // a new application → read it and say yes or no (scrolls to it)
   assert.deepEqual(buttons(top(fernDetail)), [['Read the application and say yes or no', 'tkGoTo(&quot;application&quot;)']]);
-  // they wrote and are waiting for his reply → answer it (the reply box)
-  assert.deepEqual(buttons(top(sit((d) => { d.onboardCall.needsReply = true; }))), [['Answer their reply', 'tkFocusReply()']]);
-  assert.deepEqual(buttons(top(sit((d) => { d.row.todo = [{ id: 'onboard-reply:ecreek-it', text: 'Answer Sam', urgent: true, action: { type: 'view', view: 'detail' } }]; }))), [['Answer their reply', 'tkFocusReply()']], 'or the machine\'s to-do says so');
+  // they wrote and are waiting for his reply → answer it (the reply box under Messages)
+  assert.deepEqual(buttons(top(sit((d) => { d.onboardCall.needsReply = true; }))), [["Answer Sam's message", 'tkFocusReply()']]);
+  assert.deepEqual(buttons(top(sit((d) => { d.row.todo = [{ id: 'onboard-reply:ecreek-it', text: 'Answer Sam', urgent: true, action: { type: 'view', view: 'detail' } }]; }))), [["Answer Sam's message", 'tkFocusReply()']], 'or the machine\'s to-do says so');
   // they asked for a call time → say yes to it (from the Calendar's own list, or the machine's to-do alone)
   cal.reqs = calRequestsOf(calWeek); cal.settings = calSettingsFixture;
   assert.deepEqual(buttons(top(sit(() => {}))), [['Say yes to their call time', 'openCalendar(&quot;mreq1&quot;)']]);
@@ -248,7 +248,7 @@ test('the big buttons do what they say: scroll to the application, into the repl
     el('tkSec-application')._scrolled = 0; tkGoTo('application'); assert.equal(el('tkSec-application')._scrolled, 1, 'the application scrolls into view');
     el('tkBehind')._scrolled = 0; tkGoTo('behind'); assert.equal(el('tkBehind')._scrolled, 1, 'behind the scenes too');
     tk.detail['ecreek-it'] = clone(ecreekDetail); tk.detailAt['ecreek-it'] = Date.now(); openTrial('ecreek-it'); await tick();
-    el('tkOcReply')._focused = 0; tkFocusReply(); assert.equal(el('tkOcReply')._focused, 1, 'the cursor goes into the reply box');
+    el('tkMsgReply')._focused = 0; tkFocusReply(); assert.equal(el('tkMsgReply')._focused, 1, 'the cursor goes into the reply box under Messages');
     asked = null; await trialOcTopHeld('ecreek-it');
     assert.equal(asked, 'Mark the call with Sam Test as done?'); assert.deepEqual(calls.filter((c) => c[1].endsWith('/onboard-call')).pop()[2], { action: 'markHeld' });
     const posts = () => calls.filter((c) => c[1].endsWith('/onboard-call')).length;
@@ -320,7 +320,7 @@ test('buttons say exactly what happens', () => {
   const app = renderTrialDetail(fernDetail, 'overview', { now: NOW });
   assert.ok(app.includes('>Say yes and email them</button>') && app.includes('>Say no…</button>'));
   assert.ok(renderDeclineModal(fernDetail).includes('>Say no and email them</button>'));
-  assert.ok(renderOnboardCall(onboardCall, simpleRows.ecreek).includes('>Send to Sam</button>'));
+  assert.ok(renderMessages(ecreekConvDetail).includes('>Send to Sam</button>') && renderMessages(ecreekConvDetail).includes('Reply bot for Sam: <b>On</b>'));
   cal.settings = calSettingsFixture;
   assert.ok(renderCalRequest(calWeek.requests[1], calSettings(calSettingsFixture), { now: CAL_NOW }).includes('>Say yes and email them</button>'));
   assert.ok(renderInquiry(clone(inquiryRecords[0]), { now: NOW }).includes('>Start a free trial and email them</button>'));
@@ -329,13 +329,13 @@ test('buttons say exactly what happens', () => {
 });
 
 /* ───────────── 7. Settings: everything else, as named sections ───────────── */
-test('Settings: Alerts, Phone alerts, Is everything running?, Behind the scenes, Advanced, Light or dark, Your account — each folds open, each says its state in one word', () => {
+test('Settings: Alerts, Phone alerts, Google Meet, Reply bot, Is everything running?, Behind the scenes, Advanced, Light or dark, Your account — each folds open, each says its state in one word', () => {
   const ctx = { hub: fullHub, at: Date.now(), alerts: fullHub.alerts, alertsAt: Date.now(), filter: 'open', open: {}, phone: '', dark: false, email: 'owner@example.com', now: NOW };
   const out = renderSettings(ctx);
-  assert.deepEqual([...out.matchAll(/<span class="tk-set-title">([^<]+)<\/span>/g)].map((m) => m[1]), ['Alerts', 'Phone alerts', 'Is everything running?', 'Behind the scenes', 'Advanced', 'Light or dark', 'Your account']);
-  assert.equal(count(out, /<details class="tk-set" id="tkSet-[a-z]+" ontoggle=/g), 7, 'all folded to begin with');
+  assert.deepEqual([...out.matchAll(/<span class="tk-set-title">([^<]+)<\/span>/g)].map((m) => m[1]), ['Alerts', 'Phone alerts', 'Google Meet', 'Reply bot', 'Is everything running?', 'Behind the scenes', 'Advanced', 'Light or dark', 'Your account']);
+  assert.equal(count(out, /<details class="tk-set" id="tkSet-[a-z]+" ontoggle=/g), 9, 'all folded to begin with');
   assert.ok(between(out, 'tkSet-alerts', 'tkSet-phone').includes('<span class="pill amber">2 not seen</span>'));
-  assert.ok(between(out, 'tkSet-phone', 'tkSet-status').includes('<span class="pill grey">Off</span>') && renderSettings(Object.assign({}, ctx, { phone: 'On' })).includes('<span class="pill green">On</span>'));
+  assert.ok(between(out, 'tkSet-phone', 'tkSet-google').includes('<span class="pill grey">Off</span>') && between(renderSettings(Object.assign({}, ctx, { phone: 'On' })), 'tkSet-phone', 'tkSet-google').includes('<span class="pill green">On</span>'));
   assert.ok(between(out, 'tkSet-status', 'tkSet-behind').includes('<span class="pill green">Yes</span>'));
   // Alerts (the old alerts page): not seen first, "Mark as seen", no system keys
   const al = renderSettings(Object.assign({}, ctx, { open: { alerts: true } }));

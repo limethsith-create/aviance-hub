@@ -4,7 +4,8 @@
    The hub's window onto the Aviance Trial Machine (email-distributor). The
    machine does all the work; this file only shows and steers it through the
    contract in email-distributor/docs/HUB-API.md (incl. "v2 additions") and
-   docs/ONBOARD-CALL.md (row.simple on the board, onboardCall on a trial).
+   docs/ONBOARD-CALL.md (row.simple on the board, onboardCall on a trial) and docs/REPLYBOT-MEET.md
+   (`conversation` on a trial — drawn by messages.js as the Messages section).
 
    Loaded by index.html after the shell script, so it can use the shell's globals:
      esc, emptyState, toast, openModal, closeModal, render, renderNav,
@@ -19,7 +20,8 @@
      4. charts: data models + hand-rolled SVG           — pure, tested
      5. pure renderers (data → HTML string)              — what the tests call
         (the Trials list with the one journey, a trial's three questions and its
-        one big button (tkPrimaryAction), the onboarding call card, Settings, and
+        one big button (tkPrimaryAction), the onboarding call card, Settings (Google Meet and the
+        reply bot come from messages.js), and
         the old board, which now lives in Settings › Behind the scenes)
      6. views the shell router calls (viewTrials, viewTrial, viewSettings, viewTrialsBoard …)
      7. actions wired to buttons
@@ -45,7 +47,7 @@ const TK_TABS=[['overview','Overview'],['growth','Growth'],['systems','Parts'],[
 const TK_TAB_ALIAS={numbers:'overview',setup:'deliverability',promises:'comingup',upcoming:'comingup',reports:'comingup'};
 const TK_TRIAL_VIEWS=['trials','trialsBoard','trial','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
 /* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
-const TK_SETTINGS=['alerts','phone','status','behind','advanced','look','account'];
+const TK_SETTINGS=['alerts','phone','google','replybot','status','behind','advanced','look','account'];
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
@@ -63,7 +65,6 @@ const TK_STEPS=['Applied','Onboarding call','Setting up','Sending emails','Done'
 const TK_STEP_OF={new:1,queued:1,accepted:2,call_booked:2,setting_up:3,warming_up:3,sending:4,finished:5};
 /* "You need to answer Sam…" reads right when the machine's sentence starts with one of these verbs. */
 const TK_VERBS=['add','answer','approve','book','buy','call','check','choose','confirm','decide','decline','email','fill','give','look','mark','open','paste','pick','read','reply','review','say','see','send','tell','write'];
-const TK_OC_MAX=2000;                 // a reply to the applicant: plain text, 2 000 characters at most
 
 /* Last good answers live here so navigating back is instant. */
 const tk={hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},
@@ -519,17 +520,44 @@ function tkStepFromState(st){
 function tkFirstName(s){s=String(s==null?'':s).trim();return s?s.split(/\s+/)[0]:''}
 function tkTodosSorted(row){return ((row&&row.todo)||[]).filter(t=>t&&typeof t==='object').slice().sort((a,b)=>(b.urgent?1:0)-(a.urgent?1:0))}
 function tkFallbackNext(row){const t=tkTodosSorted(row)[0];if(t&&t.text)return String(t.text);const n=row.nextUp;return n&&n.what?(n.date?tkDate(n.date)+': ':'')+n.what:''}
+/* The conversation with a client (email-distributor docs/REPLYBOT-MEET.md §1): `conversation` on the trial
+   detail — every email between them and us. An older system without it: the onboarding call's thread.
+   → {thread, needsReply, canReply, bot, fromInbox, legacy}. messages.js draws it as the Messages section. */
+function tkConv(d){
+  d=d||{};const c=d.conversation&&typeof d.conversation==='object'?d.conversation:null;
+  const oc=d.onboardCall&&typeof d.onboardCall==='object'?d.onboardCall:null;
+  if(c)return {thread:Array.isArray(c.thread)?c.thread:[],needsReply:tkTruthy(c.needsReply),canReply:c.canReply==null?true:tkTruthy(c.canReply),bot:c.bot&&typeof c.bot==='object'?c.bot:null,fromInbox:String(c.fromInbox||''),legacy:false};
+  const st=String((oc&&oc.status)||'').toLowerCase();
+  return {thread:oc&&Array.isArray(oc.thread)?oc.thread:[],needsReply:oc?(oc.needsReply!=null?tkTruthy(oc.needsReply):st==='replied'):false,canReply:true,bot:null,fromInbox:String((oc&&oc.fromInbox)||''),legacy:true};
+}
+/* "They wrote and nobody (you or the reply bot) has answered yet." A trial page knows it from the conversation;
+   the Trials list only has the row: row.simple.needsReply when the system sends it, else its "answer them" to-do. */
+function tkRowNeedsReply(row){
+  row=row||{};const s=row.simple&&typeof row.simple==='object'?row.simple:null;
+  if(s&&s.needsReply!=null)return tkTruthy(s.needsReply);
+  if(row.needsReply!=null)return tkTruthy(row.needsReply);
+  return (row.todo||[]).some(t=>t&&String(t.id||'').indexOf('onboard-reply:')===0);
+}
+function tkNeedsReply(d){d=d||{};const c=tkConv(d);return c.legacy?(c.needsReply||tkRowNeedsReply(d.row)):c.needsReply}
+/* tkSimple for the top of a trial page. The conversation there is fresher than the list's row: a row that still
+   says "they wrote" when the conversation says answered (he just replied, or the reply bot did; the list catches
+   up a moment later) asks for nothing — anything else still waiting has its own button (tkPrimaryAction). */
+function tkPageSimple(d){
+  d=d||{};const s=tkSimple(d.row||{});const c=tkConv(d);
+  return !c.legacy&&!c.needsReply&&s.needsReply?Object.assign({},s,{needsReply:false,needsYou:false,next:''}):s;
+}
 /* Everything the simple screens show about one row — row.simple when the machine sends it, else a fallback. */
 function tkSimple(row){
   row=row||{};const s=row.simple&&typeof row.simple==='object'?row.simple:null;
   const step=s&&s.step?String(s.step):tkStepFromState(row.state);
+  const needsReply=tkRowNeedsReply(row);
   return {
-    has:!!s,step,
+    has:!!s,step,needsReply,
     company:String((s&&s.company)||row.name||row.id||'—'),
     person:String((s&&s.person)||row.contactName||''),
     label:String((s&&s.label)||tkStateLabel(row)),
     next:s?String(s.next||''):tkFallbackNext(row),
-    needsYou:s?tkTruthy(s.needsYou):(tkIsUnderReview(row)||(row.todo||[]).some(t=>t&&t.urgent)),
+    needsYou:needsReply||(s?tkTruthy(s.needsYou):(tkIsUnderReview(row)||(row.todo||[]).some(t=>t&&t.urgent))),
     since:s?s.since||null:null,
     day:s?tkNorm(s.dayOf30):tkNorm(row.trialDay),   // the machine's dayOf30 when it sends row.simple (only while sending)
     done:step==='finished'||step==='declined'||(!s&&TK_DONE_STATES.includes(row.state)),
@@ -591,7 +619,8 @@ function renderTrialRow(x){
   const go=review?`openTrial(${tkAttr(r.id)},null,'application')`:`openTrial(${tkAttr(r.id)})`;
   const firstTodo=(tkTodosSorted(r)[0]||{}).text;
   const next=/^nothing\b/i.test(s.next)?'':s.next;   // "Nothing for you: …" never becomes "You need to…"
-  const you=s.needsYou?(tkYouNeedTo(next||firstTodo)||'Something here needs you. Open it to see what.'):'';
+  // they wrote and nobody has answered: that is the red line, whatever else is waiting (the reply box is on their page)
+  const you=s.needsReply?(tkFirstName(s.person)||'They')+' wrote — answer them':s.needsYou?(tkYouNeedTo(next||firstTodo)||'Something here needs you. Open it to see what.'):'';
   const say=j.notTaken&&/^declined\.?$/i.test(s.label.trim())?'':s.label;
   const step=j.notTaken?'':tkStepText(j,s.label);
   const row=`<button type="button" class="tk-person${s.needsYou?' needs':''}${s.done?' done':''}" onclick="${go}"><span class="tk-person-main">
@@ -635,11 +664,11 @@ function tkTodoPrimary(t,id){
   return {label:a.label||({mc:'Open the full control panel',link:'Open the link'}[a.type])||'Do it now',run:`trialsTodoAction(${tkAttr(tid)})`};
 }
 /* The single most important thing the owner can do on this trial, in this order:
-   a new application → a call time they asked for → their reply → a call to mark done → a late booking →
+   a new application → a call time they asked for → their message ("Answer Sam's message") → a call to mark done → a late booking →
    buying the domain and inboxes → anything else on the to-do list → nothing.
    → {kind, label (the button, or the "nothing" sentence), say (one sentence above it), run, todoId}. */
 function tkPrimaryAction(d,meta){
-  d=d||{};meta=meta||{};const row=d.row||{};const id=row.id;const s=tkSimple(row);
+  d=d||{};meta=meta||{};const row=d.row||{};const id=row.id;const s=tkPageSimple(d);
   const oc=d.onboardCall&&typeof d.onboardCall==='object'?d.onboardCall:null;const now=meta.now?new Date(meta.now):new Date();
   const todos=tkTodosSorted(row);const todo=p=>todos.find(t=>String(t.id||'').indexOf(p)===0)||null;
   const who=tkFirstName(s.person);const first=who||'They';
@@ -653,8 +682,8 @@ function tkPrimaryAction(d,meta){
   if(req||mreq){const at=req?req.start:oc&&oc.requestedFor;const w=at&&typeof calWhen==='function'&&typeof calSettingsNow==='function'?calWhen(at,calSettingsNow(),req?req.theirZone:oc&&oc.theirZone):null;
     return A('calendar','Say yes to their call time',first+' asked for a call on '+(w?w.big+' (your time)':'a time you can see in the Calendar')+'. Say yes, or suggest another time.',mid!=null?`openCalendar(${tkAttr(mid)})`:"render('calendar')",mreq);}
   const st=String((oc&&oc.status)||'').toLowerCase();const booked=!!(oc&&tkOcIsBooked(oc));
-  const owesReply=oc?(oc.needsReply!=null?tkTruthy(oc.needsReply):st==='replied'):false;
-  if(oc&&(owesReply||todo('onboard-reply:')))return A('reply','Answer their reply',say(first+' wrote to you about the call. Write back in the box below.'),'tkFocusReply()',todo('onboard-reply:'));
+  // their message waits for an answer (conversation.needsReply) — the hub's own words: the box lives under Messages
+  if(tkNeedsReply(d))return A('reply',who?'Answer '+who+"'s message":'Answer their message',first+' wrote to you. Read it under Messages below and write back there.','tkFocusReply()',todo('onboard-reply:'));
   const when=oc&&tkParseDate(oc.bookedFor);
   if(oc&&(todo('onboard-mark:')||(booked&&when&&when<now)))return A('markHeld','Mark the call done',"The call was set for "+(when?tkDateTime(when):'earlier')+". If it happened, mark it done. If they didn't show, say so in the call box below.",`trialOcTopHeld(${tkAttr(id)})`,todo('onboard-mark:'));
   if(oc&&!booked&&(todo('onboard-overdue:')||tkTruthy(oc.overdue)||st==='overdue'))return A('nudge','Write to them about booking',say((who?who+" hasn't":"They haven't")+" booked the call yet, and it's late. Send a short note in the box below."),'tkFocusReply()',todo('onboard-overdue:'));
@@ -680,7 +709,8 @@ function renderPrimary(act){
   return `${act.say?`<p class="tk-q-say">${esc(act.say)}</p>`:''}<button type="button" class="btn tk-primary" onclick="${act.run}">${esc(act.label)}</button>`;
 }
 function renderTrialTop(d,meta,act){
-  d=d||{};meta=meta||{};const row=d.row||{};const s=tkSimple(row);const j=tkStep(row);act=act||tkPrimaryAction(d,meta);
+  d=d||{};meta=meta||{};const row=d.row||{};const j=tkStep(row);act=act||tkPrimaryAction(d,meta);
+  let s=tkPageSimple(d);if(act.kind==='reply'&&!s.needsYou)s=Object.assign({},s,{needsYou:true});   // they wrote: his turn, even if the list has not caught up yet
   const who=[s.person?`<b>${esc(s.person)}</b>`:'',row.contactEmail?`<a href="mailto:${esc(row.contactEmail)}">${esc(row.contactEmail)}</a>`:'',row.website?tkLink(row.website):''].filter(Boolean).join(' · ');
   const say=j.notTaken&&/^declined\.?$/i.test(s.label.trim())?'':s.label;const day=tkDayText(j,s.label);
   return `<section class="card tk-top${s.needsYou&&act.kind!=='none'?' needs':''}" id="tkTop">
@@ -710,22 +740,12 @@ function renderBehind(d,tab,meta){
 
 /* -- onboarding call (email-distributor docs/ONBOARD-CALL.md) --
    Approve sends one email asking the applicant to book the onboarding call. This card follows it:
-   the five steps with times, "Book by", the whole conversation (oldest first, theirs and ours look
-   different, plain text with its line breaks), a reply box and the owner's buttons. */
+   the five steps with times, "Book by" and the owner's buttons. The emails themselves (and the reply box)
+   live in one place only: Messages, right under the three questions ("See the messages"). */
 function tkOcIsBooked(oc){const st=String((oc&&oc.status)||'').toLowerCase();return st==='booked'||(!!(oc&&oc.bookedFor)&&!['held','no_show'].includes(st))}
 function tkThreadSorted(thread){
   const ms=m=>{const d=tkParseDate(m.at);return d?d.getTime():0};
   return (Array.isArray(thread)?thread:[]).filter(m=>m&&typeof m==='object').map((m,i)=>({m,i})).sort((a,b)=>ms(a.m)-ms(b.m)||a.i-b.i).map(x=>x.m);
-}
-function tkMsgWho(m,first){
-  const k=String(m.kind||'').toLowerCase();
-  if(String(m.dir)==='in')return k==='booking'?'Calendar booking':(first?first+' wrote':'They wrote');
-  return {acceptance:'Acceptance email — sent automatically',reminder:'Reminder — sent automatically'}[k]||'You wrote';
-}
-function renderThread(thread,first){
-  const list=tkThreadSorted(thread);
-  if(!list.length)return '<div class="tk-oc-empty">No emails yet.</div>';
-  return `<div class="tk-thread">${list.map(m=>{const inb=String(m.dir)==='in';return `<div class="tk-msg ${inb?'in':'out'}"><div class="tk-msg-head"><b>${esc(tkMsgWho(m,first))}</b><span class="tk-msg-at" title="${esc(tkFull(m.at))}">${esc(tkDateTime(m.at))}</span></div>${m.subject?`<div class="tk-msg-subj">${esc(m.subject)}</div>`:''}<div class="tk-msg-text">${esc(m.text||'')}</div></div>`}).join('')}</div>`;
 }
 function renderOnboardCall(oc,row,meta){
   if(!oc||typeof oc!=='object')return '';
@@ -754,12 +774,7 @@ function renderOnboardCall(oc,row,meta){
     ${oc.label?`<p class="tk-oc-say">${esc(oc.label)}</p>`:''}
     ${when}${due}${stepsHtml}
     ${facts?`<p class="tk-oc-facts">${facts}</p>`:''}
-    <h4>Emails with ${esc(first||'them')}</h4>
-    ${renderThread(oc.thread,first)}
-    <div class="tk-oc-reply"><label for="tkOcReply">Write back${first?' to '+esc(first):''}</label>
-      <textarea id="tkOcReply" data-tk-form maxlength="${TK_OC_MAX}" rows="4" placeholder="Type your reply. Plain text, no formatting." oninput="tkOcCount(this)"></textarea>
-      <div class="tk-oc-reply-foot"><span id="tkOcCount" class="tk-oc-count">0 / ${TK_OC_MAX}</span><button class="btn" onclick="trialOcReply(${tkAttr(id)})">Send to ${esc(first||'them')}</button></div>
-    </div>
+    <p class="tk-oc-msgs">Your emails with ${esc(first||'them')} are under Messages. <button type="button" class="tk-textbtn" onclick="tkGoTo(${tkAttr('messages')})">See the messages</button></p>
     ${book||acts.length?`<h4>Update the call</h4>${book}${acts.length?`<div class="tk-oc-acts">${acts.join('')}</div>`:''}`:''}
   </section>`;
 }
@@ -1085,15 +1100,17 @@ function renderTab(d,tab,ctx){
     default:return renderOverviewTab(d,ctx);
   }
 }
-/* One trial: the three questions, then the onboarding call, the application, anything else on the
-   to-do list (never the one already asked for at the top, never the call's or the application's own —
-   those have their own place), then everything technical collapsed under "Behind the scenes". */
+/* One trial: the three questions, then Messages (messages.js: the whole conversation, the reply box and the
+   reply-bot switch), the onboarding call, the application, anything else on the to-do list (never the one
+   already asked for at the top, never the call's or the application's own — those have their own place),
+   then everything technical collapsed under "Behind the scenes". */
 function renderTrialDetail(d,tab,meta){
   d=d||{};meta=meta||{};tab=tkTabKey(tab);tab=tkTabsFor(d).some(t=>t[0]===tab)?tab:'overview';
   const row=d.row||{};const act=tkPrimaryAction(d,meta);
   const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application');};
   const todos=tkTodosSorted(row).filter(t=>!mine(t));
   return renderTrialTop(d,meta,act)+
+    (typeof renderMessages==='function'?`<div id="tkMsgHost">${renderMessages(d,meta)}</div>`:'')+
     (act.kind!=='calendar'&&typeof calTrialAsk==='function'?calTrialAsk(row.id):'')+   // calendar.js: a call time waiting for the owner's yes
     (d.onboardCall&&typeof d.onboardCall==='object'?`<div id="tkOcHost">${renderOnboardCall(d.onboardCall,row,meta)}</div>`:'')+
     renderApplicationBlock(d,meta)+
@@ -1363,7 +1380,8 @@ function renderAlerts(alerts,filter,meta){
 /* -- Settings: everything that is not Trials, Calendar or Inquiries, as named sections --
    Each is a <details> with its name and a one-word state in the summary, so the page reads as a short
    list. ctx = {hub, hubErr, at, alerts, alertsErr, alertsAt, filter, open:{alerts:true…}, phone:'On'|'',
-   dark, email, now}. Pure: the host (trialsHostHTML) reads the DOM and caches. */
+   dark, email, now, google (messages.js googleSettingsCtx), details}. Pure: the host (trialsHostHTML) reads
+   the DOM and caches. Google Meet and Reply bot are drawn by messages.js (left out if it is not loaded). */
 function renderSettings(ctx){
   ctx=ctx||{};const open=ctx.open||{};const hub=ctx.hub||null;const machine=(hub&&hub.machine)||{};
   const alerts=Array.isArray(ctx.alerts)?ctx.alerts:null;
@@ -1373,10 +1391,14 @@ function renderSettings(ctx){
   const sec=(key,title,sub,state,body)=>`<details class="tk-set" id="${esc('tkSet-'+key)}"${open[key]?' open':''} ontoggle="trialsSettingsToggle(${tkAttr(key)},this.open)"><summary><span class="tk-set-head"><span class="tk-set-title">${esc(title)}</span><span class="tk-set-sub">${esc(sub)}</span></span>${state||''}</summary><div class="tk-set-body">${body}</div></details>`;
   const alertsBody=alerts?renderAlerts(alerts,ctx.filter,{at:ctx.alertsAt,now:ctx.now}):ctx.alertsErr?`<p class="tk-note red">${esc(ctx.alertsErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Loading your alerts…');
   const statusBody=hub?renderSystemStatus(machine,{at:ctx.at,now:ctx.now}):ctx.hubErr?`<p class="tk-note red">${esc(ctx.hubErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Checking…');
+  const gm=typeof renderGoogleMeetSet==='function'?renderGoogleMeetSet(ctx.google||{}):null;
+  const rb=typeof renderReplyBotSet==='function'?renderReplyBotSet({hub,details:ctx.details}):null;
   return `<div class="tk-sets">`+
     sec('alerts','Alerts','Messages from the system about your trials.',unseen==null?'':unseen?`<span class="pill amber">${tkNum(unseen)} not seen</span>`:'<span class="pill green">All seen</span>',alertsBody)+
     sec('phone','Phone alerts','Get a message on your phone when something needs you.',ctx.phone==='On'?'<span class="pill green">On</span>':'<span class="pill grey">Off</span>',
       `<p class="tk-set-text">${ctx.phone==='On'?'Phone alerts are on for this device.':'Phone alerts are off on this device.'} On an iPhone, add the hub to your Home Screen first; the setup shows you how.</p><button type="button" class="btn" onclick="openPhoneAlerts()">Set up phone alerts</button>`)+
+    (gm?sec('google','Google Meet','A Google Meet link for every call you say yes to.',gm.state,gm.body):'')+
+    (rb?sec('replybot','Reply bot','Answers the simple questions for you, with fixed answers.',rb.state,rb.body):'')+
     sec('status','Is everything running?','A quick health check of the system.',st?`<span class="pill ${st[0]}">${st[0]==='green'?'Yes':st[0]==='amber'?'Mostly':'Needs a look'}</span>`:'',statusBody)+
     sec('behind','Behind the scenes','Every trial by stage, every to-do and the waiting list.','',
       `<p class="tk-set-text">The full picture: every trial by stage, every to-do in one list, the waiting list and your own sending.</p><button type="button" class="btn" onclick="render('trialsBoard')">Open behind the scenes</button>`)+
@@ -1422,6 +1444,7 @@ function trialsRepaint(view,opts){
   if(view==='inquiry')inquiryTitle();
   if(view==='trial'&&currentTrialId&&tk.detail[currentTrialId])trialsTitle();
   try{renderNav();updateNotifBadge();}catch(e){}
+  if(view==='trial'&&typeof msgScrollDown==='function')msgScrollDown();   // Messages: the newest email in view
   trialsApplyScroll();
 }
 /* Repaint only the open tab (after a growth/sparkline answer) — leaves the rest of the page alone. */
@@ -1443,7 +1466,7 @@ async function trialsKick(view,force){
   if(view==='trials'||view==='trialsBoard')r=await loadHub(force);
   else if(view==='trial')r=await loadTrial(currentTrialId,force);
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
-  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force)]);r=h&&h.ok===false?h:a;}
+  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null]);r=h&&h.ok===false?h:a;}   // Google: its own 5-minute cache, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
   trialsRepaint(view,{soft:true});
   return r;
@@ -1459,7 +1482,8 @@ function viewSettings(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKi
 function trialsSettingsCtx(){
   let dark=false;try{dark=!!(document.body&&document.body.classList&&document.body.classList.contains('dark'));}catch(e){dark=false;}
   return {hub:tk.hub,hubErr:tk.hubErr,at:tk.hubAt,alerts:tk.alerts,alertsErr:tk.alertsErr,alertsAt:tk.alertsAt,filter:trialsAlertFilter,open:tk.setOpen,
-    phone:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():'',dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:''};
+    phone:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():'',dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:'',
+    google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,details:tk.detail};
 }
 /* #alerts and the bell open Settings with that section open and in view. */
 function openSettings(section){
@@ -1513,10 +1537,11 @@ async function trialsSparkBoot(){
 
 /* ===================== 7. ACTIONS ===================== */
 function openTrial(id,tab,section){if(!id)return;id=String(id);if(id!==currentTrialId&&!tab){trialTab='overview';tk.behindOpen=false;}currentTrialId=id;if(tab){trialTab=tkTabKey(tab);tk.behindOpen=true;}if(section)tk.scrollTo=String(section);render('trial')}
-/* The big button's helpers: scroll to a part of the trial page (opening it if it is folded), or into the reply box. */
+/* The big button's helpers: scroll to a part of the trial page (opening it if it is folded), or into the reply box
+   under Messages (messages.js). No box (no inbox to send from yet): Messages itself, which says why. */
 function tkGoTo(section){tk.scrollTo=String(section||'');trialsApplyScroll();}
 function tkFocusReply(){
-  const t=document.getElementById('tkOcReply');if(!t){toast('The reply box is in the onboarding call section below');return;}
+  const t=document.getElementById('tkMsgReply');if(!t){tkGoTo('messages');return;}
   if(t.scrollIntoView)try{t.scrollIntoView({block:'center'});}catch(e){t.scrollIntoView();}
   try{t.focus();}catch(e){}
 }
@@ -1608,18 +1633,15 @@ async function submitDeclineApplication(id){
 function trialResearchAgain(id){
   return trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/intake',{action:'rerunResearch'},{done:data=>{const st=String((data.result&&data.result.status)||'').toLowerCase();return st==='done'?'Research finished':st==='failed'?'Research could not finish — see the note':'Research started — it carries on in the background; refresh in a minute';},fail:'Research did not start'});
 }
-/* -- onboarding call: the owner's reply and buttons (docs/ONBOARD-CALL.md §4–5) --
+/* -- onboarding call: the owner's buttons (docs/ONBOARD-CALL.md §4–5; replies go through Messages, messages.js) --
    POST /api/mc/clients/{id}/onboard-call → {ok, onboardCall}. The card is redrawn from the answer at
    once; the rest of the page (and the list's plain sentence) refreshes quietly behind it. */
 function tkOcPath(id){return '/api/mc/clients/'+encodeURIComponent(id)+'/onboard-call'}
 function tkOcName(id){const r=(tk.detail[id]&&tk.detail[id].row)||tkFindRow(id)||{};const s=tkSimple(r);return s.person||s.company||String(id||'')}
-function tkOcCount(el){const c=document.getElementById('tkOcCount');const n=String((el&&el.value)||'').length;if(c){c.textContent=n+' / '+TK_OC_MAX;c.classList.toggle('over',n>TK_OC_MAX);}}
-function tkOcRepaint(id,keepDraft){
+function tkOcRepaint(id){
   if(currentView!=='trial'||currentTrialId!==id)return;
   const host=document.getElementById('tkOcHost');const d=tk.detail[id];if(!host||!d)return;
-  const ta=document.getElementById('tkOcReply');const draft=keepDraft&&ta?String(ta.value||''):'';
   host.innerHTML=renderOnboardCall(d.onboardCall,d.row,{now:new Date()});
-  if(draft){const t2=document.getElementById('tkOcReply');if(t2){t2.value=draft;tkOcCount(t2);}}
 }
 async function trialOcPost(id,body,opts){
   opts=opts||{};
@@ -1627,21 +1649,15 @@ async function trialOcPost(id,body,opts){
   if(r&&r.ok){
     const oc=r.data&&r.data.onboardCall;
     if(oc&&typeof oc==='object'&&tk.detail[id])tk.detail[id]=Object.assign({},tk.detail[id],{onboardCall:oc});
-    tkOcRepaint(id,opts.keepDraft);
+    tkOcRepaint(id);
     Promise.all([loadTrial(id,true),loadHub(true)]).then(()=>{trialsRepaint('trial',{soft:true});try{renderNav();updateNotifBadge();}catch(e){}});
   }
   return r;
 }
-function trialOcReply(id){
-  const t=document.getElementById('tkOcReply');const text=String((t&&t.value)||'').trim();
-  if(!text){toast('Write your reply first');return Promise.resolve({ok:false});}
-  if(text.length>TK_OC_MAX){toast('That is too long — '+TK_OC_MAX+' characters at most (yours is '+text.length+')');return Promise.resolve({ok:false});}
-  return trialOcPost(id,{action:'reply',text},{done:'Reply sent to '+tkOcName(id),fail:'Reply not sent'});
-}
 function trialOcMarkBooked(id){
   const i=document.getElementById('tkOcWhen');const v=String((i&&i.value)||'').trim();const d=v?new Date(v):null;
   if(!d||isNaN(d)){toast('Pick the date and time of the call first');return Promise.resolve({ok:false});}
-  return trialOcPost(id,{action:'markBooked',when:d.toISOString()},{done:'Call marked as booked for '+tkDateTime(d),keepDraft:true});
+  return trialOcPost(id,{action:'markBooked',when:d.toISOString()},{done:'Call marked as booked for '+tkDateTime(d)});
 }
 const TK_OC_ACTIONS={
   markHeld:{done:'Marked: the call happened'},
@@ -1650,10 +1666,10 @@ const TK_OC_ACTIONS={
   stopReminders:{confirm:n=>'Stop the reminder emails to '+n+'?',done:'Reminders stopped'},
 };
 /* "Mark the call done" from the top of the page: one tap, so it asks first. */
-function trialOcTopHeld(id){return trialOcPost(id,{action:'markHeld'},{confirm:'Mark the call with '+tkOcName(id)+' as done?',done:TK_OC_ACTIONS.markHeld.done,keepDraft:true})}
+function trialOcTopHeld(id){return trialOcPost(id,{action:'markHeld'},{confirm:'Mark the call with '+tkOcName(id)+' as done?',done:TK_OC_ACTIONS.markHeld.done})}
 function trialOcAction(id,action){
   const a=TK_OC_ACTIONS[action];if(!a)return Promise.resolve({ok:false});
-  return trialOcPost(id,{action},{confirm:a.confirm?a.confirm(tkOcName(id)):'',done:a.done,keepDraft:true});
+  return trialOcPost(id,{action},{confirm:a.confirm?a.confirm(tkOcName(id)):'',done:a.done});
 }
 /* Opening the Trials list or a trial asks the machine to look for replies and bookings now (it throttles
    this itself). Fire-and-forget: errors are ignored; if something new came in, the screen refreshes. */
@@ -1786,6 +1802,8 @@ function trialsCmdkActions(){
     {type:'Go to',label:'Alerts',icon:I.bell||'',sub:'Settings › Alerts',kw:'alerts messages machine',run:()=>{closeCmdk();openSettings('alerts');}},
     {type:'Go to',label:'Behind the scenes',icon:I.chart||'',sub:'Every trial by stage, every to-do',kw:'behind the scenes board stages queue waiting list',run:()=>{closeCmdk();render('trialsBoard');}},
     {type:'Go to',label:'Is everything running?',icon:I.check||'',sub:'Settings › a quick health check',kw:'status health running machine heartbeat usage',run:()=>{closeCmdk();openSettings('status');}},
+    {type:'Go to',label:'Google Meet',icon:I.calendar||'',sub:'Settings › a Meet link for every call',kw:'google meet video call link connect calendar',run:()=>{closeCmdk();openSettings('google');}},
+    {type:'Go to',label:'Reply bot',icon:I.inquiry||'',sub:'Settings › what it answers for you',kw:'reply bot auto-reply automatic answers',run:()=>{closeCmdk();openSettings('replybot');}},
   ];
 }
 function trialsCmdkEntities(){
@@ -1796,7 +1814,7 @@ function trialsCmdkEntities(){
 /* Called by the shell's render(): explicit navigation — the only place growth fetches start. */
 function trialsOnRender(v){
   if(TK_TRIAL_VIEWS.includes(v))trialsStartTimer();else trialsStopTimer();
-  if(v==='trial'){trialsTitle();trialsApplyScroll();trialsEnsureTab();}
+  if(v==='trial'){trialsTitle();if(typeof msgScrollDown==='function')msgScrollDown();trialsApplyScroll();trialsEnsureTab();}
   if(v==='settings')trialsSettingsScroll();
   if(v==='trialsBoard')trialsSparkBoot();
 }
@@ -1806,6 +1824,7 @@ function trialsForget(){
   Object.assign(tk,{hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{}});
   currentTrialId=null;trialTab='overview';tk.behindOpen=false;tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;
   try{inquiriesForget();}catch(e){}
+  try{messagesForget();}catch(e){}
   try{localStorage.removeItem(TK_SPARK_KEY);}catch(e){}
 }
 function trialsStartTimer(){if(tk.timer)return;tk.timer=setInterval(trialsTick,TK_REFRESH_MS);}

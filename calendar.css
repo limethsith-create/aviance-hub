@@ -116,6 +116,15 @@
 .cal-when-small{font-size:var(--fs-small);color:var(--muted);line-height:1.6;margin:4px 0 16px}
 .tk-kv.cal-kv{grid-template-columns:130px 1fr;font-size:var(--fs-base)}
 .cal-trial-link{margin-left:6px}
+/* Google Meet: a big "Join Google Meet" button in the panel (or "No Meet link yet" + why); a small camera on the call */
+.btn.cal-meet{display:flex;width:100%;justify-content:center;gap:10px;min-height:52px;margin:2px 0 6px;font-size:var(--fs-strong)}
+.btn.cal-meet .cal-cam{width:22px;height:22px;margin:0}
+.cal-meet-url{font-size:var(--fs-small);color:var(--muted);line-height:1.5;margin-bottom:14px;overflow-wrap:anywhere}
+.cal-nomeet{display:flex;flex-direction:column;gap:2px;padding:10px 14px;margin:2px 0 14px;background:var(--amber-bg);color:var(--text);font-size:var(--fs-base);line-height:1.5;overflow-wrap:anywhere}
+.cal-nomeet b{color:var(--amber);font-weight:600}
+.cal-nomeet a{color:var(--text)}
+.cal-cam{display:inline-block;width:14px;height:14px;flex:none;margin-right:4px;vertical-align:-2px}
+.cal-amain .cal-cam{width:16px;height:16px;margin-right:6px}
 .cal-h4{font-size:var(--fs-strong);font-weight:600;margin:20px 0 8px}
 .cal-hist{list-style:none;display:grid;gap:6px}
 .cal-hist li{display:flex;justify-content:space-between;gap:12px;font-size:var(--fs-small);line-height:1.45;padding-bottom:6px;border-bottom:1px solid var(--border-soft)}

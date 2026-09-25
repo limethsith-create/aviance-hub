@@ -355,8 +355,8 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
 /* ===================== AVIANCE HUB — shell =====================
    Sign-in, router, the four-place navigation (sidebar on a computer, tab bar
    on a phone), ⌘K, notifications, theme. Everything the owner sees inside is
-   Trials + Settings in trials.js, Inquiries in inquiries.js and the Calendar
-   in calendar.js (loaded last). */
+   Trials + Settings in trials.js, Inquiries in inquiries.js, the Calendar
+   in calendar.js, and Messages, Google Meet and the reply bot in messages.js. */
 
 /* Capture the URL hash before supabase-js processes & strips it (password recovery flow) */
 const INITIAL_HASH=location.hash||'';
@@ -410,7 +410,7 @@ const views={
   calendar:{fn:()=>viewCalendar(),title:'Calendar',sub:'Every call, in Sri Lanka time'},
   inquiries:{fn:()=>viewInquiries(),title:'Inquiries',sub:'People who asked about a paid plan'},
   inquiry:{fn:()=>viewInquiry(),title:'Inquiry',sub:'',back:()=>render('inquiries')},
-  settings:{fn:()=>viewSettings(),title:'Settings',sub:'Alerts, phone alerts, and how everything is running'},
+  settings:{fn:()=>viewSettings(),title:'Settings',sub:'Alerts, Google Meet, the reply bot, and how everything is running'},
   trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every trial by stage, every to-do, the waiting list',back:()=>render('settings')},
 };
 function render(v){
@@ -429,7 +429,8 @@ function render(v){
 /* The Back button in the top bar (pages inside one of the four places). */
 function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('trials');}
 
-/* ---- Deep links: #trial/{id}, #inquiry/{id}, #calendar/{meetingId}, #alerts (Settings › Alerts), #settings, #inquiries, #calendar, #trials (what a phone alert opens) ----
+/* ---- Deep links: #trial/{id}, #inquiry/{id}, #calendar/{meetingId}, #alerts (Settings › Alerts), #settings, #inquiries, #calendar, #trials (what a phone alert opens),
+   and #settings/google?connected=1 | ?error=… (where Google sends the owner back after "Connect Google" → Settings › Google Meet with a message) ----
    Honoured on load and on hashchange; when signed out, kept until sign-in. */
 function parseDeepLink(h){
   h=String(h||'');const at=h.indexOf('#');if(at<0)return null;h=h.slice(at+1).replace(/^\/+/,'').replace(/\/+$/,'');
@@ -438,6 +439,14 @@ function parseDeepLink(h){
   if(h==='settings')return {view:'settings'};
   if(h==='inquiries')return {view:'inquiries'};
   if(h==='calendar')return {view:'calendar'};
+  const g=h.match(/^settings\/google\/?(?:\?([^#]*))?$/);
+  if(g){
+    const q={};try{new URLSearchParams(g[1]||'').forEach((v,k)=>{q[k]=v;});}catch(e){}
+    const out={view:'settings',section:'google'};
+    if(q.connected==='1'||q.connected==='true')out.google='connected';
+    else if(q.error!=null&&q.error!==''){out.google='error';out.error=String(q.error).slice(0,200);}
+    return out;
+  }
   const m=h.match(/^(trial|inquiry|calendar)\/([^/?#&=]+)$/);if(!m)return null;
   let id='';try{id=decodeURIComponent(m[2]);}catch(e){return null;}
   return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:m[1],id}:null;
@@ -449,7 +458,9 @@ function goDeepLink(d){
   pendingDeepLink=null;
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same alert can open it again
   closeModal();closeCmdk();
-  if(d.view==='trial')openTrial(d.id);else if(d.view==='inquiry')openInquiry(d.id);else if(d.view==='calendar'&&d.id)openCalendar(d.id);else if(d.view==='settings')openSettings(d.section);else render(d.view);
+  if(d.view==='trial')openTrial(d.id);else if(d.view==='inquiry')openInquiry(d.id);else if(d.view==='calendar'&&d.id)openCalendar(d.id);
+  else if(d.view==='settings'){if(d.google&&typeof googleReturn==='function')googleReturn(d.google,d.error);openSettings(d.section);}
+  else render(d.view);
   return true;
 }
 if(typeof window.addEventListener==='function')window.addEventListener('hashchange',()=>{const d=parseDeepLink(location.hash);if(d)goDeepLink(d);});
@@ -625,6 +636,7 @@ boot();
 <script src="trials.js"></script>
 <script src="inquiries.js"></script>
 <script src="calendar.js"></script>
+<script src="messages.js"></script>
 <script src="push.js"></script>
 </body>
 </html>

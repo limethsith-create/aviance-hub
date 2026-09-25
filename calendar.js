@@ -2,7 +2,9 @@
    Every call the owner is supposed to hold, in Sri Lanka time, with US Eastern beside it.
    Clients pick a time on the machine's booking page → a *request* lands here → the owner says
    Yes / suggests another time / declines. Meetings he adds or blocks himself live here too.
-   Contract: email-distributor/docs/CALENDAR.md
+   Contract: email-distributor/docs/CALENDAR.md (+ docs/REPLYBOT-MEET.md §3 and HUB-API "Google Meet": a
+   confirmed meeting's meetLink, or meetError in plain words when Google could not make one;
+   settings.googleMeet = the Google status word, which says whether to point at Settings › Google Meet)
      GET  /api/mc/calendar?from=ISO&to=ISO → {meetings, requests, settings, free}
      POST /api/mc/calendar {action:'confirm'|'decline'|'suggest'|'move'|'held'|'noShow'|'cancel'|'add'|'block'|'unblock', …} → {ok, meeting}
    Loaded after trials.js + inquiries.js: reuses machineFetch, trialPost, tkAttr, tkSafeUrl, tkLink,
@@ -41,6 +43,8 @@ const CAL_WHAT={requested:'Asked for this time',confirmed:'Confirmed',moved:'Mov
 const CAL_BY={them:'by them',owner:'by you',machine:'automatically'};
 const CAL_SOURCE={booking_page:'They picked it on your booking page',owner:'You added it',inbox:'Found in your inbox (a calendar invite)',onboard_card:'Marked booked on the onboarding card'};
 const CAL_DAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+/* The small camera beside a call that has its Google Meet link (decoration: the words say it too). */
+const CAL_CAM='<svg class="cal-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><rect x="2.5" y="6.5" width="13" height="11"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/></svg>';
 const CAL_BLOCK_LENGTHS=[[30,'30 minutes'],[60,'1 hour'],[120,'2 hours'],[180,'3 hours'],[240,'4 hours'],[15,'15 minutes']];
 
 /* Last good answers per week (key = that week's Monday, a Sri Lanka date "YYYY-MM-DD"). */
@@ -121,6 +125,7 @@ function calSettings(s){
     ownerZone:calZoneOk(s.ownerZone)?s.ownerZone:CAL_DEFAULTS.ownerZone,
     usZone:calZoneOk(s.usZone)?s.usZone:CAL_DEFAULTS.usZone,
     meetingLink:s.meetingLink==null||s.meetingLink===''?null:String(s.meetingLink),
+    googleMeet:['not_set_up','ready_to_connect','connected','broken'].includes(s.googleMeet)?s.googleMeet:null,
   };
 }
 function calSettingsNow(){return calSettings(cal.settings)}
@@ -129,6 +134,37 @@ function calTitle(m){m=m||{};if(m.status==='blocked')return String(m.title||'Bus
 function calWhoText(m){m=m||{};return m.person&&m.company?m.person+' ('+m.company+')':String(m.person||m.company||'them')}
 function calName(m){return (m&&(tkFirstName(m.person)||m.company))||'They'}
 function calSourceText(s){return CAL_SOURCE[s]||String(s||'')}
+/* A confirmed call's Google Meet link — only a safe https link, never javascript: or data:. */
+function calMeetLink(m){return m&&m.status==='confirmed'?tkSafeUrl(m.meetLink):''}
+/* Why a confirmed call has no Meet link: {text, settings: point to Settings › Google Meet}. The system sends
+   meetError in plain words ("Google isn't connected", "Google didn't answer in time") and it is shown as it is;
+   a bare code from an older system is turned into words. Whether to point at Settings: the Google status
+   (settings.googleMeet) when the Calendar has it — anything but connected — else what the words say. */
+function calMeetWhy(err,googleMeet){
+  const s=String(err==null?'':err).trim();const k=s.toLowerCase();
+  const fix=googleMeet?googleMeet!=='connected':null;
+  if(!s)return googleMeet==='connected'?{text:'It was confirmed before Google was connected',settings:false}:{text:'Calls get one when Google is connected',settings:true};
+  if(!/\s/.test(s)){   // a code, not a sentence
+    if(/broken|revoked|invalid[_-]?grant|expired|disconnected|unauthori[sz]ed/.test(k))return {text:'The Google connection stopped working — connect again',settings:true};
+    if(/not[_-]?(connected|set[_-]?up)|no[_-]?(client|token|google|refresh)/.test(k))return {text:"Google isn't connected",settings:true};
+    if(/quota|rate[_-]?limit|429/.test(k))return {text:'Google was busy and said to try later',settings:fix===true};
+    if(/time.?out|unavailable|5\d\d|network|fetch|google[_-]?(down|error)/.test(k))return {text:"Google didn't answer when the call was confirmed",settings:fix===true};
+    return {text:"Google couldn't make one (for your developer: "+s+')',settings:fix===true};
+  }
+  return {text:s.replace(/[.\s]+$/,''),settings:fix!=null?fix||/settings|step \d/i.test(s):/connect|set up|settings|step \d/i.test(s)};
+}
+/* The meeting panel's Google Meet part (confirmed calls): a big "Join Google Meet" button, or "No Meet link yet",
+   why, and what went out instead (his usual link) or what to do (send one himself — GOOGLE-SETUP.md). */
+function renderCalMeet(m,st){
+  const link=calMeetLink(m);
+  if(link)return `<a class="btn cal-meet" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${CAL_CAM}Join Google Meet</a><p class="cal-meet-url">${esc(link.replace(/^https?:\/\//i,''))}</p>`;
+  const why=calMeetWhy(m&&m.meetError,st&&st.googleMeet);
+  const btn=`<button type="button" class="tk-textbtn" onclick="closeModal();openSettings(${tkAttr('google')})">Settings › Google Meet</button>`;
+  const words=esc(why.text);const said=words.indexOf('Settings › Google Meet')>=0;   // "… reconnect it in Settings › Google Meet": that phrase becomes the button
+  const reason=said?words.replace('Settings › Google Meet',btn):words+(why.settings?' — '+btn:'');
+  const instead=st&&tkSafeUrl(st.meetingLink)?`The email had your usual link instead: ${tkLink(st.meetingLink)}.`:'Send them a link yourself, for example from Google Calendar.';
+  return `<div class="cal-nomeet"><b>No Meet link yet</b><span>${reason}.</span><span>${instead}</span></div>`;
+}
 function calStatusOf(m){const s=String((m&&m.status)||'');if(s==='requested'&&m.proposed&&tkParseDate(m.proposed))return CAL_STATUS.suggested;return CAL_STATUS[s]||{cls:'other',pill:'grey',short:s||'—',long:s||'—'}}
 /* The time a meeting holds on the calendar: a request the owner answered with "Suggest another time"
    holds the suggested time (proposed), not the one they asked for (CALENDAR.md, as built). */
@@ -227,9 +263,10 @@ function renderCalBlock(x,model){
   const top=model.yOf(x.s);const h=Math.max(Math.round(((x.e-x.s)*CAL_PX-2)*10)/10,20);
   const w=100/(x.lanes||1),left=w*(x.lane||0);
   const who=m.status==='blocked'?calTitle(m):String(m.company||calTitle(m));
-  const aria=calTitle(m)+(m.person&&m.status!=='blocked'?' with '+m.person:'')+'. '+calDay(d,st.ownerZone)+', '+calTime(d,st.ownerZone)+' '+calOwnerName(st)+' time ('+calWeekdayName(d,st.usZone)+' '+calTime(d,st.usZone)+' '+calZoneName(st.usZone)+'). '+x.mins+' minutes. '+S.short+'.';
+  const meet=!!calMeetLink(m);
+  const aria=calTitle(m)+(m.person&&m.status!=='blocked'?' with '+m.person:'')+'. '+calDay(d,st.ownerZone)+', '+calTime(d,st.ownerZone)+' '+calOwnerName(st)+' time ('+calWeekdayName(d,st.usZone)+' '+calTime(d,st.usZone)+' '+calZoneName(st.usZone)+'). '+x.mins+' minutes. '+S.short+'.'+(meet?' Google Meet link ready.':'');
   // who first (the row already says the time); the time and the status word on the second line when there is room
-  return `<button type="button" class="cal-ev ${S.cls}${x.mins<=15?' short':''}" style="top:${top}px;height:${h}px;left:calc(${Math.round(left*100)/100}% + 2px);width:calc(${Math.round(w*100)/100}% - 4px)" onclick="calOpenMeeting(${tkAttr(m.id)})" title="${esc(aria)}" aria-label="${esc(aria)}"><span class="cal-ev-t">${esc(who)}</span>${x.mins>15?`<span class="cal-ev-s">${esc(calTime(d,st.ownerZone))} · ${esc(S.short)}</span>`:''}</button>`;
+  return `<button type="button" class="cal-ev ${S.cls}${x.mins<=15?' short':''}" style="top:${top}px;height:${h}px;left:calc(${Math.round(left*100)/100}% + 2px);width:calc(${Math.round(w*100)/100}% - 4px)" onclick="calOpenMeeting(${tkAttr(m.id)})" title="${esc(aria)}" aria-label="${esc(aria)}"><span class="cal-ev-t">${meet?CAL_CAM:''}${esc(who)}</span>${x.mins>15?`<span class="cal-ev-s">${esc(calTime(d,st.ownerZone))} · ${esc(S.short)}</span>`:''}</button>`;
 }
 function renderCalGrid(model){
   const st=model.st,H=model.height;
@@ -251,7 +288,7 @@ function renderCalAgenda(model){
   if(model.empty)return `<div class="cal-agenda"><p class="cal-anone">Nothing booked this week.</p></div>`;
   return `<div class="cal-agenda">${model.days.map(d=>`<section class="cal-aday${d.today?' today':''}"><h4>${esc(d.label)}${d.today?'<span class="cal-today-tag">Today</span>':''}</h4>${d.items.length
     ?`<ol class="cal-alist">${d.items.slice().sort((a,b)=>a.t-b.t).map(x=>{const m=x.m,S=calStatusOf(m),t=new Date(x.t);const who=m.status==='blocked'?calTitle(m):String(m.company||calTitle(m));
-      return `<li><button type="button" class="cal-aitem ${S.cls}" onclick="calOpenMeeting(${tkAttr(m.id)})"><span class="cal-atime"><b>${esc(calTime(t,st.ownerZone))}</b><small>${esc(calWeekdayName(t,st.usZone)+' '+calTime(t,st.usZone))} ET</small></span><span class="cal-amain"><b>${esc(who)}</b>${m.person&&m.status!=='blocked'?`<small>${esc(m.person)}</small>`:''}<span class="cal-astatus">${esc(S.short)} · ${x.mins} min</span></span></button></li>`}).join('')}</ol>`
+      return `<li><button type="button" class="cal-aitem ${S.cls}" onclick="calOpenMeeting(${tkAttr(m.id)})"><span class="cal-atime"><b>${esc(calTime(t,st.ownerZone))}</b><small>${esc(calWeekdayName(t,st.usZone)+' '+calTime(t,st.usZone))} ET</small></span><span class="cal-amain"><b>${calMeetLink(m)?CAL_CAM:''}${esc(who)}</b>${m.person&&m.status!=='blocked'?`<small>${esc(m.person)}</small>`:''}<span class="cal-astatus">${esc(S.short)} · ${x.mins} min${calMeetLink(m)?' · Google Meet':''}</span></span></button></li>`}).join('')}</ol>`
     :'<p class="cal-anone">Nothing booked</p>'}</section>`).join('')}</div>`;
 }
 function renderCalRequest(m,st,meta){
@@ -337,7 +374,7 @@ function renderCalMeeting(m,st,meta){
   if(m.note)kv.push(['Their note',`<span class="cal-note">${esc(m.note)}</span>`]);
   if(m.declineReason)kv.push(['Reason',`<span class="cal-note">${esc(m.declineReason)}</span>`]);
   if(m.source)kv.push(['From',esc(calSourceText(m.source))]);
-  if(status==='confirmed'||status==='requested')kv.push(['Calls happen on',st.meetingLink?(tkSafeUrl(st.meetingLink)?tkLink(st.meetingLink):esc(st.meetingLink)):'No meeting link set yet']);
+  if(status==='requested')kv.push(['Calls happen on',st.meetingLink?(tkSafeUrl(st.meetingLink)?tkLink(st.meetingLink):esc(st.meetingLink)):'No meeting link set yet']);   // confirmed: the Google Meet part below the time
   const b=(fn,label,ghost)=>`<button class="btn${ghost?' ghost':''}" onclick="${fn}(${tkAttr(id)})">${esc(label)}</button>`;
   const acts=[];
   if(status==='requested'){if(!past)acts.push(b('calConfirm','Say yes and email them'));acts.push(b('calOpenSuggest','Suggest another time',!past));acts.push(b('calOpenDecline','Say no…',true));}
@@ -349,6 +386,7 @@ function renderCalMeeting(m,st,meta){
   return `<div class="modal-head cal-mhead"><div><h3>${esc(calTitle(m))}</h3><p>${esc(long)}</p></div></div>
     <div class="modal-body">
       ${w?`<div class="cal-when-big">${esc(w.big)} <small>${esc(calOwnerName(st))}</small></div><div class="cal-when-small">${esc(w.us)}${w.their?'<br>'+esc(w.their):''}</div>`:'<div class="cal-when-big">No time</div>'}
+      ${status==='confirmed'?renderCalMeet(m,st):''}
       <div class="tk-kv cal-kv">${kv.map(([k,v])=>`<small>${esc(k)}</small><span>${v}</span>`).join('')}</div>
       ${renderCalHistory(m.history,st)}
     </div>

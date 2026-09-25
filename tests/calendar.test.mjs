@@ -44,7 +44,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'push.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'push.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 
@@ -128,9 +128,11 @@ test('time: Sri Lanka ↔ US Eastern through Intl — summer (EDT), winter (EST)
 });
 
 test('settings: the machine\'s settings are used; anything missing or odd falls back to the contract defaults', () => {
-  assert.deepEqual(calSettings(null), { hours: ['09:00', '17:00'], days: [1, 2, 3, 4, 5], slotMinutes: 30, ownerZone: 'Asia/Colombo', usZone: 'America/New_York', meetingLink: null });
+  assert.deepEqual(calSettings(null), { hours: ['09:00', '17:00'], days: [1, 2, 3, 4, 5], slotMinutes: 30, ownerZone: 'Asia/Colombo', usZone: 'America/New_York', meetingLink: null, googleMeet: null });
   const s = calSettings({ hours: ['10:00', '16:00'], days: [2, 4, 9, 'x'], slotMinutes: 15, ownerZone: 'Mars/Base', usZone: 'America/Chicago', meetingLink: '' });
-  assert.deepEqual(s, { hours: ['10:00', '16:00'], days: [2, 4], slotMinutes: 15, ownerZone: 'Asia/Colombo', usZone: 'America/Chicago', meetingLink: null });
+  assert.deepEqual(s, { hours: ['10:00', '16:00'], days: [2, 4], slotMinutes: 15, ownerZone: 'Asia/Colombo', usZone: 'America/Chicago', meetingLink: null, googleMeet: null });
+  assert.equal(calSettings({ googleMeet: 'connected' }).googleMeet, 'connected', 'the Google status word (Settings › Google Meet)');
+  assert.equal(calSettings({ googleMeet: '<b>x</b>' }).googleMeet, null);
   assert.deepEqual(calSettings({ hours: ['17:00', '09:00'] }).hours, ['09:00', '17:00'], 'end before start → default');
 });
 

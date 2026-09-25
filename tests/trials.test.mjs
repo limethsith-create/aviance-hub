@@ -55,6 +55,7 @@ const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'trials.js'), 'utf8'), { filename: 'trials.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'inquiries.js'), 'utf8'), { filename: 'inquiries.js' });
+vm.runInThisContext(fs.readFileSync(path.join(root, 'messages.js'), 'utf8'), { filename: 'messages.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'push.js'), 'utf8'), { filename: 'push.js' });
 supa.session = { access_token: 'test-token' }; // boot() has already seen "no session" and shown the login screen
 after(() => trialsStopTimer());
@@ -282,7 +283,7 @@ test('Trials list: one row per trial client — company, person, the journey (ba
   assert.equal(count(needs, /class="tk-person needs"/g), 3); assert.equal(count(needs, /class="tk-person-you"/g), 3);
   assert.ok(needs.includes('<span class="tk-person-name">Lee Park</span>') && needs.includes('Sam Test') && needs.includes('Raj Patel'), "the person's name on each row");
   assert.ok(needs.includes('<span class="tk-person-say">New application — read it and say yes or no</span>'));
-  assert.ok(needs.includes('<span class="tk-person-you">You need to answer Sam in the onboarding call box.</span>'));
+  assert.ok(needs.includes('<span class="tk-person-you">Sam wrote — answer them</span>'), 'they wrote and nobody answered: that is the red line');
   assert.ok(needs.includes('<span class="tk-person-step">Step 2 of 5 — Onboarding call</span>') && needs.includes('<span class="tk-person-step">Step 1 of 5 — Applied</span>') && needs.includes('<span class="tk-person-step">Step 3 of 5 — Setting up</span>'));
   const going = between(html, '<h3 class="tk-group">In progress</h3>', '<details');
   assert.equal(count(going, /tk-person-you|tk-person needs/g), 0, 'in progress: no red');
@@ -384,12 +385,13 @@ test('trial page: three questions on top — Where are they? What happens next? 
   assert.ok(top.includes("<p class=\"tk-q-text\">It's your turn. Once you've done the step below, we carry on.</p>"));
   // What do you need to do? — ONE big button
   assert.equal(count(top, /class="btn tk-primary"/g), 1);
-  assert.ok(top.includes('<p class="tk-q-say">You need to answer Sam in the onboarding call box.</p><button type="button" class="btn tk-primary" onclick="tkFocusReply()">Answer their reply</button>'));
+  assert.ok(top.includes('<p class="tk-q-say">Sam wrote to you. Read it under Messages below and write back there.</p><button type="button" class="btn tk-primary" onclick="tkFocusReply()">Answer Sam\'s message</button>'));
   assert.ok(top.includes('class="card tk-top needs"'), 'a red edge: this trial needs you');
   for (const gone of ['Mission Control', 'Day 1', 'Day 30', 'tk-pills', 'reply waiting 3 h', '← All trials', 'Refresh', 'Needs you']) assert.ok(!top.includes(gone), 'not at the top: ' + gone);
-  // then: the onboarding call, the application (decided → one folded line), Behind the scenes (folded)
-  const iTop = html.indexOf('tk-top'), iCall = html.indexOf('id="tkSec-onboardcall"'), iApp = html.indexOf('<details class="tk-appbox" id="tkSec-application">'), iBehind = html.indexOf('<details class="tk-behind" id="tkBehind" ontoggle="trialsBehindToggle(this.open)">');
-  assert.ok(iTop >= 0 && iTop < iCall && iCall < iApp && iApp < iBehind, 'top → call → application → behind the scenes');
+  // then: Messages, the onboarding call, the application (decided → one folded line), Behind the scenes (folded)
+  const iTop = html.indexOf('tk-top'), iMsgs = html.indexOf('id="tkSec-messages"'), iCall = html.indexOf('id="tkSec-onboardcall"'), iApp = html.indexOf('<details class="tk-appbox" id="tkSec-application">'), iBehind = html.indexOf('<details class="tk-behind" id="tkBehind" ontoggle="trialsBehindToggle(this.open)">');
+  assert.ok(iTop >= 0 && iTop < iMsgs && iMsgs < iCall && iCall < iApp && iApp < iBehind, 'top → messages → call → application → behind the scenes');
+  assert.ok(html.indexOf('</section><div id="tkMsgHost"><section class="card tk-msgs" id="tkSec-messages">') === html.indexOf('</section>', iTop), 'Messages comes right after the three questions');
   assert.ok(!html.includes('What you need to do') && !html.includes('Also on your list'), 'the reply to-do is the big button, not a second list');
   assert.ok(!/\bmachine\b|heartbeat|pipeline|\btick\b|\bstates?\b/i.test(visibleText(html.slice(0, iBehind))), 'plain words above Behind the scenes');
   const behind = html.slice(iBehind);
@@ -402,7 +404,7 @@ test('trial page: three questions on top — Where are they? What happens next? 
   assert.ok(t2.includes('<h3>Also on your list</h3>') && t2.includes('Mark the invoice paid') && !between(t2, 'Also on your list', 'tkBehind').includes('Answer Sam about the onboarding call'));
 });
 
-test('onboarding call card: label, five steps with times, Book by, the conversation oldest first (theirs vs ours, escaped, line breaks kept), reply box, buttons by status', () => {
+test('onboarding call card: label, five steps with times, Book by, buttons by status — and no copy of the emails (they live under Messages: "See the messages")', () => {
   const row = simpleRows.ecreek;
   const html = renderOnboardCall(onboardCall, row, { now: NOW });
   assert.ok(html.includes('<h3>Onboarding call</h3>') && html.includes('They replied — answer them below'));
@@ -410,15 +412,10 @@ test('onboarding call card: label, five steps with times, Book by, the conversat
   assert.ok(html.includes('Acceptance email sent</span><span class="tk-oc-at"') && html.includes(tkDateTime('2026-10-16T09:00:00Z')));
   assert.ok(html.includes('<p class="tk-oc-due">Book by ' + tkDayName('2026-10-20T10:00:00Z') + '</p>'));
   assert.ok(html.includes('1 reminder sent · next one') && html.includes('href="https://cal.com/aviance/onboarding"') && html.includes('Emails go from hello@aviance.store.'));
-  // the conversation: oldest first, theirs and ours look different, escaped, line breaks kept for pre-wrap
-  const iAcc = html.indexOf('Hi Sam, good news'), iRem = html.indexOf('Just checking you saw this.'), iRep = html.indexOf('Tuesday 3 pm works');
-  assert.ok(iAcc > 0 && iAcc < iRem && iRem < iRep, 'oldest first');
-  assert.ok(html.includes('<div class="tk-msg out"><div class="tk-msg-head"><b>Acceptance email — sent automatically</b>') && html.includes('<b>Reminder — sent automatically</b>'));
-  assert.ok(html.includes('<div class="tk-msg in"><div class="tk-msg-head"><b>Sam wrote</b>'));
-  assert.ok(html.includes('<div class="tk-msg-text">Hi!\nTuesday 3 pm works for us.\n&lt;script&gt;alert(1)&lt;/script&gt;</div>') && !html.includes('<script>alert(1)'));
-  assert.ok(html.includes("Re: You're in — let's book your onboarding call"), 'subject shown');
-  // reply box + buttons while they have not booked
-  assert.ok(html.includes('<label for="tkOcReply">Write back to Sam</label>') && html.includes('maxlength="2000"') && html.includes('onclick="trialOcReply(&quot;ecreek-it&quot;)">Send to Sam</button>') && html.includes('0 / 2000'));
+  // the emails: not here any more — one line pointing to Messages (no second thread, no second reply box)
+  assert.ok(!html.includes('Hi Sam, good news') && !html.includes('Tuesday 3 pm works') && !html.includes('<textarea') && !html.includes('tkOcReply'), 'no copy of the thread');
+  assert.ok(html.includes('<p class="tk-oc-msgs">Your emails with Sam are under Messages. <button type="button" class="tk-textbtn" onclick="tkGoTo(&quot;messages&quot;)">See the messages</button></p>'));
+  // buttons while they have not booked
   assert.ok(html.includes('type="datetime-local"') && html.includes('trialOcMarkBooked(&quot;ecreek-it&quot;)">Mark call booked'));
   assert.ok(html.includes('trialOcAction(&quot;ecreek-it&quot;,&quot;resend&quot;)">Send the first email again') && html.includes('trialOcAction(&quot;ecreek-it&quot;,&quot;stopReminders&quot;)">Stop the reminder emails'));
   assert.ok(!html.includes('Call done</button>') && !html.includes("They didn't show"), 'nothing booked yet: no Call done / no-show');
@@ -430,20 +427,19 @@ test('onboarding call card: label, five steps with times, Book by, the conversat
   assert.ok(booked.includes('The call is on <b>' + tkDateTime('2026-10-20T15:00:00Z') + '</b> — they booked it on your calendar'));
   assert.ok(booked.includes('&quot;markHeld&quot;)">Call done</button>') && booked.includes("&quot;markNoShow&quot;)\">They didn't show</button>"));
   assert.ok(!booked.includes('Book by') && !booked.includes('Send the first email again') && booked.includes('Call moved? Pick the new date and time'));
-  // held → quiet: no buttons, reply box stays
+  // held → quiet: no buttons, the link to the messages stays
   const held = renderOnboardCall(Object.assign({}, onboardCall, { status: 'held', bookedFor: '2026-10-20T15:00:00Z', heldAt: '2026-10-20T15:40:00Z' }), row);
-  assert.ok(held.includes('The call was on') && !held.includes('Mark call booked') && !held.includes('Update the call') && held.includes('tkOcReply'));
+  assert.ok(held.includes('The call was on') && !held.includes('Mark call booked') && !held.includes('Update the call') && held.includes('See the messages'));
   // stopped → no Stop reminders; no booking link → plain words; unsafe link → no href; hostile values escaped
   const stopped = renderOnboardCall(Object.assign({}, onboardCall, { status: 'stopped', stopped: true, bookingUrl: null }), row);
   assert.ok(stopped.includes('Reminders are stopped.') && !stopped.includes('Stop the reminder emails') && stopped.includes('No booking link: the email asks them to reply with times that suit them.'));
   const evil = renderOnboardCall(Object.assign({}, onboardCall, { label: '<img src=x onerror=alert(1)>', fromInbox: '<b>x</b>', bookingUrl: 'javascript:alert(2)', steps: [{ key: 'sent', label: '<i>x</i>', done: true, at: 'nope' }], thread: [{ dir: 'in', at: null, subject: '<u>s</u>', text: '<a href="javascript:alert(3)">x</a>', kind: 'reply' }] }), Object.assign({}, row, { simple: Object.assign({}, row.simple, { person: '<b>Eve</b> X' }) }));
   assert.ok(!/<img src=x|<b>x<\/b>|<i>x<\/i>|<u>s<\/u>|<a href="javascript|<b>Eve/.test(evil) && !evil.includes('href="javascript'));
-  assert.ok(evil.includes('&lt;img src=x onerror=alert(1)&gt;') && evil.includes('&lt;a href=&quot;javascript:alert(3)&quot;&gt;x&lt;/a&gt;') && evil.includes('&lt;b&gt;Eve&lt;/b&gt; wrote'));
+  assert.ok(evil.includes('&lt;img src=x onerror=alert(1)&gt;') && evil.includes('Your emails with &lt;b&gt;Eve&lt;/b&gt; are under Messages.'));
   assert.equal(renderOnboardCall(null, row), '');
-  assert.ok(renderOnboardCall(Object.assign({}, onboardCall, { thread: [] }), row).includes('No emails yet.'));
 });
 
-test('onboarding call: reply and every button post the contract body, toast plain words and redraw the card from the answer', async () => {
+test('onboarding call: every button posts the contract body, toasts plain words and redraws the card from the answer; an older system without `conversation` takes the Messages reply through the call\'s own reply', async () => {
   asOwner(); trialsForget(); asOwner(); trialsIngestHub(simpleHub);
   const oc = JSON.parse(JSON.stringify(onboardCall));
   let reply = null; const calls = [];
@@ -470,15 +466,17 @@ test('onboarding call: reply and every button post the contract body, toast plai
     assert.equal(el('ptitle').textContent, 'eCreek IT', 'the top bar says whose trial it is'); assert.equal(el('psub').textContent, '', 'and nothing the page repeats');
     assert.equal(el('backBtn').style.display, 'grid', 'a Back button to the list');
     assert.equal(calls.filter((c) => c[1] === '/api/mc/onboard-calls/check').length, 1, 'opening a trial asks for the check once');
-    // reply: empty and too long are stopped here; a real one is sent as plain text with its line breaks
-    el('tkOcReply').value = '   '; await trialOcReply('ecreek-it');
-    assert.equal(posts().length, 0); assert.ok(el('toast').innerHTML.includes('Write your reply first'));
-    el('tkOcReply').value = 'x'.repeat(2001); await trialOcReply('ecreek-it');
+    // the reply box under Messages (no `conversation` from this older system → the call's own reply, same thread):
+    // empty and too long are stopped here; a real one is sent as plain text with its line breaks
+    el('tkMsgReply').value = '   '; await msgSend('ecreek-it');
+    assert.equal(posts().length, 0); assert.ok(el('toast').innerHTML.includes('Write your message first'));
+    el('tkMsgReply').value = 'x'.repeat(2001); await msgSend('ecreek-it');
     assert.equal(posts().length, 0); assert.ok(el('toast').innerHTML.includes('2000 characters at most'));
-    el('tkOcReply').value = '  Tuesday 3 pm is perfect.\nSee you then.  '; await trialOcReply('ecreek-it');
+    el('tkMsgReply').value = '  Tuesday 3 pm is perfect.\nSee you then.  '; await msgSend('ecreek-it');
     assert.deepEqual(posts().pop(), ['POST', '/api/mc/clients/ecreek-it/onboard-call', { action: 'reply', text: 'Tuesday 3 pm is perfect.\nSee you then.' }]);
-    assert.ok(el('toast').innerHTML.includes('Reply sent to Sam Test'));
-    assert.ok(el('tkOcHost').innerHTML.includes('<b>You wrote</b>') && el('tkOcHost').innerHTML.includes('Tuesday 3 pm is perfect.\nSee you then.'), 'the card is redrawn from the answer');
+    assert.ok(el('toast').innerHTML.includes('Sent to Sam Test'));
+    assert.ok(el('tkMsgHost').innerHTML.includes('<b>You wrote</b>') && el('tkMsgHost').innerHTML.includes('Tuesday 3 pm is perfect.\nSee you then.'), 'Messages is redrawn from the answer');
+    assert.ok(!el('tkOcHost').innerHTML.includes('Tuesday 3 pm is perfect'), 'the call card never shows the emails');
     await new Promise((r) => setTimeout(r, 5));
     assert.ok(calls.some((c) => c[1] === '/api/mc/hub/ecreek-it') && calls.some((c) => c[1] === '/api/mc/hub'), 'the rest of the page and the list refresh behind it');
     // mark booked: needs a date and time; sends it as ISO
@@ -499,11 +497,13 @@ test('onboarding call: reply and every button post the contract body, toast plai
     assert.deepEqual(lastBody(), { action: 'stopReminders' }); assert.equal(asked, 'Stop the reminder emails to Sam Test?'); assert.ok(el('toast').innerHTML.includes('Reminders stopped'));
     globalThis.confirm = () => false; const m = posts().length; await trialOcAction('ecreek-it', 'resend'); assert.equal(posts().length, m, 'cancel sends nothing');
     globalThis.confirm = () => true; await trialOcAction('ecreek-it', 'somethingElse'); assert.equal(posts().length, m, 'unknown actions are never posted');
-    // the machine says no: plain toast, the card is not redrawn, the draft stays
+    // the machine says no: plain toast, nothing is redrawn, the draft stays
     reply = { status: 400, body: { ok: false, error: 'The inbox is not set up yet' } };
-    el('tkOcHost').innerHTML = 'UNCHANGED'; el('tkOcReply').value = 'Still here';
-    await trialOcReply('ecreek-it');
-    assert.ok(el('toast').innerHTML.includes('Reply not sent: The inbox is not set up yet') && el('tkOcHost').innerHTML === 'UNCHANGED' && el('tkOcReply').value === 'Still here');
+    el('tkMsgHost').innerHTML = 'UNCHANGED'; el('tkMsgReply').value = 'Still here';
+    await msgSend('ecreek-it');
+    assert.ok(el('toast').innerHTML.includes('Not sent: The inbox is not set up yet') && el('tkMsgHost').innerHTML === 'UNCHANGED' && el('tkMsgReply').value === 'Still here');
+    el('tkOcHost').innerHTML = 'UNCHANGED'; await trialOcAction('ecreek-it', 'markHeld');
+    assert.ok(el('toast').innerHTML.includes('That did not work: The inbox is not set up yet') && el('tkOcHost').innerHTML === 'UNCHANGED', 'a refused button leaves the card alone');
   } finally { globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); }; globalThis.confirm = () => true; trialsStopTimer(); await new Promise((r) => setTimeout(r, 5)); }
 });
 
@@ -852,16 +852,17 @@ const trialsJs = fs.readFileSync(path.join(root, 'trials.js'), 'utf8');
 const pushJs = fs.readFileSync(path.join(root, 'push.js'), 'utf8');
 const calendarCss = fs.readFileSync(path.join(root, 'calendar.css'), 'utf8');
 const calendarJs = fs.readFileSync(path.join(root, 'calendar.js'), 'utf8');
+const messagesJs = fs.readFileSync(path.join(root, 'messages.js'), 'utf8');
 const varsIn = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*([^;}]+)/g)].map((m) => [m[1], m[2].trim()]));
 const rootVars = varsIn(shellCss.match(/:root\{[\s\S]*?\n\}/)[0]);
 const darkVars = Object.assign({}, rootVars, varsIn(shellCss.match(/body\.dark\{[^}]*\}/)[0]));
 const noComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '');
-const allStyle = { 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'push.js': pushJs };
+const allStyle = { 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'messages.js': messagesJs, 'push.js': pushJs };
 
 test('font: one plain system font family, no web fonts, no capitals-only labels, no letter-spacing, weights 400/600', () => {
   assert.equal(rootVars.font, '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif');
   assert.ok(!/fonts\.googleapis|fonts\.gstatic|@import|@font-face/i.test(html + css), 'no web font is loaded');
-  assert.ok(!/JetBrains|Inter Tight|var\(--mono\)|var\(--display\)/.test(noComments(html) + noComments(css) + noComments(calendarCss) + trialsJs + calendarJs), 'no second family');
+  assert.ok(!/JetBrains|Inter Tight|var\(--mono\)|var\(--display\)/.test(noComments(html) + noComments(css) + noComments(calendarCss) + trialsJs + calendarJs + messagesJs), 'no second family');
   for (const [name, src] of Object.entries(allStyle)) {
     for (const m of src.matchAll(/font-family:\s*([^;"'}]+)/g)) assert.ok(['var(--font)', 'inherit'].includes(m[1].trim()), `${name}: font-family ${m[1]}`);
     assert.ok(!/text-transform:\s*uppercase/.test(src), `${name}: no capitals-only text`);

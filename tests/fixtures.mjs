@@ -428,3 +428,55 @@ export const calWinterWeek = {
 };
 /* Everything a hostile machine answer could carry. */
 export const calHostile = calM({ id: 'x"\');alert(4);//', clientId: 'ev"il', company: '<img src=x onerror=alert(1)>', person: '"><script>alert(2)</script>', title: '<svg onload=alert(3)>', email: '"><script>@x.com', start: '2026-09-30T13:00:00Z', status: 'requested', note: '</div><script>alert(6)</script>', theirZone: 'Not/AZone', source: '<b>src</b>', history: [{ at: '2026-09-29T03:00:00Z', what: '<i>odd</i>', by: '<u>who</u>' }] });
+
+/* ───── Messages, the reply bot and Google Meet (email-distributor docs/REPLYBOT-MEET.md) ─────
+   `conversation` on the trial detail: every email with the client, deliberately out of order (the hub
+   shows it oldest first). NOW is Sat 17 Oct 2026 12:00 UTC. Times: 2026-10-15T02:00Z = Thu 15 Oct 7:30 am
+   in Sri Lanka = Wed 10:00 pm US Eastern (the day before); 2026-10-16T09:00Z = Fri 2:30 pm = Fri 5:00 am ET. */
+const SUBJ = "You're in — let's book your onboarding call";
+export const conversation = {
+  thread: [
+    { id: 'c5', dir: 'in', at: '2026-10-16T14:00:00Z', from: 'sam@ecreek.io', to: 'hello@aviance.store', subject: 'Re: ' + SUBJ, text: 'How much is it after the trial?', kind: 'reply', auto: false, rule: null },
+    { id: 'c1', dir: 'out', at: '2026-10-15T02:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: SUBJ, text: 'Hi Sam, good news: we would like to run your free 30-day trial for eCreek IT.', kind: 'acceptance', auto: false, rule: null },
+    { id: 'c2', dir: 'out', at: '2026-10-15T02:01:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'Your trial dates', text: 'Day 1 is Monday 26 October.\nDay 30 is Tuesday 24 November.', kind: 'system', template: 'welcome_dates', auto: false, rule: null },
+    { id: 'c3', dir: 'in', at: '2026-10-16T09:00:00Z', from: 'Sam Test <sam@ecreek.io>', to: 'hello@aviance.store', subject: 'Re: ' + SUBJ, text: 'Hi!\nWhat times work for you?\n<script>alert(1)</script>', kind: 'reply', auto: false, rule: null },
+    { id: 'c4', dir: 'out', at: '2026-10-16T09:03:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'Re: ' + SUBJ, text: 'Here is my booking page: https://aviance.store/book\nOr one of these: Tue 20 Oct 10:00 am your time', kind: 'auto_reply', auto: true, rule: 'wants_time' },
+    { id: 'c6', dir: 'out', at: '2026-10-16T14:03:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'Re: ' + SUBJ, text: 'The 30-day trial is free, with no card.', kind: 'auto_reply', auto: true, rule: 'price' },
+    { id: 'c7', dir: 'out', at: '2026-10-16T15:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'Re: ' + SUBJ, text: 'Happy to go through the plans on the call.', kind: 'owner_reply', auto: false, rule: null },
+    { id: 'c8', dir: 'in', at: '2026-10-17T08:30:00Z', from: 'Ops <ops@ecreek.io>', to: 'hello@aviance.store', subject: 'Re: ' + SUBJ, text: 'Sam is out today — can we do Wednesday instead?', kind: 'reply', auto: false, rule: null },
+  ],
+  needsReply: true, lastInAt: '2026-10-17T08:30:00Z', lastOutAt: '2026-10-16T15:00:00Z',
+  bot: { enabled: true, sentToday: 1, maxPerDay: 3 },
+  canReply: true, fromInbox: 'hello@aviance.store',
+};
+/* eCreek's page with the conversation (the onboarding call card keeps its steps; its thread is the same list). */
+export const ecreekConvDetail = Object.assign({}, ecreekDetail, { conversation });
+/* Every reply-bot rule, for the label test. */
+export const botRuleWords = {
+  wants_time: 'sent your booking link and free times',
+  proposes_time: 'pencilled in the time they asked for',
+  reschedule: 'sent the booking page to pick another time',
+  price: 'explained the trial is free',
+  what_needed: 'sent the one-page form',
+  not_interested: 'said goodbye and stopped reminders',
+};
+/* GET /api/mc/google in each of its four states (as built: + clientFrom, brokenAt, problem, encKey). */
+const G_REDIRECT = 'https://email-distributor.vercel.app/api/google/callback';
+const gs = (o) => Object.assign({ account: null, redirectUri: G_REDIRECT, hasClient: true, clientFrom: 'saved', connectedAt: null, brokenAt: null, problem: null, encKey: true }, o);
+export const googleStates = {
+  not_set_up: gs({ status: 'not_set_up', hasClient: false, clientFrom: null }),
+  ready_to_connect: gs({ status: 'ready_to_connect' }),
+  connected: gs({ status: 'connected', account: 'owner@gmail.com', connectedAt: '2026-10-16T08:00:00Z' }),
+  broken: gs({ status: 'broken', account: 'owner@gmail.com', connectedAt: '2026-10-01T08:00:00Z', brokenAt: '2026-10-15T08:00:00Z', problem: 'the connection was removed or has expired' }),
+};
+/* The callback's ?error= codes (REPLYBOT-MEET §3 as built). */
+export const googleErrorCodes = ['state', 'denied', 'calendar_permission', 'exchange', 'not_set_up', 'no_refresh_token', 'google_down', 'google', 'no_code', 'server'];
+/* Calendar meetings with Google Meet (hub meetings gain meetLink, googleEventId; meetError when Google couldn't make one). */
+export const calMeet = {
+  // Tue 29 Sep 9:00 am ET — confirmed, with its Meet
+  linked: calM({ id: 'mmeet', clientId: 'acme-plumbing', company: 'Acme Plumbing', person: 'Ann Lee', email: 'ann@acme.com', title: 'Onboarding call — Acme Plumbing', start: '2026-09-29T13:00:00Z', status: 'confirmed', confirmedAt: '2026-09-27T11:00:00Z', meetLink: 'https://meet.google.com/xyz-abcd-efg', googleEventId: 'ev123' }),
+  // confirmed, Google not connected (meetError is plain words — HUB-API "Google Meet")
+  noGoogle: calM({ id: 'mnog', clientId: 'gale-roofing', company: 'Gale Roofing', person: 'Mia Gale', start: '2026-10-01T13:00:00Z', status: 'confirmed', meetLink: null, meetError: "Google isn't connected" }),
+  // confirmed, a hostile link and a hostile reason
+  hostile: calM({ id: 'mbad', company: 'Bad Co', person: 'Eve', start: '2026-10-01T14:00:00Z', status: 'confirmed', meetLink: 'javascript:alert(1)', meetError: '<img src=x onerror=alert(2)> went wrong' }),
+};

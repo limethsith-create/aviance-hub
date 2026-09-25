@@ -22,7 +22,8 @@ sees "This hub is for the Aviance owner." and is signed out.
 | --- | --- |
 | `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, the four-place navigation (sidebar on a computer, tab bar on a phone), ⌘K, notifications, theme. |
 | `trials.js` | Trials (the list, one trial, Buy & paste, Behind the scenes) and Settings. Talks to the machine. |
-| `calendar.js`, `calendar.css` | The Calendar: requests waiting for your yes, the week, meetings (see `email-distributor/docs/CALENDAR.md`). |
+| `calendar.js`, `calendar.css` | The Calendar: requests waiting for your yes, the week, meetings, each confirmed call's Google Meet (see `email-distributor/docs/CALENDAR.md`). |
+| `messages.js` | Messages on every trial page (the whole conversation, the reply box, the reply-bot switch), Settings › Google Meet and Settings › Reply bot (see `email-distributor/docs/REPLYBOT-MEET.md`). Styles in `trials.css`. |
 | `trials.css` | Styles for the Trials screens, on top of the shell's CSS variables (light + dark). |
 | `inquiries.js` | Inquiries: paid-plan calls booked from the website — list, detail, status/notes, "Start a trial instead", the board strip. |
 | `push.js` | Phone alerts: the panel, turning Web Push on/off with the machine, the quiet re-subscribe after sign-in. |
@@ -33,6 +34,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, ⌘K, deep links), the Trials screens, application review, phone alerts (`push.js`) and the readability floor. |
 | `tests/simple.test.mjs` | Node tests for the simple hub: the four places and their badges, the one journey, "Needs you", the three questions and the one big button, Settings, deep links, plain words (a banned-word list), and no function name declared twice. |
 | `tests/calendar.test.mjs` | Node tests for the Calendar. |
+| `tests/messages.test.mjs` | Node tests for Messages (each kind of email, escaped; auto-reply labels; reply and bot posts), "Answer Sam's message", the Join Google Meet button and its fallback, Settings › Google Meet (states, the four actions, the return from Google) and Settings › Reply bot. |
 | `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and `sw.js` (run in a sandbox with a fake service-worker global). |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
 
@@ -57,7 +59,9 @@ sentence already does).
   "Step 2 of 5 — Onboarding call", the machine's plain sentence
   (`row.simple.label`) and what happens next (`row.simple.next`). A row that
   needs you has a red left edge and a red "You need to…" line (from the next
-  step, or the first to-do) and sits under **Needs you** at the top; then
+  step, or the first to-do; when they wrote and nobody has answered —
+  `simple.needsReply`, or the "answer them" to-do — it says "Sam wrote —
+  answer them") and sits under **Needs you** at the top; then
   **In progress**; then a folded **Done / not taken**. When a client asked for
   a call time, a link under the row opens the Calendar at it. At the bottom:
   **+ Add a trial client yourself**. An older machine without `simple` falls
@@ -70,17 +74,18 @@ sentence already does).
   happens next?** and **What do you need to do?** with ONE big button for the
   single most important thing, in this order: a new application ("Read the
   application and say yes or no" → scrolls to it) · a call time they asked for
-  ("Say yes to their call time" → the Calendar at that meeting) · their reply
-  ("Answer their reply" → the reply box) · a call whose time has passed ("Mark
+  ("Say yes to their call time" → the Calendar at that meeting) · their message
+  waiting for an answer (`conversation.needsReply`: "Answer Sam's message" →
+  the reply box under Messages) · a call whose time has passed ("Mark
   the call done", asks first) · a late booking ("Write to them about booking")
   · "Buy the domain and inboxes" · anything else on the to-do list (not urgent:
   "When you have a minute: …") · otherwise "Nothing — we'll tell you when
-  something needs you". Below: the onboarding call card, the application (open
+  something needs you". Right under the questions: **Messages**. Below: the onboarding call card, the application (open
   while it waits; once decided, one folded line), any other to-dos under "Also
   on your list", and **Behind the scenes**, folded, with everything technical.
 - **Settings** — named sections, each folds open and says its state in one
   word: **Alerts** (every alert, "Not seen" first, "Mark as seen"; `#alerts`
-  opens it), **Phone alerts**, **Is everything running?** (last check-in, last
+  opens it), **Phone alerts**, **Google Meet**, **Reply bot**, **Is everything running?** (last check-in, last
   email sent, trials running, free extensions, alerts not seen, paid services
   used, setup still to finish), **Behind the scenes** (the old board: every
   to-do, all trials by stage, the waiting list, your own sending), **Advanced**
@@ -89,13 +94,58 @@ sentence already does).
 - **Onboarding call** card (when `detail.onboardCall` exists — after Approve
   the machine sends one email asking them to book the call): its plain
   label, the five steps as ticks with times, "Book by {day}" (red when
-  overdue), how many reminders went out, the booking link, the whole
-  conversation oldest first (theirs on grey at the left, ours outlined at
-  the right, plain text with its line breaks), a reply box (2 000
-  characters) and the buttons **Mark call booked** (date + time), **Call
+  overdue), how many reminders went out, the booking link, one line pointing
+  to the emails ("See the messages" — they live only under Messages, never
+  twice) and the buttons **Mark call booked** (date + time), **Call
   done**, **They didn't show**, **Send the email again**, **Stop reminders**
   — each posts `POST /api/mc/clients/{id}/onboard-call` `{action, …}`, says
   what happened in plain words and redraws the card from the answer.
+- **Messages** (every trial page, right under the three questions;
+  `messages.js`, `conversation` on the trial detail) — every email between
+  him and the client as a chat, oldest at the top and the newest scrolled
+  into view: theirs on grey at the left ("Sam wrote", or the address when
+  someone else from their side writes), ours outlined at the right ("You
+  wrote", "Acceptance email — sent automatically"…), the reply bot's dashed
+  and marked "Auto-reply · sent your booking link and free times" (each rule
+  in plain words), automatic emails folded to one line "We sent: {subject}"
+  with "show". Times in Sri Lanka time with "(US Eastern …)" small. Plain
+  text, escaped, line breaks kept; the subject only when it changes. Then
+  "Sam is waiting for your answer." (red) when `needsReply`, a reply box
+  "Send to Sam" (2 000 characters) → `POST /api/mc/clients/{id}/messages`
+  `{action:'reply', text}` and a switch "Reply bot for Sam: On/Off" →
+  `{action:'botOn'|'botOff'}`; both redraw Messages and the three questions
+  from the answer's `conversation` at once. No inbox to send from
+  (`canReply: false`): "Set up the inbox in Settings to reply from here." An
+  older machine without `conversation` shows the onboarding call's thread and
+  sends the reply through the call's own reply action (same email thread).
+- **Settings › Google Meet** (`GET/POST /api/mc/google`) — the status in
+  words: Not set up · Ready to connect · Connected as owner@gmail.com ·
+  Broken — connect again (with the machine's `problem`). Eight numbered steps
+  for a first-timer (a Google Cloud project → the Google Calendar API → the
+  consent screen: External, his email, **Publish app** → Credentials › OAuth
+  client ID › Web application → the redirect address with a **Copy** button
+  → Client ID + Client secret (a password box) and **Save** → **Connect
+  Google** → **Test it**), open until the details are saved, then folded.
+  Buttons by status: Connect Google (goes to Google's page — only a
+  `*.google.com` https address is followed), Test it (shows the test Meet
+  link), Disconnect (asks first). Google sends him back to
+  `#settings/google?connected=1` or `?error=<code>`: Settings opens there with
+  a plain sentence for every code (docs/GOOGLE-SETUP.md). The status is
+  fetched when Settings opens (at most every 5 minutes, never by the 60 s
+  refresh). Details set on the server (`clientFrom: 'env'`) → nothing to
+  paste; no password lock (`encKey: false`) → said plainly.
+- **Settings › Reply bot** — what it answers, rule by rule in plain words,
+  what it never does, and where to switch it off (one person: the switch
+  under Messages; everyone: Advanced settings). The contract has no switch
+  for everyone, so no state is shown unless the board ever sends
+  `replyBot {enabled}`.
+- **Calendar and Google Meet** — a confirmed call with `meetLink` gets a big
+  **Join Google Meet** button in its panel (safe link, new tab) and a small
+  camera on its block in the week and the phone list. Without one: "No Meet
+  link yet" + why (the machine's `meetError` in its own words; "Settings ›
+  Google Meet" as a button when the Google status in `settings.googleMeet`
+  is not connected) + either "The email had your usual link instead" or
+  "Send them a link yourself".
 - **Behind the scenes on a trial** — tabs. **Overview**: the 13 parts as one
   strip (each says OK / Working / Waiting / Blocked / Off in words), and four
   growth numbers — emails sent, replies, calls booked, warm-up inbox rate —
@@ -229,7 +279,7 @@ How it fits together:
 - `sw.js` has no fetch handler and uses no cache, so the hub itself is never
   served stale; bump `SW_VERSION` when changing it. The push payload is
   `{title, body, url, tag, urgent, at}`; only hub paths are followed.
-- Deep links (`#trial/{id}`, `#alerts`, `#trials`) work on load and on
+- Deep links (`#trial/{id}`, `#alerts`, `#trials`, `#settings/google?connected=1|error=…`) work on load and on
   `hashchange`; the hash is cleared once handled so the same alert can open it
   again.
 - The brand PNGs on the website have a transparent background (and a
