@@ -437,7 +437,7 @@ function renderTrialCard(row,spark){
   const sparkable=!TK_PRE_WARMUP.includes(row.state);
   return `<div class="tk-card${review?' review':''}" onclick="${review?`openTrial(${tkAttr(row.id)},null,'application')`:`openTrial(${tkAttr(row.id)})`}">
     <div class="tk-card-top"><b>${esc(row.name||row.id||'—')}</b>${tkDot(tkHealthClass(row.health))}</div>
-    <span class="tk-state">${esc(tkStateLabel(row))}</span>${review?'<span class="tk-new">New application</span>':''}
+    <span class="tk-state">${esc(tkStateLabel(row))}</span>${review?'<span class="tk-new">New application</span>':''}${review&&row.fitScore?`<div class="tk-card-meta">${tkScoreBadge(row.fitScore)}</div>`:''}
     ${renderFive(row.five)}
     ${sparkable?`<div class="tk-card-spark-host" id="${tkDomId('tkSpark-',row.id)}">${renderCardSpark(spark)}</div>`:''}
     ${alerts?`<div class="tk-card-meta"><span class="pill ${urgent?'red':'amber'}">${alerts} open alert${alerts!==1?'s':''}</span></div>`:''}
@@ -823,6 +823,34 @@ function tkVerdictPill(v){v=String(v||'unknown').toLowerCase();const m={fit:['gr
 function tkSourceText(src){return {website:'the website',form:'the application form',owner:'you (owner)'}[src]||src||'—'}
 /* Turn a fit-rule label into a starting sentence for the decline reason. */
 function tkSentence(s){s=String(s||'').trim();if(!s)return '';s=s.charAt(0).toUpperCase()+s.slice(1);return /[.!?]$/.test(s)?s:s+'.'}
+/* Fit Score (machine systems/fitscore.js): the applicant against the fit gate, 0–100, facts only. */
+function tkGradeClass(f){if(!f)return 'grey';if((f.dealbreakers||[]).length)return 'red';if(f.label==='Needs a look')return 'amber';return {A:'green',B:'green',C:'amber',D:'red'}[f.grade]||'grey'}
+function tkItemPill(st){const m={good:['green','Good'],ok:['amber','OK'],bad:['red','Weak'],unknown:['grey','Unknown']}[String(st||'unknown')]||['grey',st];return `<span class="pill ${m[0]}">${esc(m[1])}</span>`}
+function tkScoreBadge(b){if(!b||!b.label)return '';const f={grade:b.grade,label:b.label,dealbreakers:b.label==='Not a fit'?[1]:[]};return `<span class="pill ${tkGradeClass(f)}">${b.score!=null?esc(b.score)+'/100 · ':''}${esc(b.label)}</span>`}
+function renderFitScore(r){
+  if(!r)return '';
+  const st=String(r.status||'').toLowerCase();
+  if(st==='pending')return `<h4>Fit score</h4><div class="tk-research-pending">Scoring once the website research finishes…</div>`;
+  const f=r.score;if(!f||!f.label)return '';
+  const cls=tkGradeClass(f);const parts=Array.isArray(f.parts)?f.parts:[];const breakers=f.dealbreakers||[];const qs=f.questions||[];
+  const bar=(pct,c)=>`<div class="tk-meter"><span class="tk-meter-fill ${c}" style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`;
+  const partCls=p=>p.pct==null?'grey':p.pct>=75?'green':p.pct>=50?'amber':'red';
+  return `<h4>Fit score</h4>
+  <div class="tk-score">
+    <div class="tk-score-head">
+      <div class="tk-score-num ${cls}"><b>${f.score!=null?esc(f.score):'—'}</b><small>/100</small></div>
+      <div class="tk-score-words"><div><span class="pill ${cls}">${esc(f.label)}</span>${f.grade?` <span class="tk-muted">Grade ${esc(f.grade)}</span>`:''}</div><p>${esc(f.summary||'')}</p></div>
+    </div>
+    <div class="tk-score-conf"><small>How much we could check: <b>${esc(f.confidence)}</b> of 100 points</small>${bar(f.confidence,'grey')}</div>
+    ${breakers.length?`<div class="tk-score-breakers"><h5>Dealbreakers</h5>${breakers.map(d=>`<div class="tk-flag warn"><span class="pill red">No</span><span>${esc(d.text)}${d.evidence&&d.evidence.quote?`<br><span class="tk-muted">“${esc(d.evidence.quote)}”${d.evidence.page?` — ${esc(d.evidence.page)}`:''}</span>`:''}</span></div>`).join('')}</div>`:''}
+    <div class="tk-score-parts">${parts.map(p=>`<details class="tk-score-part">
+      <summary><span class="tk-score-label">${esc(p.label)}</span><span class="tk-score-pts">${p.pct==null?'<span class="tk-muted">not checked</span>':`<b>${esc(p.pct)}%</b> <span class="tk-muted">of ${esc(p.checked)} checked pts</span>`}</span>${bar(p.pct==null?0:p.pct,partCls(p))}</summary>
+      <div class="tk-score-items">${(p.items||[]).map(i=>`<div class="tk-fit-line"><div>${tkItemPill(i.status)}</div><div><b>${esc(i.text||'')}</b>${i.evidence&&i.evidence.quote?`<small>“${esc(i.evidence.quote)}”${i.evidence.page?` — ${esc(i.evidence.page)}`:''}</small>`:''}<small>${i.points!=null?`${esc(i.points)} of ${esc(i.max)} points`:`Not counted — up to ${esc(i.max)} points once known`}</small></div></div>`).join('')}</div>
+    </details>`).join('')}</div>
+    ${qs.length?`<div class="tk-score-qs"><h5>Ask them on the call</h5><ul>${qs.map(q=>`<li>${esc(q)}</li>`).join('')}</ul></div>`:''}
+    <p class="tk-help">Scored by fixed rules against your fit gate — their answers, their website's own words and Google. No AI, nothing guessed: what could not be checked is left out and listed as a question.</p>
+  </div>`;
+}
 /* What the machine found out about the applicant (website crawl + Google Places + market count). */
 function renderResearch(r,id){
   const head=`<div class="tk-research-head"><h4>What we found</h4>${id?`<button class="btn ghost tk-btn-s" onclick="trialResearchAgain(${tkAttr(id)})">Research again</button>`:''}</div>`;
@@ -862,6 +890,7 @@ function renderApplication(d){
     <h4>Fit check</h4>
     <div class="tk-fit-summary">${tkVerdictPill(fit.verdict)}<span>${esc(fit.summary||'')}</span></div>
     ${lines.length?`<div class="tk-fit">${lines.map(l=>`<div class="tk-fit-line"><div>${tkFitPill(l.status)}</div><div><b>${esc(l.label||l.rule||'')}</b>${l.note?`<small>${esc(l.note)}</small>`:''}</div></div>`).join('')}</div>`:''}
+    ${renderFitScore(app.research)}
     ${renderResearch(app.research,id)}
     <h4>Their answers</h4>
     ${answers.length?`<dl class="tk-answers">${answers.map(x=>`<dt>${esc(x.q||'')}</dt><dd>${x.a!=null&&x.a!==''?esc(x.a):'<span class="tk-muted">(no answer)</span>'}</dd>`).join('')}</dl>`:'<div class="tk-muted">No answers stored.</div>'}

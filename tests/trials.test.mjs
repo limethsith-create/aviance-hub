@@ -1011,3 +1011,28 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
     inquiriesForget(); trialsStopTimer(); render('trials'); trialsStopTimer();
   }
 });
+
+test('fit score: number, label, how much was checked, six parts with evidence, dealbreakers and questions — all escaped', () => {
+  const score = {
+    score: 82, grade: 'A', label: 'Strong fit', confidence: 74, summary: '82/100 — strong fit (74 of 100 points checked).',
+    parts: [
+      { key: 'b2b', label: 'Sells to businesses', points: 20, checked: 20, max: 20, pct: 100, items: [{ text: 'Website talks to businesses (9 mentions)', status: 'good', max: 12, points: 12, evidence: { quote: 'IT for <law> firms', page: '/' }, known: true }] },
+      { key: 'market', label: 'Market', points: 0, checked: 0, max: 15, pct: null, items: [{ text: 'Market size: not counted yet', status: 'unknown', max: 8, points: null, evidence: null, known: false }] },
+    ],
+    dealbreakers: [], questions: ['How many people work at the company?'],
+  };
+  const h = renderFitScore({ status: 'done', score });
+  assert.ok(h.includes('<b>82</b><small>/100</small>') && h.includes('class="pill green">Strong fit<') && h.includes('Grade A'));
+  assert.ok(h.includes('<b>74</b> of 100 points'));
+  assert.ok(h.includes('Sells to businesses') && h.includes('<b>100%</b>') && h.includes('not checked'));
+  assert.ok(h.includes('“IT for &lt;law&gt; firms” — /'), 'evidence quote escaped');
+  assert.ok(h.includes('Not counted — up to 8 points once known'));
+  assert.ok(h.includes('Ask them on the call') && h.includes('How many people work at the company?'));
+  const no = renderFitScore({ status: 'done', score: { ...score, grade: 'D', label: 'Not a fit', dealbreakers: [{ text: 'Sells cold outreach themselves', evidence: null }] } });
+  assert.ok(no.includes('Dealbreakers') && no.includes('class="pill red">No<') && no.includes('class="pill red">Not a fit<'));
+  assert.ok(renderFitScore({ status: 'pending' }).includes('Scoring once the website research finishes'));
+  assert.equal(renderFitScore(null), '');
+  assert.equal(renderFitScore({ status: 'done' }), '', 'no score yet: nothing shown');
+  assert.ok(tkScoreBadge({ score: 64, grade: 'C', label: 'Borderline' }).includes('64/100 · Borderline'));
+  assert.equal(tkScoreBadge(null), '');
+});

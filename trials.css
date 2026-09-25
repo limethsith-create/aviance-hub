@@ -325,6 +325,33 @@
 .tk-app-actions .btn{padding:13px 18px;font-size:var(--fs-base)}
 .tk-app-decided{margin-top:18px;padding:12px 14px;background:var(--surface-2);font-size:var(--fs-base);line-height:1.55}
 @media(max-width:560px){.tk-fit-line{grid-template-columns:1fr;gap:6px}.tk-app-actions .btn{width:100%;justify-content:center}}
+/* fit score */
+.tk-score{border:1px solid var(--border-soft);padding:16px 18px}
+.tk-score-head{display:flex;gap:18px;align-items:flex-start}
+.tk-score-num{flex:none;min-width:86px;padding:10px 12px;text-align:center;background:var(--surface-2)}
+.tk-score-num b{display:block;font-size:var(--fs-num-lg);font-weight:600;line-height:1.1}
+.tk-score-num small{font-size:var(--fs-small);color:var(--muted)}
+.tk-score-num.green b{color:var(--green)}.tk-score-num.amber b{color:var(--amber)}.tk-score-num.red b{color:var(--red)}
+.tk-score-words p{margin:8px 0 0;font-size:var(--fs-base);line-height:1.55}
+.tk-score-conf{margin-top:14px}
+.tk-score-conf small{font-size:var(--fs-small);color:var(--muted)}
+.tk-meter-fill.grey{background:var(--muted-2)}.tk-meter-fill.green{background:var(--green)}.tk-meter-fill.amber{background:var(--amber)}
+.tk-score-breakers,.tk-score-qs{margin-top:14px}
+.tk-score-breakers h5,.tk-score-qs h5{font-size:var(--fs-base);font-weight:600;margin:0 0 8px}
+.tk-score-breakers .tk-flag{margin-bottom:8px}
+.tk-score-parts{margin-top:10px;border-top:1px solid var(--border-soft)}
+.tk-score-part{border-bottom:1px solid var(--border-soft)}
+.tk-score-part summary{cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:baseline;padding:10px 0 4px;list-style:none}
+.tk-score-part summary::-webkit-details-marker{display:none}
+.tk-score-part summary .tk-meter{grid-column:1 / -1;margin:4px 0 6px;height:8px}
+.tk-score-label{font-size:var(--fs-base);font-weight:600}
+.tk-score-label::before{content:'▸ ';color:var(--muted)}
+.tk-score-part[open] .tk-score-label::before{content:'▾ '}
+.tk-score-pts{font-size:var(--fs-small)}
+.tk-score-items{border:1px solid var(--border-soft);margin:4px 0 12px}
+.tk-score-qs ul{margin:0;padding-left:20px}
+.tk-score-qs li{font-size:var(--fs-base);line-height:1.6}
+@media(max-width:560px){.tk-score-head{flex-direction:column;gap:10px}}
 
 /* ── alerts view ────────────────────────────────────────────────────────── */
 .tk-alert{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border-soft)}
