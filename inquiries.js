@@ -12,6 +12,7 @@ const IQ_HOST_TZ = 'Asia/Colombo';   // the owner's time (the website books call
 const IQ_STATUSES = ['new', 'contacted', 'won', 'lost'];
 const IQ_STATUS = { new: ['red', 'New'], contacted: ['amber', 'Contacted'], won: ['green', 'Won'], lost: ['grey', 'Lost'] };
 const IQ_FILTERS = [['open', 'Open'], ['all', 'All'], ['new', 'New'], ['contacted', 'Contacted'], ['won', 'Won'], ['lost', 'Lost']];
+const IQ_CHIPS = ['open', 'won', 'lost', 'all'];   // the filters shown as chips (new/contacted still work, e.g. from a link)
 const iq = { list: null, counts: null, at: 0, err: null, filter: 'open' };
 let currentInquiryId = null;
 
@@ -57,18 +58,18 @@ function iqWhenHost(q) {
   try { return new Intl.DateTimeFormat('en-US', { timeZone: IQ_HOST_TZ, weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d); } catch (e) { return tkDateTime(d); }
 }
 function iqTrialOutcomeText(o) {
-  return { onboarding: 'onboarding link emailed', queued: 'waiting in the queue', declined: 'the machine declined it', manual: 'needs you to finish it by hand', review: 'waiting for your review', received: 'already applied' }[String(o || '').toLowerCase()] || '';
+  return { onboarding: 'the welcome email was sent', queued: 'on the waiting list', declined: 'it was turned down automatically', manual: 'needs you to finish it by hand', review: 'waiting for your yes or no', received: 'already applied' }[String(o || '').toLowerCase()] || '';
 }
 /* What to tell the owner after "Start a trial instead". */
 function iqTrialToast(d, name) {
   d = d || {}; const o = String(d.outcome || '').toLowerCase(); name = name || 'them';
   if (d.already) return 'This inquiry is already a trial';
   if (d.duplicate || o === 'received') return name + ' already applied for a trial moments ago. Nothing new was sent';
-  if (o === 'onboarding') return 'Trial started. ' + name + ' was emailed the onboarding link';
-  if (o === 'queued') { const pos = d.position != null ? d.position : null; return 'Trial started. In the queue' + (pos != null ? ' at position ' + pos : '') + '; the onboarding link goes out when a spot opens'; }
-  if (o === 'declined') return 'The machine declined the trial' + (d.reason ? ' (' + String(d.reason).replace(/_/g, ' ') + ')' : '');
-  if (o === 'review') return 'Trial saved and waiting for your review';
-  if (o === 'manual') return 'Trial saved, but the machine hit a problem. Open the trial to finish it';
+  if (o === 'onboarding') return 'Trial started. ' + name + ' was emailed the welcome link';
+  if (o === 'queued') { const pos = d.position != null ? d.position : null; return 'Trial started. On the waiting list' + (pos != null ? ' at number ' + pos : '') + '; the welcome link goes out when a spot opens'; }
+  if (o === 'declined') return 'The trial was turned down automatically' + (d.reason ? ' (' + String(d.reason).replace(/_/g, ' ') + ')' : '');
+  if (o === 'review') return 'Trial saved and waiting for your yes or no';
+  if (o === 'manual') return 'Trial saved, but something went wrong. Open the trial to finish it';
   return 'Trial started';
 }
 
@@ -94,25 +95,26 @@ function renderInquiryCard(q, now) {
 function renderInquiries(list, counts, filter, meta) {
   list = list || []; meta = meta || {}; filter = IQ_FILTERS.some(([k]) => k === filter) ? filter : 'open';
   counts = counts || iqCountsOf(list);
-  const tiles = `<div class="iq-counts">${IQ_STATUSES.map((s) => `<button class="iq-count ${s}${(Number(counts[s]) || 0) > 0 ? ' has' : ''}${filter === s ? ' active' : ''}" onclick="inquiriesSetFilter('${s}')" aria-pressed="${filter === s}"><small>${IQ_STATUS[s][1]}</small><b>${tkNum(counts[s] || 0)}</b></button>`).join('')}</div>`;
   const nOf = (f) => list.filter((q) => iqMatches(q, f)).length;
-  const toolbar = `<div class="toolbar iq-toolbar"><div class="seg iq-filters">${IQ_FILTERS.map(([k, l]) => `<button class="${filter === k ? 'active' : ''}" onclick="inquiriesSetFilter('${k}')">${l} · ${nOf(k)}</button>`).join('')}</div><div class="tk-inline iq-refresh">${tkUpdatedStamp(meta.at)}<button class="btn ghost" onclick="trialsRefresh()">Refresh</button></div></div>`;
-  if (!list.length) return tiles + emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'No inquiries yet', "When someone books a call from the website's Book a call form, it lands here and pops up on your phone.", '', null);
+  // the chips shown: open (new + contacted), won, lost, all — every card says its own status in a pill
+  const chips = IQ_FILTERS.filter(([k]) => IQ_CHIPS.includes(k) || k === filter);
+  const toolbar = `<div class="toolbar iq-toolbar"><div class="seg iq-filters" role="group" aria-label="Which inquiries">${chips.map(([k, l]) => `<button class="${filter === k ? 'active' : ''}" aria-pressed="${filter === k}" onclick="inquiriesSetFilter('${k}')">${l} · ${nOf(k)}</button>`).join('')}</div><div class="tk-inline iq-refresh">${tkUpdatedStamp(meta.at)}</div></div>`;
+  if (!list.length) return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'No inquiries yet', "When someone books a call from your website's Book a call form, it shows up here and on your phone.", '', null);
   const shown = list.filter((q) => iqMatches(q, filter)).slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
   const body = shown.length ? `<div class="iq-list">${shown.map((q) => renderInquiryCard(q, meta.now)).join('')}</div>`
     : `<div class="card"><div class="tk-todo-empty">${filter === 'open' ? 'Nothing open. Every inquiry has been answered.' : 'No ' + esc(IQ_STATUS[filter] ? IQ_STATUS[filter][1].toLowerCase() : '') + ' inquiries.'} <span class="tk-linkish" onclick="inquiriesSetFilter('all')">Show all</span></div></div>`;
-  return tiles + toolbar + body;
+  return toolbar + body;
 }
 function renderInquiry(q, meta) {
   meta = meta || {}; const now = meta.now;
-  if (!q) return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'Inquiry not found', "It isn't on the machine any more.", 'All inquiries', "render('inquiries')");
+  if (!q) return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'Inquiry not found', 'It may have been removed.', 'All inquiries', "render('inquiries')");
   const id = q.id, mail = iqMailto(q), email = iqEmail(q.email), site = iqSiteUrl(q.website);
   const isNew = q.status === 'new';
   const head = `<div class="card tk-pad iq-head${isNew ? ' iq-new' : ''}">
-    <div class="iq-card-head"><h3 class="iq-company">${esc(q.company || '—')}</h3>${isNew ? '<span class="pill red">New</span>' : iqStatusPill(q.status)}${iqPlanChip(q.plan)}</div>
+    <div class="iq-card-head">${iqPlanChip(q.plan)}</div>
     <div class="iq-who">${esc(q.name || '')}${q.at ? `<span class="muted"> · asked <span title="${esc(tkFull(q.at))}">${esc(tkRel(q.at, now))}</span>${q.source ? ' from ' + esc(q.source === 'website' ? 'the website' : q.source) : ''}</span>` : ''}</div>
     ${renderInquiryCall(q, now, 'iq-call iq-call-big')}
-    <div class="tk-inline iq-head-act">${mail ? `<a class="btn" href="${esc(mail)}">Reply by email</a>` : ''}<button class="btn ghost" onclick="render('inquiries')">← All inquiries</button></div>
+    ${mail ? `<div class="tk-inline iq-head-act"><a class="btn" href="${esc(mail)}">Reply by email</a></div>` : ''}
   </div>`;
   const theirs = q.whenTheirs ? esc(q.whenTheirs) + (q.theirTz ? ` <span class="muted">(${esc(q.theirTz)})</span>` : '') : q.theirTz ? `<span class="muted">${esc(q.theirTz)}</span>` : '—';
   const facts = `<div class="section-head tk-section"><h3>About them</h3></div><div class="card tk-pad"><div class="tk-kv">
@@ -124,7 +126,7 @@ function renderInquiry(q, meta) {
   </div></div>`;
   const trial = q.clientId
     ? `<div class="iq-trial-done"><b>Now a trial</b>${q.trialOutcome && iqTrialOutcomeText(q.trialOutcome) ? ' — ' + esc(iqTrialOutcomeText(q.trialOutcome)) : ''}. <span class="tk-linkish" onclick="openTrial(${tkAttr(q.clientId)})">Open the trial →</span></div>`
-    : `<p class="tk-small muted">Not ready for a paid plan? The machine emails them the trial onboarding link, or puts them in the queue if three trials are running.</p><div class="tk-inline"><button class="btn ghost" onclick="inquiryToTrial(${tkAttr(id)})">Start a trial instead</button></div>`;
+    : `<p class="tk-small muted">Not ready for a paid plan? We email them the free-trial welcome link, or add them to the waiting list if three trials are already running.</p><div class="tk-inline"><button class="btn ghost" onclick="inquiryToTrial(${tkAttr(id)})">Start a free trial and email them</button></div>`;
   const moves = IQ_STATUSES.filter((s) => s !== q.status).map((s) => `<button class="btn${s === 'contacted' && isNew ? '' : ' ghost'}" onclick="inquirySetStatus(${tkAttr(id)},'${s}')">${s === 'new' ? 'Back to New' : 'Mark ' + IQ_STATUS[s][1].toLowerCase()}</button>`).join('');
   const status = `<div class="section-head tk-section"><h3>Where it stands</h3>${iqStatusPill(q.status)}${q.statusAt ? `<span class="tk-updated" title="${esc(tkFull(q.statusAt))}">since ${esc(tkRel(q.statusAt, now))}</span>` : ''}</div>
     <div class="card tk-pad iq-moves"><div class="field"><label for="iqStatusNote">Note with the change (optional)</label><input id="iqStatusNote" data-tk-form placeholder="e.g. Called, sending a proposal on Monday"></div>
@@ -174,7 +176,7 @@ async function loadInquiries(force) {
   if (!force && iq.list && Date.now() - iq.at < TK_FRESH_MS) return { ok: true, data: { inquiries: iq.list, counts: iq.counts } };
   const r = await machineFetch('/api/mc/inquiries');
   if (r.ok && r.data && Array.isArray(r.data.inquiries)) { iq.list = r.data.inquiries; iq.counts = r.data.counts || iqCountsOf(iq.list); iq.at = Date.now(); iq.err = null; }
-  else { iq.err = r.error || 'The machine answered without an "inquiries" list.'; if (r.ok) r.ok = false; }
+  else { iq.err = r.error || "The inquiries didn't load. Try again."; if (r.ok) r.ok = false; }
   return r;
 }
 
@@ -196,7 +198,7 @@ function inquiryAddNote(id) {
 function inquiryToTrial(id) {
   const q = iqFind(id); const name = (q && (q.name || q.company)) || 'them';
   return trialPost('/api/mc/inquiries', { action: 'toTrial', id }, {
-    confirm: 'Email ' + name + ' the trial onboarding link now?',
+    confirm: 'Start a free trial for ' + name + '? They get the welcome email now.',
     done: (data) => { if (q && data && data.clientId) Object.assign(q, { clientId: data.clientId, trialOutcome: data.outcome || q.trialOutcome || null }); return iqTrialToast(data, name); },
     fail: 'Trial not started',
   });

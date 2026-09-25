@@ -3,7 +3,8 @@
    ----------------------------------------------------------------------------
    The hub's window onto the Aviance Trial Machine (email-distributor). The
    machine does all the work; this file only shows and steers it through the
-   contract in email-distributor/docs/HUB-API.md (incl. "v2 additions").
+   contract in email-distributor/docs/HUB-API.md (incl. "v2 additions") and
+   docs/ONBOARD-CALL.md (row.simple on the board, onboardCall on a trial).
 
    Loaded by index.html after the shell script, so it can use the shell's globals:
      esc, emptyState, toast, openModal, closeModal, render, renderNav,
@@ -17,25 +18,34 @@
      3. loaders (fill the cache; growth only on request)
      4. charts: data models + hand-rolled SVG           — pure, tested
      5. pure renderers (data → HTML string)              — what the tests call
-     6. views the shell router calls (viewTrials …)
+        (the Trials list with the one journey, a trial's three questions and its
+        one big button (tkPrimaryAction), the onboarding call card, Settings, and
+        the old board, which now lives in Settings › Behind the scenes)
+     6. views the shell router calls (viewTrials, viewTrial, viewSettings, viewTrialsBoard …)
      7. actions wired to buttons
      8. shell integration (nav counts, notifications, ⌘K, auto-refresh timer)
 
    Rules: every machine string goes through esc(); every machine link through
    tkSafeUrl(); render functions never touch the DOM; nothing runs at load
    time; the growth history is never fetched by the 60-second auto-refresh.
+   Words: what the owner reads is plain — no "state", "machine", "systems",
+   "config", ids or system names (tests/simple.test.mjs keeps a banned list).
+   One global script: grep before naming a new function (the test fails on a
+   name declared twice — a later one silently replaces the earlier one).
    ========================================================================== */
 
 /* ===================== 0. CONSTANTS + CACHE ===================== */
 const TK_STAGE_ORDER=['intake','onboard','setup','build','live','decide','won','closing','ended'];
 const TK_SYSTEM_ORDER=['intake','market','purchase','setup','warmup','list','copy','canary','sending','replies','calls','reports','closing'];
 const TK_STATE_LABEL={applied:'Applied',queued:'In the queue',onboarding:'Onboarding',awaiting_purchase:'Waiting for you to buy',setup_check:'Checking the setup',warming:'Warming up',ready:'Ready for Day 1',sending:'Sending',paused:'Paused',extension:'Free extension',deciding:'Deciding',converted:'Converted',not_now:'Not now',retired:'Retired',deleted:'Deleted',declined:'Declined',closed_silent:'Never finished onboarding'};
-const TK_SETUP_NAMES={migrated:'migration',encKey:'ENC_KEY',cronSecret:'CRON_SECRET',telegram:'Telegram',healthchecks:'Healthchecks',ownerInbox:'owner inbox'};
+const TK_SETUP_NAMES={migrated:'the data update',encKey:'the password lock (ENC_KEY)',cronSecret:'the timer key (CRON_SECRET)',telegram:'Telegram messages',healthchecks:'the uptime check (Healthchecks)',ownerInbox:'your own inbox'};
 const TK_FIVE=[['sent','Sent','Emails sent'],['replies','Replies','Replies'],['positive','Pos.','Positive replies'],['booked','Booked','Calls booked'],['qualified','Qual.','Qualified calls']];
 const TK_COUNTERS=[['sent','Sent'],['companiesContacted','Companies'],['bounces','Bounces'],['replies','Replies'],['positive','Positive'],['booked','Booked'],['held','Held'],['qualified','Qualified'],['noshows','No-shows'],['wrongfit','Wrong fit'],['warmupSent','Warm-up sent'],['warmupInbox','Warm-up inbox'],['warmupSpam','Warm-up spam'],['warmupRescued','Warm-up rescued']];
-const TK_TABS=[['overview','Overview'],['growth','Growth'],['systems','Systems'],['leads','Leads'],['deliverability','Deliverability'],['inboxes','Inboxes'],['calls','Calls'],['replies','Replies'],['copy','Copy'],['comingup','Coming up'],['timeline','Timeline'],['actions','Actions']];
+const TK_TABS=[['overview','Overview'],['growth','Growth'],['systems','Parts'],['leads','Leads'],['deliverability','Deliverability'],['inboxes','Inboxes'],['calls','Calls'],['replies','Replies'],['copy','Copy'],['comingup','Coming up'],['timeline','History'],['actions','Actions']];
 const TK_TAB_ALIAS={numbers:'overview',setup:'deliverability',promises:'comingup',upcoming:'comingup',reports:'comingup'};
-const TK_TRIAL_VIEWS=['trials','trial','trialPurchase','trialAlerts','inquiries','inquiry']; // inquiries.js hosts the last two
+const TK_TRIAL_VIEWS=['trials','trialsBoard','trial','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
+/* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
+const TK_SETTINGS=['alerts','phone','status','behind','advanced','look','account'];
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
@@ -45,10 +55,21 @@ const TK_SPARK_FRESH_MS=6*3600000;    // board-card sparklines — kept across r
 const TK_SPARK_KEY='avianceGrowth14:v1';
 /* States with nothing to chart yet (no warm-up, no sending): no sparkline fetch. */
 const TK_PRE_WARMUP=['applied','queued','onboarding','awaiting_purchase','setup_check','declined','closed_silent','deleted'];
+/* The simple Trials list: rows in these states sit in the collapsed "Finished / declined" group (older machines without row.simple). */
+const TK_DONE_STATES=['converted','not_now','retired','deleted','declined','closed_silent'];
+/* The one journey, the same on every screen: five numbered steps in plain words.
+   row.simple.step → the step number; 'declined' is "Not taken" (grey, no journey). */
+const TK_STEPS=['Applied','Onboarding call','Setting up','Sending emails','Done'];
+const TK_STEP_OF={new:1,queued:1,accepted:2,call_booked:2,setting_up:3,warming_up:3,sending:4,finished:5};
+/* "You need to answer Sam…" reads right when the machine's sentence starts with one of these verbs. */
+const TK_VERBS=['add','answer','approve','book','buy','call','check','choose','confirm','decide','decline','email','fill','give','look','mark','open','paste','pick','read','reply','review','say','see','send','tell','write'];
+const TK_OC_MAX=2000;                 // a reply to the applicant: plain text, 2 000 characters at most
 
 /* Last good answers live here so navigating back is instant. */
 const tk={hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},
-  growth:{},growthErr:{},growthBusy:{},growthDays:45,spark:null,sparkErr:{},sparkBusy:{},timer:null,busy:false};
+  growth:{},growthErr:{},growthBusy:{},growthDays:45,spark:null,sparkErr:{},sparkBusy:{},timer:null,busy:false,
+  behindOpen:false,doneOpen:false,   // "Behind the scenes" on a trial, "Done / not taken" on the list — kept open across repaints
+  setOpen:{},setScroll:null};        // Settings: which sections are open, and the one to scroll to (#alerts)
 let currentTrialId=null;
 let trialTab='overview';
 let trialsAlertFilter='open';
@@ -92,7 +113,7 @@ function tkFindRow(id){if(!id)return null;const rows=tkAllRows(tk.hub);let r=row
 function tkClientName(id){const r=tkFindRow(id);return r&&r.name?r.name:(id||'')}
 function tkSortedStages(stages){return (stages||[]).slice().sort((a,b)=>{const ia=TK_STAGE_ORDER.indexOf(a.key),ib=TK_STAGE_ORDER.indexOf(b.key);return (ia<0?99:ia)-(ib<0?99:ib)})}
 function tkSortedSystems(systems){return (systems||[]).slice().sort((a,b)=>{const ia=TK_SYSTEM_ORDER.indexOf(a.key),ib=TK_SYSTEM_ORDER.indexOf(b.key);return (ia<0?99:ia)-(ib<0?99:ib)})}
-function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return 'Do it';case 'view':return a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open copy':a.view==='inquiry'?'Open inquiry':a.section==='application'?'Review application':'Open trial';case 'mc':return 'Open in Mission Control';case 'link':return 'Open link';default:return ''}}
+function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return 'Do it';case 'view':return a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open the email wording':a.view==='inquiry'?'Open the inquiry':a.view==='calendar'?'Open the Calendar':a.section==='application'?'Read the application':'Open the trial';case 'mc':return 'Open the full control panel';case 'link':return 'Open link';default:return ''}}
 function tkFindTodo(id){const all=[];if(tk.hub)(tk.hub.todos||[]).forEach(t=>all.push(t));tkAllRows(tk.hub).forEach(r=>(r.todo||[]).forEach(t=>all.push(Object.assign({clientId:r.id,clientName:r.name},t))));Object.keys(tk.detail).forEach(k=>{const d=tk.detail[k];if(d&&d.row)(d.row.todo||[]).forEach(t=>all.push(Object.assign({clientId:d.row.id,clientName:d.row.name},t)))});return all.find(t=>t.id===id)||null}
 function tkTabKey(tab){tab=TK_TAB_ALIAS[tab]||tab;return tab}
 
@@ -102,7 +123,7 @@ async function tkToken(){try{const r=await sb.auth.getSession();return r&&r.data
 async function machineFetch(path,opts){
   opts=opts||{};
   const token=await tkToken();
-  if(!token)return {ok:false,status:0,data:null,error:'You are not signed in to the hub, so there is no token to show the machine. Sign out and back in.'};
+  if(!token)return {ok:false,status:0,data:null,error:'You are not signed in any more. Sign out, then sign in again.'};
   const headers={'authorization':'Bearer '+token,'accept':'application/json'};
   const init={method:opts.method||(opts.body!==undefined?'POST':'GET'),headers};
   if(opts.body!==undefined){headers['content-type']='application/json';init.body=typeof opts.body==='string'?opts.body:JSON.stringify(opts.body);}
@@ -110,7 +131,8 @@ async function machineFetch(path,opts){
   if(typeof AbortController!=='undefined'){ctrl=new AbortController();init.signal=ctrl.signal;timer=setTimeout(()=>ctrl.abort(),opts.timeout||30000);}
   let res;
   try{res=await fetch(tkMachineUrl()+path,init);}
-  catch(e){if(timer)clearTimeout(timer);const to=e&&e.name==='AbortError';return {ok:false,status:0,data:null,error:to?'The machine took too long to answer (timed out after '+Math.round((opts.timeout||30000)/1000)+' s).':'Could not reach the machine at '+tkMachineUrl()+' — network down, wrong MACHINE_URL, or the machine has not allowed this hub origin yet ('+((e&&e.message)||'fetch failed')+').'};}
+  /* Plain words first; the technical bit, if any, goes last in brackets "for your developer". */
+  catch(e){if(timer)clearTimeout(timer);const to=e&&e.name==='AbortError';return {ok:false,status:0,data:null,error:to?'The system took too long to answer. Try again in a minute.':"Couldn't reach the system. Check your internet, then try again. (For your developer: "+tkMachineUrl()+' — '+((e&&e.message)||'fetch failed')+'.)'};}
   if(timer)clearTimeout(timer);
   let text='';try{text=await res.text();}catch(e){text='';}
   let data=null;if(text){try{data=JSON.parse(text);}catch(e){data=null;}}
@@ -118,16 +140,16 @@ async function machineFetch(path,opts){
     let msg=(data&&(data.error||data.message))||'';
     if(!msg&&data&&data.errors)msg=tkErrorList(data.errors).join(' · ');
     if(!msg){
-      if(res.status===401)msg='The machine rejected the hub sign-in (401). Your email must be on the machine\'s admin list (HUB_ADMIN_EMAILS).';
-      else if(res.status===403)msg='The machine refused this (403).';
-      else if(res.status===404)msg='The machine has no such endpoint yet (404 on '+path+').';
-      else if(res.status===503)msg='The machine is not set up for this yet (503).';
-      else msg='The machine answered '+res.status+(text?': '+text.slice(0,200):'.');
+      if(res.status===401)msg="The system didn't accept your sign-in. Sign out, then sign in again. (For your developer: 401 — this email must be on HUB_ADMIN_EMAILS.)";
+      else if(res.status===403)msg="You're not allowed to do that.";
+      else if(res.status===404)msg="This isn't available yet. (For your developer: 404 on "+path+'.)';
+      else if(res.status===503)msg="This isn't set up yet. (For your developer: 503 on "+path+'.)';
+      else msg='Something went wrong on our side. Try again in a minute. (For your developer: '+res.status+(text?' — '+text.slice(0,200):'')+'.)';
     }
     return {ok:false,status:res.status,data,error:msg};
   }
-  if(data===null&&text)return {ok:false,status:res.status,data:null,error:'The machine answered with something that is not JSON ('+text.slice(0,120)+').'};
-  if(data&&data.ok===false)return {ok:false,status:res.status,data,error:data.error||tkErrorList(data.errors).join(' · ')||'The machine said no.'};
+  if(data===null&&text)return {ok:false,status:res.status,data:null,error:"The system sent an answer we couldn't read. (For your developer: not JSON — "+text.slice(0,120)+'.)'};
+  if(data&&data.ok===false)return {ok:false,status:res.status,data,error:data.error||tkErrorList(data.errors).join(' · ')||'The system said no.'};
   return {ok:true,status:res.status,data,error:null};
 }
 /* Single sign-on into a Mission Control page: hidden POST form → /api/mc/login (target _blank).
@@ -150,7 +172,7 @@ async function loadHub(force){
   if(!force&&tk.hub&&Date.now()-tk.hubAt<TK_FRESH_MS)return {ok:true,data:tk.hub};
   const r=await machineFetch('/api/mc/hub');
   if(r.ok&&r.data&&Array.isArray(r.data.stages))trialsIngestHub(r.data);
-  else{tk.hubErr=r.error||'The machine answered without the board data (no "stages").';if(r.ok)r.ok=false;}
+  else{tk.hubErr=r.error||"Your trials didn't load. Try again. (For your developer: no \"stages\" in the answer.)";if(r.ok)r.ok=false;}
   return r;
 }
 async function loadTrial(id,force){
@@ -158,14 +180,14 @@ async function loadTrial(id,force){
   if(!force&&tk.detail[id]&&Date.now()-(tk.detailAt[id]||0)<TK_FRESH_MS)return {ok:true,data:tk.detail[id]};
   const r=await machineFetch('/api/mc/hub/'+encodeURIComponent(id));
   if(r.ok&&r.data&&r.data.row){tk.detail[id]=r.data;tk.detailAt[id]=Date.now();delete tk.detailErr[id];tkApplyGates(r.data);}
-  else{tk.detailErr[id]=r.error||'The machine answered without the trial data (no "row").';if(r.ok)r.ok=false;}
+  else{tk.detailErr[id]=r.error||"This trial didn't load. Try again. (For your developer: no \"row\" in the answer.)";if(r.ok)r.ok=false;}
   return r;
 }
 async function loadAlerts(force){
   if(!force&&tk.alerts&&Date.now()-tk.alertsAt<TK_FRESH_MS)return {ok:true,data:tk.alerts};
   const r=await machineFetch('/api/mc/alerts');
   if(r.ok&&r.data&&Array.isArray(r.data.alerts)){tk.alerts=r.data.alerts;tk.alertsAt=Date.now();tk.alertsErr=null;}
-  else{tk.alertsErr=r.error||'The machine answered without an "alerts" list.';if(r.ok)r.ok=false;}
+  else{tk.alertsErr=r.error||"The alerts didn't load. Try again.";if(r.ok)r.ok=false;}
   return r;
 }
 async function loadPurchase(id,force){
@@ -173,7 +195,7 @@ async function loadPurchase(id,force){
   if(!force&&tk.purchase[id]&&Date.now()-(tk.purchaseAt[id]||0)<TK_FRESH_MS)return {ok:true,data:tk.purchase[id]};
   const r=await machineFetch('/api/mc/clients/'+encodeURIComponent(id)+'/purchase');
   if(r.ok&&r.data&&typeof r.data==='object'){tk.purchase[id]=r.data;tk.purchaseAt[id]=Date.now();delete tk.purchaseErr[id];}
-  else{tk.purchaseErr[id]=r.error||'The machine answered without the purchase data.';if(r.ok)r.ok=false;}
+  else{tk.purchaseErr[id]=r.error||"The shopping list didn't load. Try again.";if(r.ok)r.ok=false;}
   return r;
 }
 /* Growth history — GET /api/mc/hub/{id}/growth?days=N. Costs the machine ~days×(2+inboxes)
@@ -184,7 +206,7 @@ async function loadGrowth(id,days,force){
   if(!force&&c&&c.days===days&&Date.now()-c.at<TK_GROWTH_FRESH_MS)return {ok:true,data:c.data};
   const r=await machineFetch('/api/mc/hub/'+encodeURIComponent(id)+'/growth?days='+days);
   if(r.ok&&r.data&&Array.isArray(r.data.days)){tk.growth[id]={days,data:r.data,at:Date.now()};delete tk.growthErr[id];tkSparkPut(id,tkSliceGrowth(r.data,14));}
-  else{tk.growthErr[id]=r.error||'The machine answered without growth data (no "days").';if(r.ok)r.ok=false;}
+  else{tk.growthErr[id]=r.error||"The history didn't load. Try again.";if(r.ok)r.ok=false;}
   return r;
 }
 /* 14-day history for sparklines (board cards + Overview): kept in memory and in localStorage. */
@@ -368,38 +390,39 @@ function renderSpark(values,o){
 function tkEmptyChart(msg){return `<div class="card tk-chart-empty">${esc(msg)}</div>`}
 
 /* ===================== 5. PURE RENDERERS (data → HTML) ===================== */
-function renderLoading(msg){return `<div class="card tk-loading">${esc(msg||'Reaching the machine…')}</div>`}
+function renderLoading(msg){return `<div class="tk-loading" role="status">${esc(msg||'Loading…')}</div>`}
 function renderMachineError(reason,retryFn){
-  return `<div class="card tk-err"><b>The machine isn't reachable from the hub yet</b><p>${esc(reason||'No answer.')}</p>
-    <div class="tk-inline"><button class="btn" onclick="${esc(retryFn||'trialsRetry()')}">Try again</button><span class="tk-updated">Machine · ${esc(tkMachineUrl())}</span></div></div>`;
+  return `<div class="card tk-err" role="alert"><b>We can't reach the system right now</b><p>${esc(reason||'No answer.')}</p>
+    <div class="tk-inline"><button class="btn" onclick="${esc(retryFn||'trialsRetry()')}">Try again</button></div></div>`;
 }
 function tkUpdatedStamp(at){return at?`<span class="tk-updated" title="${esc(tkFull(new Date(at)))}">Updated ${esc(tkRel(new Date(at)))}</span>`:''}
 /* Shown above cached data when the latest refresh failed — the screen stays useful, but says so. */
-function renderStaleNote(err,at){if(!err)return '';return `<div class="tk-note red">Couldn't refresh from the machine — showing what it said ${esc(at?tkRel(new Date(at)):'earlier')}. ${esc(err)} <span class="tk-linkish" onclick="trialsRetry()">Try again</span></div>`}
+function renderStaleNote(err,at){if(!err)return '';return `<div class="tk-note red">Couldn't refresh — showing what we had ${esc(at?tkRel(new Date(at)):'earlier')}. ${esc(err)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></div>`}
 function renderStatTiles(pairs){return `<div class="tk-stats">${pairs.map(([l,v])=>`<div class="card tk-stat-tile"><small>${esc(l)}</small><b>${v}</b></div>`).join('')}</div>`}
 
-/* -- machine bar -- */
-function renderMachineBar(machine,meta){
+/* -- Settings › "Is everything running?" — the old status strip, in plain words -- */
+function tkStatusOf(machine){
+  machine=machine||{};const hb=machine.heartbeat||{};
+  if(machine.ok===false)return ['red','No. Something is wrong'+(machine.error?': '+machine.error:'')+'.'];
+  const c=tkHeartbeatClass(hb);
+  if(c==='green')return ['green','Yes. Everything is running.'];
+  if(c==='amber')return ['amber','Mostly. The last check-in was a while ago.'];
+  return ['red',hb.lastTickAt||hb.ageSec!=null?"No. The system hasn't checked in for a while.":"Not yet. The automatic check-in isn't running yet."];
+}
+function renderSystemStatus(machine,meta){
   machine=machine||{};meta=meta||{};const hb=machine.heartbeat||{};const u=machine.usage||{};
-  const hbClass=tkHeartbeatClass(hb);
-  const hbText=hb.lastTickAt?tkRel(hb.lastTickAt,meta.now):(hb.ageSec!=null?Math.round(hb.ageSec)+' s ago':'never');
+  const st=tkStatusOf(machine);
+  const ago=hb.lastTickAt?tkRel(hb.lastTickAt,meta.now):(hb.ageSec!=null?Math.round(hb.ageSec)+' s ago':'Never');
   const usage=[];
   if(u.redis)usage.push('Redis '+tkPct(u.redis.pct));
-  if(u.places)usage.push('Places '+tkPct(u.places.pct));
+  if(u.places)usage.push('Google Places '+tkPct(u.places.pct));
   if(u.reoon)usage.push('Reoon '+(u.reoon.remaining!=null?tkNum(u.reoon.remaining)+' left':tkPct(u.reoon.pct)));
   const setup=machine.setup||{};const missing=Object.keys(TK_SETUP_NAMES).filter(k=>setup[k]===false).map(k=>TK_SETUP_NAMES[k]);
-  const notOk=machine.ok===false?`<div class="tk-setupline tk-red">The machine reports it is not OK${machine.error?' — '+esc(machine.error):''}.</div>`:'';
-  return `<div class="card tk-bar">
-    <div class="tk-stat">${tkDot(hbClass)}<div><small>Heartbeat</small><b>${esc(hbText)}${hb.source?` <span>· ${esc(hb.source)}</span>`:''}</b></div></div>
-    <div class="tk-stat"><div><small>Last send</small><b>${esc(hb.lastSendAt?tkRel(hb.lastSendAt,meta.now):'—')}</b></div></div>
-    <div class="tk-stat"><div><small>Active trials</small><b>${tkNum(machine.activeTrials)} <span>/ ${tkNum(machine.maxActiveTrials)}</span></b></div></div>
-    <div class="tk-stat"><div><small>Extensions</small><b>${tkNum(machine.extensions)}</b></div></div>
-    <div class="tk-stat"><div><small>Open alerts</small><b${Number(machine.openAlerts)>0?' class="tk-red"':''}>${tkNum(machine.openAlerts)}</b></div></div>
-    <div class="tk-stat tk-stat-wide"><div><small>Usage</small><b>${usage.length?esc(usage.join(' · ')):'—'}</b></div></div>
-    <div class="tk-right">${tkUpdatedStamp(meta.at)}<button class="btn ghost" onclick="trialsRefresh()">Refresh</button><button class="btn ghost" onclick="openMachine('/mc')">Mission Control ↗</button></div>
-    ${missing.length?`<div class="tk-setupline">Machine setup: still to set — ${esc(missing.join(', '))}. <span class="tk-linkish" onclick="openMachine('/mc/config')">Open config</span></div>`:''}
-    ${notOk}
-  </div>`;
+  const rows=[['Last check-in',esc(ago)],['Last email sent',esc(hb.lastSendAt?tkRel(hb.lastSendAt,meta.now):'—')],['Trials running',`${tkNum(machine.activeTrials)} of ${tkNum(machine.maxActiveTrials)}`],['Free extensions',tkNum(machine.extensions)],['Alerts not seen yet',tkNum(machine.openAlerts)],['Paid services used',usage.length?esc(usage.join(' · ')):'—']];
+  return `<p class="tk-status ${st[0]}">${esc(st[1])}</p>
+    <div class="tk-kv">${rows.map(([k,v])=>`<small>${esc(k)}</small><span>${v}</span>`).join('')}</div>
+    ${missing.length?`<p class="tk-note tk-gap">Setup is not finished. Still to set: ${esc(missing.join(', '))}. <button type="button" class="tk-textbtn" onclick="openMachine('/mc/config')">Open advanced settings ↗</button></p>`:''}
+    <div class="tk-inline tk-gap">${tkUpdatedStamp(meta.at)}<button class="btn ghost" onclick="trialsRefresh()">Check again</button></div>`;
 }
 
 /* -- to-dos -- */
@@ -417,7 +440,7 @@ function renderTodos(todos,opts){
       <div class="tk-todo-main"><b>${esc(t.text||'')}</b><small>${client}${t.detail?esc(t.detail)+' · ':''}<span class="tk-since" title="Due since ${esc(tkFull(t.since))}">${esc(tkRel(t.since,opts.now))}</span></small></div>
       <div class="tk-todo-act">${opts.hideClient&&tkTodoIsSelf(t)?'':renderTodoButton(t)}</div>
     </div>`}).join(''):`<div class="tk-todo-empty">${esc(opts.empty||'Nothing waiting on you.')}</div>`;
-  return `<div class="section-head tk-section"><h3>${esc(title)}</h3><span class="count">${todos.length}</span></div><div class="card tk-todos">${body}</div>`;
+  return `<div class="section-head tk-section"><h3>${esc(title)}</h3>${opts.noCount?'':`<span class="count">${todos.length}</span>`}</div><div class="card tk-todos">${body}</div>`;
 }
 
 /* -- board -- */
@@ -453,47 +476,297 @@ function renderStages(stages,sparks){
 }
 function renderQueue(queue){
   queue=queue||[];if(!queue.length)return '';
-  return `<div class="section-head tk-section"><h3>Queue</h3><span class="count">${queue.length}</span></div>
+  return `<div class="section-head tk-section"><h3>Waiting list</h3><span class="count">${queue.length}</span></div>
   <div class="tk-grid">${queue.map(q=>`<div class="card tk-mini"><b>${esc(q.position!=null?'#'+q.position+' · ':'')}${esc(q.name||q.id)}</b><small>Expected ${esc(tkDate(q.expectedDate))}${q.contactEmail?' · '+esc(q.contactEmail):''}</small>
-    <div class="tk-acts"><button class="btn" onclick="trialsQueueAction(${tkAttr(q.id)},'promote')">Promote</button><button class="btn ghost" onclick="trialsQueueAction(${tkAttr(q.id)},'decline')">Decline</button></div></div>`).join('')}</div>`;
+    <div class="tk-acts"><button class="btn" onclick="trialsQueueAction(${tkAttr(q.id)},'promote')">Start their trial now</button><button class="btn ghost" onclick="trialsQueueAction(${tkAttr(q.id)},'decline')">Say no…</button></div></div>`).join('')}</div>`;
 }
 function renderOthers(others,sparks){
   others=others||[];sparks=sparks||{};if(!others.length)return '';
-  return `<div class="section-head tk-section"><h3>Also on the machine</h3><span class="count">${others.length}</span></div>
+  return `<div class="section-head tk-section"><h3>Not trials (your own sending)</h3><span class="count">${others.length}</span></div>
   <div class="tk-grid">${others.map(r=>`<div class="card tk-mini click" onclick="openTrial(${tkAttr(r.id)})"><div class="tk-card-top"><b>${esc(r.name||r.id)}</b>${tkDot(tkHealthClass(r.health))}</div><small>${esc(tkStateLabel(r))}</small>${renderFive(r.five)}<div class="tk-card-spark-host" id="${tkDomId('tkSpark-',r.id)}">${renderCardSpark(sparks[r.id])}</div></div>`).join('')}</div>`;
 }
+/* "Behind the scenes" (Settings › Behind the scenes): every trial by stage, every to-do, the waiting list.
+   How the system is running lives in Settings now (renderSystemStatus). */
 function renderBoard(hub,meta){
   hub=hub||{};meta=meta||{};const machine=hub.machine||{};
-  const rows=tkAllRows({stages:hub.stages});
-  const toolbar=`<div class="toolbar"><span class="muted tk-small">${rows.length} trial${rows.length!==1?'s':''} on the machine · ${(hub.todos||[]).length} thing${(hub.todos||[]).length!==1?'s':''} waiting on you</span>
-    <div style="margin-left:auto" class="tk-inline"><button class="btn ghost" onclick="render('trialAlerts')">${I.bell||''}Machine alerts${machine.openAlerts?` · ${tkNum(machine.openAlerts)}`:''}</button><button class="btn" onclick="openNewTrialClient()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>New client</button></div></div>`;
-  const board=rows.length?renderStages(hub.stages,meta.sparks):emptyState(I.trials||'','No trials yet','Add the first client — the machine takes it from application to booked calls, and tells you here whenever it needs you.','New client','openNewTrialClient()');
-  return toolbar+renderMachineBar(machine,{at:meta.at,now:meta.now})+(typeof renderInquiryStrip==='function'?renderInquiryStrip(hub.inquiries,{now:meta.now}):'')+renderTodos(hub.todos,{now:meta.now})+
-    `<div class="section-head tk-section"><h3>Stages</h3><span class="count">${rows.length}</span></div>`+board+renderQueue(machine.queue)+renderOthers(machine.others,meta.sparks);
+  const rows=tkAllRows({stages:hub.stages});const nTodo=(hub.todos||[]).length;
+  const toolbar=`<div class="toolbar"><span class="muted tk-small">${rows.length} trial${rows.length!==1?'s':''} · ${nTodo} thing${nTodo!==1?'s':''} on your to-do list</span>
+    <div style="margin-left:auto" class="tk-inline">${tkUpdatedStamp(meta.at)}<button class="btn ghost" onclick="trialsRefresh()">Refresh</button></div></div>`;
+  const board=rows.length?renderStages(hub.stages,meta.sparks):emptyState(I.trials||'','No trials yet','When someone applies on your website, they show up here.','Add a trial client yourself','openNewTrialClient()');
+  return toolbar+(typeof renderInquiryStrip==='function'?renderInquiryStrip(hub.inquiries,{now:meta.now}):'')+renderTodos(hub.todos,{title:'Every to-do',now:meta.now})+
+    `<div class="section-head tk-section"><h3>All trials by stage</h3><span class="count">${rows.length}</span></div>`+board+renderQueue(machine.queue)+renderOthers(machine.others,meta.sparks);
 }
 
-/* -- trial detail: header + tabs -- */
-function tkTabsFor(d){const app=d&&d.application;return app&&app.review!=='pending'?TK_TABS.concat([['application','Application']]):TK_TABS}
+/* -- the Trials list: the screen the owner lands on --
+   One row per trial client, in plain words: the company (big) and the person, where they are on the
+   one journey (a small five-step bar + "Step 2 of 5 — Onboarding call", "Day 12 of 30" while sending),
+   the machine's plain sentence (row.simple.label) and what happens next (row.simple.next). A row that
+   needs the owner has a red left edge and a red "You need to…" line, and sits under "Needs you" at the
+   top; then "In progress"; then a collapsed "Done / not taken". An older machine without row.simple falls
+   back to the state and the to-dos. Everything technical lives in Settings › Behind the scenes. */
+function tkStepFromState(st){
+  st=String(st||'');
+  if(st==='applied')return 'new';
+  if(st==='queued')return 'queued';
+  if(st==='onboarding')return 'accepted';
+  if(['awaiting_purchase','setup_check'].includes(st))return 'setting_up';
+  if(['warming','ready'].includes(st))return 'warming_up';
+  if(['sending','paused','extension','deciding'].includes(st))return 'sending';
+  if(['declined','closed_silent','deleted'].includes(st))return 'declined';
+  if(TK_DONE_STATES.includes(st))return 'finished';
+  return '';
+}
+function tkFirstName(s){s=String(s==null?'':s).trim();return s?s.split(/\s+/)[0]:''}
+function tkTodosSorted(row){return ((row&&row.todo)||[]).filter(t=>t&&typeof t==='object').slice().sort((a,b)=>(b.urgent?1:0)-(a.urgent?1:0))}
+function tkFallbackNext(row){const t=tkTodosSorted(row)[0];if(t&&t.text)return String(t.text);const n=row.nextUp;return n&&n.what?(n.date?tkDate(n.date)+': ':'')+n.what:''}
+/* Everything the simple screens show about one row — row.simple when the machine sends it, else a fallback. */
+function tkSimple(row){
+  row=row||{};const s=row.simple&&typeof row.simple==='object'?row.simple:null;
+  const step=s&&s.step?String(s.step):tkStepFromState(row.state);
+  return {
+    has:!!s,step,
+    company:String((s&&s.company)||row.name||row.id||'—'),
+    person:String((s&&s.person)||row.contactName||''),
+    label:String((s&&s.label)||tkStateLabel(row)),
+    next:s?String(s.next||''):tkFallbackNext(row),
+    needsYou:s?tkTruthy(s.needsYou):(tkIsUnderReview(row)||(row.todo||[]).some(t=>t&&t.urgent)),
+    since:s?s.since||null:null,
+    day:s?tkNorm(s.dayOf30):tkNorm(row.trialDay),   // the machine's dayOf30 when it sends row.simple (only while sending)
+    done:step==='finished'||step==='declined'||(!s&&TK_DONE_STATES.includes(row.state)),
+  };
+}
+/* Where a row is on the one journey: {n: 1–5 (0 = unknown), name, notTaken, day (Day N of 30, only while sending)}. */
+function tkStep(row){
+  const s=tkSimple(row);
+  if(s.step==='declined')return {n:0,name:'Not taken',notTaken:true,day:null};
+  const n=TK_STEP_OF[s.step]||0;
+  return {n,name:n?TK_STEPS[n-1]:'',notTaken:false,day:n===4&&s.day!=null?s.day:null};
+}
+/* "Day 12 of 30" — left out when the plain sentence already says it. */
+function tkDayText(j,label){
+  if(!j||j.day==null)return '';
+  return new RegExp('\\bday\\s+'+j.day+'\\s+of\\s+30\\b','i').test(String(label||''))?'':'Day '+j.day+' of 30';
+}
+function tkStepText(j,label){
+  if(!j)return '';if(j.notTaken)return 'Not taken';if(!j.n)return '';
+  const day=tkDayText(j,label);
+  return 'Step '+j.n+' of 5 — '+j.name+(day?' · '+day:'');
+}
+/* The small step bar on a row: done steps ticked, the current one filled, the rest empty (decoration —
+   the words beside it say the same for a screen reader). */
+function renderStepBar(j){
+  if(!j||j.notTaken)return '<span class="pill grey">Not taken</span>';
+  if(!j.n)return '';
+  return `<span class="tk-bar5" aria-hidden="true">${TK_STEPS.map((_,i)=>{const k=i+1<j.n?'done':i+1===j.n?'now':'todo';return `<span class="tk-b5 ${k}">${k==='done'?'✓':i+1}</span>`}).join('')}</span>`;
+}
+/* The big journey on a trial page: every step with its name. */
+function renderJourney(j){
+  if(!j)return '';
+  if(j.notTaken)return '<p class="tk-journey-not"><span class="pill grey">Not taken</span></p>';
+  if(!j.n)return '';
+  // a phone has no room for five names: it shows "Step 2 of 5 — Onboarding call" above the bar instead
+  return `<p class="tk-jcap" aria-hidden="true">${esc(tkStepText(Object.assign({},j,{day:null})))}</p><ol class="tk-journey" aria-label="The trial journey, step ${j.n} of 5">${TK_STEPS.map((name,i)=>{const k=i+1<j.n?'done':i+1===j.n?'now':'todo';
+    return `<li class="${k}"${k==='now'?' aria-current="step"':''}><span class="tk-j-dot" aria-hidden="true">${k==='done'?'✓':i+1}</span><span class="tk-j-name">${esc(name)}</span><span class="tk-sr">${k==='done'?' (done)':k==='now'?' (now)':''}</span></li>`}).join('')}</ol>`;
+}
+/* "You need to answer Sam in the onboarding call box." — from the machine's next step (or a to-do). */
+function tkYouNeedTo(t){
+  t=String(t||'').trim().replace(/\.+$/,'');if(!t)return '';
+  const w=t.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,'');
+  return TK_VERBS.includes(w)?'You need to '+t.charAt(0).toLowerCase()+t.slice(1)+'.':'You need to: '+t+'.';
+}
+/* The trial clients only (the stages) — not the owner's own aviance/_test rows, not the queue list. */
+function tkListRows(hub){const out=[],seen={};((hub&&hub.stages)||[]).forEach(st=>(st.clients||[]).forEach(r=>{if(r&&r.id!=null&&!seen[r.id]){seen[r.id]=1;out.push(r);}}));return out}
+function tkListGroups(hub){
+  const rows=tkListRows(hub).map(row=>({row,s:tkSimple(row)}));
+  const ms=x=>{const d=tkParseDate(x.s.since);return d?d.getTime():0};
+  const newest=(a,b)=>ms(b)-ms(a);   // Array.sort is stable: rows without a time keep the machine's order
+  return {
+    needs:rows.filter(x=>x.s.needsYou).sort(newest),
+    going:rows.filter(x=>!x.s.needsYou&&!x.s.done).sort(newest),
+    done:rows.filter(x=>!x.s.needsYou&&x.s.done).sort(newest),
+  };
+}
+function renderTrialRow(x){
+  const r=x.row,s=x.s;const review=tkIsUnderReview(r);const j=tkStep(r);
+  const go=review?`openTrial(${tkAttr(r.id)},null,'application')`:`openTrial(${tkAttr(r.id)})`;
+  const firstTodo=(tkTodosSorted(r)[0]||{}).text;
+  const next=/^nothing\b/i.test(s.next)?'':s.next;   // "Nothing for you: …" never becomes "You need to…"
+  const you=s.needsYou?(tkYouNeedTo(next||firstTodo)||'Something here needs you. Open it to see what.'):'';
+  const say=j.notTaken&&/^declined\.?$/i.test(s.label.trim())?'':s.label;
+  const step=j.notTaken?'':tkStepText(j,s.label);
+  const row=`<button type="button" class="tk-person${s.needsYou?' needs':''}${s.done?' done':''}" onclick="${go}"><span class="tk-person-main">
+    <span class="tk-person-top"><span class="tk-person-co">${esc(s.company)}</span>${s.person?`<span class="tk-person-name">${esc(s.person)}</span>`:''}</span>
+    <span class="tk-person-where">${renderStepBar(j)}${step?`<span class="tk-person-step">${esc(step)}</span>`:''}</span>
+    ${say?`<span class="tk-person-say">${esc(say)}</span>`:''}
+    ${you?`<span class="tk-person-you">${esc(you)}</span>`:s.next?`<span class="tk-person-next">${esc(s.next)}</span>`:''}
+  </span><span class="tk-person-go" aria-hidden="true">›</span></button>`;
+  // calendar.js: they asked for a call time and the owner has not said yes yet → a link to the Calendar under the row
+  const ask=typeof calRowAsk==='function'?calRowAsk(r.id,s):'';
+  return ask?`<div class="cal-ask-wrap">${row}${ask}</div>`:row;
+}
+function renderTrialList(hub,meta){
+  hub=hub||{};meta=meta||{};
+  const g=tkListGroups(hub);const total=g.needs.length+g.going.length+g.done.length;
+  const add=`<div class="tk-add"><button type="button" class="btn ghost" onclick="openNewTrialClient()">+ Add a trial client yourself</button></div>`;
+  if(!total)return emptyState(I.trials||'','No trials yet','When someone applies on your website, they show up here.','Add a trial client yourself','openNewTrialClient()');
+  const list=xs=>`<div class="tk-people">${xs.map(renderTrialRow).join('')}</div>`;
+  const head=(t,cls)=>`<h3 class="tk-group${cls?' '+cls:''}">${esc(t)}</h3>`;
+  const needs=g.needs.length?head('Needs you','red')+list(g.needs):`<p class="tk-allclear">Nothing needs you right now. We'll tell you when something does.</p>`;
+  const going=g.going.length?head('In progress')+list(g.going):'';
+  const done=g.done.length?`<details class="tk-done" id="tkDoneGroup"${meta.doneOpen?' open':''} ontoggle="trialsDoneToggle(this.open)"><summary><span class="tk-done-title">Done / not taken</span><span class="tk-done-count">${g.done.length}</span></summary>${list(g.done)}</details>`:'';
+  return needs+going+done+add;
+}
+
+/* -- one trial: three plain questions at the top --
+   "Where are they?" (the big journey + the plain sentence), "What happens next?" and "What do you need to
+   do?" with ONE big button for the single most important thing (tkPrimaryAction). Below: the onboarding
+   call card, the application, anything else on the to-do list, then "Behind the scenes" (collapsed). */
+function tkTabsFor(d){return TK_TABS}
 function renderTabBar(active,d){return `<div class="tk-tabs" id="tkTabBar" role="tablist"><div class="seg">${tkTabsFor(d).map(([k,l])=>`<button role="tab" aria-selected="${k===active}" class="${k===active?'active':''}" onclick="trialsSetTab(${tkAttr(k)})">${esc(l)}</button>`).join('')}</div></div>`}
-function renderTrialHeader(d,meta){
-  const row=d.row||{};const id=row.id;const reasons=(row.healthReasons||[]).filter(Boolean);
-  const canBuy=['awaiting_purchase','setup_check'].includes(row.state);
-  return `<div class="card tk-head">
-    <div class="tk-head-main">
-      <h2>${tkDot(tkHealthClass(row.health))}${esc(row.name||id||'—')}</h2>
-      <div class="tk-pills"><span class="pill grey">${esc(tkStateLabel(row))}</span>${row.trialDay!=null?`<span class="pill blue">Day ${esc(row.trialDay)}</span>`:''}${row.plan&&row.plan!=='trial'?`<span class="pill grey">${esc(row.plan)} plan</span>`:''}${Number(row.openAlerts)?`<span class="pill ${Number(row.urgentAlerts)?'red':'amber'}">${tkNum(row.openAlerts)} open alert${Number(row.openAlerts)!==1?'s':''}</span>`:''}</div>
-      ${reasons.length?`<div class="tk-reasons">${reasons.map(r=>esc(r)).join(' · ')}</div>`:''}
-      <div class="tk-meta">${esc(row.contactName||'—')}${row.contactEmail?` · <a href="mailto:${esc(row.contactEmail)}">${esc(row.contactEmail)}</a>`:''}${row.website?` · ${tkLink(row.website)}`:''}</div>
-      <div class="tk-dates"><div><small>Day 1</small><b>${esc(tkDate(row.day1Date))}</b></div><div><small>Day 30</small><b>${esc(tkDate(row.day30Date))}</b></div>${row.nextUp&&row.nextUp.what?`<div><small>Next</small><b>${esc(tkDate(row.nextUp.date))} · ${esc(row.nextUp.what)}</b></div>`:''}</div>
-    </div>
-    <div class="tk-btns"><button class="btn ghost" onclick="render('trials')">← Board</button><button class="btn ghost" onclick="trialsRefresh()">Refresh</button>${canBuy?`<button class="btn" onclick="openTrialPurchase(${tkAttr(id)})">Buy & paste</button>`:''}<button class="btn ghost" onclick="openMachine(${tkAttr('/mc/clients/'+id)})">Mission Control ↗</button></div>
-    ${meta&&meta.at?`<div class="tk-head-stamp">${tkUpdatedStamp(meta.at)}</div>`:''}
+/* The one button for a to-do that is not about the call or the application. `run` is attribute-ready. */
+function tkTodoPrimary(t,id){
+  const a=(t&&t.action)||{};const tid=String((t&&t.id)||'');
+  if(tid.indexOf('dispute:')===0)return {label:'Decide the dispute',run:`trialsSetTab(${tkAttr('calls')});tkGoTo(${tkAttr('behind')})`};
+  if(a.type==='view'&&a.view==='calendar')return {label:'Say yes to their call time',run:`trialsTodoAction(${tkAttr(tid)})`};
+  if(a.type==='view'&&a.view==='purchase')return {label:'Buy the domain and inboxes',run:`openTrialPurchase(${tkAttr(id)})`};
+  if(a.type==='view'&&a.view==='sequence')return {label:'Open the email wording',run:`trialsSetTab(${tkAttr('copy')});tkGoTo(${tkAttr('behind')})`};
+  if(a.type==='view'&&a.view==='inquiry')return {label:'Open the inquiry',run:`trialsTodoAction(${tkAttr(tid)})`};
+  if(a.type==='view'&&tkTodoIsSelf(t))return {label:'See the details',run:`tkGoTo(${tkAttr('behind')})`};
+  return {label:a.label||({mc:'Open the full control panel',link:'Open the link'}[a.type])||'Do it now',run:`trialsTodoAction(${tkAttr(tid)})`};
+}
+/* The single most important thing the owner can do on this trial, in this order:
+   a new application → a call time they asked for → their reply → a call to mark done → a late booking →
+   buying the domain and inboxes → anything else on the to-do list → nothing.
+   → {kind, label (the button, or the "nothing" sentence), say (one sentence above it), run, todoId}. */
+function tkPrimaryAction(d,meta){
+  d=d||{};meta=meta||{};const row=d.row||{};const id=row.id;const s=tkSimple(row);
+  const oc=d.onboardCall&&typeof d.onboardCall==='object'?d.onboardCall:null;const now=meta.now?new Date(meta.now):new Date();
+  const todos=tkTodosSorted(row);const todo=p=>todos.find(t=>String(t.id||'').indexOf(p)===0)||null;
+  const who=tkFirstName(s.person);const first=who||'They';
+  const machineSays=s.needsYou&&s.next&&!/^nothing\b/i.test(s.next)?tkYouNeedTo(s.next):'';
+  const say=fallback=>machineSays||fallback;
+  const A=(kind,label,text,run,t)=>({kind,label,say:text||'',run:run||'',todoId:t&&t.id!=null?String(t.id):null});
+  const pending=d.application&&typeof d.application==='object'?d.application.review==='pending':tkIsUnderReview(row);
+  if(pending)return A('review','Read the application and say yes or no',say('They applied for a trial. Read what they sent, then say yes or no.'),`tkGoTo(${tkAttr('application')})`,todo('review:'));
+  const req=typeof calReqFor==='function'?calReqFor(id):null;const mreq=todo('meeting-request:');
+  const mid=req?req.id:mreq&&mreq.action&&mreq.action.meetingId!=null?mreq.action.meetingId:null;
+  if(req||mreq){const at=req?req.start:oc&&oc.requestedFor;const w=at&&typeof calWhen==='function'&&typeof calSettingsNow==='function'?calWhen(at,calSettingsNow(),req?req.theirZone:oc&&oc.theirZone):null;
+    return A('calendar','Say yes to their call time',first+' asked for a call on '+(w?w.big+' (your time)':'a time you can see in the Calendar')+'. Say yes, or suggest another time.',mid!=null?`openCalendar(${tkAttr(mid)})`:"render('calendar')",mreq);}
+  const st=String((oc&&oc.status)||'').toLowerCase();const booked=!!(oc&&tkOcIsBooked(oc));
+  const owesReply=oc?(oc.needsReply!=null?tkTruthy(oc.needsReply):st==='replied'):false;
+  if(oc&&(owesReply||todo('onboard-reply:')))return A('reply','Answer their reply',say(first+' wrote to you about the call. Write back in the box below.'),'tkFocusReply()',todo('onboard-reply:'));
+  const when=oc&&tkParseDate(oc.bookedFor);
+  if(oc&&(todo('onboard-mark:')||(booked&&when&&when<now)))return A('markHeld','Mark the call done',"The call was set for "+(when?tkDateTime(when):'earlier')+". If it happened, mark it done. If they didn't show, say so in the call box below.",`trialOcTopHeld(${tkAttr(id)})`,todo('onboard-mark:'));
+  if(oc&&!booked&&(todo('onboard-overdue:')||tkTruthy(oc.overdue)||st==='overdue'))return A('nudge','Write to them about booking',say((who?who+" hasn't":"They haven't")+" booked the call yet, and it's late. Send a short note in the box below."),'tkFocusReply()',todo('onboard-overdue:'));
+  const buy=todos.find(t=>t.action&&t.action.view==='purchase')||null;
+  if(buy||row.state==='awaiting_purchase')return A('buy','Buy the domain and inboxes',say(buy&&buy.text?tkYouNeedTo(buy.text):'You need to buy their domain and inboxes, then paste the logins.'),`openTrialPurchase(${tkAttr(id)})`,buy);
+  const rest=todos.find(t=>!/^(review:|onboard-)/.test(String(t.id||''))&&!(t.action&&t.action.section==='application'));
+  if(rest){const m=tkTodoPrimary(rest,id);const txt=tkSentence(rest.text||'');const verb=TK_VERBS.includes(txt.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,''));
+    return A('todo',m.label,rest.urgent||s.needsYou?txt:'When you have a minute: '+(verb?txt.charAt(0).toLowerCase()+txt.slice(1):txt),m.run,rest);}
+  if(s.needsYou)return A('look','See what needs you',say('Something here needs you.'),`tkGoTo(${tkAttr('behind')})`);
+  return A('none',"Nothing — we'll tell you when something needs you");
+}
+/* "What happens next?" — never the same words as the other two answers. */
+function tkNextText(s,j,act){
+  if(s.needsYou&&act&&act.kind!=='none')return "It's your turn. Once you've done the step below, we carry on.";
+  const n=String(s.next||'').trim().replace(/^nothing\s+(?:for\s+you|to\s+do)\s*[:—–-]\s*/i,'');
+  if(n&&!/^nothing\b/i.test(n))return tkSentence(n);
+  if(j&&j.notTaken)return "Nothing. We didn't take this one.";
+  if(j&&j.n===5)return 'Nothing. This trial is finished.';
+  return "Nothing for now. We'll tell you when something changes.";
+}
+function renderPrimary(act){
+  if(!act||act.kind==='none')return `<p class="tk-q-none">${esc(act?act.label:'')}</p>`;
+  return `${act.say?`<p class="tk-q-say">${esc(act.say)}</p>`:''}<button type="button" class="btn tk-primary" onclick="${act.run}">${esc(act.label)}</button>`;
+}
+function renderTrialTop(d,meta,act){
+  d=d||{};meta=meta||{};const row=d.row||{};const s=tkSimple(row);const j=tkStep(row);act=act||tkPrimaryAction(d,meta);
+  const who=[s.person?`<b>${esc(s.person)}</b>`:'',row.contactEmail?`<a href="mailto:${esc(row.contactEmail)}">${esc(row.contactEmail)}</a>`:'',row.website?tkLink(row.website):''].filter(Boolean).join(' · ');
+  const say=j.notTaken&&/^declined\.?$/i.test(s.label.trim())?'':s.label;const day=tkDayText(j,s.label);
+  return `<section class="card tk-top${s.needsYou&&act.kind!=='none'?' needs':''}" id="tkTop">
+    ${who?`<p class="tk-top-who">${who}</p>`:''}
+    <div class="tk-q"><h3 class="tk-q-title">Where are they?</h3>${renderJourney(j)}${say?`<p class="tk-q-big">${esc(say)}</p>`:''}${day?`<p class="tk-q-day">${esc(day)}</p>`:''}</div>
+    <div class="tk-q"><h3 class="tk-q-title">What happens next?</h3><p class="tk-q-text">${esc(tkNextText(s,j,act))}</p></div>
+    <div class="tk-q tk-q-you"><h3 class="tk-q-title">What do you need to do?</h3>${renderPrimary(act)}</div>
+  </section>`;
+}
+/* The facts the old header showed, now at the top of "Behind the scenes". */
+function renderTrialFacts(d,meta){
+  const row=d.row||{};const id=row.id;const reasons=(row.healthReasons||[]).filter(Boolean);const canBuy=['awaiting_purchase','setup_check'].includes(row.state);
+  return `<div class="tk-facts">
+    <div class="tk-pills">${tkDot(tkHealthClass(row.health))}<span class="pill grey">${esc(tkStateLabel(row))}</span>${row.trialDay!=null?`<span class="pill blue">Day ${esc(row.trialDay)}</span>`:''}${row.plan&&row.plan!=='trial'?`<span class="pill grey">${esc(row.plan)} plan</span>`:''}${Number(row.openAlerts)?`<span class="pill ${Number(row.urgentAlerts)?'red':'amber'}">${tkNum(row.openAlerts)} alert${Number(row.openAlerts)!==1?'s':''} not seen</span>`:''}</div>
+    ${reasons.length?`<div class="tk-reasons">${reasons.map(r=>esc(r)).join(' · ')}</div>`:''}
+    <div class="tk-dates"><div><small>Day 1</small><b>${esc(tkDate(row.day1Date))}</b></div><div><small>Day 30</small><b>${esc(tkDate(row.day30Date))}</b></div>${row.nextUp&&row.nextUp.what?`<div><small>Next</small><b>${esc(tkDate(row.nextUp.date))} · ${esc(row.nextUp.what)}</b></div>`:''}</div>
+    <div class="tk-inline tk-gap">${meta&&meta.at?tkUpdatedStamp(meta.at):''}<button class="btn ghost" onclick="trialsRefresh()">Refresh</button>${canBuy?`<button class="btn ghost" onclick="openTrialPurchase(${tkAttr(id)})">Buy &amp; paste</button>`:''}<button class="btn ghost" onclick="openMachine(${tkAttr('/mc/clients/'+id)})">Full control panel ↗</button></div>
   </div>`;
+}
+/* Everything technical for one trial, collapsed: the 13 parts, counters, deliverability, growth charts, history. */
+function renderBehind(d,tab,meta){
+  return `<details class="tk-behind" id="tkBehind"${meta.behindOpen?' open':''} ontoggle="trialsBehindToggle(this.open)">
+    <summary><span class="tk-behind-title">Behind the scenes</span><span class="tk-behind-sub">Every part, the numbers, charts and history</span></summary>
+    <div class="tk-behind-body">${renderTrialFacts(d,meta)}${renderTabBar(tab,d)}<div id="tkTabHost">${renderTab(d,tab,meta)}</div></div>
+  </details>`;
+}
+
+/* -- onboarding call (email-distributor docs/ONBOARD-CALL.md) --
+   Approve sends one email asking the applicant to book the onboarding call. This card follows it:
+   the five steps with times, "Book by", the whole conversation (oldest first, theirs and ours look
+   different, plain text with its line breaks), a reply box and the owner's buttons. */
+function tkOcIsBooked(oc){const st=String((oc&&oc.status)||'').toLowerCase();return st==='booked'||(!!(oc&&oc.bookedFor)&&!['held','no_show'].includes(st))}
+function tkThreadSorted(thread){
+  const ms=m=>{const d=tkParseDate(m.at);return d?d.getTime():0};
+  return (Array.isArray(thread)?thread:[]).filter(m=>m&&typeof m==='object').map((m,i)=>({m,i})).sort((a,b)=>ms(a.m)-ms(b.m)||a.i-b.i).map(x=>x.m);
+}
+function tkMsgWho(m,first){
+  const k=String(m.kind||'').toLowerCase();
+  if(String(m.dir)==='in')return k==='booking'?'Calendar booking':(first?first+' wrote':'They wrote');
+  return {acceptance:'Acceptance email — sent automatically',reminder:'Reminder — sent automatically'}[k]||'You wrote';
+}
+function renderThread(thread,first){
+  const list=tkThreadSorted(thread);
+  if(!list.length)return '<div class="tk-oc-empty">No emails yet.</div>';
+  return `<div class="tk-thread">${list.map(m=>{const inb=String(m.dir)==='in';return `<div class="tk-msg ${inb?'in':'out'}"><div class="tk-msg-head"><b>${esc(tkMsgWho(m,first))}</b><span class="tk-msg-at" title="${esc(tkFull(m.at))}">${esc(tkDateTime(m.at))}</span></div>${m.subject?`<div class="tk-msg-subj">${esc(m.subject)}</div>`:''}<div class="tk-msg-text">${esc(m.text||'')}</div></div>`}).join('')}</div>`;
+}
+function renderOnboardCall(oc,row,meta){
+  if(!oc||typeof oc!=='object')return '';
+  row=row||{};meta=meta||{};const id=row.id;const st=String(oc.status||'').toLowerCase();
+  const first=tkFirstName(tkSimple(row).person);
+  const held=st==='held',noShow=st==='no_show',booked=tkOcIsBooked(oc);
+  const stopped=st==='stopped'||tkTruthy(oc.stopped),overdue=st==='overdue'||tkTruthy(oc.overdue);
+  const waiting=!booked&&!held&&!noShow;
+  const by=oc.bookedBy==='calendar'?' — they booked it on your calendar':oc.bookedBy==='owner'?' — you marked it':'';
+  const when=oc.bookedFor&&!waiting?`<p class="tk-oc-when">${held?'The call was on':noShow?'The call was set for':'The call is on'} <b>${esc(tkDateTime(oc.bookedFor))}</b>${esc(by)}</p>`:'';
+  const due=waiting&&oc.dueBy?`<p class="tk-oc-due${overdue?' late':''}">Book by ${esc(tkDayName(oc.dueBy))}${overdue?' — overdue':''}</p>`:'';
+  const steps=(Array.isArray(oc.steps)?oc.steps:[]).filter(x=>x&&typeof x==='object');
+  const stepsHtml=steps.length?`<ol class="tk-oc-steps">${steps.map(x=>{const done=tkTruthy(x.done);return `<li class="${done?'done':'todo'}"><span class="tk-oc-tick" aria-hidden="true">${done?'✓':''}</span><span><span class="tk-sr">${done?'Done: ':'Not yet: '}</span>${esc(x.label||x.key||'')}</span>${done&&x.at?`<span class="tk-oc-at" title="${esc(tkFull(x.at))}">${esc(tkDateTime(x.at))}</span>`:''}</li>`}).join('')}</ol>`:'';
+  const n=Number(oc.remindersSent)||0;
+  const rem=stopped?'Reminders are stopped.':n?`${n} reminder${n!==1?'s':''} sent${waiting&&oc.nextReminderAt?' · next one '+tkDateTime(oc.nextReminderAt):''}.`:waiting&&oc.nextReminderAt?`First reminder ${tkDateTime(oc.nextReminderAt)} if they haven't booked.`:'';
+  const link=tkSafeUrl(oc.bookingUrl)?`Booking link in the email: ${tkLink(oc.bookingUrl)}`:'No booking link: the email asks them to reply with times that suit them.';
+  const facts=[rem?esc(rem):'',link,oc.fromInbox?`Emails go from ${esc(oc.fromInbox)}.`:''].filter(Boolean).join('<br>');
+  const btn=(action,label,ghost)=>`<button class="btn${ghost?' ghost':''}" onclick="trialOcAction(${tkAttr(id)},${tkAttr(action)})">${esc(label)}</button>`;
+  const acts=[];
+  if(booked){acts.push(btn('markHeld','Call done'));acts.push(btn('markNoShow',"They didn't show",true));}
+  if(!booked&&!held)acts.push(btn('resend','Send the first email again',true));
+  if(!stopped&&!held)acts.push(btn('stopReminders','Stop the reminder emails',true));
+  const book=held?'':`<div class="tk-oc-book"><label for="tkOcWhen">${booked?'Call moved? Pick the new date and time':'Booked by phone or email? Pick the date and time'}</label><div class="tk-oc-book-row"><input id="tkOcWhen" type="datetime-local" data-tk-form><button class="btn${booked?' ghost':''}" onclick="trialOcMarkBooked(${tkAttr(id)})">Mark call booked</button></div></div>`;
+  return `<section class="card tk-oc" id="tkSec-onboardcall">
+    <h3>Onboarding call</h3>
+    ${oc.label?`<p class="tk-oc-say">${esc(oc.label)}</p>`:''}
+    ${when}${due}${stepsHtml}
+    ${facts?`<p class="tk-oc-facts">${facts}</p>`:''}
+    <h4>Emails with ${esc(first||'them')}</h4>
+    ${renderThread(oc.thread,first)}
+    <div class="tk-oc-reply"><label for="tkOcReply">Write back${first?' to '+esc(first):''}</label>
+      <textarea id="tkOcReply" data-tk-form maxlength="${TK_OC_MAX}" rows="4" placeholder="Type your reply. Plain text, no formatting." oninput="tkOcCount(this)"></textarea>
+      <div class="tk-oc-reply-foot"><span id="tkOcCount" class="tk-oc-count">0 / ${TK_OC_MAX}</span><button class="btn" onclick="trialOcReply(${tkAttr(id)})">Send to ${esc(first||'them')}</button></div>
+    </div>
+    ${book||acts.length?`<h4>Update the call</h4>${book}${acts.length?`<div class="tk-oc-acts">${acts.join('')}</div>`:''}`:''}
+  </section>`;
 }
 
 /* -- Overview: what to do, the 13 systems at a glance, four growth numbers -- */
 function renderSystemsStrip(systems){
-  const list=tkSortedSystems(systems);if(!list.length)return '<div class="card"><div class="tk-todo-empty">No system cards yet.</div></div>';
+  const list=tkSortedSystems(systems);if(!list.length)return '<div class="card"><div class="tk-todo-empty">No parts to show yet.</div></div>';
   const words={ok:'OK',working:'Working',waiting:'Waiting',blocked:'Blocked',off:'Off'};
   return `<div class="tk-strip">${list.map(s=>{const st=String(s.status||'off').toLowerCase();return `<button class="tk-strip-item ${esc(words[st]?st:'off')}" onclick="trialsSetTab('systems')" title="${esc(s.line||'')}"><b>${esc(s.label||s.key)}</b><small>${esc(words[st]||st)}</small></button>`}).join('')}</div>`;
 }
@@ -515,15 +788,15 @@ function renderKeyNumbers(row,ov){
   ];
   return `<div class="tk-keys">${tiles.map(([l,v,sub,sp])=>`<button class="card tk-key" onclick="trialsSetTab('growth')"><small>${esc(l)}</small><b>${v}</b><span class="tk-key-sub">${esc(sub)}</span>${sp}</button>`).join('')}</div>`;
 }
+/* The to-dos moved up to the trial page itself (renderTrialDetail), so the Overview is systems + growth. */
 function renderOverviewTab(d,ctx){
   const row=d.row||{};ctx=ctx||{};
-  return renderTodos(row.todo||[],{hideClient:true,now:ctx.now,empty:'Nothing waiting on you for this client.'})+
-    `<div class="section-head tk-section"><h3>Systems</h3><span class="tk-muted tk-small">${esc(tkSystemsSummary(row.systems))}</span><div class="spacer"></div><button class="btn ghost" onclick="trialsSetTab('systems')">Details</button></div>`+renderSystemsStrip(row.systems)+
+  return `<div class="section-head tk-section"><h3>Parts</h3><span class="tk-muted tk-small">${esc(tkSystemsSummary(row.systems))}</span><div class="spacer"></div><button class="btn ghost" onclick="trialsSetTab('systems')">Details</button></div>`+renderSystemsStrip(row.systems)+
     `<div class="section-head tk-section"><h3>Growth</h3><span class="tk-muted tk-small">Last 14 days</span><div class="spacer"></div><button class="btn ghost" onclick="trialsSetTab('growth')">See the charts</button></div>`+renderKeyNumbers(row,ctx.spark);
 }
 function renderSystems(systems){
   const list=tkSortedSystems(systems);
-  if(!list.length)return '<div class="card"><div class="tk-todo-empty">No system cards yet.</div></div>';
+  if(!list.length)return '<div class="card"><div class="tk-todo-empty">No parts to show yet.</div></div>';
   return `<div class="tk-sys">${list.map(s=>{const st=String(s.status||'off').toLowerCase();const det=Array.isArray(s.detail)?s.detail:(s.detail?[s.detail]:[]);
     return `<div class="card tk-sys-card ${esc(st)}"><div class="tk-sys-top"><b>${esc(s.label||s.key)}</b>${tkStatusPill(st)}</div>${s.line?`<div class="tk-sys-line">${esc(s.line)}</div>`:''}${det.length?`<ul class="tk-sys-detail">${det.map(x=>`<li>${esc(tkDetailText(x))}</li>`).join('')}</ul>`:''}</div>`}).join('')}</div>`;
 }
@@ -659,14 +932,14 @@ function tkSpamGate(tests){
 function renderDeliverabilityTab(d){
   const dv=d.deliverability||null;const dom=d.domain||{};const id=(d.row||{}).id;
   const phase=dom.setupPhase?`<span class="pill ${dom.setupPhase==='passed'?'green':dom.setupPhase==='failed'?'red':'amber'}">${esc(dom.setupPhase)}</span>`:'<span class="pill grey">Not run</span>';
-  const dns=`<div class="section-head tk-section"><h3>Domain and DNS</h3></div><div class="card tk-pad"><div class="tk-kv">
+  const dns=`<div class="section-head tk-section"><h3>Domain setup</h3></div><div class="card tk-pad"><div class="tk-kv">
       <small>Domain</small><span class="tk-break">${esc(dom.name||((d.shopping||{}).chosenDomain)||'—')}</span>
       <small>Setup check</small><span>${phase}</span>
-      <small>DMARC pass, 7 days</small><span>${tkRate(dom.dmarcPassRate7d)}</span>
+      <small>Passed the email security check (DMARC), 7 days</small><span>${tkRate(dom.dmarcPassRate7d)}</span>
       ${dom.retiredAt?`<small>Retired</small><span>${esc(tkDateTime(dom.retiredAt))}</span>`:''}
     </div></div><div class="card tk-scroll tk-gap">${renderChecksTable(dom.checks)}</div>
     <div class="tk-inline tk-gap"><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunSetup')">Re-run setup check</button>${((d.shopping||{}).total!=null||['awaiting_purchase','setup_check'].includes((d.row||{}).state))?`<button class="btn ghost" onclick="openTrialPurchase(${tkAttr(id)})">Buy & paste</button>`:''}</div>`;
-  if(!dv)return `<div class="tk-note">Warm-up, placement and blacklist details show here once the machine sends them.</div>`+dns;
+  if(!dv)return `<div class="tk-note">Warm-up, test and blacklist details show here once there are some.</div>`+dns;
   const w=dv.warmup||null;const pl=(dv.placement||[]).slice(0,10);
   const prov=w&&w.providers&&typeof w.providers==='object'?Object.keys(w.providers):[];
   const gate=tkSpamGate(pl);const ext=w&&w.external;
@@ -703,7 +976,7 @@ function renderInboxesTab(d){
     <div class="field"><label>Email</label><input id="tkIbEmail" data-tk-form placeholder="hello@acme-team.com" autocomplete="off"></div>
     <div class="field"><label>App password</label><input id="tkIbPass" data-tk-form type="password" placeholder="16-character app password" autocomplete="new-password"></div>
     <div class="field"><label>Display name</label><input id="tkIbName" data-tk-form placeholder="Ann at Acme" autocomplete="off"></div>
-    <div class="field"><label>Provider</label><select id="tkIbProv"><option value="google">Google</option><option value="microsoft">Microsoft</option><option value="other">Other (IMAP/SMTP)</option></select></div>
+    <div class="field"><label>Provider</label><select id="tkIbProv"><option value="google">Google</option><option value="microsoft">Microsoft</option><option value="other">Another email provider</option></select></div>
     <button class="btn" onclick="trialAddInbox(${tkAttr(id)})">Add inbox</button>
   </div>`;
 }
@@ -733,7 +1006,7 @@ function renderCopyTab(d){
     <small>Lead Finder</small><span>${esc(lf.status||'—')}${lf.found!=null?' · '+tkNum(lf.found)+' found of '+tkNum(lf.need):''}</span>
   </div>
   ${changes.length?`<h4 class="tk-gap">Change requests</h4><ul class="tk-sys-detail">${changes.map(c=>`<li>${esc(tkDetailText(c))}</li>`).join('')}</ul>`:''}
-  <div class="tk-inline tk-gap"><button class="btn" onclick="openMachine(${tkAttr('/mc/clients/'+id+'/sequence')})">Open the copy editor ↗</button><button class="btn ghost" onclick="trialSequenceAction(${tkAttr(id)},'sendLink')">Send approval link</button><button class="btn ghost" onclick="trialSequenceAction(${tkAttr(id)},'dispatch')">Dispatch Lead Finder</button></div></div>`;
+  <div class="tk-inline tk-gap"><button class="btn" onclick="openMachine(${tkAttr('/mc/clients/'+id+'/sequence')})">Edit the email wording ↗</button><button class="btn ghost" onclick="trialSequenceAction(${tkAttr(id)},'sendLink')">Send approval link</button><button class="btn ghost" onclick="trialSequenceAction(${tkAttr(id)},'dispatch')">Find more leads now</button></div></div>`;
 }
 function renderChecksTable(checks){
   const keys=Object.keys(checks||{});if(!keys.length)return '<div class="tk-todo-empty">No checks recorded yet.</div>';
@@ -753,10 +1026,12 @@ function renderComingUpTab(d){
     <div class="section-head tk-section"><h3>Reports</h3><span class="count">${reports.length}</span></div>
     <div class="card">${reports.length?reports.map(r=>`<div class="tk-list-row"><div><b>${esc(r.name||'—')}</b><small>${r.blockedReason?'<span class="tk-red">Blocked — '+esc(r.blockedReason)+'</span>':r.renderedAt?'Sent '+esc(tkDateTime(r.renderedAt)):'Not sent yet'}</small></div>${r.blockedReason?'<span class="pill red">Blocked</span>':r.renderedAt?'<span class="pill green">Sent</span>':'<span class="pill grey">Pending</span>'}</div>`).join(''):'<div class="tk-todo-empty">No reports yet.</div>'}</div>`;
 }
+/* "dispute_opened" → "Dispute opened": the system's own names, readable. */
+function tkHuman(x){x=String(x==null?'':x).replace(/[_]+/g,' ').replace(/\s+/g,' ').trim();return x?x.charAt(0).toUpperCase()+x.slice(1):''}
 function renderTimeline(events){
   const list=(events||[]).slice().sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
-  if(!list.length)return '<div class="card"><div class="tk-todo-empty">No events yet.</div></div>';
-  return `<div class="card tk-timeline">${list.map(e=>`<div class="tk-ev"><span class="t" title="${esc(tkFull(e.at))}">${esc(tkDateTime(e.at))}</span><span class="s">${esc(e.system||'')}</span><span class="e"><b>${esc(e.event||'')}</b>${e.detail!=null&&e.detail!==''?` <span>${esc(tkDetailText(e.detail))}</span>`:''}</span></div>`).join('')}</div>`;
+  if(!list.length)return '<div class="card"><div class="tk-todo-empty">Nothing has happened yet.</div></div>';
+  return `<div class="card tk-timeline">${list.map(e=>`<div class="tk-ev"><span class="t" title="${esc(tkFull(e.at))}">${esc(tkDateTime(e.at))}</span><span class="s">${esc(tkHuman(e.system))}</span><span class="e"><b>${esc(tkHuman(e.event))}</b>${e.detail!=null&&e.detail!==''?` <span>${esc(tkDetailText(e.detail))}</span>`:''}</span></div>`).join('')}</div>`;
 }
 function renderLinks(links){
   const keys=Object.keys(links||{}).filter(k=>links[k]);if(!keys.length)return '';
@@ -774,8 +1049,8 @@ function renderActionsTab(d){
   if(holds.pausedReason)holdLines.push(`<span class="pill amber">Paused · ${esc(String(holds.pausedReason))}</span>`);
   return `<div class="card tk-pad">
     ${holdLines.length?`<div class="tk-pills tk-gap-b">${holdLines.join('')}</div>`:''}
-    <div class="tk-inline">${pause}<select id="tkStateSel"><option value="">Move to state…</option>${stateOpts}</select><button class="btn ghost" onclick="trialMoveState(${tkAttr(id)})">Move</button></div>
-    <div class="tk-inline tk-gap"><select id="tkJobSel">${jobNames.length?jobNames.map(j=>`<option value="${esc(j)}">${esc(j)}</option>`).join(''):'<option value="">(no jobs listed)</option>'}</select><button class="btn ghost" onclick="trialRunJob(${tkAttr(id)})">Run a job now</button></div>
+    <div class="tk-inline">${pause}<select id="tkStateSel" aria-label="Move to another step"><option value="">Move to another step…</option>${stateOpts}</select><button class="btn ghost" onclick="trialMoveState(${tkAttr(id)})">Move</button></div>
+    <div class="tk-inline tk-gap"><select id="tkJobSel" aria-label="Automatic task">${jobNames.length?jobNames.map(j=>`<option value="${esc(j)}">${esc(j)}</option>`).join(''):'<option value="">(no tasks listed)</option>'}</select><button class="btn ghost" onclick="trialRunJob(${tkAttr(id)})">Run this task now</button></div>
     <div class="tk-inline tk-gap">
       <button class="btn ghost" onclick="trialSimple(${tkAttr(id)},'markPaid','Mark this client as paid?')">Mark paid</button>
       <button class="btn ghost" onclick="trialSimple(${tkAttr(id)},'inboxesCancelled','Mark the inboxes as cancelled?')">Mark inboxes cancelled</button>
@@ -789,7 +1064,7 @@ function renderActionsTab(d){
   <div class="card tk-pad"><div class="tk-inline"><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunSetup')">Re-run setup check</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunMarket')">Re-run market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'marketOverride')">Override market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunBookingTest')">Re-test booking link</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'resendWelcome')">Resend welcome email</button></div></div>
   ${inv?`<div class="section-head tk-section"><h3>Invoice</h3></div><div class="card tk-pad"><div class="tk-kv"><small>Number</small><span>${esc(inv.number||'—')}</span><small>Amount</small><span>${tkMoney(inv.amount)}</span><small>Issued</small><span>${esc(tkDate(inv.issuedAt))}</span><small>Due</small><span>${esc(tkDate(inv.dueDate))}</span><small>Paid</small><span>${inv.paidAt?'<span class="pill green">Paid '+esc(tkDate(inv.paidAt))+'</span>':'<span class="pill amber">Unpaid</span>'}</span></div></div>`:''}
   ${renderLinks(d.links)}
-  ${jobNames.length?`<div class="section-head tk-section"><h3>Jobs</h3><span class="count">${jobNames.length}</span></div><div class="card tk-scroll"><table class="tk-table"><tr><th>Job</th><th>Last run</th><th>Took</th><th>Result</th></tr>${jobNames.map(j=>{const r=jobs[j]||{};return `<tr><td>${esc(j)}</td><td class="num" title="${esc(tkFull(r.at))}">${esc(r.at?tkRel(r.at):'never')}</td><td class="num">${r.ms!=null?tkNum(r.ms)+' ms':'—'}</td><td class="wrap">${r.at==null?'—':r.ok===false||r.error?`<span class="pill red">Error</span> <span class="tk-small">${esc(r.error||'')}</span>`:'<span class="pill green">OK</span>'}</td></tr>`}).join('')}</table></div>`:''}`;
+  ${jobNames.length?`<div class="section-head tk-section"><h3>Automatic tasks</h3><span class="count">${jobNames.length}</span></div><div class="card tk-scroll"><table class="tk-table"><tr><th>Task</th><th>Last run</th><th>Took</th><th>Result</th></tr>${jobNames.map(j=>{const r=jobs[j]||{};return `<tr><td>${esc(j)}</td><td class="num" title="${esc(tkFull(r.at))}">${esc(r.at?tkRel(r.at):'never')}</td><td class="num">${r.ms!=null?tkNum(r.ms)+' ms':'—'}</td><td class="wrap">${r.at==null?'—':r.ok===false||r.error?`<span class="pill red">Error</span> <span class="tk-small">${esc(r.error||'')}</span>`:'<span class="pill green">OK</span>'}</td></tr>`}).join('')}</table></div>`:''}`;
 }
 /* ctx = {now, spark:{g,state}, growth:{g,days,loading,error,at}} */
 function renderTab(d,tab,ctx){
@@ -810,10 +1085,20 @@ function renderTab(d,tab,ctx){
     default:return renderOverviewTab(d,ctx);
   }
 }
+/* One trial: the three questions, then the onboarding call, the application, anything else on the
+   to-do list (never the one already asked for at the top, never the call's or the application's own —
+   those have their own place), then everything technical collapsed under "Behind the scenes". */
 function renderTrialDetail(d,tab,meta){
   d=d||{};meta=meta||{};tab=tkTabKey(tab);tab=tkTabsFor(d).some(t=>t[0]===tab)?tab:'overview';
-  const pending=!!(d.application&&d.application.review==='pending');
-  return renderTrialHeader(d,meta)+(pending?renderApplication(d):'')+renderTabBar(tab,d)+`<div id="tkTabHost">${renderTab(d,tab,meta)}</div>`;
+  const row=d.row||{};const act=tkPrimaryAction(d,meta);
+  const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application');};
+  const todos=tkTodosSorted(row).filter(t=>!mine(t));
+  return renderTrialTop(d,meta,act)+
+    (act.kind!=='calendar'&&typeof calTrialAsk==='function'?calTrialAsk(row.id):'')+   // calendar.js: a call time waiting for the owner's yes
+    (d.onboardCall&&typeof d.onboardCall==='object'?`<div id="tkOcHost">${renderOnboardCall(d.onboardCall,row,meta)}</div>`:'')+
+    renderApplicationBlock(d,meta)+
+    (todos.length?renderTodos(todos,{title:'Also on your list',hideClient:true,noCount:true,now:meta.now}):'')+
+    renderBehind(d,tab,meta);
 }
 
 /* -- application review (website applications held for the owner) -- */
@@ -933,15 +1218,14 @@ function renderResearch(r,id){
     ${m&&m.estimate!=null?`<div class="tk-market"><h5>Their market</h5><p>About <b>${tkNum(m.estimate)}</b> matching companies for “${esc(m.query||'')}”${m.source?` <span class="tk-muted">(${esc(m.source==='places'?'Google Places':m.source==='overpass'?'OpenStreetMap':m.source)})</span>`:''}.</p></div>`:''}
     ${r.at?`<p class="tk-help">Researched ${esc(tkRel(r.at))}. Facts copied from their site and Google — nothing guessed.</p>`:''}`;
 }
-function renderApplication(d){
+/* The application itself: when it came, the fit check, the fit score, what we found, every answer, and
+   (while it waits) the two buttons. Who they are is already at the top of the page. */
+function renderApplicationCard(d){
   const row=d.row||{};const id=row.id;const app=d.application||{};const fit=app.fit||{};const lines=fit.lines||[];const answers=app.answers||[];
   const review=String(app.review||'').toLowerCase();const pending=review==='pending';
-  const status=pending?'<span class="pill red">Waiting for your review</span>':review==='approved'?'<span class="pill green">Approved</span>':review==='declined'?'<span class="pill grey">Declined</span>':'';
-  const who=[esc(row.contactName||''),row.contactEmail?`<a href="mailto:${esc(row.contactEmail)}">${esc(row.contactEmail)}</a>`:'',row.website?tkLink(row.website):''].filter(Boolean).join(' · ');
-  const decided=review==='approved'?`Approved ${esc(tkDateTime(app.decidedAt))} — the onboarding link went out.`:review==='declined'?`Declined ${esc(tkDateTime(app.decidedAt))}.${app.declineReason?` Reason sent to them: “${esc(app.declineReason)}”`:''}`:'';
-  return `<div class="section-head tk-section" id="tkSec-application"><h3>Application</h3>${status}</div>
-  <div class="card tk-app${pending?' pending':''}">
-    <div class="tk-app-who"><b>${esc(row.name||id||'—')}</b>${who?' · '+who:''}<br><span class="tk-muted">Received ${esc(tkDateTime(app.receivedAt))} (${esc(tkRel(app.receivedAt))}) · from ${esc(tkSourceText(app.source))}</span></div>
+  const decided=review==='approved'?`You said yes ${esc(tkDateTime(app.decidedAt))}. They were emailed.`:review==='declined'?`You said no ${esc(tkDateTime(app.decidedAt))}.${app.declineReason?` The reason they were sent: “${esc(app.declineReason)}”`:''}`:'';
+  return `<div class="card tk-app${pending?' pending':''}">
+    <p class="tk-app-who">Sent ${esc(tkDateTime(app.receivedAt))} (${esc(tkRel(app.receivedAt))}) from ${esc(tkSourceText(app.source))}.</p>
     <h4>Fit check</h4>
     <div class="tk-fit-summary">${tkVerdictPill(fit.verdict)}<span>${esc(fit.summary||'')}</span></div>
     ${lines.length?`<div class="tk-fit">${lines.map(l=>`<div class="tk-fit-line"><div>${tkFitPill(l.status)}</div><div><b>${esc(l.label||l.rule||'')}</b>${l.note?`<small>${esc(l.note)}</small>`:''}</div></div>`).join('')}</div>`:''}
@@ -949,26 +1233,38 @@ function renderApplication(d){
     ${renderResearch(app.research,id)}
     <h4>Their answers</h4>
     ${answers.length?`<dl class="tk-answers">${answers.map(x=>`<dt>${esc(x.q||'')}</dt><dd>${x.a!=null&&x.a!==''?esc(x.a):'<span class="tk-muted">(no answer)</span>'}</dd>`).join('')}</dl>`:'<div class="tk-muted">No answers stored.</div>'}
-    ${pending?`<div class="tk-app-actions"><button class="btn" onclick="trialApproveApplication(${tkAttr(id)})">Approve — send the onboarding link</button><button class="btn ghost" onclick="openDeclineApplication(${tkAttr(id)})">Decline…</button></div>`:decided?`<div class="tk-app-decided">${decided}</div>`:''}
+    ${pending?`<div class="tk-app-actions"><button class="btn" onclick="trialApproveApplication(${tkAttr(id)})">Say yes and email them</button><button class="btn ghost" onclick="openDeclineApplication(${tkAttr(id)})">Say no…</button></div>`:decided?`<div class="tk-app-decided">${decided}</div>`:''}
   </div>`;
+}
+function tkReviewPill(review){return review==='approved'?'<span class="pill green">You said yes</span>':review==='declined'?'<span class="pill grey">You said no</span>':''}
+function renderApplication(d){
+  const review=String(((d&&d.application)||{}).review||'').toLowerCase();
+  return `<div class="section-head tk-section" id="tkSec-application"><h3>Their application</h3>${tkReviewPill(review)}</div>${renderApplicationCard(d)}`;
+}
+/* On the trial page: open while it waits for the owner; once decided, one closed line to look back at. */
+function renderApplicationBlock(d){
+  const app=d&&d.application;if(!app||typeof app!=='object')return '';
+  const review=String(app.review||'').toLowerCase();
+  if(review==='pending')return renderApplication(d);
+  return `<details class="tk-appbox" id="tkSec-application"><summary><span class="tk-appbox-title">Their application</span>${tkReviewPill(review)}</summary>${renderApplicationCard(d)}</details>`;
 }
 function renderDeclineModal(d){
   const row=(d&&d.row)||{};const id=row.id;const app=(d&&d.application)||{};
   const fail=((app.fit&&app.fit.lines)||[]).find(l=>String(l.status).toLowerCase()==='fail');
-  return `<div class="modal-head"><div><h3>Decline ${esc(row.name||id)}'s application</h3><p>Write the reason in one plain sentence.</p></div></div>
+  return `<div class="modal-head"><div><h3>Say no to ${esc(row.name||id)}</h3><p>Write the reason in one plain sentence. They get it by email.</p></div></div>
     <div class="modal-body">
-      <div class="field"><label>Reason</label><textarea id="tkDeclineReason" rows="4" placeholder="e.g. We only run trials for companies whose customers are worth $2,000 or more in year one.">${esc(fail?tkSentence(fail.label):'')}</textarea><div class="tk-help">They'll get this reason by email.</div></div>
+      <div class="field"><label>Reason</label><textarea id="tkDeclineReason" rows="4" placeholder="e.g. We only run trials for companies whose customers are worth $2,000 or more in year one.">${esc(fail?tkSentence(fail.label):'')}</textarea><div class="tk-help">They get this reason by email.</div></div>
       <div id="tkDeclineErr" class="tk-modal-errs"></div>
     </div>
-    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="tkDeclineBtn" onclick="submitDeclineApplication(${tkAttr(id)})">Decline and email them</button></div>`;
+    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="tkDeclineBtn" onclick="submitDeclineApplication(${tkAttr(id)})">Say no and email them</button></div>`;
 }
 /* Plain words for what the machine did with an application. */
 function tkOutcomeText(data,action){
   data=data||{};const o=String(data.outcome||'').toLowerCase();
-  if(o==='onboarding')return 'Onboarding link sent';
-  if(o==='queued'){const pos=data.position!=null?data.position:data.queuePosition!=null?data.queuePosition:(data.queue&&data.queue.position);return 'In the queue'+(pos!=null?' — position '+pos:'');}
-  if(o==='declined')return action==='approve'?'Declined — this company already had a trial; email sent':'Declined — email sent';
-  return action==='approve'?'Approved':'Done';
+  if(o==='onboarding')return 'Done. They were emailed to book the onboarding call';
+  if(o==='queued'){const pos=data.position!=null?data.position:data.queuePosition!=null?data.queuePosition:(data.queue&&data.queue.position);return 'Done. They are on the waiting list'+(pos!=null?' — number '+pos:'')+'. The email goes out when a trial slot frees up';}
+  if(o==='declined')return action==='approve'?'This company already had a trial, so they got a no by email':'Done. They got your no by email';
+  return action==='approve'?'Done. You said yes':'Done';
 }
 
 /* -- purchase (Buy & paste) -- */
@@ -978,7 +1274,7 @@ function renderQuoteLine(q,unconfirmed){
   const flag=q.unconfirmed||(unconfirmed||[]).some(u=>String(u).toLowerCase().includes(String(name).toLowerCase()));
   return `<li><b>${esc(name)}</b>${price!=null?' · '+tkMoney(price):''}${q.code?' · code '+esc(q.code):''}${q.minOrder?' · min '+esc(q.minOrder):''}${q.source?` <span class="tk-muted">(${esc(q.source)})</span>`:''}${flag?' <span class="pill amber">Unconfirmed</span>':''}</li>`;
 }
-function tkSourcePill(src,confirmedAt){src=String(src||'').toLowerCase();return src==='live'?`<span class="pill green" title="${esc(confirmedAt?'Checked '+tkFull(confirmedAt):'Checked live')}">Live price</span>`:src==='table'?`<span class="pill grey" title="From the machine's price list">Price list</span>`:''}
+function tkSourcePill(src,confirmedAt){src=String(src||'').toLowerCase();return src==='live'?`<span class="pill green" title="${esc(confirmedAt?'Checked '+tkFull(confirmedAt):'Checked live')}">Live price</span>`:src==='table'?`<span class="pill grey" title="From our price list">Price list</span>`:''}
 function tkRegistrarUrl(sh,name,prices){const p=(prices||[]).find(x=>x&&x.registrar===name&&tkSafeUrl(x.url));if(p)return p.url;const r=(sh.registrars||[]).find(x=>x&&x.name===name&&tkSafeUrl(x.url));return r?r.url:''}
 /* A registrar promo: the machine sends {code, firstYear, note}; older data may be a bare code. Shown, never counted in the price. */
 function tkPromoText(pr){if(!pr)return '';if(typeof pr!=='object')return 'Code '+String(pr);return ['Code '+(pr.code||'?'),tkNorm(pr.firstYear)!=null?tkMoney(pr.firstYear)+' first year':'',pr.note||''].filter(Boolean).join(' · ')}
@@ -1019,7 +1315,7 @@ function renderPurchase(p,id,meta){
   const rowsN=Math.max(2,senders.length,Number(sh.inboxes&&sh.inboxes.count)||0);
   const rows=[];for(let i=0;i<rowsN;i++)rows.push(renderPurchaseRow(senders[i]||'',setup.senderName||''));
   const notes=[];
-  if(!enc)notes.push('<div class="tk-note">The machine has no ENC_KEY yet, so it cannot store app passwords safely. Set ENC_KEY on the machine, then come back.</div>');
+  if(!enc)notes.push('<div class="tk-note">Passwords can\'t be stored safely yet, so this form is closed. (For your developer: set ENC_KEY.) Come back once that is done.</div>');
   if(state&&!canPaste)notes.push(`<div class="tk-note">This client is in "${esc(tkStateLabel({state}))}" — the paste form only applies while it waits for the purchase or the setup check.</div>`);
   const disabled=!enc||!canPaste;
   const t=sh.totals||null;const v2=(sh.offers||[]).length>0||!!(sh.inboxes&&typeof sh.inboxes==='object')||!!t;
@@ -1033,8 +1329,8 @@ function renderPurchase(p,id,meta){
     <small>Total</small><span class="tk-total">${tkMoney(sh.total)}</span>
   </div></div>`;
   const status=`<div class="card tk-pad tk-gap"><div class="tk-kv"><small>List sent</small><span>${sh.sentAt?esc(tkDateTime(sh.sentAt))+' ('+esc(tkRel(sh.sentAt))+')':'—'}</span><small>Bought</small><span>${sh.boughtAt?'<span class="pill green">'+esc(tkDateTime(sh.boughtAt))+'</span>':'<span class="pill amber">Not yet</span>'}</span>${unconfirmed.length?`<small>Unconfirmed</small><span class="tk-amber">${unconfirmed.map(u=>esc(String(u))).join('; ')}</span>`:''}</div></div>`;
-  return `<div class="card tk-head tk-gap-b"><div class="tk-head-main"><h2>${esc(client.name||tkClientName(id)||id||'—')}</h2><div class="tk-pills"><span class="pill grey">${esc(tkStateLabel({state}))}</span>${client.mainDomain?`<span class="pill blue">${esc(client.mainDomain)}</span>`:''}</div><div class="tk-meta">The one manual step per trial: buy the domain and the inboxes, then paste the logins here. The machine checks everything else.</div></div>
-    <div class="tk-btns"><button class="btn ghost" onclick="openTrial(${tkAttr(id)})">← Trial</button><button class="btn ghost" onclick="trialsRefresh()">Refresh</button><button class="btn ghost" onclick="openMachine(${tkAttr('/mc/clients/'+id+'/purchase')})">Mission Control ↗</button></div></div>
+  return `<div class="card tk-head tk-gap-b"><div class="tk-head-main"><h2>${esc(client.name||tkClientName(id)||id||'—')}</h2><div class="tk-pills"><span class="pill grey">${esc(tkStateLabel({state}))}</span>${client.mainDomain?`<span class="pill blue">${esc(client.mainDomain)}</span>`:''}</div><div class="tk-meta">The one step only you can do: buy the domain and the inboxes, then paste the logins here. We check everything else.</div></div>
+    <div class="tk-btns"><button class="btn ghost" onclick="trialsRefresh()">Refresh</button><button class="btn ghost" onclick="openMachine(${tkAttr('/mc/clients/'+id+'/purchase')})">Full control panel ↗</button></div></div>
   ${notes.join('')}
   ${v2?totals+renderOffers(sh,!disabled)+renderInboxOrder(sh.inboxes,senders,setup.senderName)+status:legacy+status}
   ${existing.length?`<div class="section-head tk-section"><h3>Already pasted</h3><span class="count">${existing.length}</span></div><div class="card tk-scroll"><table class="tk-table"><tr><th>Inbox</th><th>Name</th><th>Password</th><th>On</th></tr>${existing.map(ib=>`<tr><td class="tk-break">${esc(ib.email||'')}</td><td>${esc(ib.displayName||'')}</td><td>${ib.hasPassword?'<span class="pill green">Stored</span>':'<span class="pill red">Missing</span>'}</td><td>${tkTruthy(ib.enabled)?'Yes':'No'}</td></tr>`).join('')}</table></div>`:''}
@@ -1044,7 +1340,7 @@ function renderPurchase(p,id,meta){
     <label class="tk-check"><input id="pcAutoRenew" type="checkbox"> Auto-renew is <b>off</b> at the registrar (required)</label>
     <div class="field"><label>Inboxes (email · app password · display name)</label><div id="pcRows">${rows.join('')}</div><button class="li-add" type="button" onclick="trialsPurchaseAddRow()">+ Add another inbox</button></div>
     <div id="pcErr" class="tk-modal-errs"></div>
-    <div class="tk-inline tk-gap"><button class="btn" onclick="submitTrialPurchase(${tkAttr(id)})">Save logins and start the setup check</button><span class="tk-help">Passwords are sent once, over HTTPS, and stored encrypted on the machine.</span></div>
+    <div class="tk-inline tk-gap"><button class="btn" onclick="submitTrialPurchase(${tkAttr(id)})">Save logins and start the setup check</button><span class="tk-help">Passwords are sent once, safely, and stored locked away.</span></div>
   </fieldset></div>
   <div class="section-head tk-section"><h3>Setup checks</h3>${setup.domain&&setup.domain.setupPhase?`<span class="pill ${setup.domain.setupPhase==='passed'?'green':setup.domain.setupPhase==='failed'?'red':'amber'}">${esc(setup.domain.setupPhase)}</span>`:''}<div class="spacer"></div><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunSetup')">Re-run setup</button></div>
   <div class="card tk-scroll">${renderChecksTable(setup.checks)}</div>`;
@@ -1052,15 +1348,45 @@ function renderPurchase(p,id,meta){
 function renderPurchaseRow(email,name){return `<div class="tk-pc-row"><input class="pc-email" data-tk-form placeholder="hello@acme-team.com" value="${esc(email||'')}" autocomplete="off"><input class="pc-pass" data-tk-form type="password" placeholder="App password" autocomplete="new-password"><input class="pc-name" data-tk-form placeholder="Display name" value="${esc(name||'')}" autocomplete="off"><button class="li-del" type="button" onclick="this.parentElement.remove()" title="Remove row">✕</button></div>`}
 
 /* -- alerts -- */
+/* Settings › Alerts: every alert the system sent, newest first; "Mark as seen" clears one. */
 function renderAlerts(alerts,filter,meta){
-  alerts=alerts||[];meta=meta||{};filter=filter||'open';
+  alerts=alerts||[];meta=meta||{};filter=filter==='all'?'all':'open';
   const list=alerts.filter(a=>filter==='all'||!a.acknowledged).slice().sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
   const openN=alerts.filter(a=>!a.acknowledged).length;
-  const toolbar=`<div class="toolbar"><div class="seg"><button class="${filter==='all'?'active':''}" onclick="trialsSetAlertFilter('all')">All · ${alerts.length}</button><button class="${filter==='open'?'active':''}" onclick="trialsSetAlertFilter('open')">Open · ${openN}</button></div><div style="margin-left:auto" class="tk-inline">${tkUpdatedStamp(meta.at)}<button class="btn ghost" onclick="trialsRefresh()">Refresh</button><button class="btn ghost" onclick="openMachine('/mc/alerts')">Mission Control ↗</button></div></div>`;
-  if(!list.length)return toolbar+`<div class="card"><div class="tk-todo-empty">${filter==='open'?'No open alerts — the machine has nothing for you.':'No alerts yet.'}</div></div>`;
-  return toolbar+`<div class="card">${list.map(a=>`<div class="tk-alert ${a.acknowledged?'acked':''}">${a.urgent?'<span class="pill red">Urgent</span>':'<span class="pill grey">Info</span>'}
-    <div style="min-width:0"><b>${esc(a.title||a.key||'Alert')}</b><small>${a.clientId?`<span class="tk-client" onclick="openTrial(${tkAttr(a.clientId)})">${esc(tkClientName(a.clientId))}</span> · `:''}${a.key?esc(a.key)+' · ':''}<span title="${esc(tkFull(a.at))}">${esc(tkRel(a.at,meta.now))}</span> · ${a.delivered===false?'<span class="tk-red">not delivered</span>':'delivered'}${a.acknowledged?' · acknowledged':''}</small></div>
-    <div class="tk-alert-act">${a.acknowledged?'':`<button class="btn ghost" onclick="trialsAckAlert(${tkAttr(a.id)})">Acknowledge</button>`}</div></div>`).join('')}</div>`;
+  const toolbar=`<div class="toolbar"><div class="seg" role="group" aria-label="Which alerts"><button class="${filter==='open'?'active':''}" aria-pressed="${filter==='open'}" onclick="trialsSetAlertFilter('open')">Not seen · ${openN}</button><button class="${filter==='all'?'active':''}" aria-pressed="${filter==='all'}" onclick="trialsSetAlertFilter('all')">All · ${alerts.length}</button></div><div style="margin-left:auto" class="tk-inline">${tkUpdatedStamp(meta.at)}</div></div>`;
+  if(!list.length)return toolbar+`<p class="tk-todo-empty">${filter==='open'?'No new alerts. Nothing needs you.':'No alerts yet. When something needs you, it shows up here.'}</p>`;
+  return toolbar+`<div class="tk-alerts">${list.map(a=>`<div class="tk-alert ${a.acknowledged?'acked':''}">${a.urgent?'<span class="pill red">Urgent</span>':'<span class="pill grey">Note</span>'}
+    <div style="min-width:0"><b>${esc(a.title||'Alert')}</b><small>${a.clientId?`<button type="button" class="tk-client" onclick="openTrial(${tkAttr(a.clientId)})">${esc(tkClientName(a.clientId))}</button> · `:''}<span title="${esc(tkFull(a.at))}">${esc(tkRel(a.at,meta.now))}</span>${a.delivered===false?' · <span class="tk-red">not sent to your phone or email</span>':''}${a.acknowledged?' · seen':''}</small></div>
+    <div class="tk-alert-act">${a.acknowledged?'':`<button class="btn ghost" onclick="trialsAckAlert(${tkAttr(a.id)})">Mark as seen</button>`}</div></div>`).join('')}</div>`;
+}
+
+/* -- Settings: everything that is not Trials, Calendar or Inquiries, as named sections --
+   Each is a <details> with its name and a one-word state in the summary, so the page reads as a short
+   list. ctx = {hub, hubErr, at, alerts, alertsErr, alertsAt, filter, open:{alerts:true…}, phone:'On'|'',
+   dark, email, now}. Pure: the host (trialsHostHTML) reads the DOM and caches. */
+function renderSettings(ctx){
+  ctx=ctx||{};const open=ctx.open||{};const hub=ctx.hub||null;const machine=(hub&&hub.machine)||{};
+  const alerts=Array.isArray(ctx.alerts)?ctx.alerts:null;
+  const unseen=alerts?alerts.filter(a=>a&&!a.acknowledged).length:(machine.openAlerts!=null?Number(machine.openAlerts)||0:null);
+  const st=hub?tkStatusOf(machine):null;
+  const pages=typeof MACHINE_PAGES!=='undefined'?MACHINE_PAGES:[];
+  const sec=(key,title,sub,state,body)=>`<details class="tk-set" id="${esc('tkSet-'+key)}"${open[key]?' open':''} ontoggle="trialsSettingsToggle(${tkAttr(key)},this.open)"><summary><span class="tk-set-head"><span class="tk-set-title">${esc(title)}</span><span class="tk-set-sub">${esc(sub)}</span></span>${state||''}</summary><div class="tk-set-body">${body}</div></details>`;
+  const alertsBody=alerts?renderAlerts(alerts,ctx.filter,{at:ctx.alertsAt,now:ctx.now}):ctx.alertsErr?`<p class="tk-note red">${esc(ctx.alertsErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Loading your alerts…');
+  const statusBody=hub?renderSystemStatus(machine,{at:ctx.at,now:ctx.now}):ctx.hubErr?`<p class="tk-note red">${esc(ctx.hubErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Checking…');
+  return `<div class="tk-sets">`+
+    sec('alerts','Alerts','Messages from the system about your trials.',unseen==null?'':unseen?`<span class="pill amber">${tkNum(unseen)} not seen</span>`:'<span class="pill green">All seen</span>',alertsBody)+
+    sec('phone','Phone alerts','Get a message on your phone when something needs you.',ctx.phone==='On'?'<span class="pill green">On</span>':'<span class="pill grey">Off</span>',
+      `<p class="tk-set-text">${ctx.phone==='On'?'Phone alerts are on for this device.':'Phone alerts are off on this device.'} On an iPhone, add the hub to your Home Screen first; the setup shows you how.</p><button type="button" class="btn" onclick="openPhoneAlerts()">Set up phone alerts</button>`)+
+    sec('status','Is everything running?','A quick health check of the system.',st?`<span class="pill ${st[0]}">${st[0]==='green'?'Yes':st[0]==='amber'?'Mostly':'Needs a look'}</span>`:'',statusBody)+
+    sec('behind','Behind the scenes','Every trial by stage, every to-do and the waiting list.','',
+      `<p class="tk-set-text">The full picture: every trial by stage, every to-do in one list, the waiting list and your own sending.</p><button type="button" class="btn" onclick="render('trialsBoard')">Open behind the scenes</button>`)+
+    sec('advanced','Advanced','The full control panel, for rare changes.','',
+      `<p class="tk-set-text">Each link opens the full control panel in a new tab, already signed in.</p><div class="tk-set-links"><button type="button" class="btn ghost" onclick="openMachine(${tkAttr('/mc')})">Full control panel ↗</button>${pages.map(([path,,label])=>`<button type="button" class="btn ghost" onclick="openMachine(${tkAttr(path)})">${esc(label)} ↗</button>`).join('')}</div>`)+
+    sec('look','Light or dark','How the hub looks on this device.',`<span class="pill grey">${ctx.dark?'Dark':'Light'}</span>`,
+      `<div class="seg" role="group" aria-label="Light or dark"><button class="${ctx.dark?'':'active'}" aria-pressed="${!ctx.dark}" onclick="setTheme('light')">Light</button><button class="${ctx.dark?'active':''}" aria-pressed="${!!ctx.dark}" onclick="setTheme('dark')">Dark</button></div>`)+
+    sec('account','Your account','Sign out of the hub.','',
+      `<p class="tk-set-text">${ctx.email?`Signed in as <b>${esc(ctx.email)}</b>.`:'Signed in.'}</p><button type="button" class="btn ghost" onclick="logout()">Log out</button>`)+
+  `</div>`;
 }
 
 /* ===================== 6. VIEWS (called by the shell router) ===================== */
@@ -1076,13 +1402,14 @@ function trialsCtx(id){
 function trialsSparkMap(){const out={};const all=tkSparkAll();Object.keys(all).forEach(k=>{if(all[k]&&all[k].g)out[k]=all[k].g;});return out}
 function trialsHostHTML(view){
   switch(view){
-    case 'trials':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderBoard(tk.hub,{at:tk.hubAt,sparks:trialsSparkMap()}):tk.hubErr?renderMachineError(tk.hubErr):renderLoading();
-    case 'trial':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the board.','Trials board',"render('trials')");
-      const d=tk.detail[id];return d?renderStaleNote(tk.detailErr[id],tk.detailAt[id])+renderTrialDetail(d,trialTab,Object.assign({at:tk.detailAt[id]},trialsCtx(id))):tk.detailErr[id]?renderMachineError(tk.detailErr[id]):renderLoading();}
-    case 'trialPurchase':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the board first.','Trials board',"render('trials')");
+    case 'trials':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderTrialList(tk.hub,{at:tk.hubAt,doneOpen:tk.doneOpen}):tk.hubErr?renderMachineError(tk.hubErr):renderLoading('Loading your trials…');
+    case 'trialsBoard':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderBoard(tk.hub,{at:tk.hubAt,sparks:trialsSparkMap()}):tk.hubErr?renderMachineError(tk.hubErr):renderLoading();
+    case 'settings':return renderSettings(trialsSettingsCtx());
+    case 'trial':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the list.','All trials',"render('trials')");
+      const d=tk.detail[id];return d?renderStaleNote(tk.detailErr[id],tk.detailAt[id])+renderTrialDetail(d,trialTab,Object.assign({at:tk.detailAt[id],behindOpen:tk.behindOpen},trialsCtx(id))):tk.detailErr[id]?renderMachineError(tk.detailErr[id]):renderLoading('Loading this trial…');}
+    case 'trialPurchase':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the list first.','All trials',"render('trials')");
       const p=tk.purchase[id];return p?renderStaleNote(tk.purchaseErr[id],tk.purchaseAt[id])+renderPurchase(p,id,{at:tk.purchaseAt[id]}):tk.purchaseErr[id]?renderMachineError(tk.purchaseErr[id]):renderLoading();}
     case 'inquiries':case 'inquiry':return inquiriesHostHTML(view);
-    case 'trialAlerts':return tk.alerts?renderStaleNote(tk.alertsErr,tk.alertsAt)+renderAlerts(tk.alerts,trialsAlertFilter,{at:tk.alertsAt}):tk.alertsErr?renderMachineError(tk.alertsErr):renderLoading();
   }
   return '';
 }
@@ -1093,7 +1420,7 @@ function trialsRepaint(view,opts){
   if(opts.soft&&tkFormDirty())return;   // never wipe something the owner is typing
   h.innerHTML=trialsHostHTML(view);
   if(view==='inquiry')inquiryTitle();
-  if(view==='trial'&&currentTrialId&&tk.detail[currentTrialId]){const row=tk.detail[currentTrialId].row||{};const t=document.getElementById('ptitle'),s=document.getElementById('psub');if(t)t.textContent=row.name||'Trial';if(s)s.textContent=tkStateLabel(row);}
+  if(view==='trial'&&currentTrialId&&tk.detail[currentTrialId])trialsTitle();
   try{renderNav();updateNotifBadge();}catch(e){}
   trialsApplyScroll();
 }
@@ -1106,24 +1433,50 @@ function trialsRepaintTab(tab){
 /* openTrial(id, tab, section) asks for a section (e.g. 'application'); scroll there once it exists. */
 function trialsApplyScroll(){
   if(currentView!=='trial'||!tk.scrollTo||!currentTrialId||!tk.detail[currentTrialId])return;
-  const el=document.getElementById('tkSec-'+tk.scrollTo);tk.scrollTo=null;
+  const el=document.getElementById(tk.scrollTo==='behind'?'tkBehind':'tkSec-'+tk.scrollTo);tk.scrollTo=null;
+  const box=el&&el.closest?el.closest('details'):null;if(box&&!box.open)box.open=true;   // e.g. a decided application sits behind the scenes
   // Instant, not smooth: smooth scrolling needs animation frames, which browsers pause in hidden tabs.
   if(el&&el.scrollIntoView)try{el.scrollIntoView({block:'start'});}catch(e){el.scrollIntoView();}
 }
 async function trialsKick(view,force){
   let r;
-  if(view==='trials')r=await loadHub(force);
+  if(view==='trials'||view==='trialsBoard')r=await loadHub(force);
   else if(view==='trial')r=await loadTrial(currentTrialId,force);
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
-  else if(view==='trialAlerts')r=await loadAlerts(force);
+  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force)]);r=h&&h.ok===false?h:a;}
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
   trialsRepaint(view,{soft:true});
   return r;
 }
-function viewTrials(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trials').then(()=>trialsSparkBoot());return `<div id="tkHost">${trialsHostHTML('trials')}</div>`}
-function viewTrial(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trial');loadHub(false).then(()=>{try{renderNav();}catch(e){}});return `<div id="tkHost">${trialsHostHTML('trial')}</div>`}
+/* The Trials list costs one board call (no growth history) plus the onboarding-call check. */
+function viewTrials(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trials');trialsOcCheck();return `<div id="tkHost">${trialsHostHTML('trials')}</div>`}
+/* "Behind the scenes": the old board — status strip, every to-do, stage columns, queue, the owner's own rows, sparklines. */
+function viewTrialsBoard(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trialsBoard').then(()=>trialsSparkBoot());return `<div id="tkHost">${trialsHostHTML('trialsBoard')}</div>`}
+function viewTrial(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trial');trialsOcCheck();loadHub(false).then(()=>{try{renderNav();}catch(e){}});return `<div id="tkHost">${trialsHostHTML('trial')}</div>`}
 function viewTrialPurchase(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trialPurchase');return `<div id="tkHost">${trialsHostHTML('trialPurchase')}</div>`}
-function viewTrialAlerts(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trialAlerts');loadHub(false).then(()=>{try{renderNav();}catch(e){}});return `<div id="tkHost">${trialsHostHTML('trialAlerts')}</div>`}
+/* Settings: always drawn at once (theme, phone alerts, account need no data); alerts + status fill in. */
+function viewSettings(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('settings');return `<div id="tkHost">${trialsHostHTML('settings')}</div>`}
+function trialsSettingsCtx(){
+  let dark=false;try{dark=!!(document.body&&document.body.classList&&document.body.classList.contains('dark'));}catch(e){dark=false;}
+  return {hub:tk.hub,hubErr:tk.hubErr,at:tk.hubAt,alerts:tk.alerts,alertsErr:tk.alertsErr,alertsAt:tk.alertsAt,filter:trialsAlertFilter,open:tk.setOpen,
+    phone:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():'',dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:''};
+}
+/* #alerts and the bell open Settings with that section open and in view. */
+function openSettings(section){
+  if(section&&TK_SETTINGS.includes(section)){tk.setOpen[section]=true;tk.setScroll=section;}
+  render('settings');
+}
+function trialsSettingsToggle(key,open){if(TK_SETTINGS.includes(key))tk.setOpen[key]=!!open;}
+function trialsSettingsScroll(){
+  if(currentView!=='settings'||!tk.setScroll)return;
+  const el=document.getElementById('tkSet-'+tk.setScroll);tk.setScroll=null;
+  if(el&&el.scrollIntoView)try{el.scrollIntoView({block:'start'});}catch(e){el.scrollIntoView();}
+}
+/* The top bar on a trial: the company is the title; the page itself starts with the three questions. */
+function trialsTitle(){
+  const d=currentTrialId&&tk.detail[currentTrialId];if(!d)return;const s=tkSimple(d.row||{});
+  const t=document.getElementById('ptitle'),p=document.getElementById('psub');if(t)t.textContent=s.company;if(p)p.textContent='';   // who they are is the first line of the page
+}
 /* Growth fetches — only from the owner's own clicks (opening a trial or a tab), never from the timer. */
 function trialsEnsureOverview(id){
   const row=tkFindRow(id);if(row&&TK_PRE_WARMUP.includes(row.state))return;
@@ -1139,7 +1492,7 @@ function trialsEnsureGrowth(id,force){
   loadGrowth(id,days,true).then(()=>{delete tk.growthBusy[id];if(currentTrialId===id)trialsRepaintTab('growth');});
 }
 function trialsEnsureTab(){
-  if(currentView!=='trial'||!currentTrialId)return;
+  if(currentView!=='trial'||!currentTrialId||!tk.behindOpen)return;   // the tabs live behind the scenes: nothing to fetch while it is closed
   const t=tkTabKey(trialTab);
   if(t==='growth')trialsEnsureGrowth(currentTrialId);
   else if(t==='overview')trialsEnsureOverview(currentTrialId);
@@ -1147,36 +1500,43 @@ function trialsEnsureTab(){
 /* Board sparklines: one small growth call per warming/sending client, at most every 6 hours
    (kept in localStorage so reloads are free). Started by opening the board, not by the timer. */
 async function trialsSparkBoot(){
-  if(!tk.hub||currentView!=='trials')return;
+  if(!tk.hub||currentView!=='trialsBoard')return;
   const rows=tkAllRows(tk.hub).filter(r=>r&&r.id&&!TK_PRE_WARMUP.includes(r.state));
   for(const r of rows){
     const c=tkSparkGet(r.id);if(c&&Date.now()-c.at<TK_SPARK_FRESH_MS)continue;
     await loadSpark(r.id,TK_SPARK_FRESH_MS);
-    if(currentView!=='trials')return;
+    if(currentView!=='trialsBoard')return;
     const el=document.getElementById(tkDomId('tkSpark-',r.id));const s=tkSparkGet(r.id);
     if(el&&s)el.innerHTML=renderCardSpark(s.g);
   }
 }
 
 /* ===================== 7. ACTIONS ===================== */
-function openTrial(id,tab,section){if(!id)return;id=String(id);if(id!==currentTrialId&&!tab)trialTab='overview';currentTrialId=id;if(tab)trialTab=tkTabKey(tab);if(section){tk.scrollTo=section;if(section==='application')trialTab='application';}render('trial')}
+function openTrial(id,tab,section){if(!id)return;id=String(id);if(id!==currentTrialId&&!tab){trialTab='overview';tk.behindOpen=false;}currentTrialId=id;if(tab){trialTab=tkTabKey(tab);tk.behindOpen=true;}if(section)tk.scrollTo=String(section);render('trial')}
+/* The big button's helpers: scroll to a part of the trial page (opening it if it is folded), or into the reply box. */
+function tkGoTo(section){tk.scrollTo=String(section||'');trialsApplyScroll();}
+function tkFocusReply(){
+  const t=document.getElementById('tkOcReply');if(!t){toast('The reply box is in the onboarding call section below');return;}
+  if(t.scrollIntoView)try{t.scrollIntoView({block:'center'});}catch(e){t.scrollIntoView();}
+  try{t.focus();}catch(e){}
+}
 function openTrialPurchase(id){if(!id)return;currentTrialId=String(id);render('trialPurchase')}
 function trialsRetry(){const h=document.getElementById('tkHost');if(h&&!trialsHasData(currentView))h.innerHTML=renderLoading('Trying again…');trialsKick(currentView,true).then(()=>trialsRepaint(currentView))}
-function trialsHasData(v){if(v==='trials')return !!tk.hub;if(v==='trial')return !!tk.detail[currentTrialId];if(v==='trialPurchase')return !!tk.purchase[currentTrialId];if(v==='trialAlerts')return !!tk.alerts;if(v==='inquiries')return !!iq.list;if(v==='inquiry')return !!iqFind(currentInquiryId);return false}
+function trialsHasData(v){if(v==='trials'||v==='trialsBoard')return !!tk.hub;if(v==='trial')return !!tk.detail[currentTrialId];if(v==='trialPurchase')return !!tk.purchase[currentTrialId];if(v==='settings')return true;if(v==='inquiries')return !!iq.list;if(v==='inquiry')return !!iqFind(currentInquiryId);return false}
 async function trialsRefresh(){
   const v=currentView;const r=await trialsKick(v,true);trialsRepaint(v);
-  if(v==='trial'&&currentTrialId){const t=tkTabKey(trialTab);if(t==='growth')trialsEnsureGrowth(currentTrialId,true);else if(t==='overview'){loadSpark(currentTrialId,0).then(()=>trialsRepaintTab('overview'));}}
+  if(v==='trial'&&currentTrialId&&tk.behindOpen){const t=tkTabKey(trialTab);if(t==='growth')trialsEnsureGrowth(currentTrialId,true);else if(t==='overview'){loadSpark(currentTrialId,0).then(()=>trialsRepaintTab('overview'));}}
   if(r&&r.ok===false)toast('Refresh failed: '+(r.error||'no answer'));
 }
 function trialsSetTab(tab){
-  trialTab=tkTabKey(tab);const bar=document.getElementById('tkTabBar'),host=document.getElementById('tkTabHost');const d=currentTrialId&&tk.detail[currentTrialId];
+  trialTab=tkTabKey(tab);tk.behindOpen=true;const bar=document.getElementById('tkTabBar'),host=document.getElementById('tkTabHost');const d=currentTrialId&&tk.detail[currentTrialId];
   if(!d||!bar||!host){trialsRepaint('trial');trialsEnsureTab();return;}
   bar.outerHTML=renderTabBar(trialTab,d);host.innerHTML=renderTab(d,trialTab,trialsCtx(currentTrialId));
   trialsEnsureTab();
 }
 function trialsGrowthRange(n){if(!TK_GROWTH_RANGES.includes(Number(n)))return;tk.growthDays=Number(n);trialsRepaintTab('growth');if(currentTrialId)trialsEnsureGrowth(currentTrialId);}
 function trialsGrowthReload(){if(currentTrialId)trialsEnsureGrowth(currentTrialId,true);}
-function trialsSetAlertFilter(f){trialsAlertFilter=f;trialsRepaint('trialAlerts')}
+function trialsSetAlertFilter(f){trialsAlertFilter=f==='all'?'all':'open';tk.setOpen.alerts=true;trialsRepaint('settings')}
 /* After a machine action: refresh the data behind the current screen (and the board cache) */
 async function trialsAfterAction(){
   const v=currentView;
@@ -1214,6 +1574,7 @@ function trialsTodoAction(id){
 function tkOpenTodoTarget(t){
   const a=(t&&t.action)||{};
   if(a.type==='view'&&a.view==='inquiry'){if(a.inquiryId)openInquiry(a.inquiryId);else render('inquiries');return;}
+  if(a.type==='view'&&a.view==='calendar'){if(typeof openCalendar==='function')openCalendar(a.meetingId!=null&&a.meetingId!==''?String(a.meetingId):null);else render('calendar');return;}   // meeting-request:{id}
   const cid=a.clientId||t.clientId;if(!cid){render('trials');return;}
   if(a.type==='view'&&a.view==='purchase')openTrialPurchase(cid);
   else if(a.type==='view'&&a.view==='sequence')openTrial(cid,'copy');
@@ -1221,7 +1582,7 @@ function tkOpenTodoTarget(t){
 }
 /* Application review: approve (onboarding or queue) / decline with a reason */
 function trialApproveApplication(id){
-  return trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/intake',{action:'approveApplication'},{confirm:'Send '+tkClientName(id)+' the onboarding link now?',done:data=>tkOutcomeText(data,'approve'),fail:'Not approved'});
+  return trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/intake',{action:'approveApplication'},{confirm:'Say yes to '+tkClientName(id)+'? They get an email asking them to book the onboarding call.',done:data=>tkOutcomeText(data,'approve'),fail:'Not sent'});
 }
 function openDeclineApplication(id){
   const d=tk.detail[id]||{row:tkFindRow(id)||{id}};
@@ -1238,7 +1599,7 @@ async function submitDeclineApplication(id){
   let r;
   try{r=await machineFetch('/api/mc/clients/'+encodeURIComponent(id)+'/intake',{body:{action:'declineApplication',reason}});}
   finally{tk.busy=false;if(btn)btn.disabled=false;}
-  if(!r.ok){show(r.data&&r.data.errors?tkErrorList(r.data.errors).join(' · '):(r.error||'The machine did not accept it.'));return r;}
+  if(!r.ok){show(r.data&&r.data.errors?tkErrorList(r.data.errors).join(' · '):(r.error||'That did not go through. Try again.'));return r;}
   closeModal();toast(tkOutcomeText(r.data,'decline'));
   await trialsAfterAction();
   return r;
@@ -1247,6 +1608,66 @@ async function submitDeclineApplication(id){
 function trialResearchAgain(id){
   return trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/intake',{action:'rerunResearch'},{done:data=>{const st=String((data.result&&data.result.status)||'').toLowerCase();return st==='done'?'Research finished':st==='failed'?'Research could not finish — see the note':'Research started — it carries on in the background; refresh in a minute';},fail:'Research did not start'});
 }
+/* -- onboarding call: the owner's reply and buttons (docs/ONBOARD-CALL.md §4–5) --
+   POST /api/mc/clients/{id}/onboard-call → {ok, onboardCall}. The card is redrawn from the answer at
+   once; the rest of the page (and the list's plain sentence) refreshes quietly behind it. */
+function tkOcPath(id){return '/api/mc/clients/'+encodeURIComponent(id)+'/onboard-call'}
+function tkOcName(id){const r=(tk.detail[id]&&tk.detail[id].row)||tkFindRow(id)||{};const s=tkSimple(r);return s.person||s.company||String(id||'')}
+function tkOcCount(el){const c=document.getElementById('tkOcCount');const n=String((el&&el.value)||'').length;if(c){c.textContent=n+' / '+TK_OC_MAX;c.classList.toggle('over',n>TK_OC_MAX);}}
+function tkOcRepaint(id,keepDraft){
+  if(currentView!=='trial'||currentTrialId!==id)return;
+  const host=document.getElementById('tkOcHost');const d=tk.detail[id];if(!host||!d)return;
+  const ta=document.getElementById('tkOcReply');const draft=keepDraft&&ta?String(ta.value||''):'';
+  host.innerHTML=renderOnboardCall(d.onboardCall,d.row,{now:new Date()});
+  if(draft){const t2=document.getElementById('tkOcReply');if(t2){t2.value=draft;tkOcCount(t2);}}
+}
+async function trialOcPost(id,body,opts){
+  opts=opts||{};
+  const r=await trialPost(tkOcPath(id),body,{confirm:opts.confirm||'',done:opts.done,fail:opts.fail||'That did not work',reload:false});
+  if(r&&r.ok){
+    const oc=r.data&&r.data.onboardCall;
+    if(oc&&typeof oc==='object'&&tk.detail[id])tk.detail[id]=Object.assign({},tk.detail[id],{onboardCall:oc});
+    tkOcRepaint(id,opts.keepDraft);
+    Promise.all([loadTrial(id,true),loadHub(true)]).then(()=>{trialsRepaint('trial',{soft:true});try{renderNav();updateNotifBadge();}catch(e){}});
+  }
+  return r;
+}
+function trialOcReply(id){
+  const t=document.getElementById('tkOcReply');const text=String((t&&t.value)||'').trim();
+  if(!text){toast('Write your reply first');return Promise.resolve({ok:false});}
+  if(text.length>TK_OC_MAX){toast('That is too long — '+TK_OC_MAX+' characters at most (yours is '+text.length+')');return Promise.resolve({ok:false});}
+  return trialOcPost(id,{action:'reply',text},{done:'Reply sent to '+tkOcName(id),fail:'Reply not sent'});
+}
+function trialOcMarkBooked(id){
+  const i=document.getElementById('tkOcWhen');const v=String((i&&i.value)||'').trim();const d=v?new Date(v):null;
+  if(!d||isNaN(d)){toast('Pick the date and time of the call first');return Promise.resolve({ok:false});}
+  return trialOcPost(id,{action:'markBooked',when:d.toISOString()},{done:'Call marked as booked for '+tkDateTime(d),keepDraft:true});
+}
+const TK_OC_ACTIONS={
+  markHeld:{done:'Marked: the call happened'},
+  markNoShow:{confirm:n=>'Mark that '+n+" didn't show up for the call?",done:"Marked: they didn't show up"},
+  resend:{confirm:n=>'Send '+n+' the acceptance email again?',done:'The acceptance email was sent again'},
+  stopReminders:{confirm:n=>'Stop the reminder emails to '+n+'?',done:'Reminders stopped'},
+};
+/* "Mark the call done" from the top of the page: one tap, so it asks first. */
+function trialOcTopHeld(id){return trialOcPost(id,{action:'markHeld'},{confirm:'Mark the call with '+tkOcName(id)+' as done?',done:TK_OC_ACTIONS.markHeld.done,keepDraft:true})}
+function trialOcAction(id,action){
+  const a=TK_OC_ACTIONS[action];if(!a)return Promise.resolve({ok:false});
+  return trialOcPost(id,{action},{confirm:a.confirm?a.confirm(tkOcName(id)):'',done:a.done,keepDraft:true});
+}
+/* Opening the Trials list or a trial asks the machine to look for replies and bookings now (it throttles
+   this itself). Fire-and-forget: errors are ignored; if something new came in, the screen refreshes. */
+function trialsOcCheck(){
+  return machineFetch('/api/mc/onboard-calls/check',{method:'POST',body:{},timeout:20000}).then(r=>{
+    const d=r&&r.ok&&r.data;
+    if(d&&(Number(d.newReplies)>0||Number(d.booked)>0||Number(d.remindersSent)>0)&&(currentView==='trials'||currentView==='trial'))trialsKick(currentView,true);
+    return r;
+  },()=>null);
+}
+/* Only the owner opening it fetches anything: a repaint re-inserts <details open>, which fires "toggle" again —
+   that must not turn the 60-second refresh into a growth-history call. */
+function trialsBehindToggle(open){open=!!open;const was=tk.behindOpen;tk.behindOpen=open;if(open&&!was)trialsEnsureTab();}
+function trialsDoneToggle(open){tk.doneOpen=!!open;}
 function trialsQueueAction(id,action){
   if(action==='decline'){const reason=typeof prompt==='function'?prompt('Reason for declining '+tkClientName(id)+' (the applicant is told this):',''):null;if(reason===null)return;trialPost('/api/mc/queue',{action:'decline',clientId:id,reason},{done:'Declined'});return;}
   trialPost('/api/mc/queue',{action:'promote',clientId:id},{confirm:'Promote '+tkClientName(id)+' into onboarding now (even over the cap)?',done:'Promoted to onboarding'});
@@ -1265,8 +1686,8 @@ function trialRemoveInbox(id,email){trialAction(id,{action:'removeInbox',email},
 function trialDispute(id,bookingId,action){trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/bookings',{bookingId,action},{confirm:(action==='uphold'?'Uphold the dispute (the call does not count)?':'Overturn the dispute (the call counts)?'),done:action==='uphold'?'Dispute upheld':'Dispute overturned'})}
 function trialSequenceAction(id,action){
   const body=action==='dispatch'?{action:'dispatch',mode:'refill'}:{action};
-  const conf=action==='sendLink'?'Send the approval link to the client now?':action==='dispatch'?'Dispatch Lead Finder for a refill now?':'';
-  trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/sequence',body,{confirm:conf,done:action==='sendLink'?'Approval link sent':'Lead Finder dispatched'});
+  const conf=action==='sendLink'?'Send the approval link to the client now?':action==='dispatch'?'Look for more leads now?':'';
+  trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/sequence',body,{confirm:conf,done:action==='sendLink'?'Approval link sent':'Looking for more leads now'});
 }
 function trialIntakeAction(id,action){
   const labels={rerunSetup:['Re-run the full setup check now?','Setup check started'],rerunMarket:['Re-run the market count?','Market count started'],marketOverride:['Override the market count and accept this market as big enough?','Market overridden'],rerunBookingTest:['Test the calendar link now?','Booking test started'],resendWelcome:['Resend the welcome email with the two dates?','Welcome email resent']};
@@ -1277,8 +1698,8 @@ function trialIntakeAction(id,action){
 function trialPromiseDone(id,promiseId){trialAction(id,{action:'completePromise',promiseId},{done:'Marked done'})}
 function trialAddNote(id){const t=document.getElementById('tkNoteText'),d=document.getElementById('tkNoteDate');const text=t?t.value.trim():'';if(!text)return toast('Type the note first');const body={action:'addNote',text};if(d&&d.value)body.dueDate=d.value;trialAction(id,body,{done:'Note added'})}
 function trialSetState(id,to){const lab=TK_STATE_LABEL[to]||to;trialAction(id,{action:'setState',to,reason:'owner (hub)'},{confirm:'Move '+tkClientName(id)+' to "'+lab+'"?',done:'Moved to '+lab})}
-function trialMoveState(id){const s=document.getElementById('tkStateSel');const to=s?s.value:'';if(!to)return toast('Pick a state first');const reason=typeof prompt==='function'?prompt('Reason for moving to "'+(TK_STATE_LABEL[to]||to)+'":','owner (hub)'):'owner (hub)';if(reason===null)return;trialAction(id,{action:'setState',to,reason:reason||'owner (hub)'},{done:'Moved to '+(TK_STATE_LABEL[to]||to)})}
-function trialRunJob(id){const s=document.getElementById('tkJobSel');const job=s?s.value:'';if(!job)return toast('Pick a job first');trialAction(id,{action:'runJob',job},{confirm:'Run the "'+job+'" job for '+tkClientName(id)+' now?',done:'Job "'+job+'" ran'})}
+function trialMoveState(id){const s=document.getElementById('tkStateSel');const to=s?s.value:'';if(!to)return toast('Pick a step first');const reason=typeof prompt==='function'?prompt('Reason for moving to "'+(TK_STATE_LABEL[to]||to)+'":','owner (hub)'):'owner (hub)';if(reason===null)return;trialAction(id,{action:'setState',to,reason:reason||'owner (hub)'},{done:'Moved to '+(TK_STATE_LABEL[to]||to)})}
+function trialRunJob(id){const s=document.getElementById('tkJobSel');const job=s?s.value:'';if(!job)return toast('Pick a task first');trialAction(id,{action:'runJob',job},{confirm:'Run "'+job+'" for '+tkClientName(id)+' now?',done:'"'+job+'" ran'})}
 function trialSimple(id,action,confirmText){trialAction(id,{action},{confirm:confirmText||'',done:'Done'})}
 function trialLogTime(id){const i=document.getElementById('tkMinutes');const minutes=Math.round(Number(i?i.value:''));if(!minutes||minutes<1||minutes>600)return toast('Enter minutes between 1 and 600');trialAction(id,{action:'logTime',minutes},{done:minutes+' min logged'})}
 function trialCopyLink(url){try{navigator.clipboard.writeText(url).then(()=>toast('Link copied'),()=>toast('Could not copy — select it and copy by hand'));}catch(e){toast('Could not copy — select it and copy by hand');}}
@@ -1302,7 +1723,7 @@ async function submitTrialPurchase(id){
   const rows=[...document.querySelectorAll('#pcRows .tk-pc-row')].map(r=>({email:(r.querySelector('.pc-email')||{}).value||'',password:(r.querySelector('.pc-pass')||{}).value||'',displayName:(r.querySelector('.pc-name')||{}).value||''})).map(x=>({email:x.email.trim(),password:x.password,displayName:x.displayName.trim()})).filter(x=>x.email||x.password||x.displayName);
   const errs=[];
   if(!domain.trim())errs.push('Enter the domain you bought.');
-  if(!auto||!auto.checked)errs.push('Tick "Auto-renew is off" — the machine will not proceed otherwise.');
+  if(!auto||!auto.checked)errs.push('Check the box "Auto-renew is off" — we can\'t go on without it.');
   rows.forEach((x,i)=>{if(!/.+@.+\..+/.test(x.email))errs.push('Inbox '+(i+1)+': enter a valid email.');if(!x.password)errs.push('Inbox '+(i+1)+': enter the app password.');});
   if(!rows.length)errs.push('Paste at least one inbox (the trial expects two).');
   if(errs.length)return show(errs);
@@ -1315,15 +1736,15 @@ async function submitTrialPurchase(id){
 /* New client modal (topbar button, ⌘K, the empty board). `prefill` is optional. */
 function openNewTrialClient(prefill){
   if(!trialsIsAdmin())return;prefill=prefill||{};
-  openModal(`<div class="modal-head"><div><h3>New trial client</h3><p>Pre-approved — the machine skips the fit rules and starts onboarding (or queues them if three trials are running).</p></div></div>
+  openModal(`<div class="modal-head"><div><h3>Add a trial client yourself</h3><p>For someone you already said yes to. They get the welcome email now, or join the waiting list if three trials are already running.</p></div></div>
     <div class="modal-body">
       <div class="field"><label>Company name</label><input id="ntCompany" value="${esc(prefill.companyName||'')}" placeholder="Acme Plumbing"></div>
       <div class="field row2"><div><label>Contact name</label><input id="ntContact" value="${esc(prefill.contactName||'')}" placeholder="Ann Lee"></div><div><label>Contact email</label><input id="ntEmail" type="email" value="${esc(prefill.contactEmail||'')}" placeholder="ann@acme.com"></div></div>
       <div class="field"><label>Website</label><input id="ntWebsite" value="${esc(prefill.website||'')}" placeholder="https://acme.com"></div>
-      <label class="tk-check"><input id="ntOverride" type="checkbox"> Override the 3-trial cap (and the no-new-trials-during-extension rule)</label>
+      <label class="tk-check"><input id="ntOverride" type="checkbox"> Start now, even if three trials are already running</label>
       <div id="ntErr" class="tk-modal-errs"></div>
     </div>
-    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="ntSubmit" onclick="submitNewTrialClient()">Create trial</button></div>`);
+    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="ntSubmit" onclick="submitNewTrialClient()">Add them and send the email</button></div>`);
   setTimeout(()=>{const n=document.getElementById(prefill.companyName?'ntWebsite':'ntCompany');if(n)n.focus();},60);
 }
 async function submitNewTrialClient(){
@@ -1331,53 +1752,59 @@ async function submitNewTrialClient(){
   const errEl=document.getElementById('ntErr');const show=list=>{if(errEl)errEl.innerHTML=list.map(e=>esc(e)).join('<br>');};
   const body={companyName:g('ntCompany'),contactName:g('ntContact'),contactEmail:g('ntEmail'),website:g('ntWebsite')};
   const ov=document.getElementById('ntOverride');if(ov&&ov.checked)body.override=true;
-  const errs=[];if(!body.companyName)errs.push('Company name is required.');if(!body.contactName)errs.push('Contact name is required.');if(!/.+@.+\..+/.test(body.contactEmail))errs.push('A valid contact email is required.');if(!body.website)errs.push('Website is required.');
+  const errs=[];if(!body.companyName)errs.push('Write the company name.');if(!body.contactName)errs.push("Write the person's name.");if(!/.+@.+\..+/.test(body.contactEmail))errs.push('Write a working email address.');if(!body.website)errs.push('Write their website.');
   if(errs.length)return show(errs);
   const btn=document.getElementById('ntSubmit');if(btn)btn.disabled=true;
   show([]);
   const r=await machineFetch('/api/mc/clients/new',{body});
   if(btn)btn.disabled=false;
-  if(!r.ok){show(r.data&&r.data.errors?tkErrorList(r.data.errors):[r.error||'The machine did not accept it.']);return;}
+  if(!r.ok){show(r.data&&r.data.errors?tkErrorList(r.data.errors):[r.error||'That did not go through. Try again.']);return;}
   const clientId=r.data&&r.data.clientId;const state=r.data&&r.data.state;
   closeModal();
-  toast(`${body.companyName} created${state?' — '+(TK_STATE_LABEL[state]||state):''}`);
+  toast(`${body.companyName} added${state?' — '+(TK_STATE_LABEL[state]||state):''}`);
   await loadHub(true);
   if(clientId)openTrial(clientId);else render('trials');
 }
 
 /* ===================== 8. SHELL INTEGRATION ===================== */
-function trialsNavCount(){const m=tk.hub&&tk.hub.machine;if(!m||m.activeTrials==null)return '';const n=Number(m.activeTrials);return n>0?n:''}
-function trialsAlertCount(){const m=tk.hub&&tk.hub.machine;let n=m&&m.openAlerts!=null?Number(m.openAlerts):(tk.hub?(tk.hub.alerts||[]).length:0);return n>0?n:''}
+/* The sidebar badge beside Trials: how many trial clients need you (the red "Needs you" rows). */
+function trialsNavCount(){if(!tk.hub)return '';const n=tkListGroups(tk.hub).needs.length;return n>0?n:''}
 function trialsNotifs(){
   const n=[];if(!trialsIsAdmin()||!tk.hub)return n;
-  (tk.hub.todos||[]).filter(t=>t.urgent).forEach(t=>n.push({dot:'var(--red)',t:t.text||'To-do',s:(t.clientName||t.clientId||'Trial')+(t.detail?' · '+t.detail:''),go:()=>tkOpenTodoTarget(t)}));
-  (tk.hub.alerts||[]).filter(a=>a.urgent&&!a.acknowledged).forEach(a=>n.push({dot:'var(--red)',t:a.title||a.key||'Machine alert',s:'Machine alert'+(a.clientId?' · '+tkClientName(a.clientId):''),go:()=>render('trialAlerts')}));
+  // a call time they asked for is listed once, by the Calendar (calendarNotifs), when the Calendar already knows it
+  const inCal=t=>{const a=t.action||{};return a.view==='calendar'&&a.meetingId!=null&&typeof cal!=='undefined'&&cal.reqs.some(m=>m&&String(m.id)===String(a.meetingId));};
+  (tk.hub.todos||[]).filter(t=>t.urgent&&!inCal(t)).forEach(t=>n.push({dot:'var(--red)',t:t.text||'To-do',s:(t.clientName||t.clientId||'Trial')+(t.detail?' · '+t.detail:''),go:()=>tkOpenTodoTarget(t)}));
+  (tk.hub.alerts||[]).filter(a=>a.urgent&&!a.acknowledged).forEach(a=>n.push({dot:'var(--red)',t:a.title||'Alert',s:'Alert'+(a.clientId?' · '+tkClientName(a.clientId):''),go:()=>openSettings('alerts')}));
   return n;
 }
 function trialsCmdkActions(){
   return [
-    {type:'Create',label:'New trial client',icon:I.trials||'',sub:'Start a trial on the machine',kw:'new trial client create start',run:()=>{closeCmdk();openNewTrialClient();}},
-    {type:'Go to',label:'Trials board',icon:I.trials||'',sub:'Trials',kw:'trials board machine',run:()=>{closeCmdk();render('trials');}},
+    {type:'Create',label:'Add a trial client',icon:I.trials||'',sub:'Start a trial yourself',kw:'new trial client create start add',run:()=>{closeCmdk();openNewTrialClient();}},
+    {type:'Go to',label:'Trials',icon:I.trials||'',sub:'Every trial client and where they are',kw:'trials list clients people',run:()=>{closeCmdk();render('trials');}},
     {type:'Go to',label:'Inquiries',icon:I.inquiry||'',sub:'Paid-plan calls booked from the website',kw:'inquiries plan paid book a call starter growth scale',run:()=>{closeCmdk();render('inquiries');}},
-    {type:'Go to',label:'Machine alerts',icon:I.bell||'',sub:'Trials',kw:'machine alerts trials',run:()=>{closeCmdk();render('trialAlerts');}},
+    {type:'Go to',label:'Settings',icon:I.gear||'',sub:'Alerts, phone alerts, how everything is running',kw:'settings preferences account log out theme',run:()=>{closeCmdk();render('settings');}},
+    {type:'Go to',label:'Alerts',icon:I.bell||'',sub:'Settings › Alerts',kw:'alerts messages machine',run:()=>{closeCmdk();openSettings('alerts');}},
+    {type:'Go to',label:'Behind the scenes',icon:I.chart||'',sub:'Every trial by stage, every to-do',kw:'behind the scenes board stages queue waiting list',run:()=>{closeCmdk();render('trialsBoard');}},
+    {type:'Go to',label:'Is everything running?',icon:I.check||'',sub:'Settings › a quick health check',kw:'status health running machine heartbeat usage',run:()=>{closeCmdk();openSettings('status');}},
   ];
 }
 function trialsCmdkEntities(){
   const inq=typeof inquiriesCmdkEntities==='function'?inquiriesCmdkEntities():[];
   if(!tk.hub)return inq;
-  return tkAllRows(tk.hub).map(r=>({type:'Trial',label:r.name||r.id,icon:I.trials||'',sub:tkStateLabel(r)+' · trial:'+r.id,kw:'trial:'+r.id+' '+(r.name||'')+' '+tkStateLabel(r)+' '+(r.contactName||''),run:()=>{closeCmdk();openTrial(r.id);}})).concat(inq);
+  return tkAllRows(tk.hub).map(r=>{const s=tkSimple(r);return {type:'Trial',label:r.name||r.id,icon:I.trials||'',sub:s.label+(s.person?' · '+s.person:''),kw:'trial:'+r.id+' '+(r.name||'')+' '+tkStateLabel(r)+' '+s.label+' '+s.person+' '+(r.contactName||''),run:()=>{closeCmdk();openTrial(r.id);}}}).concat(inq);
 }
 /* Called by the shell's render(): explicit navigation — the only place growth fetches start. */
 function trialsOnRender(v){
   if(TK_TRIAL_VIEWS.includes(v))trialsStartTimer();else trialsStopTimer();
-  if(v==='trial'){trialsApplyScroll();trialsEnsureTab();}
-  if(v==='trials')trialsSparkBoot();
+  if(v==='trial'){trialsTitle();trialsApplyScroll();trialsEnsureTab();}
+  if(v==='settings')trialsSettingsScroll();
+  if(v==='trialsBoard')trialsSparkBoot();
 }
 /* Sign-out: drop every cached answer, including the sparkline history kept in localStorage. */
 function trialsForget(){
   trialsStopTimer();
   Object.assign(tk,{hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{}});
-  currentTrialId=null;trialTab='overview';
+  currentTrialId=null;trialTab='overview';tk.behindOpen=false;tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;
   try{inquiriesForget();}catch(e){}
   try{localStorage.removeItem(TK_SPARK_KEY);}catch(e){}
 }

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Aviance Hub — Trials</title>
 <link rel="stylesheet" href="trials.css">
+<link rel="stylesheet" href="calendar.css">
 <!-- Installable app (Add to Home Screen) — needed for phone alerts on iPhone -->
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
@@ -18,9 +19,12 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
 <style>
 /* ===================== AVIANCE HUB — shell styles =====================
-   Black/white, red-brand accent, one plain system font (--font), sentence case,
-   weights 400/600, square corners.
-   The Trials screens themselves are styled in trials.css on top of these. */
+   Black/white, one plain system font (--font), sentence case, weights 400/600,
+   square corners. Calm: soft borders, lots of room. One accent for "needs you"
+   (--red); pills: green = good, amber = waiting, red = needs you, grey = done.
+   Four places only: Trials, Calendar, Inquiries, Settings — a sidebar on a
+   computer, a tab bar along the bottom on a phone.
+   The screens themselves are styled in trials.css and calendar.css on top of these. */
 :root{
   --bg:#FFFFFF;--surface:#FFFFFF;--surface-2:#F4F4F4;--surface-3:#EAEAEA;
   --border:#000000;--border-soft:rgba(0,0,0,.16);
@@ -35,8 +39,8 @@
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   /* chart marks (≥3:1 on the surface; validated with the dataviz palette checker) */
   --c1:#2a78d6;--c2:#eb6834;--c3:#4a3aa7;--c-none:#8f8f8f;--grid:#e3e3e3;--g-a:#0d366b;--g-b:#1c5cab;--g-c:#3987e5;
-  /* type scale — readability floor: nothing below --fs-min (13px). See README. */
-  --fs-min:13px;--fs-small:14px;--fs-base:15px;--fs-strong:16px;--fs-h3:18px;--fs-h2:22px;--fs-num:18px;--fs-num-lg:24px;
+  /* type scale — readability floor: nothing below --fs-min (13px); body text 16px. See README. */
+  --fs-min:13px;--fs-small:15px;--fs-base:16px;--fs-strong:17px;--fs-h3:19px;--fs-h2:24px;--fs-num:19px;--fs-num-lg:26px;
 }
 *{box-sizing:border-box;margin:0;padding:0;border-radius:0!important}
 html,body{height:100%}
@@ -60,17 +64,28 @@ h1,h2,h3,h4{font-weight:600}
 .logo{width:36px;height:36px;flex:none;display:grid;place-items:center;border:1px solid var(--border);overflow:hidden;color:transparent!important;background-color:#fff!important;background-image:url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCI+PGRlZnM+PC9kZWZzPjxwb2x5Z29uIHBvaW50cz0iMjgsODggMTAwLDEyOCAxNzIsODggMTcyLDE1MCAxMDAsMTkwIDI4LDE1MCIgZmlsbD0iIzEwMTAxNSIgLz48cG9seWdvbiBwb2ludHM9IjI4LDg4IDEwMCwxMjggMTAwLDE5MCAyOCwxNTAiIGZpbGw9IiMxQzFDMjIiIC8+PHBvbHlnb24gcG9pbnRzPSIxMDAsMTI4IDE3Miw4OCAxNzIsMTUwIDEwMCwxOTAiIGZpbGw9IiMwQTBBMEMiIC8+PHBvbHlnb24gcG9pbnRzPSIzMCw3MiAxMDAsMTEwIDE3MCw3MiAxMDAsMzQiIGZpbGw9IiNFMDI5MEYiIC8+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMC4zNSwtMC4xOSwwLjM1LDAuMTksMzAsNzIpIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg0LDQpIHNjYWxlKDAuOTIpIj48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0xMDAgMTggTDE1NiAxNzIgTDEyOCAxNzIgTDExNyAxNDAgTDgzIDE0MCBMNzIgMTcyIEw0NCAxNzIgWiBNOTEgMTE0IEwxMDkgMTE0IEwxMDAgODQgWiIgZmlsbD0iI0ZGRkZGRiIvPjwvZz48L2c+PC9zdmc+")!important;background-size:76%!important;background-position:center!important;background-repeat:no-repeat!important}
 .brand h1{font-size:var(--fs-h3);font-weight:600;line-height:1.2}
 .brand span{font-size:var(--fs-min);color:var(--muted);font-weight:400}
-.nav-area{display:flex;flex-direction:column;gap:3px;overflow-y:auto;flex:1}
-.nav-label{font-size:var(--fs-min);color:var(--muted-2);padding:16px 10px 7px;font-weight:600}
-.nav-item{display:flex;align-items:center;gap:11px;padding:10px 11px;cursor:pointer;color:var(--muted);font-size:var(--fs-small);font-weight:400;transition:background .13s,color .13s;position:relative;user-select:none}
-.nav-item svg{width:18px;height:18px;flex:none;stroke-width:2}
+.nav-area{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1;padding-top:8px}
+.nav-item{display:flex;align-items:center;gap:12px;width:100%;min-height:48px;padding:10px 12px;cursor:pointer;color:var(--muted);background:none;border:none;font:inherit;font-size:var(--fs-base);font-weight:400;text-align:left;transition:background .13s,color .13s;position:relative;user-select:none}
+.nav-item svg{width:20px;height:20px;flex:none;stroke-width:2}
 .nav-item:hover{background:var(--surface-2);color:var(--text)}
-.nav-item.active{background:var(--accent-soft);color:var(--accent-d)}
-.nav-item.active::before{content:"";position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:18px;background:var(--red-brand)}
-.nav-item .badge{margin-left:auto;background:var(--surface-3);color:var(--muted);font-size:var(--fs-min);font-weight:600;padding:1px 7px}
-.nav-item.active .badge{background:var(--accent);color:#fff}
-.nav-item .badge.new{background:var(--red);color:#fff}
+.nav-item:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+.nav-item.active{background:var(--surface-2);color:var(--text);font-weight:600}
+.nav-item.active::before{content:"";position:absolute;left:-12px;top:50%;transform:translateY(-50%);width:3px;height:22px;background:var(--text)}
+/* badges: red = that many need you, amber = that many are waiting for your yes */
+.badge{display:inline-grid;place-items:center;min-width:24px;height:24px;padding:0 7px;font-size:var(--fs-min);font-weight:600;line-height:1}
+.badge.red{background:var(--red);color:#fff}
+.badge.amber{background:var(--amber-bg);color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber)}
+.nav-item .badge{margin-left:auto}
 .nav-item .ext{margin-left:auto;color:var(--muted-2);font-size:var(--fs-min)}
+/* the phone's tab bar (hidden on a computer) */
+.tabbar{display:none}
+.tab{flex:1 1 0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:58px;min-width:0;padding:6px 2px;background:none;border:none;color:var(--muted);font:inherit;font-size:var(--fs-min);cursor:pointer;position:relative}
+.tab .tab-ic{position:relative;display:grid;place-items:center;width:28px;height:26px}
+.tab svg{width:24px;height:24px;stroke-width:2}
+.tab .badge{position:absolute;top:-6px;left:17px;min-width:22px;height:22px;padding:0 6px}
+.tab.active{color:var(--text);font-weight:600}
+.tab.active::before{content:"";position:absolute;top:0;left:22%;right:22%;height:3px;background:var(--text)}
+.tab:focus-visible{outline:2px solid var(--text);outline-offset:-3px}
 .sidebar-foot{border-top:1px solid var(--border-soft);padding-top:10px;margin-top:6px}
 .who{display:flex;align-items:center;gap:10px;padding:8px}
 .who .meta{flex:1;line-height:1.3;overflow:hidden}
@@ -80,28 +95,32 @@ h1,h2,h3,h4{font-weight:600}
 
 /* MAIN */
 .main{display:flex;flex-direction:column;overflow:hidden;min-width:0}
-.topbar{display:flex;align-items:center;gap:14px;padding:14px 24px;border-bottom:1px solid var(--border-soft);background:var(--surface)}
-.hamburger{display:none;width:38px;height:38px;border:1px solid var(--border);background:var(--surface);place-items:center;cursor:pointer;color:var(--text);flex:none}
-.hamburger svg{width:19px;height:19px}
-.page-title{min-width:0}
+.topbar{position:relative;display:flex;align-items:center;gap:14px;padding:12px 32px;min-height:68px;border-bottom:1px solid var(--border-soft);background:var(--surface)}
+.back-btn{display:none;width:44px;height:44px;margin-left:-8px;border:none;background:none;place-items:center;cursor:pointer;color:var(--text);flex:none}
+.back-btn svg{width:24px;height:24px;stroke-width:2.2}
+.back-btn:hover{background:var(--surface-2)}
+.back-btn:focus-visible{outline:2px solid var(--text)}
+.page-title{min-width:0;flex:1}
 .page-title h2{font-size:var(--fs-h2);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .page-title p{font-size:var(--fs-small);color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .search{margin-left:auto;display:flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--border);padding:8px 12px;width:240px;color:var(--muted);font-size:var(--fs-min);cursor:pointer}
 .search input{background:none;border:none;outline:none;color:var(--text);font-size:var(--fs-min);width:100%;cursor:pointer}
 .search svg{width:16px;height:16px;flex:none}
 .kbd{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:22px;padding:0 5px;background:var(--surface-2);border:1px solid var(--border);font-size:var(--fs-min);color:var(--muted);font-weight:600}
-.tb-btn{width:38px;height:38px;border:1px solid var(--border);background:var(--surface);display:grid;place-items:center;cursor:pointer;color:var(--muted);flex:none;position:relative;transition:.13s}
+.tb-btn{width:44px;height:44px;border:1px solid var(--border-soft);background:var(--surface);display:grid;place-items:center;cursor:pointer;color:var(--text);flex:none;position:relative;transition:.13s}
 .tb-btn:hover{color:var(--text);background:var(--surface-2)}
 .tb-btn svg{width:18px;height:18px}
 .tb-dot{position:absolute;top:3px;right:3px;min-width:20px;height:20px;padding:0 4px;background:var(--red);color:#fff;font-size:var(--fs-min);font-weight:600;display:grid;place-items:center;line-height:1}
-.btn{display:inline-flex;align-items:center;gap:7px;cursor:pointer;white-space:nowrap;font-size:var(--fs-small);font-weight:600;background:var(--text);color:var(--bg);border:1px solid var(--text);padding:10px 15px;transition:background .12s linear,color .12s linear}
+.btn{display:inline-flex;align-items:center;gap:7px;min-height:44px;cursor:pointer;white-space:nowrap;font-size:var(--fs-base);font-weight:600;background:var(--text);color:var(--bg);border:1px solid var(--text);padding:10px 16px;transition:background .12s linear,color .12s linear}
+.btn:focus-visible{outline:2px solid var(--text);outline-offset:2px}
 .btn:hover{background:var(--bg);color:var(--text)}
 .btn:active{transform:translateY(1px)}
 .btn.ghost{background:var(--bg);color:var(--text);border:1px solid var(--text)}
 .btn.ghost:hover{background:var(--text);color:var(--bg)}
 .btn svg{width:16px;height:16px;stroke-width:2.4}
 .btn:disabled{opacity:.5;cursor:default}
-.content{flex:1;overflow-y:auto;padding:24px;-webkit-overflow-scrolling:touch}
+.content{flex:1;overflow-y:auto;padding:28px 32px 40px;-webkit-overflow-scrolling:touch}
+.content>.view{max-width:960px;margin:0 auto}
 .view{animation:viewIn .34s cubic-bezier(.2,.7,.25,1)}
 @keyframes viewIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -112,7 +131,7 @@ h1,h2,h3,h4{font-weight:600}
 .section-head h3{font-size:var(--fs-h3);font-weight:600}
 .section-head .count{font-size:var(--fs-min);font-weight:600;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:2px 9px}
 .section-head .spacer{margin-left:auto}
-.card{background:var(--surface);border:1px solid var(--border);transition:border-color .16s ease}
+.card{background:var(--surface);border:1px solid var(--border-soft);transition:border-color .16s ease}
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-min);font-weight:600;padding:4px 9px;line-height:1.3;white-space:nowrap}
 .pill .pdot{width:8px;height:8px}
 .pill.green{background:var(--green-bg);color:var(--green)}
@@ -124,18 +143,19 @@ h1,h2,h3,h4{font-weight:600}
 .flex{display:flex;align-items:center;gap:10px}
 .pj-ic{display:grid;place-items:center;font-weight:600;font-size:20px;flex:none}
 .empty{text-align:center;padding:58px 26px}
-.empty-ic{width:62px;height:62px;border:1px solid var(--border);background:var(--surface);display:grid;place-items:center;margin:0 auto 16px;color:var(--accent)}
+.empty-ic{width:62px;height:62px;border:1px solid var(--border-soft);background:var(--surface);display:grid;place-items:center;margin:0 auto 16px;color:var(--text)}
 .empty-ic svg{width:27px;height:27px}
 .empty h3{font-size:var(--fs-h2);margin-bottom:7px}
 .empty p{font-size:var(--fs-base);color:var(--muted);max-width:390px;margin:0 auto 18px;line-height:1.62}
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
-.seg{display:flex;background:var(--surface-2);border:1px solid var(--border);padding:3px}
-.seg button{border:none;background:none;color:var(--muted);font-size:var(--fs-small);font-weight:600;padding:8px 13px;cursor:pointer;transition:.12s;white-space:nowrap}
+.seg{display:flex;flex-wrap:wrap;background:var(--surface-2);border:1px solid var(--border-soft);padding:3px}
+.seg button{border:none;background:none;color:var(--muted);font-size:var(--fs-small);font-weight:600;min-height:40px;padding:8px 14px;cursor:pointer;transition:.12s;white-space:nowrap}
+.seg button:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
 .seg button.active{background:#fff;color:var(--text);box-shadow:0 1px 2px rgba(16,24,40,.12)}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:var(--fs-min);font-weight:600;color:var(--text);margin-bottom:7px}
 .field input,.field textarea,.field select{width:100%;background:var(--surface);border:1px solid var(--border);padding:10px 12px;color:var(--text);font-size:var(--fs-base);outline:none;transition:.12s}
-.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--red-brand)}
+.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
 .field textarea{resize:vertical;min-height:68px;line-height:1.55}
 .field.row2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 .field.row2>div label{display:block;font-size:var(--fs-min);font-weight:600;color:var(--text);margin-bottom:7px}
@@ -172,7 +192,7 @@ h1,h2,h3,h4{font-weight:600}
 .forgot-link:hover{color:var(--red-deep);text-decoration:underline}
 @media(max-width:760px){.login-wrap{grid-template-columns:1fr;width:430px}.login-aside{padding:26px 26px 22px}.la-hero{margin:24px 0 20px}.la-hero h2{font-size:24px}.la-points{display:none}.login-card{padding:30px 26px}}
 
-/* MODAL / TOAST / SCRIM */
+/* MODAL / TOAST */
 .modal-wrap{position:fixed;inset:0;z-index:260;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;padding:18px}
 .modal-wrap.open{display:flex;animation:fade .18s ease}
 .modal{width:480px;max-width:100%;max-height:90vh;overflow-y:auto;background:var(--surface);border:1px solid var(--border)}
@@ -184,8 +204,6 @@ h1,h2,h3,h4{font-weight:600}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(30px);z-index:300;background:#000;color:#fff;border:1px solid #000;padding:12px 18px;font-size:var(--fs-small);font-weight:400;opacity:0;visibility:hidden;transition:.28s;display:flex;align-items:center;gap:10px;max-width:90vw}
 .toast.show{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
 .toast .tdot{width:8px;height:8px;background:var(--red-brand);flex:none}
-.scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:39;opacity:0;visibility:hidden;transition:.2s}
-.scrim.open{opacity:1;visibility:visible}
 
 /* COMMAND PALETTE + NOTIFICATIONS */
 .cmdk-wrap{position:fixed;inset:0;z-index:300;display:none;align-items:flex-start;justify-content:center;padding-top:12vh;background:rgba(16,20,26,.45);backdrop-filter:blur(2px)}
@@ -203,7 +221,7 @@ h1,h2,h3,h4{font-weight:600}
 .cmdk-item small{font-size:var(--fs-min);color:var(--muted);display:block;margin-top:2px}
 .cmdk-item.sel{background:var(--surface-2)}
 .cmdk-empty{padding:26px;text-align:center;color:var(--muted);font-size:var(--fs-base)}
-.notif-pop{position:absolute;top:46px;right:0;width:380px;max-width:88vw;background:var(--surface);border:1px solid var(--border);z-index:60;display:none;overflow:hidden}
+.notif-pop{position:absolute;top:calc(100% - 4px);right:12px;width:380px;max-width:calc(100vw - 24px);background:var(--surface);border:1px solid var(--border);z-index:60;display:none;overflow:hidden}
 .notif-pop.open{display:block;animation:fade .14s ease}
 .notif-head{padding:13px 15px;border-bottom:1px solid var(--border-soft);font-size:var(--fs-base);font-weight:600}
 .notif-list{max-height:60vh;overflow-y:auto}
@@ -215,20 +233,17 @@ h1,h2,h3,h4{font-weight:600}
 .notif-item small{font-size:var(--fs-small);color:var(--muted);display:block;margin-top:3px;line-height:1.45}
 .notif-empty{padding:30px 15px;text-align:center;color:var(--muted);font-size:var(--fs-base)}
 
-/* RESPONSIVE */
+/* RESPONSIVE — phone first: one column, the four places as a tab bar at the bottom */
 @media(max-width:860px){
   .app{grid-template-columns:1fr}
-  .sidebar{position:fixed;top:0;left:0;bottom:0;width:262px;z-index:40;transform:translateX(-100%);transition:transform .25s;height:100dvh}
-  .sidebar.open{transform:none}
-  .hamburger{display:grid}
+  .sidebar{display:none}
   .search{display:none}
-  .content{padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
-  .sidebar{padding-bottom:calc(16px + env(safe-area-inset-bottom))}
-  .topbar{padding:12px 16px;gap:11px}
+  .content{padding:18px 16px 28px}
+  .topbar{padding:8px 16px;gap:8px;min-height:60px;padding-top:calc(8px + env(safe-area-inset-top))}
   .page-title h2{font-size:var(--fs-h3)}
   .page-title p{display:none}
-  .btn-label{display:none}
-  #newClientBtn{padding:10px 12px}
+  .tabbar{display:flex;flex:none;border-top:1px solid var(--border-soft);background:var(--surface);padding:0 4px env(safe-area-inset-bottom)}
+  .toast{bottom:calc(84px + env(safe-area-inset-bottom))}
 }
 @media(max-width:560px){
   /* bigger text on a phone: let long button labels wrap instead of clipping */
@@ -241,9 +256,7 @@ body.dark .btn{background:#fff;color:#000;border-color:#fff}
 body.dark .btn:hover{background:#000;color:#fff}
 body.dark .btn.ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.4)}
 body.dark .btn.ghost:hover{background:#fff;color:#000}
-body.dark .nav-item.active{color:var(--text)}
-body.dark .nav-item.active .badge{background:#FF5C3D;color:#000}
-body.dark .nav-item .badge.new{background:var(--red);color:#000}
+body.dark .badge.red{background:var(--red);color:#000}
 body.dark .seg button.active{background:#fff;color:#000}
 body.dark .toast{background:#fff;color:#000;border-color:#fff}
 body.dark .toast .tdot{background:#E0290F}
@@ -265,22 +278,22 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
   <div class="login-wrap">
     <div class="login-aside">
       <div class="la-top"><div class="logo" style="width:40px;height:40px">A</div>
-        <div><div class="la-name">Aviance Hub</div><div class="la-sub">Trial machine · owner</div></div></div>
+        <div><div class="la-name">Aviance Hub</div><div class="la-sub">For the owner</div></div></div>
       <div class="la-hero">
         <h2>We don't sell emails. We sell <span class="accent">booked calls</span>.</h2>
-        <p>The machine runs every 30-day trial by itself. This is where you watch it, and do the one thing it can't: buy the domain and inboxes.</p>
+        <p>Every 30-day trial runs by itself. This is where you see who is where, and do the few things only you can do.</p>
       </div>
       <div class="la-points">
-        <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>Every trial, one card, five numbers</div>
-        <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>What you need to do, urgent first</div>
-        <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>Every system, watched per client</div>
+        <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>Every trial on one line: where they are</div>
+        <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>What you need to do, at the top</div>
+        <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>Every call in one calendar</div>
       </div>
       <div class="la-guarantee">Live in 3 weeks — <b>guaranteed</b></div>
     </div>
     <div class="login-card">
       <div class="login-eyebrow">Aviance Hub</div>
-      <div class="login-title">Sign in to the trial machine</div>
-      <div class="login-desc">Owner sign-in. Email and password.</div>
+      <div class="login-title">Sign in</div>
+      <div class="login-desc">Your email and password.</div>
       <div id="loginAppNote" class="login-app-note" style="display:none">First time in the app? Sign in once here.</div>
       <div class="field"><label>Email</label><input id="loginEmail" type="email" placeholder="you@email.com" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()"></div>
       <div class="field"><label>Password</label><input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
@@ -288,19 +301,18 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
       <div id="loginErr" class="login-err"></div>
       <div id="resetOk" class="login-ok" style="display:none">Recovery link sent — check your inbox.</div>
       <button class="btn" style="width:100%;justify-content:center;padding:11px" onclick="doLogin()">Sign in</button>
-      <div class="login-hint">This hub is for the Aviance owner. Trials run on the machine; here you watch them and steer.</div>
+      <div class="login-hint">This hub is for the Aviance owner.</div>
     </div>
   </div>
 </div>
 
 <div id="modalWrap" class="modal-wrap"><div class="modal" id="modal"></div></div>
 <div id="toast" class="toast"></div>
-<div id="scrim" class="scrim" onclick="closeSidebar()"></div>
 <div class="cmdk-wrap" id="cmdkWrap" onclick="if(event.target.id==='cmdkWrap')closeCmdk()">
   <div class="cmdk">
     <div class="cmdk-in">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-      <input id="cmdkInput" placeholder="Jump to a trial — or type a command…" autocomplete="off">
+      <input id="cmdkInput" placeholder="Find a trial, or type what you want to do…" autocomplete="off" aria-label="Find a trial, or type what you want to do">
     </div>
     <div class="cmdk-list" id="cmdkList"></div>
   </div>
@@ -310,43 +322,41 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
   <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="logo">A</div>
-      <div><h1>Aviance Hub</h1><span>Trial machine</span></div>
+      <div><h1>Aviance Hub</h1><span>For the owner</span></div>
     </div>
-    <div class="nav-area" id="navArea"></div>
+    <nav class="nav-area" id="navArea" aria-label="Main"></nav>
     <div class="sidebar-foot">
       <div class="who"><div class="avatar" id="whoAvatar" style="width:34px;height:34px;background:#000000">A</div>
         <div class="meta"><b id="whoName">Owner</b><small id="whoEmail"></small></div></div>
-      <div class="nav-item" onclick="logout()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>Log out</div>
     </div>
   </aside>
 
   <div class="main">
     <header class="topbar">
-      <div class="hamburger" onclick="openSidebar()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg></div>
+      <button type="button" class="back-btn" id="backBtn" onclick="goBack()" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15 5l-7 7 7 7"/></svg></button>
       <div class="page-title"><h2 id="ptitle">Trials</h2><p id="psub"></p></div>
-      <div class="search" onclick="openCmdk()" title="Search trials & commands (Ctrl/⌘ K)">
+      <div class="search" onclick="openCmdk()" title="Find anything (Ctrl/⌘ K)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-        <input placeholder="Jump to…" readonly>
+        <input placeholder="Find…" readonly aria-label="Find a trial">
         <span class="kbd" style="margin-left:auto">⌘K</span>
       </div>
-      <button class="tb-btn" id="notifBtn" onclick="toggleNotif(event)" title="What needs you">
+      <button type="button" class="tb-btn" id="notifBtn" onclick="toggleNotif(event)" title="What needs you" aria-label="What needs you">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
         <span class="tb-dot" id="notifDot" style="display:none">0</span>
       </button>
       <div class="notif-pop" id="notifPop"></div>
-      <button class="tb-btn" onclick="toggleTheme()" title="Toggle theme" id="themeBtn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
-      </button>
-      <button class="btn" id="newClientBtn" onclick="openNewTrialClient()" title="New trial client" aria-label="New client"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg><span class="btn-label">New client</span></button>
     </header>
     <div class="content" id="content"></div>
+    <nav class="tabbar" id="tabBar" aria-label="Main"></nav>
   </div>
 </div>
 
 <script>
 /* ===================== AVIANCE HUB — shell =====================
-   Sign-in, router, sidebar, ⌘K, notifications, theme. Everything the
-   owner sees inside is the Trials section in trials.js (loaded last). */
+   Sign-in, router, the four-place navigation (sidebar on a computer, tab bar
+   on a phone), ⌘K, notifications, theme. Everything the owner sees inside is
+   Trials + Settings in trials.js, Inquiries in inquiries.js and the Calendar
+   in calendar.js (loaded last). */
 
 /* Capture the URL hash before supabase-js processes & strips it (password recovery flow) */
 const INITIAL_HASH=location.hash||'';
@@ -365,15 +375,17 @@ const I={
   inquiry:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z"/><path d="M8.5 11h7M8.5 14.5h4.5"/></svg>',
   bellRing:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/><path d="M2.5 6.5A9 9 0 0 1 5 3M21.5 6.5A9 9 0 0 0 19 3"/></svg>',
   logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
+  calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16v15H4zM4 10.5h16M8.5 3v5M15.5 3v5"/><path d="M8 14.5h3M8 17.5h6"/></svg>',
 };
 
 /* ---- Config ---- */
 const SUPA_URL='https://zjbxnkpktbghhudjbxhk.supabase.co';
 const SUPA_KEY='sb_publishable_WV4FANV2hNsmbzK3DbiLFg_9bjiB8Z1';
-/* The trial machine (email-distributor). Override for testing: localStorage.setItem('avianceMachineUrl','http://localhost:3000') */
+/* The system behind the hub (email-distributor). Override for testing: localStorage.setItem('avianceMachineUrl','http://localhost:3000') */
 const MACHINE_URL=(function(){try{return localStorage.getItem('avianceMachineUrl')||'https://email-distributor.vercel.app'}catch(e){return 'https://email-distributor.vercel.app'}})();
-/* Mission Control pages that stay inside the machine — opened signed-in, in a new tab (openMachine in trials.js) */
-const MACHINE_PAGES=[['/mc/queue',I.inbox,'Queue'],['/mc/warmup',I.sun,'Warm-up circle'],['/mc/config',I.gear,'Config'],['/mc/test',I.flask,'Test Mode'],['/mc/learning',I.chart,'Learning']];
+/* Pages of the full control panel (Mission Control) — opened signed-in, in a new tab (openMachine in trials.js).
+   Listed in Settings › Advanced and in ⌘K. */
+const MACHINE_PAGES=[['/mc/queue',I.inbox,'Waiting list'],['/mc/warmup',I.sun,'Warm-up circle'],['/mc/config',I.gear,'Advanced settings'],['/mc/test',I.flask,'Test mode'],['/mc/learning',I.chart,'What we learned']];
 const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY);
 
 /* ---- State ---- */
@@ -389,14 +401,17 @@ function openModal(html){document.getElementById('modal').innerHTML=html;documen
 function closeModal(){document.getElementById('modalWrap').classList.remove('open');}
 document.getElementById('modalWrap').addEventListener('click',e=>{if(e.target.id==='modalWrap')closeModal();});
 
-/* ---- Router: the Trials views (trials.js) and Inquiries (inquiries.js) — lazy wrappers, the files load after this ---- */
+/* ---- Router: Trials + Settings (trials.js), Inquiries (inquiries.js) and the Calendar (calendar.js) — lazy wrappers, the files load after this.
+   The four places are trials, calendar, inquiries, settings; the rest are pages inside them with a Back button (back). ---- */
 const views={
-  trials:{fn:()=>viewTrials(),title:'Trials',sub:'The trial machine — every trial, and what it needs from you'},
-  trial:{fn:()=>viewTrial(),title:'Trial',sub:'One trial in full'},
-  trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins'},
-  trialAlerts:{fn:()=>viewTrialAlerts(),title:'Machine alerts',sub:'Everything the machine told you'},
-  inquiries:{fn:()=>viewInquiries(),title:'Inquiries',sub:'Paid-plan calls booked from the website'},
-  inquiry:{fn:()=>viewInquiry(),title:'Inquiry',sub:'One plan inquiry'},
+  trials:{fn:()=>viewTrials(),title:'Trials',sub:'Who is where, and what needs you'},
+  trial:{fn:()=>viewTrial(),title:'Trial',sub:'',back:()=>render('trials')},
+  trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins',back:()=>currentTrialId?openTrial(currentTrialId):render('trials')},
+  calendar:{fn:()=>viewCalendar(),title:'Calendar',sub:'Every call, in Sri Lanka time'},
+  inquiries:{fn:()=>viewInquiries(),title:'Inquiries',sub:'People who asked about a paid plan'},
+  inquiry:{fn:()=>viewInquiry(),title:'Inquiry',sub:'',back:()=>render('inquiries')},
+  settings:{fn:()=>viewSettings(),title:'Settings',sub:'Alerts, phone alerts, and how everything is running'},
+  trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every trial by stage, every to-do, the waiting list',back:()=>render('settings')},
 };
 function render(v){
   const view=views[v];if(!view||!authUser)return;
@@ -404,19 +419,26 @@ function render(v){
   document.getElementById('content').innerHTML=`<div class="view">${view.fn()}</div>`;
   document.getElementById('ptitle').textContent=view.title;
   document.getElementById('psub').textContent=view.sub;
+  const back=document.getElementById('backBtn');if(back)back.style.display=view.back?'grid':'none';
   renderNav();document.getElementById('content').scrollTop=0;closeSidebar();
   try{updateNotifBadge();}catch(e){}
   try{trialsOnRender(v);}catch(e){}
+  try{calendarOnRender(v);}catch(e){}
 }
 
-/* ---- Deep links: #trial/{id}, #inquiry/{id}, #alerts, #inquiries, #trials (what a phone alert opens) ----
+/* The Back button in the top bar (pages inside one of the four places). */
+function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('trials');}
+
+/* ---- Deep links: #trial/{id}, #inquiry/{id}, #calendar/{meetingId}, #alerts (Settings › Alerts), #settings, #inquiries, #calendar, #trials (what a phone alert opens) ----
    Honoured on load and on hashchange; when signed out, kept until sign-in. */
 function parseDeepLink(h){
   h=String(h||'');const at=h.indexOf('#');if(at<0)return null;h=h.slice(at+1).replace(/^\/+/,'').replace(/\/+$/,'');
   if(h==='trials')return {view:'trials'};
-  if(h==='alerts')return {view:'trialAlerts'};
+  if(h==='alerts')return {view:'settings',section:'alerts'};
+  if(h==='settings')return {view:'settings'};
   if(h==='inquiries')return {view:'inquiries'};
-  const m=h.match(/^(trial|inquiry)\/([^/?#&=]+)$/);if(!m)return null;
+  if(h==='calendar')return {view:'calendar'};
+  const m=h.match(/^(trial|inquiry|calendar)\/([^/?#&=]+)$/);if(!m)return null;
   let id='';try{id=decodeURIComponent(m[2]);}catch(e){return null;}
   return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:m[1],id}:null;
 }
@@ -427,29 +449,35 @@ function goDeepLink(d){
   pendingDeepLink=null;
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same alert can open it again
   closeModal();closeCmdk();
-  if(d.view==='trial')openTrial(d.id);else if(d.view==='inquiry')openInquiry(d.id);else render(d.view);
+  if(d.view==='trial')openTrial(d.id);else if(d.view==='inquiry')openInquiry(d.id);else if(d.view==='calendar'&&d.id)openCalendar(d.id);else if(d.view==='settings')openSettings(d.section);else render(d.view);
   return true;
 }
 if(typeof window.addEventListener==='function')window.addEventListener('hashchange',()=>{const d=parseDeepLink(location.hash);if(d)goDeepLink(d);});
 /* The home-screen app (iPhone "Add to Home Screen", or an installed desktop app) */
 function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.standalone===true)||(typeof window.matchMedia==='function'&&window.matchMedia('(display-mode: standalone)').matches);}catch(e){return false}}
 
-/* ---- Sidebar ---- */
-function navConfig(){
-  const n=typeof trialsNavCount==='function'?trialsNavCount():'',a=typeof trialsAlertCount==='function'?trialsAlertCount():'',q=typeof inquiriesNavCount==='function'?inquiriesNavCount():'';
+/* ---- Navigation: four places only. Badges: Trials = how many need you (red), Calendar = call times waiting
+   for your yes (amber), Inquiries = new ones (red). The same items fill the sidebar and the phone's tab bar. ---- */
+function navItems(){
+  const n=typeof trialsNavCount==='function'?trialsNavCount():'',q=typeof inquiriesNavCount==='function'?inquiriesNavCount():'',c=typeof calNavCount==='function'?calNavCount():'';
   return [
-    {label:'Trials',items:[{view:'trials',icon:I.trials,label:'Trials',badge:n,also:['trial','trialPurchase']},{view:'inquiries',icon:I.inquiry,label:'Inquiries',badge:q,also:['inquiry'],badgeNew:true},{view:'trialAlerts',icon:I.bell,label:'Machine alerts',badge:a}]},
-    {label:'Machine',items:[...MACHINE_PAGES.map(([path,icon,label])=>({path,icon,label})),{run:'openPhoneAlerts()',icon:I.bellRing,label:'Phone alerts',note:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():''}]},
+    {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','trialPurchase']},
+    {view:'calendar',icon:I.calendar,label:'Calendar',badge:c,tone:'amber',badgeTitle:c?c+' waiting for your yes':''},
+    {view:'inquiries',icon:I.inquiry,label:'Inquiries',badge:q,tone:'red',badgeTitle:q?q+' new':'',also:['inquiry']},
+    {view:'settings',icon:I.gear,label:'Settings',badge:'',also:['trialsBoard']},
   ];
 }
 function renderNav(){
-  document.getElementById('navArea').innerHTML=navConfig().map(g=>`<div class="nav-label">${g.label}</div>`+g.items.map(it=>it.view
-    ?`<div class="nav-item ${it.view===currentView||(it.also||[]).includes(currentView)?'active':''}" onclick="render('${it.view}')">${it.icon}${it.label}${it.badge?`<span class="badge${it.badgeNew?' new':''}"${it.badgeNew?` title="${esc(it.badge)} new"`:''}>${it.badge}</span>`:''}</div>`
-    :it.run?`<div class="nav-item" onclick="${it.run}">${it.icon}${it.label}${it.note?`<span class="ext">${esc(it.note)}</span>`:''}</div>`
-    :`<div class="nav-item" onclick="openMachine('${it.path}')" title="Opens in Mission Control, in a new tab">${it.icon}${it.label}<span class="ext">↗</span></div>`).join('')).join('');
+  const items=navItems();const on=it=>it.view===currentView||(it.also||[]).includes(currentView);
+  const badge=it=>it.badge?`<span class="badge ${it.tone}" title="${esc(it.badgeTitle)}" aria-hidden="true">${esc(it.badge)}</span>`:'';
+  const attrs=it=>`type="button" onclick="render('${it.view}')" aria-label="${esc(it.label+(it.badge?' — '+it.badgeTitle:''))}"${on(it)?' aria-current="page"':''}`;
+  const side=document.getElementById('navArea'),tab=document.getElementById('tabBar');
+  if(side)side.innerHTML=items.map(it=>`<button class="nav-item${on(it)?' active':''}" ${attrs(it)}>${it.icon}<span>${esc(it.label)}</span>${badge(it)}</button>`).join('');
+  if(tab)tab.innerHTML=items.map(it=>`<button class="tab${on(it)?' active':''}" ${attrs(it)}><span class="tab-ic">${it.icon}${badge(it)}</span><span class="tab-t">${esc(it.label)}</span></button>`).join('');
 }
-function openSidebar(){document.getElementById('sidebar').classList.add('open');document.getElementById('scrim').classList.add('open')}
-function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('scrim').classList.remove('open')}
+/* The sidebar is always on screen on a computer and hidden on a phone (the tab bar takes over), so there is
+   nothing to close; kept because render() and push.js call it. */
+function closeSidebar(){}
 
 /* ---- Auth (Supabase): only an approved profile with role 'admin' gets in ---- */
 async function getProfile(uid){const {data}=await sb.from('profiles').select('*').eq('id',uid).maybeSingle();return data;}
@@ -488,8 +516,9 @@ function showLogin(){
   document.getElementById('login').style.display='flex';
   closeModal();closeCmdk();
   try{trialsStopTimer();}catch(e){}
+  try{calendarStopTimer();}catch(e){}
 }
-async function logout(){try{await sb.auth.signOut();}catch(e){}authUser=null;try{trialsForget();}catch(e){}errEl('loginErr','');showLogin();}
+async function logout(){try{await sb.auth.signOut();}catch(e){}authUser=null;try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}errEl('loginErr','');showLogin();}
 /* ---- Password recovery ---- */
 async function forgotPassword(){
   const email=val('loginEmail').toLowerCase();
@@ -537,9 +566,10 @@ async function boot(){
 let cmdkState={items:[],sel:0};
 function cmdkActions(){const a=[];
   if(typeof trialsCmdkActions==='function')a.push(...trialsCmdkActions());
-  MACHINE_PAGES.forEach(([path,icon,label])=>a.push({type:'Machine',label,icon,sub:'Opens in Mission Control',kw:'machine mission control '+label,run:()=>{closeCmdk();openMachine(path);}}));
-  a.push({type:'Command',label:'Phone alerts',icon:I.bellRing,sub:'Get every machine alert on your phone',kw:'phone alerts push notifications iphone',run:()=>{closeCmdk();openPhoneAlerts();}});
-  a.push({type:'Command',label:'Toggle light / dark',icon:I.moon,sub:'Switch theme',kw:'theme dark light mode toggle',run:()=>{closeCmdk();toggleTheme();}});
+  if(typeof calendarCmdkActions==='function')a.push(...calendarCmdkActions());
+  MACHINE_PAGES.forEach(([path,icon,label])=>a.push({type:'Advanced',label,icon,sub:'Opens the full control panel in a new tab',kw:'advanced machine mission control control panel '+label,run:()=>{closeCmdk();openMachine(path);}}));
+  a.push({type:'Command',label:'Phone alerts',icon:I.bellRing,sub:'Get a message on your phone when something needs you',kw:'phone alerts push notifications iphone',run:()=>{closeCmdk();openPhoneAlerts();}});
+  a.push({type:'Command',label:'Switch light / dark',icon:I.moon,sub:'How the hub looks',kw:'theme dark light mode toggle',run:()=>{closeCmdk();toggleTheme();}});
   a.push({type:'Command',label:'Log out',icon:I.logout,sub:'End your session',kw:'log out sign out logout',run:()=>{closeCmdk();logout();}});
   return a;}
 function cmdkEntities(){return typeof trialsCmdkEntities==='function'?trialsCmdkEntities():[]}
@@ -566,18 +596,20 @@ document.getElementById('cmdkInput').addEventListener('keydown',e=>{
   else if(e.key==='Escape'){closeCmdk();}
 });
 
-/* ---- Notifications: trial to-dos + open urgent machine alerts ---- */
-function computeNotifs(){if(!authUser)return [];try{return typeof trialsNotifs==='function'?trialsNotifs():[];}catch(e){return [];}}
+/* ---- Notifications: trial to-dos + open urgent machine alerts + calendar requests waiting for a yes ---- */
+function computeNotifs(){if(!authUser)return [];let n=[];try{n=typeof trialsNotifs==='function'?trialsNotifs():[];}catch(e){n=[];}try{if(typeof calendarNotifs==='function')n=n.concat(calendarNotifs());}catch(e){}return n;}
 function updateNotifBadge(){const dot=document.getElementById('notifDot');if(!dot)return;const n=computeNotifs();if(n.length){dot.style.display='grid';dot.textContent=n.length>9?'9+':n.length;}else{dot.style.display='none';}}
 function toggleNotif(e){e.stopPropagation();const pop=document.getElementById('notifPop');if(pop.classList.contains('open')){pop.classList.remove('open');return;}const n=computeNotifs();window._notifs=n;
-  pop.innerHTML=`<div class="notif-head">What needs you</div>`+(n.length?`<div class="notif-list">${n.map((x,i)=>`<div class="notif-item" onclick="runNotif(${i})"><span class="nd" style="background:${x.dot}"></span><div style="min-width:0"><b>${esc(x.t)}</b>${x.s?`<small>${esc(x.s)}</small>`:''}</div></div>`).join('')}</div>`:`<div class="notif-empty">Nothing urgent — the machine is running.</div>`);
+  pop.innerHTML=`<div class="notif-head">What needs you</div>`+(n.length?`<div class="notif-list">${n.map((x,i)=>`<div class="notif-item" onclick="runNotif(${i})"><span class="nd" style="background:${x.dot}"></span><div style="min-width:0"><b>${esc(x.t)}</b>${x.s?`<small>${esc(x.s)}</small>`:''}</div></div>`).join('')}</div>`:`<div class="notif-empty">Nothing needs you right now.</div>`);
   pop.classList.add('open');}
 function runNotif(i){const x=(window._notifs||[])[i];document.getElementById('notifPop').classList.remove('open');if(x&&x.go)x.go();}
 document.addEventListener('click',e=>{const p=document.getElementById('notifPop');if(p&&p.classList.contains('open')&&!e.target.closest('#notifPop')&&!e.target.closest('#notifBtn'))p.classList.remove('open');});
 
 /* ---- Theme + shortcuts ---- */
 function themeColorMeta(){const m=document.getElementById('themeColor');if(m&&typeof m.setAttribute==='function')m.setAttribute('content',document.body.classList.contains('dark')?'#000000':'#FFFFFF');}
-function toggleTheme(){const d=document.body.classList.toggle('dark');try{localStorage.setItem('avianceTheme',d?'dark':'light');}catch(e){}themeColorMeta();}
+function toggleTheme(){setTheme(document.body.classList.contains('dark')?'light':'dark');}
+/* Settings › Light or dark (and ⌘K). Remembered on this device. */
+function setTheme(mode){const d=mode==='dark';document.body.classList.toggle('dark',d);try{localStorage.setItem('avianceTheme',d?'dark':'light');}catch(e){}themeColorMeta();if(currentView==='settings'&&typeof trialsRepaint==='function')trialsRepaint('settings');}
 function initTheme(){try{if(localStorage.getItem('avianceTheme')==='dark')document.body.classList.add('dark');}catch(e){}themeColorMeta();}
 document.addEventListener('keydown',e=>{
   const typing=/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName||''))||e.target.isContentEditable;
@@ -592,6 +624,7 @@ boot();
 </script>
 <script src="trials.js"></script>
 <script src="inquiries.js"></script>
+<script src="calendar.js"></script>
 <script src="push.js"></script>
 </body>
 </html>

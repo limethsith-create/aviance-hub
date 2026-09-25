@@ -321,3 +321,110 @@ export function inquiryTodosOf(summary) {
 const inquiryHubSummary = inquirySummaryOf(inquiryRecords);
 export const hubWithInquiries = Object.assign({}, fullHub, { inquiries: inquiryHubSummary, todos: inquiryTodosOf(inquiryHubSummary).concat(fullHub.todos) });
 export const noInquiries = { inquiries: [], counts: { new: 0, contacted: 0, won: 0, lost: 0 } };
+
+/* ───── Onboarding call + the simple Trials list (email-distributor docs/ONBOARD-CALL.md) ─────
+   `simple` on every board row, `onboardCall` on the trial detail. NOW is Sat 17 Oct 2026 12:00 UTC. */
+const withSimple = (row, simple) => Object.assign({}, row, { simple: Object.assign({ person: row.contactName, company: row.name, dayOf30: null }, simple) });
+export const ecreek = {
+  id: 'ecreek-it', name: 'eCreek IT', state: 'onboarding', stateLabel: 'Onboarding', plan: 'trial', trialDay: null,
+  day1Date: null, day30Date: null, contactName: 'Sam Test', contactEmail: 'sam@ecreek.io', website: 'https://ecreek.io',
+  health: 'yellow', healthReasons: ['reply waiting 3 h'], five: null, inboxRate: null, openAlerts: 0, urgentAlerts: 0,
+  todo: [{ id: 'onboard-reply:ecreek-it', text: 'Answer Sam about the onboarding call', detail: 'They replied 3 h ago', urgent: true, since: '2026-10-16T09:00:00Z', action: { type: 'view', view: 'detail', clientId: 'ecreek-it' } }],
+  systems: systems({ market: 'off', purchase: 'off', setup: 'off', warmup: 'off', list: 'off', copy: 'off', canary: 'off', sending: 'off', replies: 'off', calls: 'off', reports: 'off', closing: 'off' }), nextUp: null,
+};
+export const gale = {
+  id: 'gale-roofing', name: 'Gale Roofing', state: 'warming', stateLabel: 'Warming up — day 5 of 14', plan: 'trial', trialDay: null,
+  day1Date: '2026-10-26', day30Date: '2026-11-24', contactName: 'Mia Gale', contactEmail: 'mia@galeroofing.com', website: 'https://galeroofing.com',
+  health: 'green', healthReasons: [], five: null, inboxRate: 0.88, openAlerts: 0, urgentAlerts: 0, todo: [], systems: systems({ sending: 'off', replies: 'off', calls: 'off', reports: 'off', closing: 'off' }), nextUp: { date: '2026-10-26', what: 'Day 1' },
+};
+export const delta = { id: 'delta-roofing', name: 'Delta Roofing', state: 'queued', stateLabel: 'In the queue — expected 2026-10-20', plan: 'trial', contactName: 'Sam Ito', contactEmail: 'sam@delta.com', health: 'green', healthReasons: [], five: null, todo: [], systems: [], nextUp: null };
+export const iris = { id: 'iris-dental', name: 'Iris Dental', state: 'declined', stateLabel: 'Declined', plan: 'trial', contactName: 'Ivy Ross', contactEmail: 'ivy@irisdental.com', health: 'grey', healthReasons: [], five: null, todo: [], systems: [], nextUp: null };
+export const simpleRows = {
+  fern: withSimple(fern, { step: 'new', label: 'New application — read it and say yes or no', next: 'Read their application and press Approve or Decline', needsYou: true, since: '2026-10-17T10:00:00Z' }),
+  ecreek: withSimple(ecreek, { step: 'accepted', label: 'Accepted — they replied about the call, answer them', next: 'Answer Sam in the onboarding call box', needsYou: true, since: '2026-10-16T09:00:00Z' }),
+  bright: withSimple(bright, { step: 'setting_up', label: 'Setting up their emails (about 2 weeks)', next: 'Buy the domain and 2 inboxes, then paste the logins', needsYou: true, since: '2026-10-16T22:00:00Z' }),
+  delta: withSimple(delta, { step: 'queued', label: 'Accepted — waiting for a free trial slot (first in line)', next: 'Nothing for you: they start when a slot frees up', needsYou: false, since: '2026-10-14T08:00:00Z' }),
+  gale: withSimple(gale, { step: 'warming_up', label: 'Setting up their emails (about 2 weeks)', next: 'Nothing for you: the first emails go out on Mon 26 Oct', needsYou: false, since: '2026-10-12T09:00:00Z' }),
+  acme: withSimple(acme, { step: 'sending', label: 'Sending — day 12 of 30, 2 calls booked', next: 'Nothing for you: the Friday update goes out today', needsYou: false, since: '2026-10-06T13:00:00Z', dayOf30: 12 }),
+  cobalt: withSimple(cobalt, { step: 'finished', label: 'Finished — became a client', next: '', needsYou: false, since: '2026-10-05T00:00:00Z' }),
+  iris: withSimple(iris, { step: 'declined', label: 'Declined', next: '', needsYou: false, since: '2026-10-02T12:00:00Z' }),
+};
+const S = simpleRows;
+export const simpleHub = Object.assign({}, fullHub, {
+  stages: stagesWith({ intake: [S.fern, S.delta], onboard: [S.ecreek], setup: [S.bright], build: [S.gale], live: [S.acme], won: [S.cobalt], ended: [S.iris] }),
+  todos: [Object.assign({ clientId: 'ecreek-it', clientName: 'eCreek IT' }, ecreek.todo[0])].concat(fullHub.todos),
+});
+/* The card's data, deliberately out of order (the hub shows the conversation oldest first). */
+export const onboardCall = {
+  status: 'replied', label: 'They replied — answer them below', sentAt: '2026-10-15T10:00:00Z', openedAt: '2026-10-15T10:20:00Z', lastReplyAt: '2026-10-16T09:00:00Z',
+  bookedFor: null, bookedAt: null, bookedBy: null, heldAt: null, dueBy: '2026-10-20T10:00:00Z', overdue: false,
+  remindersSent: 1, nextReminderAt: '2026-10-18T14:00:00Z', stopped: false,
+  bookingUrl: 'https://cal.com/aviance/onboarding', fromInbox: 'hello@aviance.store',
+  steps: [
+    { key: 'sent', label: 'Acceptance email sent', done: true, at: '2026-10-15T10:00:00Z' },
+    { key: 'opened', label: 'They opened it', done: true, at: '2026-10-15T10:20:00Z' },
+    { key: 'replied', label: 'They replied', done: true, at: '2026-10-16T09:00:00Z' },
+    { key: 'booked', label: 'Call booked', done: false, at: null },
+    { key: 'held', label: 'Call done', done: false, at: null },
+  ],
+  thread: [
+    { id: 'm3', dir: 'in', at: '2026-10-16T09:00:00Z', from: 'sam@ecreek.io', to: 'hello@aviance.store', subject: "Re: You're in — let's book your onboarding call", text: 'Hi!\nTuesday 3 pm works for us.\n<script>alert(1)</script>', kind: 'reply' },
+    { id: 'm1', dir: 'out', at: '2026-10-15T10:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: "You're in — let's book your onboarding call", text: 'Hi Sam, good news: we would like to run your free 30-day trial for eCreek IT.', kind: 'acceptance' },
+    { id: 'm2', dir: 'out', at: '2026-10-16T08:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: "Re: You're in — let's book your onboarding call", text: 'Just checking you saw this.', kind: 'reminder' },
+  ],
+};
+export const ecreekDetail = {
+  row: S.ecreek, onboardCall, holds: {}, links: {}, events: [{ at: '2026-10-15T10:00:00Z', system: 'onboardcall', event: 'accepted_call_sent', detail: '' }],
+  application: { receivedAt: '2026-10-14T09:00:00Z', source: 'website', review: 'approved', decidedAt: '2026-10-15T09:55:00Z', decision: 'approve', declineReason: null, answers: [], fit: { verdict: 'fit', summary: 'Looks like a fit', lines: [] } },
+};
+
+/* ───── The Calendar (email-distributor docs/CALENDAR.md) ─────
+   GET /api/mc/calendar?from=&to= for the week Mon 28 Sep – Sun 4 Oct 2026 (Sri Lanka dates).
+   US Eastern is on summer time (EDT, UTC−4) that week: 9 am ET = 6:30 pm Colombo; 4 pm ET = 1:30 am the
+   next Colombo day. CAL_NOW is Tue 29 Sep 2026, 1:30 pm in Colombo (4:00 am ET) — outside the call hours. */
+export const CAL_NOW = new Date('2026-09-29T08:00:00Z');
+export const calSettingsFixture = { hours: ['09:00', '17:00'], days: [1, 2, 3, 4, 5], slotMinutes: 30, bufferMinutes: 15, maxPerDay: 6, minNoticeHours: 12, daysAhead: 14, meetingLink: 'https://meet.google.com/abc-defg-hij', ownerZone: 'Asia/Colombo', usZone: 'America/New_York' };
+const calM = (o) => Object.assign({ clientId: null, company: null, person: null, email: null, kind: 'other', title: null, minutes: 30, source: 'booking_page', theirZone: 'America/New_York', note: '', declineReason: null, proposed: null, createdAt: '2026-09-27T10:00:00Z', confirmedAt: null, history: [] }, o);
+export const calMeetings = {
+  // Wed 30 Sep 2:00 pm ET (Wed 11:30 pm Colombo) — asked for on the booking page, from Denver
+  req1: calM({ id: 'mreq1', clientId: 'ecreek-it', company: 'eCreek IT', person: 'Sam Test', email: 'sam@ecreek.io', kind: 'onboarding', title: 'Onboarding call — eCreek IT', start: '2026-09-30T18:00:00Z', minutes: 30, status: 'requested', theirZone: 'America/Denver', note: 'Can we do a bit earlier?\nThanks! <b>really</b>', createdAt: '2026-09-29T03:10:00Z', history: [{ at: '2026-09-29T03:10:00Z', what: 'requested', by: 'them' }] }),
+  // Thu 1 Oct 4:00 pm ET = Fri 2 Oct 1:30 am Colombo — the midnight crossover; 15 minutes; from Los Angeles
+  req2: calM({ id: 'mreq2', clientId: 'gale-roofing', company: 'Gale Roofing', person: 'Mia Gale', email: 'mia@galeroofing.com', kind: 'onboarding', title: 'Onboarding call — Gale Roofing', start: '2026-10-01T20:00:00Z', minutes: 15, status: 'requested', theirZone: 'America/Los_Angeles', createdAt: '2026-09-29T04:00:00Z', history: [{ at: '2026-09-29T04:00:00Z', what: 'requested', by: 'them' }] }),
+  // the owner already suggested another time (Mon 5 Oct 9:30 am ET) — waiting for them, not for him
+  req3: calM({ id: 'mreq3', clientId: 'delta-roofing', company: 'Delta Roofing', person: 'Sam Ito', start: '2026-10-02T14:00:00Z', status: 'requested', proposed: '2026-10-05T13:30:00Z', createdAt: '2026-09-28T10:00:00Z', history: [{ at: '2026-09-28T10:00:00Z', what: 'requested', by: 'them' }, { at: '2026-09-28T12:00:00Z', what: 'suggested', by: 'owner' }] }),
+  // Tue 29 Sep 9:00 am ET = Tue 6:30 pm Colombo
+  conf: calM({ id: 'mconf', clientId: 'acme-plumbing', company: 'Acme Plumbing', person: 'Ann Lee', email: 'ann@acme.com', title: 'Onboarding call — Acme Plumbing', start: '2026-09-29T13:00:00Z', status: 'confirmed', confirmedAt: '2026-09-27T11:00:00Z', history: [{ at: '2026-09-27T10:00:00Z', what: 'requested', by: 'them' }, { at: '2026-09-27T11:00:00Z', what: 'confirmed', by: 'owner' }] }),
+  // Mon 28 Sep 10:00 am ET = Mon 7:30 pm Colombo — done
+  held: calM({ id: 'mheld', clientId: 'bright-dental', company: 'Bright Dental', person: 'Raj Patel', start: '2026-09-28T14:00:00Z', status: 'held', source: 'onboard_card' }),
+  // Mon 28 Sep 3:00 pm ET = Tue 29 Sep 12:30 am Colombo — they didn't show
+  noshow: calM({ id: 'mnoshow', clientId: 'fern-it', company: 'Fern IT', person: 'Lee Park', start: '2026-09-28T19:00:00Z', minutes: 15, status: 'no_show', source: 'inbox' }),
+  // Thu 1 Oct 11:00 am ET = Thu 8:30 pm Colombo — the owner blocked an hour
+  blocked: calM({ id: 'mblocked', title: 'Busy', start: '2026-10-01T15:00:00Z', minutes: 60, status: 'blocked', source: 'owner' }),
+  cancelled: calM({ id: 'mcancelled', clientId: 'iris-dental', company: 'Iris Dental', person: 'Ivy Ross', start: '2026-09-30T14:00:00Z', status: 'cancelled', declineReason: 'They moved it' }),
+  declined: calM({ id: 'mdeclined', clientId: 'cobalt-hvac', company: 'Cobalt HVAC', person: 'Dee Cole', start: '2026-10-02T15:00:00Z', status: 'declined', declineReason: 'Not a fit' }),
+  // Sat 3 Oct 11:00 am Colombo — the owner's own meeting, outside the call hours
+  own: calM({ id: 'mown', title: 'Call with my accountant', start: '2026-10-03T05:30:00Z', status: 'confirmed', source: 'owner', theirZone: null }),
+};
+const CM = calMeetings;
+export const calWeek = {
+  meetings: [CM.held, CM.noshow, CM.conf, CM.req1, CM.cancelled, CM.blocked, CM.req2, CM.req3, CM.declined, CM.own],
+  requests: [CM.req3, CM.req1, CM.req2],   // the machine sends them oldest first
+  settings: calSettingsFixture,
+  free: [
+    { start: '2026-09-28T13:00:00Z', minutes: 30 },   // Mon 6:30 pm — already past at CAL_NOW
+    { start: '2026-09-29T14:00:00Z', minutes: 30 },   // Tue 7:30 pm
+    { start: '2026-09-30T13:00:00Z', minutes: 30 },   // Wed 6:30 pm
+    { start: '2026-09-30T13:30:00Z', minutes: 30 },   // Wed 7:00 pm
+    { start: '2026-10-01T19:30:00Z', minutes: 30 },   // Fri 2 Oct 1:00 am (Thu 3:30 pm ET)
+  ],
+};
+/* Mon 2 – Sun 8 Nov 2026: US Eastern is back on winter time (EST, UTC−5) — 9 am ET = 7:30 pm Colombo. */
+export const calWinterWeek = {
+  meetings: [
+    calM({ id: 'mw1', clientId: 'acme-plumbing', company: 'Acme Plumbing', person: 'Ann Lee', start: '2026-11-03T14:00:00Z', status: 'confirmed' }),   // Tue 9 am ET = Tue 7:30 pm Colombo
+    calM({ id: 'mw2', clientId: 'gale-roofing', company: 'Gale Roofing', person: 'Mia Gale', start: '2026-11-03T21:00:00Z', status: 'confirmed' }),    // Tue 4 pm ET = Wed 2:30 am Colombo
+  ],
+  requests: [], settings: calSettingsFixture, free: [],
+};
+/* Everything a hostile machine answer could carry. */
+export const calHostile = calM({ id: 'x"\');alert(4);//', clientId: 'ev"il', company: '<img src=x onerror=alert(1)>', person: '"><script>alert(2)</script>', title: '<svg onload=alert(3)>', email: '"><script>@x.com', start: '2026-09-30T13:00:00Z', status: 'requested', note: '</div><script>alert(6)</script>', theirZone: 'Not/AZone', source: '<b>src</b>', history: [{ at: '2026-09-29T03:00:00Z', what: '<i>odd</i>', by: '<u>who</u>' }] });

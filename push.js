@@ -59,7 +59,7 @@ function paModeFor(env, st) {
 function renderPhoneAlerts(v) {
   v = v || {};
   const dev = esc(v.device || 'device');
-  const head = `<div class="modal-head"><div class="pj-ic pa-ic">${(typeof I !== 'undefined' && I.bellRing) || ''}</div><div><h3>Phone alerts</h3><p>Every machine alert pops up on your phone as a normal notification.</p></div></div>`;
+  const head = `<div class="modal-head"><div class="pj-ic pa-ic">${(typeof I !== 'undefined' && I.bellRing) || ''}</div><div><h3>Phone alerts</h3><p>When something needs you, your phone shows a message, like a text.</p></div></div>`;
   const close = `<button class="btn ghost" onclick="closeModal()">Close</button>`;
   const note = v.note ? `<p class="pa-note">${esc(v.note)}</p>` : '';
   const steps = (list) => `<ol class="pa-steps">${list.map((x) => `<li><span>${x}</span></li>`).join('')}</ol>`;
@@ -71,7 +71,7 @@ function renderPhoneAlerts(v) {
           '<b>Tap the Share button</b> in Safari. It is the square with an arrow pointing up. On newer iPhones it is inside the ••• menu at the bottom.',
           '<b>Add to Home Screen</b>: scroll down the list, tap it, then tap Add.',
           '<b>Open Aviance Hub from your home screen</b> and sign in once.',
-          '<b>Come back here</b> (menu → Phone alerts) <b>and tap Turn on</b>.',
+          '<b>Come back here</b> (Settings → Phone alerts) <b>and tap Turn on</b>.',
         ])}
         <p class="pa-small">Needs iOS 16.4 or later.</p>`;
       break;
@@ -96,11 +96,11 @@ function renderPhoneAlerts(v) {
       foot = `${close}<button class="btn" disabled>Turning on…</button>`;
       break;
     case 'nokeys':
-      body = `<p class="pa-lead">The machine isn't ready to send phone alerts yet.</p><p class="pa-small">Its alert keys aren't set up. There's nothing to do on this ${dev}. Try again once the machine has been updated.</p>`;
+      body = `<p class="pa-lead">Phone alerts aren't switched on at our end yet.</p><p class="pa-small">There's nothing to do on this ${dev}. Your developer needs to finish one setting (the alert keys). Try again after that.</p>`;
       foot = `${close}<button class="btn" onclick="phoneAlertsCheck()">Check again</button>`;
       break;
     case 'error':
-      body = `<p class="pa-lead">That didn't work.</p><p class="pa-err">${esc(v.error || 'No answer from the machine.')}</p>`;
+      body = `<p class="pa-lead">That didn't work.</p><p class="pa-err">${esc(v.error || 'No answer. Check your internet and try again.')}</p>`;
       foot = `${close}<button class="btn" onclick="phoneAlertsOn()">Try again</button>`;
       break;
     case 'on': {
@@ -123,7 +123,7 @@ function paView() {
 function paRender() {
   const p = document.getElementById('paPanel');
   if (p && document.getElementById('modalWrap').classList.contains('open')) p.innerHTML = renderPhoneAlerts(paView());
-  try { renderNav(); } catch (e) { /* signed out */ }
+  try { renderNav(); if (currentView === 'settings') trialsRepaint('settings', { soft: true }); } catch (e) { /* signed out */ }
 }
 function phoneAlertsNavNote() { return pa.on ? 'On' : ''; }
 
@@ -149,11 +149,11 @@ async function paKey() {
   const r = await machineFetch('/api/mc/push/key');
   pa.keyStatus = r.status;
   if (r.ok && r.data && r.data.publicKey) { pa.key = r.data.publicKey; return pa.key; }
-  if (r.status !== 503) pa.error = r.ok ? 'The machine sent no alert key.' : paPlain(r);
+  if (r.status !== 503) pa.error = r.ok ? "Phone alerts aren't ready at our end yet." : paPlain(r);
   return null;
 }
 function paSend(sub) { return machineFetch('/api/mc/push/subscribe', { body: { subscription: sub.toJSON(), device: paDeviceName() } }); }
-function paPlain(r) { return r.status === 0 ? "Couldn't reach the machine. Check the phone's internet and try again." : r.error || 'The machine said no.'; }
+function paPlain(r) { return r.status === 0 ? "Couldn't reach the system. Check the phone's internet and try again." : r.error || 'That did not go through.'; }
 function paSameKey(sub, key) {
   try {
     const have = sub.options && sub.options.applicationServerKey; if (!have) return true;
@@ -162,7 +162,7 @@ function paSameKey(sub, key) {
   } catch (e) { return true; }
 }
 
-/* Sidebar / ⌘K: open the panel and look at this device's real state. */
+/* Settings › Phone alerts / ⌘K: open the panel and look at this device's real state. */
 function openPhoneAlerts() {
   try { closeSidebar(); } catch (e) { /* no sidebar */ }
   pa.error = ''; pa.note = '';
@@ -229,7 +229,7 @@ async function phoneAlertsOff() {
     try { await sub.unsubscribe(); } catch (e) { /* already gone */ }
   }
   Object.assign(pa, { busy: '', on: false, sub: null, count: null });
-  toast(err ? 'Off on this phone. The machine will drop it on its next alert.' : 'Phone alerts are off for this ' + paEnv().device);
+  toast(err ? 'Off on this phone.' : 'Phone alerts are off for this ' + paEnv().device);
   paRender();
 }
 async function phoneAlertsTest() {

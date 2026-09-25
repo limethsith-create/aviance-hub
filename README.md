@@ -20,8 +20,9 @@ sees "This hub is for the Aviance owner." and is signed out.
 
 | File | What it is |
 | --- | --- |
-| `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, sidebar, ⌘K, notifications, theme. |
-| `trials.js` | The Trials section — everything the owner sees inside. Talks to the machine. |
+| `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, the four-place navigation (sidebar on a computer, tab bar on a phone), ⌘K, notifications, theme. |
+| `trials.js` | Trials (the list, one trial, Buy & paste, Behind the scenes) and Settings. Talks to the machine. |
+| `calendar.js`, `calendar.css` | The Calendar: requests waiting for your yes, the week, meetings (see `email-distributor/docs/CALENDAR.md`). |
 | `trials.css` | Styles for the Trials screens, on top of the shell's CSS variables (light + dark). |
 | `inquiries.js` | Inquiries: paid-plan calls booked from the website — list, detail, status/notes, "Start a trial instead", the board strip. |
 | `push.js` | Phone alerts: the panel, turning Web Push on/off with the machine, the quiet re-subscribe after sign-in. |
@@ -29,26 +30,80 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `manifest.webmanifest` | Makes the hub installable (Add to Home Screen) — iPhone only allows alerts for installed web apps. |
 | `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | The brand cube from the website, flattened onto white (see *Phone alerts*). |
 | `badge-96.png` | One-colour "A" (white on transparent) for Android's status bar. |
-| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, nav, ⌘K, deep links), the Trials screens, application review, phone alerts (`push.js`) and the readability floor. |
+| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, ⌘K, deep links), the Trials screens, application review, phone alerts (`push.js`) and the readability floor. |
+| `tests/simple.test.mjs` | Node tests for the simple hub: the four places and their badges, the one journey, "Needs you", the three questions and the one big button, Settings, deep links, plain words (a banned-word list), and no function name declared twice. |
+| `tests/calendar.test.mjs` | Node tests for the Calendar. |
 | `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and `sw.js` (run in a sandbox with a fake service-worker global). |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
 
 ## Screens
 
-- **Trials** (the landing view) — machine bar (heartbeat, last send, active
-  trials, usage, missing setup), "What you need to do" (every to-do from the
-  machine, urgent first, with its action button), the stage columns with one
-  card per trial, the queue (promote / decline) and the owner's own
-  `aviance` / `_test` rows. "New client" creates a pre-approved trial.
-  Refreshes itself every 60 s while open.
-- **Trial** (one client) — header (state, day, dates, what's next), then
-  tabs. It opens on **Overview**: what you need to do, the 13 systems as one
+Four places only, the same on a phone (a tab bar along the bottom) and a
+computer (a sidebar): **Trials**, **Calendar**, **Inquiries**, **Settings**.
+Badges: Trials = how many trial clients need you (red), Calendar = call times
+waiting for your yes (amber), Inquiries = new ones (red). Everything else lives
+in Settings. The hub opens on Trials. Pages inside a place (a trial, Buy &
+paste, an inquiry, Behind the scenes) have a Back arrow in the top bar.
+
+**One journey, everywhere the same:** ① Applied → ② Onboarding call →
+③ Setting up → ④ Sending emails → ⑤ Done, from the machine's
+`row.simple.step` (new/queued → 1, accepted/call_booked → 2,
+setting_up/warming_up → 3, sending → 4, finished → 5; declined is "Not taken",
+grey, no journey). While sending it also says "Day 12 of 30" (unless the plain
+sentence already does).
+
+- **Trials** (the landing view) — one row per trial client: the company and
+  the person, the journey as five small squares (done ✓, current filled) with
+  "Step 2 of 5 — Onboarding call", the machine's plain sentence
+  (`row.simple.label`) and what happens next (`row.simple.next`). A row that
+  needs you has a red left edge and a red "You need to…" line (from the next
+  step, or the first to-do) and sits under **Needs you** at the top; then
+  **In progress**; then a folded **Done / not taken**. When a client asked for
+  a call time, a link under the row opens the Calendar at it. At the bottom:
+  **+ Add a trial client yourself**. An older machine without `simple` falls
+  back to the state and the to-dos. Opening it asks the machine to look for
+  onboarding-call replies and bookings (`POST /api/mc/onboard-calls/check`,
+  fire-and-forget) and refreshes if something new came in. Refreshes itself
+  every 60 s while open (never the check, never growth history).
+- **Trial** (one client) — three questions at the top, big and plain:
+  **Where are they?** (the journey, bigger, + the plain sentence), **What
+  happens next?** and **What do you need to do?** with ONE big button for the
+  single most important thing, in this order: a new application ("Read the
+  application and say yes or no" → scrolls to it) · a call time they asked for
+  ("Say yes to their call time" → the Calendar at that meeting) · their reply
+  ("Answer their reply" → the reply box) · a call whose time has passed ("Mark
+  the call done", asks first) · a late booking ("Write to them about booking")
+  · "Buy the domain and inboxes" · anything else on the to-do list (not urgent:
+  "When you have a minute: …") · otherwise "Nothing — we'll tell you when
+  something needs you". Below: the onboarding call card, the application (open
+  while it waits; once decided, one folded line), any other to-dos under "Also
+  on your list", and **Behind the scenes**, folded, with everything technical.
+- **Settings** — named sections, each folds open and says its state in one
+  word: **Alerts** (every alert, "Not seen" first, "Mark as seen"; `#alerts`
+  opens it), **Phone alerts**, **Is everything running?** (last check-in, last
+  email sent, trials running, free extensions, alerts not seen, paid services
+  used, setup still to finish), **Behind the scenes** (the old board: every
+  to-do, all trials by stage, the waiting list, your own sending), **Advanced**
+  (the full control panel — Mission Control — pages, opened signed-in in a new
+  tab), **Light or dark**, **Your account** (log out).
+- **Onboarding call** card (when `detail.onboardCall` exists — after Approve
+  the machine sends one email asking them to book the call): its plain
+  label, the five steps as ticks with times, "Book by {day}" (red when
+  overdue), how many reminders went out, the booking link, the whole
+  conversation oldest first (theirs on grey at the left, ours outlined at
+  the right, plain text with its line breaks), a reply box (2 000
+  characters) and the buttons **Mark call booked** (date + time), **Call
+  done**, **They didn't show**, **Send the email again**, **Stop reminders**
+  — each posts `POST /api/mc/clients/{id}/onboard-call` `{action, …}`, says
+  what happened in plain words and redraws the card from the answer.
+- **Behind the scenes on a trial** — tabs. **Overview**: the 13 parts as one
   strip (each says OK / Working / Waiting / Blocked / Off in words), and four
   growth numbers — emails sent, replies, calls booked, warm-up inbox rate —
-  each with a 14-day sparkline. Everything else lives in tabs: **Growth**,
-  Systems, **Leads**, **Deliverability**, Inboxes, Calls, Replies, Copy,
-  Coming up (dates, your promises and notes, reports), Timeline, Actions
-  (state moves, jobs, re-run a step, invoice, client links).
+  each with a 14-day sparkline (fetched only once you open Behind the
+  scenes). Everything else lives in tabs: **Growth**,
+  Parts, **Leads**, **Deliverability**, Inboxes, Calls, Replies, Copy,
+  Coming up (dates, your promises and notes, reports), History, Actions
+  (move to another step, automatic tasks, re-run a step, invoice, client links).
 - **Growth tab** — the progress of every system over time, 7 / 30 / 45 / 90
   days: emails sent per day (first emails vs follow-ups) with replies,
   positive replies and calls booked in aligned rows underneath (each on its own
@@ -91,10 +146,11 @@ sees "This hub is for the Aviance owner." and is signed out.
   link, team size and age hints, socials, their market size, and warnings in
   amber) and every answer. **Research again** (small button beside "What we
   found") asks the machine to look the company up again. While it is
-  pending it sits at the top of the trial with two buttons — **Approve — send
-  the onboarding link** (the machine starts onboarding, or queues them if three
-  trials are running) and **Decline…** (a one-sentence reason, emailed to the
-  applicant). Once decided it moves to an Application tab.
+  pending it sits open on the trial page with two buttons — **Say yes and
+  email them** (the machine sends the acceptance email, or puts them on the
+  waiting list if three trials are running) and **Say no…** (a one-sentence
+  reason, emailed to the applicant). Once decided it folds into one line
+  ("Their application · You said yes").
 - **Buy & paste** — the one manual step per trial: the total for the first
   month, a comparison of the best domain names (why, the best first-year and
   renewal price with a **Buy at {registrar}** link straight to that
@@ -104,12 +160,11 @@ sees "This hub is for the Aviance owner." and is signed out.
   step-by-step checklist with the sender names), then the form to paste the
   domain and inbox logins. Older machines without the comparison still show
   the plain shopping list.
-- **Machine alerts** — every alert the machine sent, with Acknowledge.
 - **Inquiries** — people who want a paid plan (Starter / Growth / Scale)
   without a trial, from the website's "Book a call" form. The machine saves
   each one and pops it up on the owner's phone; nothing is sent to them.
-  - The list: New / Contacted / Won / Lost counts (tap one to filter), filter
-    chips (Open is the default: new + contacted), and a card per inquiry,
+  - The list: four filter chips with their counts — Open (the default: new +
+    contacted), Won, Lost, All — and a card per inquiry,
     newest first — company, name, plan, the booked call in the owner's time
     (the website's own text) with "call in 3 h" / "was 2 days ago", what they
     sell, and a red New marker until someone moves it on.
@@ -117,26 +172,24 @@ sees "This hub is for the Aviance owner." and is signed out.
     email** (mailto, subject "Your Aviance call"), their time and time zone,
     email, website, what they sell, plan; **Where it stands** — Mark
     contacted / won / lost or Back to New, with an optional note; **Start a
-    trial instead** (asks "Email {name} the trial onboarding link now?", then
+    free trial and email them** (asks first, then
     says in plain words what the machine did and links to the new trial);
     **Notes** (newest first) + Add note.
-  - On the Trials board a strip — "2 new inquiries — Stone Roofing, call Tue
+  - On Behind the scenes a strip — "2 new inquiries — Stone Roofing, call Tue
     7:30 PM" (the soonest upcoming call, in Sri Lanka time) — opens the list;
-    each new one is also an urgent to-do ("Open inquiry"), in the bell, and in
-    ⌘K. The sidebar badge counts new ones.
+    each new one is also an urgent to-do ("Open the inquiry"), in the bell, and in
+    ⌘K. The Inquiries badge counts new ones.
   - Machine: `GET /api/mc/inquiries`, `POST /api/mc/inquiries`
     `{action:'status'|'note'|'toTrial', …}`, and `inquiries` on
     `GET /api/mc/hub` (see HUB-API.md "## Plan inquiries"). An older machine
     without it simply shows no strip and no badge.
 
-- **Phone alerts** — a small panel (sidebar → Machine → Phone alerts, or ⌘K)
+- **Phone alerts** — a small panel (Settings → Phone alerts, or ⌘K)
   that turns on push notifications for this device. See below.
 
-Sidebar: **Trials**, **Inquiries** (red badge = new ones) and **Machine alerts** under **Trials**, and under **Machine** five
-links that open signed-in inside the machine's own Mission Control (new tab):
-Queue, Warm-up circle, Config, Test Mode, Learning — then **Phone alerts**
-("On" beside it when this device gets alerts). Topbar: ⌘K (trials and
-commands), the bell (trial to-dos + open urgent alerts), theme, New client.
+Top bar: Back (on pages inside a place), the page title, ⌘K on a computer
+(find a trial, or type what you want to do), and the bell (what needs you:
+urgent to-dos, urgent alerts, call times waiting for your yes).
 
 ## Phone alerts (Web Push)
 
@@ -153,11 +206,11 @@ only works for the hub **added to the Home Screen and opened from there**
    → **Add**.
 3. Open **Aviance** from the home screen and **sign in** (the home-screen app
    keeps its own sign-in, separate from Safari — the login screen says so).
-4. Menu (☰) → **Phone alerts** → **Turn on phone alerts** → **Allow**.
+4. **Settings** (bottom right) → **Phone alerts** → **Set up phone alerts** → **Turn on phone alerts** → **Allow**.
 5. Tap **Send a test**. "Test alert from Aviance" should pop up within seconds.
 
 Tapping an alert opens the trial it is about (`/#trial/{id}`), the inquiry
-(`/#inquiry/{id}`), the Machine alerts screen (`/#alerts`) or the board (`/#trials`) — signing in first if
+(`/#inquiry/{id}`), the Calendar (`/#calendar`), Settings › Alerts (`/#alerts`) or the list (`/#trials`) — signing in first if
 needed. Urgent alerts stay on screen until tapped; a repeat of the same alert
 replaces the previous one. If alerts are blocked later: iPhone Settings →
 Notifications → Aviance → Allow Notifications.
@@ -197,10 +250,10 @@ mode), and the tests enforce the floor.
   weights: 400 (normal) and 600 (bold).
 
 - **Size:** nothing smaller than **13px** anywhere — labels, pills, badges,
-  table heads, timestamps, chart labels, sidebar nav. Body text is **15px**.
-  Scale: `--fs-min` 13 · `--fs-small` 14 · `--fs-base` 15 · `--fs-strong` 16 ·
-  `--fs-h3` 18 · `--fs-h2` 22 · `--fs-num` 18 (the five numbers, machine bar) ·
-  `--fs-num-lg` 24. Use a token, never a raw size under 13px.
+  table heads, timestamps, chart labels, tab bar. Body text is **16px**.
+  Scale: `--fs-min` 13 · `--fs-small` 15 · `--fs-base` 16 · `--fs-strong` 17 ·
+  `--fs-h3` 19 · `--fs-h2` 24 · `--fs-num` 19 (the five numbers) ·
+  `--fs-num-lg` 26. Use a token, never a raw size under 13px.
 - **Contrast:** every text colour passes **WCAG AA, 4.5:1**, against every
   background it sits on, in light and dark — including pill text on its pill
   fill. Light: text #000, muted #3A3A3A, muted-2 #555555, green #17662F,
@@ -216,8 +269,11 @@ mode), and the tests enforce the floor.
   shrinks below 13px on a phone.
 - **Spacing:** line-height ≈1.5 for reading text; to-do rows, cards and
   table cells have room to breathe.
-- **Phones (≤560px):** long button labels wrap rather than clip; the topbar
-  "New client" button shows only its + icon.
+- **Phones (≤860px):** one column, the tab bar at the bottom, every tap target
+  at least 44px (buttons, tabs, rows), long button labels wrap rather than
+  clip, no sideways scrolling.
+- **Colour means one thing:** red = needs you, amber = waiting, green = good,
+  grey = done. Hover and focus use black/white, never red.
 
 `npm test` fails if any `font-size` in `trials.css`, the shell styles or
 inline styles drops below 13px, if any other font family, capitals-only
@@ -230,8 +286,8 @@ The growth history is the expensive call (about days × (2 + inboxes) Redis
 reads), so the hub only fetches it when you open something that shows it:
 
 - **Growth tab** — the chosen range, reused for 5 minutes.
-- **Overview** — 14 days, reused for 15 minutes.
-- **Board cards** — 14 days per warming/sending client (never for clients
+- **Overview** (inside a trial's Behind the scenes, only once it is opened) — 14 days, reused for 15 minutes.
+- **Board cards** (Behind the scenes only — the Trials list asks for none) — 14 days per warming/sending client (never for clients
   still applying, onboarding or buying), reused for **6 hours** and kept in
   the browser (`localStorage`) so reloading the page costs nothing. Signing
   out clears it.
@@ -278,7 +334,10 @@ npm run check     # node --check trials.js, inquiries.js, push.js, sw.js
 The tests load the shell's inline script, `trials.js`, `inquiries.js` and `push.js` into a tiny fake DOM
 with a fake Supabase client, then exercise the router, the admin gate, the
 chart data mapping (null = gap, 0 = a real zero), spam-test verdicts for
-both tools, when growth is and isn't fetched, the Inquiries screens and
+both tools, when growth is and isn't fetched, the simple Trials list (needs-you
+order, the `simple` fallback, escaping, and that the old clutter is gone), the
+trial page's journey line and onboarding-call card (every reply/button posts the
+contract body; the check call), the Inquiries screens and
 actions (incl. the empty state and an older machine without inquiries), and the
 pure render functions with `tests/fixtures.mjs`; no network.
 
