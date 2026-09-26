@@ -46,7 +46,8 @@ const MSG_RULES={
   not_interested:'said goodbye and stopped reminders',
 };
 /* Our automatic emails that are part of the talk (shown in full; `system` ones fold to one line). */
-const MSG_AUTO_KINDS={acceptance:'Acceptance email — sent automatically',reminder:'Reminder — sent automatically',booking:'Booking email — sent automatically'};
+const MSG_AUTO_KINDS={acceptance:'Acceptance email — sent automatically',reminder:'Reminder — sent automatically',booking:'Booking email — sent automatically',
+  next_steps:'What happens now — sent automatically',launch_invite:'Launch-call invite — sent automatically'};   // docs/LAUNCH-CALL.md §1–2 (the same thread)
 /* Settings › Google Meet: the status in one word (pill) and one sentence. */
 const GM_STATUS={
   not_set_up:{pill:'grey',word:'Not set up',tone:'grey'},

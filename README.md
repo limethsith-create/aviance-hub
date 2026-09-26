@@ -161,6 +161,30 @@ sentence already does).
   done**, **They didn't show**, **Send the email again**, **Stop reminders**
   — each posts `POST /api/mc/clients/{id}/onboard-call` `{action, …}`, says
   what happened in plain words and redraws the card from the answer.
+- **Launch call** card (when `detail.launchCall` exists — near the end of
+  warm-up the machine sends the launch invite: their list and their emails
+  are ready, go through them together; `email-distributor/docs/LAUNCH-CALL.md`).
+  It is the SAME card (`renderCallCard`, drawn with `kind: 'launch'`), right
+  under the Warm-up card, above the folded onboarding call: the five steps,
+  "Book by", the messages link, Join Google Meet / See it in the Calendar, and
+  **Open the approval page** (a safe link, new tab — he shares his screen on
+  the call). Two extra buttons: **Approved on the call** (first while the call
+  is booked or done and their OK is not in; asks "This approves their list and
+  emails — sending can start.") and **Skip the call** (only once they approved
+  on the page themselves — "They approved on the page on {date}. The call is
+  optional now"). After the OK: "Approved on the call — sending starts on Day 1
+  (Mon 26 Oct)". Each posts `POST /api/mc/clients/{id}/launch-call` `{action}`
+  (`approvedOnCall`, `skip`, and the shared ones with the kind carried along);
+  the card and the three questions are redrawn from `{ok, launchCall}`. The
+  big button follows it: "Say yes to their launch-call time" (Calendar), "Hold
+  the launch call, then press Approved on the call" (scrolls to the card),
+  "Press Approved on the call", "Mark the launch call done", "Skip the launch
+  call", "Write to them about booking", "Answer {name}'s message". The
+  journey stays ①–⑤; step ③'s sentence is the machine's `simple.label`. In the
+  Calendar a `kind: 'launch'` meeting reads "Launch call · 8:30 pm · Confirmed"
+  (its title from the machine, "Launch call — {company}" when there is none)
+  and the panel's first button is **Approved on the call**, a shortcut to the
+  trial's launch card while the OK is not in.
 - **Messages** (every trial page, right under the three questions;
   `messages.js`, `conversation` on the trial detail) — every email between
   him and the client as a chat, oldest at the top and the newest scrolled

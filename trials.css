@@ -258,6 +258,9 @@
 .tk-oc-facts{font-size:var(--fs-small);color:var(--muted);line-height:1.65;margin-top:14px;overflow-wrap:anywhere}
 .tk-oc-facts a{color:var(--text)}
 .tk-oc-msgs{font-size:var(--fs-base);line-height:1.5;margin-top:12px}
+/* the launch call: where their OK stands (green once it is in, amber when the call is done without it) and the one-line hint */
+.tk-oc-ok{margin-top:12px;overflow-wrap:anywhere}
+.tk-oc-hint{font-size:var(--fs-base);line-height:1.5;margin-top:10px;color:var(--muted-2);overflow-wrap:anywhere}
 .tk-oc-book label{display:block;font-size:var(--fs-small);font-weight:600;margin-bottom:7px}
 /* 16px in the boxes: iPhone Safari zooms the page into anything smaller */
 .tk-oc-book input{flex:1 1 220px;min-width:0;min-height:46px;padding:10px 12px;background:var(--surface);color:var(--text);border:1px solid var(--border);font:inherit;font-size:var(--fs-strong);outline:none}

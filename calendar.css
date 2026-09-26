@@ -82,6 +82,8 @@
 .cal-ev-s{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal-ev.short{justify-content:center}
 .cal-ev.confirmed{background:var(--green-bg);border-left-color:var(--green)}
+/* a launch call is drawn like an onboarding call; the double left edge (and the words) tell them apart */
+.cal-ev.launch,.cal-aitem.launch{border-left-style:double}
 .cal-ev.requested{background:var(--amber-bg);border-color:var(--amber);border-style:dashed;border-left-style:solid}
 .cal-ev.suggested{background:var(--surface);border-color:var(--amber);border-style:dashed;border-left-style:solid}
 .cal-ev.held{background:var(--surface-2);border-left-color:var(--muted-2)}

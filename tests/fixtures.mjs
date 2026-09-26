@@ -635,3 +635,98 @@ export const configStates = {
     { key: 'REVIEW.clutchUrl', default: null, value: null, overridden: false, toSet: true },
   ] },
 };
+
+/* ───── The launch call (email-distributor docs/LAUNCH-CALL.md) ─────
+   `launchCall` on the trial detail — the onboarding call's shape (docs/ONBOARD-CALL.md) plus approvedOnCall,
+   approvedOnPage, skipped (times or null) and approvalUrl. Null until the invite is sent, near the end of warm-up.
+   Gale Roofing on warm-up day 11 of about 14, Day 1 Mon 26 Oct; the onboarding call was held on Tue 6 Oct.
+   NOW is Sat 17 Oct 2026 12:00 UTC (5:30 pm in Sri Lanka). 2026-10-20T15:00Z = Tue 20 Oct, 8:30 pm Sri Lanka =
+   Tue 11:00 am US Eastern; 2026-10-16T15:00Z = Fri 16 Oct, 8:30 pm (already past at NOW). */
+const LC_AT = ['2026-10-15T10:00:00Z', '2026-10-15T10:20:00Z', '2026-10-16T09:00:00Z', '2026-10-16T09:30:00Z', '2026-10-16T15:40:00Z'];
+const lcSteps = (n) => [['sent', 'Launch invite sent'], ['opened', 'They opened it'], ['replied', 'They replied'], ['booked', 'Call booked'], ['held', 'Call done']].map(([key, label], i) => ({ key, label, done: i < n, at: i < n ? LC_AT[i] : null }));
+const lcOf = (o) => Object.assign({
+  status: 'sent', label: 'Launch invite sent — waiting for them to pick a time', sentAt: LC_AT[0], openedAt: null, lastReplyAt: null,
+  bookedFor: null, bookedAt: null, bookedBy: null, heldAt: null, dueBy: '2026-10-20T10:00:00Z', overdue: false,
+  remindersSent: 0, nextReminderAt: '2026-10-18T14:00:00Z', stopped: false, needsReply: false,
+  bookingUrl: 'https://aviance.store/book/launch', fromInbox: 'hello@aviance.store', meetingId: null, requestedFor: null, theirZone: null,
+  approvedOnCall: null, approvedOnPage: null, skipped: null, approvalUrl: 'https://machine.test/c/tok9/approve',
+  steps: lcSteps(1), thread: [],
+}, o);
+const lcBooked = { status: 'booked', label: 'Launch call booked for Tue 20 Oct, 8:30 pm your time', openedAt: LC_AT[1], lastReplyAt: LC_AT[2], bookedFor: '2026-10-20T15:00:00Z', bookedAt: LC_AT[3], bookedBy: 'calendar', meetingId: 'mlaunch', remindersSent: 1, nextReminderAt: null, steps: lcSteps(4) };
+export const launchCalls = {
+  // the invite went out; nothing back yet
+  sent: lcOf({}),
+  // they asked for a time on the booking page — it waits for the owner's yes in the Calendar
+  requested: lcOf({ status: 'replied', label: 'They asked for Tue 20 Oct, 8:30 pm your time — say yes in the Calendar', openedAt: LC_AT[1], lastReplyAt: LC_AT[2], requestedFor: '2026-10-20T15:00:00Z', theirZone: 'America/New_York', steps: lcSteps(3) }),
+  booked: lcOf(lcBooked),
+  // booked for a time that has passed: hold it, then press Approved on the call
+  past: lcOf(Object.assign({}, lcBooked, { label: 'Launch call was set for Fri 16 Oct, 8:30 pm your time — hold it, then press Approved on the call', bookedFor: '2026-10-16T15:00:00Z' })),
+  // the call happened but the owner only pressed Call done: their OK is still missing
+  held: lcOf(Object.assign({}, lcBooked, { status: 'held', label: 'Launch call done — their OK is not in yet', bookedFor: '2026-10-16T15:00:00Z', heldAt: LC_AT[4], steps: lcSteps(5) })),
+  approvedOnCall: lcOf(Object.assign({}, lcBooked, { status: 'held', label: 'Approved on the call — first emails Mon 26 Oct', bookedFor: '2026-10-16T15:00:00Z', heldAt: LC_AT[4], approvedOnCall: '2026-10-16T15:35:00Z', steps: lcSteps(5) })),
+  // they approved on the page themselves before booking anything: the call is optional
+  approvedOnPage: lcOf({ status: 'opened', label: 'They approved on the page — the call is optional', openedAt: LC_AT[1], approvedOnPage: '2026-10-16T12:00:00Z', steps: lcSteps(2) }),
+  approvedOnPageBooked: lcOf(Object.assign({}, lcBooked, { label: 'They approved on the page — the call on Tue 20 Oct is optional', approvedOnPage: '2026-10-16T12:00:00Z' })),
+  skipped: lcOf({ status: 'stopped', label: 'They approved on the page — you skipped the call', openedAt: LC_AT[1], approvedOnPage: '2026-10-16T12:00:00Z', skipped: '2026-10-17T09:00:00Z', stopped: true, nextReminderAt: null, steps: lcSteps(2) }),
+  overdue: lcOf({ status: 'overdue', label: "They haven't booked the launch call — it's late", overdue: true, dueBy: '2026-10-16T10:00:00Z', remindersSent: 2, nextReminderAt: null }),
+  // late, but they approved on the page: skip it
+  overduePage: lcOf({ status: 'overdue', label: 'They approved on the page but never booked the call', overdue: true, dueBy: '2026-10-16T10:00:00Z', remindersSent: 2, nextReminderAt: null, approvedOnPage: '2026-10-16T12:00:00Z' }),
+};
+/* The machine's plain sentence for step ③ while the launch call is on (docs/LAUNCH-CALL.md §5). */
+export const launchSimple = {
+  sent: { label: 'Warming up — day 11 of about 14 · waiting for them to pick a launch-call time', next: 'Nothing for you: the time they pick comes to your Calendar', needsYou: false },
+  requested: { label: 'They asked for the launch call on Tue 20 Oct, 8:30 pm your time — say yes in the Calendar', next: 'Open the Calendar: Yes, Suggest another time or Decline', needsYou: true },
+  booked: { label: 'Warming up — day 11 of about 14 · launch call Tue 20 Oct, 8:30 pm (your time)', next: 'Nothing for you until the launch call (on Tue 20 Oct)', needsYou: false },
+  past: { label: 'Warming up — day 11 of about 14 · launch call was Fri 16 Oct', next: 'Hold the launch call, then press Approved on the call', needsYou: true },
+  held: { label: 'Warming up — day 11 of about 14 · launch call done, their OK not in yet', next: 'Press Approved on the call if they said yes', needsYou: true },
+  approvedOnCall: { label: 'Launch call done — first emails Mon 26 Oct', next: 'Nothing for you: first emails on Monday 26 October', needsYou: false },
+  approvedOnPage: { label: 'Warming up — day 11 of about 14 · they approved on the page', next: 'Nothing for you: first emails on Monday 26 October', needsYou: false },
+  approvedOnPageBooked: { label: 'Warming up — day 11 of about 14 · launch call Tue 20 Oct, 8:30 pm (your time)', next: 'Nothing for you until the launch call (on Tue 20 Oct)', needsYou: false },
+  skipped: { label: 'Warming up — day 11 of about 14 · approved on the page, call skipped', next: 'Nothing for you: first emails on Monday 26 October', needsYou: false },
+  overdue: { label: "Warming up — day 11 of about 14 · they haven't booked the launch call", next: 'Write to them about booking the launch call', needsYou: true },
+  overduePage: { label: 'Warming up — day 11 of about 14 · they approved on the page but never booked the call', next: 'Skip the launch call, or hold it if they book one', needsYou: true },
+};
+const LAUNCH_TODO = {
+  requested: { id: 'meeting-request:gale-roofing', text: "Say yes to Mia's launch-call time", urgent: true, since: LC_AT[2], action: { type: 'view', view: 'calendar', clientId: 'gale-roofing', meetingId: 'mlaunch-req' } },
+  past: { id: 'launch-mark:gale-roofing', text: 'Hold the launch call, then press Approved on the call', urgent: true, since: '2026-10-16T16:00:00Z', action: { type: 'view', view: 'detail', clientId: 'gale-roofing', section: 'launchCall' } },
+  held: { id: 'launch-mark:gale-roofing', text: 'Press Approved on the call', urgent: true, since: LC_AT[4], action: { type: 'view', view: 'detail', clientId: 'gale-roofing', section: 'launchCall' } },
+  overdue: { id: 'launch-overdue:gale-roofing', text: 'Write to Mia about booking the launch call', urgent: true, since: '2026-10-16T10:00:00Z', action: { type: 'view', view: 'detail', clientId: 'gale-roofing', section: 'launchCall' } },
+  overduePage: { id: 'launch-overdue:gale-roofing', text: 'Skip the launch call or hold it', urgent: true, since: '2026-10-16T10:00:00Z', action: { type: 'view', view: 'detail', clientId: 'gale-roofing', section: 'launchCall' } },
+};
+/* The launch invite and what came back, in the one conversation (the same thread as the onboarding call's). */
+const LC_SUBJ = "Your list and your emails are ready — let's go through them together";
+export const launchConversation = {
+  thread: [
+    { id: 'l1', dir: 'out', at: '2026-10-06T16:00:00Z', from: 'hello@aviance.store', to: 'mia@galeroofing.com', subject: 'What happens now', text: 'We are researching your business and your market now…', kind: 'next_steps', template: 'next_steps', auto: false, rule: null },
+    { id: 'l2', dir: 'out', at: LC_AT[0], from: 'hello@aviance.store', to: 'mia@galeroofing.com', subject: LC_SUBJ, text: 'Hi Mia, your list of 412 companies and your emails are ready. Pick a 30-minute launch call: https://aviance.store/book/launch\nIf you would rather read it first: https://machine.test/c/tok9/approve', kind: 'launch_invite', template: 'launch_invite', auto: false, rule: null },
+    { id: 'l3', dir: 'in', at: LC_AT[2], from: 'mia@galeroofing.com', to: 'hello@aviance.store', subject: 'Re: ' + LC_SUBJ, text: 'Great — what times work for you?', kind: 'reply', auto: false, rule: null },
+    { id: 'l4', dir: 'out', at: '2026-10-16T09:03:00Z', from: 'hello@aviance.store', to: 'mia@galeroofing.com', subject: 'Re: ' + LC_SUBJ, text: 'Here is my booking page: https://aviance.store/book/launch\nOr one of these: Tue 20 Oct 11:00 am your time', kind: 'auto_reply', auto: true, rule: 'wants_time' },
+  ],
+  needsReply: false, lastInAt: LC_AT[2], lastOutAt: '2026-10-16T09:03:00Z', bot: { enabled: true, sentToday: 1, maxPerDay: 3 }, canReply: true, fromInbox: 'hello@aviance.store',
+};
+/* Gale Roofing's trial page with the launch call in one status: the row's plain sentence and to-do as the machine
+   would send them for that status, the warm-up on day 11, the onboarding call held on Tue 6 Oct, the conversation. */
+const lcClone = (v) => JSON.parse(JSON.stringify(v));   // every page gets its own copy: a test that patches one never touches the next
+export const galeLaunch = (status, simple, rowExtra) => ({
+  row: withSimple(Object.assign({}, gale, { stateLabel: 'Warming up — day 11 of 14', todo: LAUNCH_TODO[status] ? [lcClone(LAUNCH_TODO[status])] : [] }, rowExtra),
+    Object.assign({ step: 'warming_up', since: '2026-10-12T09:00:00Z' }, launchSimple[status] || launchSimple.sent, simple)),
+  warmup: Object.assign({}, galeWarmup.warming, { day: 11, label: 'Warming up — day 11 of about 14 · 96% reach the inbox', inboxes: galeWarmup.warming.inboxes.map((x) => Object.assign({}, x, { day: x.day ? 11 : 10 })) }),
+  launchCall: lcClone(launchCalls[status]),
+  onboardCall: Object.assign({}, onboardCall, { status: 'held', label: 'Call done', bookedFor: '2026-10-06T15:00:00Z', bookedAt: '2026-10-02T10:00:00Z', bookedBy: 'calendar', heldAt: '2026-10-06T15:40:00Z', meetingId: 'mgale-onb', needsReply: false, remindersSent: 0, nextReminderAt: null, thread: [], steps: onboardCall.steps.map((s) => ({ key: s.key, label: s.label, done: true, at: '2026-10-06T15:40:00Z' })) }),
+  conversation: lcClone(launchConversation),
+  sequence: { active: 'both', version: 1, approvedAt: launchCalls[status].approvedOnCall || launchCalls[status].approvedOnPage || null, approvalMode: launchCalls[status].approvedOnCall ? 'call' : launchCalls[status].approvedOnPage ? 'click' : null, round: 0, changes: [] },
+  leadfinder: { status: 'done', lastRunAt: '2026-10-15T02:00:00Z', found: 412, need: 400 },
+  holds: {}, links: { approval: 'https://machine.test/c/tok9/approve' }, events: [{ at: LC_AT[0], system: 'launchcall', event: 'launch_invite_sent', detail: '' }],
+  application: { receivedAt: '2026-09-28T09:00:00Z', source: 'website', review: 'approved', decidedAt: '2026-09-28T12:00:00Z', decision: 'approve', declineReason: null, answers: [], fit: { verdict: 'fit', summary: 'Looks like a fit', lines: [] } },
+});
+/* Calendar meetings for the launch call (kind 'launch', the machine's title), the week of Mon 19 – Sun 25 Oct 2026
+   (US Eastern still on summer time: 11:00 am ET = 8:30 pm Colombo). */
+export const calLaunch = {
+  requested: calM({ id: 'mlaunch-req', clientId: 'gale-roofing', company: 'Gale Roofing', person: 'Mia Gale', email: 'mia@galeroofing.com', kind: 'launch', title: 'Launch call — Gale Roofing', start: '2026-10-20T15:00:00Z', status: 'requested', createdAt: LC_AT[2], history: [{ at: LC_AT[2], what: 'requested', by: 'them' }] }),
+  confirmed: calM({ id: 'mlaunch', clientId: 'gale-roofing', company: 'Gale Roofing', person: 'Mia Gale', email: 'mia@galeroofing.com', kind: 'launch', title: 'Launch call — Gale Roofing', start: '2026-10-20T15:00:00Z', status: 'confirmed', confirmedAt: LC_AT[3], meetLink: 'https://meet.google.com/gal-launch-001', googleEventId: 'ev-launch', createdAt: LC_AT[2], history: [{ at: LC_AT[2], what: 'requested', by: 'them' }, { at: LC_AT[3], what: 'confirmed', by: 'owner' }] }),
+  // the same call, over — and no title from an older machine: the hub still says what it is
+  held: calM({ id: 'mlaunch-held', clientId: 'gale-roofing', company: 'Gale Roofing', person: 'Mia Gale', kind: 'launch', title: null, start: '2026-10-16T15:00:00Z', status: 'held', source: 'launch_card', createdAt: LC_AT[2] }),
+  // an onboarding call the same week, for the side-by-side
+  onboarding: calM({ id: 'monb-week', clientId: 'delta-roofing', company: 'Delta Roofing', person: 'Sam Ito', kind: 'onboarding', title: 'Onboarding call — Delta Roofing', start: '2026-10-21T14:00:00Z', status: 'confirmed', confirmedAt: '2026-10-17T10:00:00Z', meetLink: 'https://meet.google.com/del-onb-002' }),
+};
+export const calLaunchWeek = { meetings: [calLaunch.confirmed, calLaunch.held, calLaunch.onboarding], requests: [], settings: Object.assign({}, calSettingsFixture, { googleMeet: 'connected' }), free: [] };

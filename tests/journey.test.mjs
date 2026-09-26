@@ -112,12 +112,13 @@ function drawStep(s) {
     out.page = renderTrialDetail(d, 'overview', { now });
     out.top = between(out.page, '<section class="card tk-top', '</section>');
     // each part of the page, up to whatever comes after it (a part that is not there is '')
-    const ENDS = ['<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<details class="tk-behind"'];
+    const ENDS = ['<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkLcHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<details class="tk-behind"'];
     const part = (a) => { const i = out.page.indexOf(a); if (i < 0) return ''; const js = ENDS.map((e) => out.page.indexOf(e, i + a.length)).filter((j) => j > 0); return out.page.slice(i, js.length ? Math.min(...js) : out.page.length); };
     out.messages = part('<div id="tkMsgHost">');
     out.autobuy = part('<div id="tkAbHost">');
     out.warmup = part('<div id="tkWuHost">');
     out.call = part('<div id="tkOcHost">');
+    out.launch = part('<div id="tkLcHost">');   // the launch call's card (docs/LAUNCH-CALL.md) — '' until the machine's snapshots carry launchCall
     out.also = part('<h3>Also on your list</h3>');
     out.front = out.page.slice(0, out.page.indexOf('<details class="tk-behind"'));
     out.tabs = TK_TABS.map(([tab]) => [tab, renderTrialDetail(d, tab, { now, behindOpen: true })]);

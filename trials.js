@@ -4,7 +4,8 @@
    The hub's window onto the Aviance Trial Machine (email-distributor). The
    machine does all the work; this file only shows and steers it through the
    contract in email-distributor/docs/HUB-API.md (incl. "v2 additions") and
-   docs/ONBOARD-CALL.md (row.simple on the board, onboardCall on a trial) and docs/REPLYBOT-MEET.md
+   docs/ONBOARD-CALL.md (row.simple on the board, onboardCall on a trial), docs/LAUNCH-CALL.md (launchCall on a
+   trial — the same card, drawn for the launch call, with Approved on the call / Skip the call) and docs/REPLYBOT-MEET.md
    (`conversation` on a trial — drawn by messages.js as the Messages section), docs/AUTO-BUY.md (`autobuy`,
    autobuy.js), docs/WARMUP-HUB.md (`warmup` on a trial and Settings › Warm-up — warmup.js) and docs/KEYS.md
    (Settings › Keys and Settings › Your details — keys.js).
@@ -68,7 +69,7 @@ const TK_DONE_STATES=['converted','not_now','retired','deleted','declined','clos
 const TK_STEPS=['Applied','Onboarding call','Setting up','Sending emails','Done'];
 const TK_STEP_OF={new:1,queued:1,accepted:2,call_booked:2,setting_up:3,warming_up:3,sending:4,finished:5};
 /* "You need to answer Sam…" reads right when the machine's sentence starts with one of these verbs. */
-const TK_VERBS=['add','answer','approve','book','buy','call','check','choose','confirm','decide','decline','email','fill','give','look','mark','open','paste','pick','read','reply','review','say','see','send','tell','write'];
+const TK_VERBS=['add','answer','approve','book','buy','call','check','choose','confirm','decide','decline','email','fill','give','hold','join','look','mark','open','paste','pick','press','read','reply','review','say','see','send','skip','tell','write'];
 
 /* Last good answers live here so navigating back is instant. */
 const tk={hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},
@@ -596,7 +597,7 @@ function tkRowNeedsReply(row){
   row=row||{};const s=row.simple&&typeof row.simple==='object'?row.simple:null;
   if(s&&s.needsReply!=null)return tkTruthy(s.needsReply);
   if(row.needsReply!=null)return tkTruthy(row.needsReply);
-  return (row.todo||[]).some(t=>t&&String(t.id||'').indexOf('onboard-reply:')===0);
+  return (row.todo||[]).some(t=>t&&/^(onboard|launch)-reply:/.test(String(t.id||'')));
 }
 function tkNeedsReply(d){d=d||{};const c=tkConv(d);return c.legacy?(c.needsReply||tkRowNeedsReply(d.row)):c.needsReply}
 /* Their domain and inboxes through CheapInboxes (email-distributor docs/AUTO-BUY.md): `autobuy` on the trial detail.
@@ -646,6 +647,10 @@ function tkPageSimple(d){
   // and the warm-up: the page's `warmup` no longer waits for helpers (he just added them) while the row still asks for them
   const wu=tkTrialWarmup(d);
   if(wu&&wu.status!=='waiting_for_helpers'&&s.needsYou&&/\bwarm-?up helpers?\b/i.test(s.next))return Object.assign({},s,{needsYou:false,next:''});
+  // and the launch call: the page's `launchCall` says their OK is in (he just pressed Approved on the call) or the call is
+  // skipped, while the row still asks him to hold the call / press the button
+  const lc=d.launchCall&&typeof d.launchCall==='object'?d.launchCall:null;const lap=lc?tkLcApproval(lc):null;
+  if(lap&&(lap.approved||lap.skipped)&&s.needsYou&&/\b(launch[- ]call|approved on the call|their ok)\b/i.test(s.next+' '+s.label))return Object.assign({},s,{needsYou:false,next:''});
   return s;
 }
 /* Everything the simple screens show about one row — row.simple when the machine sends it, else a fallback. */
@@ -787,6 +792,16 @@ function tkTodoPrimary(t,id,d){
     return {label:'Mark the invoice paid',run,say:'Their first invoice'+(plan||amt!=null?' ('+[plan,amt!=null?'$'+amt.toLocaleString('en-US'):''].filter(Boolean).join(', ')+')':'')+sent+'. When the money lands, mark it paid.'};}
   return {label:a.label||({mc:'Open the full control panel',link:'Open the link'}[a.type])||'Do it now',run};
 }
+/* A call time waiting for the owner's yes: is it for the launch call? The Calendar's request says its kind; a to-do may;
+   else it is the launch call's when that call asked for a time (or the onboarding call is long over). */
+function tkReqIsLaunch(req,mreq,oc,lc){
+  const k=String((req&&req.kind)||(mreq&&mreq.action&&mreq.action.kind)||'').toLowerCase();
+  if(k)return k==='launch';
+  if(!lc)return false;
+  if(lc.requestedFor)return true;
+  const ocSt=String((oc&&oc.status)||'').toLowerCase();
+  return !!mreq&&['held','no_show'].includes(ocSt)&&!(oc&&oc.requestedFor);
+}
 /* The single most important thing the owner can do on this trial, in this order:
    a new application → a call time they asked for → their message ("Answer Sam's message") → a call to mark done → a late booking →
    buying the domain and inboxes (on CheapInboxes when it is set up — autobuy.js; else the Buy & paste page) → warm-up helpers
@@ -795,6 +810,7 @@ function tkTodoPrimary(t,id,d){
 function tkPrimaryAction(d,meta){
   d=d||{};meta=meta||{};const row=d.row||{};const id=row.id;const s=tkPageSimple(d);
   const oc=d.onboardCall&&typeof d.onboardCall==='object'?d.onboardCall:null;const now=meta.now?new Date(meta.now):new Date();
+  const lc=d.launchCall&&typeof d.launchCall==='object'?d.launchCall:null;const lap=lc?tkLcApproval(lc):null;
   const todos=tkTodosSorted(row);const todo=p=>todos.find(t=>String(t.id||'').indexOf(p)===0)||null;
   const who=tkFirstName(s.person);const first=who||'They';
   // the machine's next step, as "You need to…" — not "Open it and…" (this is it) and never "Nothing for you…"
@@ -805,14 +821,28 @@ function tkPrimaryAction(d,meta){
   if(pending)return A('review','Read the application and say yes or no',say(first+' applied for a trial. Read what they sent and what we found, then say yes or no.'),`tkGoTo(${tkAttr('application')})`,todo('review:'));
   const req=typeof calReqFor==='function'?calReqFor(id):null;const mreq=todo('meeting-request:');
   const mid=req?req.id:mreq&&mreq.action&&mreq.action.meetingId!=null?mreq.action.meetingId:null;
-  if(req||mreq){const at=req?req.start:oc&&oc.requestedFor;const w=at&&typeof calWhen==='function'&&typeof calSettingsNow==='function'?calWhen(at,calSettingsNow(),req?req.theirZone:oc&&oc.theirZone):null;
-    return A('calendar','Say yes to their call time',first+' asked for a call on '+(w?w.big+' your time ('+w.us+')':'a time you can see in the Calendar')+'. Say yes, or suggest another time.',mid!=null?`openCalendar(${tkAttr(mid)})`:"render('calendar')",mreq);}
+  if(req||mreq){const isL=tkReqIsLaunch(req,mreq,oc,lc);const call=isL?lc:oc;const at=req?req.start:call&&call.requestedFor;const w=at&&typeof calWhen==='function'&&typeof calSettingsNow==='function'?calWhen(at,calSettingsNow(),req?req.theirZone:call&&call.theirZone):null;
+    return A('calendar',isL?'Say yes to their launch-call time':'Say yes to their call time',first+' asked for '+(isL?'the launch call':'a call')+' on '+(w?w.big+' your time ('+w.us+')':'a time you can see in the Calendar')+'. Say yes, or suggest another time.',mid!=null?`openCalendar(${tkAttr(mid)})`:"render('calendar')",mreq);}
   const st=String((oc&&oc.status)||'').toLowerCase();const booked=!!(oc&&tkOcIsBooked(oc));
   // their message waits for an answer (conversation.needsReply) — the hub's own words: the box lives under Messages
-  if(tkNeedsReply(d))return A('reply',who?'Answer '+who+"'s message":'Answer their message',first+' wrote to you. Read it under Messages below and write back there.','tkFocusReply()',todo('onboard-reply:')||todo('message-reply:'));
+  if(tkNeedsReply(d))return A('reply',who?'Answer '+who+"'s message":'Answer their message',first+' wrote to you. Read it under Messages below and write back there.','tkFocusReply()',todo('onboard-reply:')||todo('launch-reply:')||todo('message-reply:'));
   const when=oc&&tkParseDate(oc.bookedFor);
   if(oc&&(todo('onboard-mark:')||(booked&&when&&when<now)))return A('markHeld','Mark the call done',"The call was set for "+(when?tkDateTime(when)+' your time':'earlier')+". If it happened, mark it done. If they didn't show, say so in the call box below.",`trialOcTopHeld(${tkAttr(id)})`,todo('onboard-mark:'));
   if(oc&&!booked&&(todo('onboard-overdue:')||tkTruthy(oc.overdue)||st==='overdue'))return A('nudge','Write to them about booking',say((who?who+" hasn't":"They haven't")+" booked the call yet, and it's late. Send a short note in the box below."),'tkFocusReply()',todo('onboard-overdue:'));
+  // the launch call (docs/LAUNCH-CALL.md): done but no OK yet → press Approved on the call; booked and past → hold it, then press
+  // it (or, once they approved on the page, just mark it done); late → skip it (approved on the page) or write to them
+  const lst=String((lc&&lc.status)||'').toLowerCase();const lskip=!!(lap&&lap.skipped);const lheld=lst==='held';
+  const lbooked=!!lc&&!lskip&&!lheld&&tkOcIsBooked(lc);const lwhen=lc&&tkParseDate(lc.bookedFor);const lpast=lbooked&&lwhen&&lwhen<now;
+  if(lc&&!lskip){
+    const go=`tkGoTo(${tkAttr('launchcall')})`;const set='The launch call was set for '+(lwhen?tkDateTime(lwhen)+' your time':'earlier')+'. ';
+    if(!lap.approved&&lheld)return A('launchApprove','Press Approved on the call','The launch call is done, but their OK is not in yet. If '+(who||'they')+' said yes to the list and the emails, press Approved on the call in the launch-call box below — sending can\'t start without it.',go,todo('launch-mark:'));
+    if(!lap.approved&&(lpast||todo('launch-mark:')))return A('launchHold','Hold the launch call, then press Approved on the call',set+'On the call, share the approval page and go through the list and the emails with '+(who||'them')+'. When '+(who?who+' says':'they say')+' yes, press Approved on the call in the launch-call box below. If they didn\'t show, say so there.',go,todo('launch-mark:'));
+    if(lap.onPage&&!lheld&&(lpast||todo('launch-mark:')))return A('markHeld','Mark the launch call done',set+first+' already approved on the page. If the call happened, mark it done. If not, skip it in the launch-call box below.',`trialOcTopHeld(${tkAttr(id)},${tkAttr('launch')})`,todo('launch-mark:'));
+    if(!lbooked&&!lheld&&(todo('launch-overdue:')||tkTruthy(lc.overdue)||lst==='overdue')){
+      if(lap.onPage)return A('launchSkip','Skip the launch call',first+' approved on the page, so sending can start without the call. Skip it — or leave it, and hold the call if they book one.',`trialOcAction(${tkAttr(id)},${tkAttr('skip')},${tkAttr('launch')})`,todo('launch-overdue:'));
+      return A('nudge','Write to them about booking',say((who?who+" hasn't":"They haven't")+" booked the launch call yet, and it's late. Send a short note in the box below."),'tkFocusReply()',todo('launch-overdue:'));
+    }
+  }
   // the buying to-do: the Buy & paste page's (view purchase), or CheapInboxes' (buy:{id} → the "autobuy" section)
   const isBuy=t=>!!(t&&((t.action&&(t.action.view==='purchase'||t.action.section==='autobuy'))||String(t.id||'').indexOf('buy:')===0));
   const buy=todos.find(isBuy)||null;
@@ -825,13 +855,17 @@ function tkPrimaryAction(d,meta){
   const wu=tkTrialWarmup(d);
   if(wu&&wu.status==='waiting_for_helpers'){const n=tkWarmupMissing(d);const more=n?n+' more helper'+(n===1?'':'s'):'more helpers';
     return A('warmupHelpers',n?'Add '+n+' warm-up helper'+(n===1?'':'s'):'Add warm-up helpers',"Their inboxes can't start warming up until the warm-up circle has "+more+'. Helpers are free email accounts you make once — they help every client after this.',`openSettings(${tkAttr('warmup')})`,todos.find(tkIsWarmupTodo)||null);}
-  const rest=todos.find(t=>!/^(review:|onboard-|message-reply:)/.test(String(t.id||''))&&!(t.action&&t.action.section==='application')&&!(ab&&ab.handled&&isBuy(t)));
+  const rest=todos.find(t=>!/^(review:|onboard-|launch-|message-reply:)/.test(String(t.id||''))&&!(t.action&&t.action.section==='application')&&!(ab&&ab.handled&&isBuy(t)));
   if(rest){const m=tkTodoPrimary(rest,id,d);const txt=tkSentence(m.say||rest.text||'');const verb=TK_VERBS.includes(txt.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,''));
     return Object.assign(A('todo',m.label,rest.urgent||s.needsYou||m.say?txt:'When you have a minute: '+(verb?txt.charAt(0).toLowerCase()+txt.slice(1):txt),m.run,rest),{quote:m.quote||null});}
+  // the machine says the launch call needs him and nothing above caught it: the launch-call box, not Behind the scenes
+  if(s.needsYou&&lc&&!lskip&&!lap.approved)return A('look','Open the launch-call box',say('Something about the launch call needs you. Open the box below to see what.'),`tkGoTo(${tkAttr('launchcall')})`);
   if(s.needsYou)return A('look','See what needs you',say('Something here needs you.'),`tkGoTo(${tkAttr('behind')})`);
   // nothing to do — but a call still ahead is his to join, and on Day 30 the decision is theirs
   const ahead=booked&&when&&when>=now?tkCallWhen(oc.bookedFor):null;
   if(ahead)return A('none','Nothing until the call. Join it on '+ahead.owner+' your time.');
+  const lahead=lbooked&&lwhen&&lwhen>=now?tkCallWhen(lc.bookedFor):null;
+  if(lahead)return A('none','Nothing until the launch call. Join it on '+lahead.owner+' your time.');
   if(row.state==='deciding')return A('none','Nothing. '+first+' '+(who?'chooses':'choose')+" on the decision page — we'll tell you what they pick.");
   return A('none',"Nothing — we'll tell you when something needs you");
 }
@@ -842,9 +876,12 @@ function tkNextText(s,j,act,d,now){
   // his own step (not marked urgent) is under "What do you need to do?" — not said twice
   if(act&&act.kind!=='none'&&n&&TK_VERBS.includes(n.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,'')))return "Once you've done the step below, we carry on.";
   if(n&&!/^nothing\b/i.test(n))return tkSentence(n);
-  // "Nothing for you until the call": the call itself, in his time and US Eastern
+  // "Nothing for you until the call": the call itself, in his time and US Eastern — the onboarding call, or the launch call
+  const nowD=now?new Date(now):new Date();
   const oc=d&&d.onboardCall&&typeof d.onboardCall==='object'?d.onboardCall:null;const at=oc&&tkOcIsBooked(oc)?tkParseDate(oc.bookedFor):null;
-  if(at&&at>=(now?new Date(now):new Date())){const w=tkCallWhen(oc.bookedFor);if(w)return 'The onboarding call: '+w.text+'.';}
+  if(at&&at>=nowD){const w=tkCallWhen(oc.bookedFor);if(w)return 'The onboarding call: '+w.text+'.';}
+  const lc=d&&d.launchCall&&typeof d.launchCall==='object'?d.launchCall:null;const lat=lc&&!tkLcApproval(lc).skipped&&tkOcIsBooked(lc)?tkParseDate(lc.bookedFor):null;
+  if(lat&&lat>=nowD){const w=tkCallWhen(lc.bookedFor);if(w)return 'The launch call: '+w.text+'.';}
   if(j&&j.notTaken)return "Nothing. We didn't take this one.";
   if(j&&j.n===5)return 'Nothing. This trial is finished.';
   return "Nothing for now. We'll tell you when something changes.";
@@ -886,58 +923,94 @@ function renderBehind(d,tab,meta){
   </details>`;
 }
 
-/* -- onboarding call (email-distributor docs/ONBOARD-CALL.md) --
-   Approve sends one email asking the applicant to book the onboarding call. This card follows it:
-   the five steps with times, "Book by" and the owner's buttons. The emails themselves (and the reply box)
-   live in one place only: Messages, right under the three questions ("See the messages"). */
+/* -- the two calls: the onboarding call (email-distributor docs/ONBOARD-CALL.md) and the launch call
+   (docs/LAUNCH-CALL.md) — ONE card, drawn for either kind --
+   Approve sends one email asking the applicant to book the onboarding call. Near the end of warm-up the machine
+   sends the launch invite: their list and their emails are ready — go through them together and they give the OK.
+   The card follows either: the five steps with times, "Book by" and the owner's buttons. The emails themselves
+   (and the reply box) live in one place only: Messages, right under the three questions ("See the messages").
+   The launch call adds the approval: "Approved on the call" (approves their list and emails — sending can start)
+   and "Skip the call" (when they approved on the page by themselves, the call is optional). */
+const TK_CALL_KINDS={
+  onboarding:{key:'onboardCall',title:'Onboarding call',short:'the call',sec:'onboardcall',host:'tkOcHost',path:'onboard-call',when:'tkOcWhen',firstEmail:'the acceptance email',resend:'Send the first email again',resendDone:'The acceptance email was sent again',open:['onboarding']},
+  launch:{key:'launchCall',title:'Launch call',short:'the launch call',sec:'launchcall',host:'tkLcHost',path:'launch-call',when:'tkLcWhen',firstEmail:'the launch-call invite',resend:'Send the invite again',resendDone:'The invite was sent again',open:['warming','ready']},
+};
+function tkCallKind(kind){return TK_CALL_KINDS[kind]?kind:'onboarding'}
 function tkOcIsBooked(oc){const st=String((oc&&oc.status)||'').toLowerCase();return st==='booked'||(!!(oc&&oc.bookedFor)&&!['held','no_show'].includes(st))}
+/* The launch call's approval (docs/LAUNCH-CALL.md §3–4): approvedOnCall / approvedOnPage / skipped are times or null.
+   → {onCall, onPage, skipped, approved (either way)}. */
+function tkLcApproval(lc){lc=lc||{};const t=v=>v?String(v):null;const onCall=t(lc.approvedOnCall),onPage=t(lc.approvedOnPage);return {onCall,onPage,skipped:t(lc.skipped)||(String(lc.status||'').toLowerCase()==='skipped'?'yes':null),approved:!!(onCall||onPage)}}
 function tkThreadSorted(thread){
   const ms=m=>{const d=tkParseDate(m.at);return d?d.getTime():0};
   return (Array.isArray(thread)?thread:[]).filter(m=>m&&typeof m==='object').map((m,i)=>({m,i})).sort((a,b)=>ms(a.m)-ms(b.m)||a.i-b.i).map(x=>x.m);
 }
-function renderOnboardCall(oc,row,meta){
+function renderCallCard(oc,row,meta,kind){
   if(!oc||typeof oc!=='object')return '';
+  kind=tkCallKind(kind);const K=TK_CALL_KINDS[kind];const launch=kind==='launch';
   row=row||{};meta=meta||{};const id=row.id;const st=String(oc.status||'').toLowerCase();
   const first=tkFirstName(tkSimple(row).person);
-  const held=st==='held',noShow=st==='no_show',booked=tkOcIsBooked(oc);
+  const ap=launch?tkLcApproval(oc):{onCall:null,onPage:null,skipped:null,approved:false};
+  const held=st==='held',noShow=st==='no_show',skipped=launch&&!!ap.skipped&&!held,booked=!skipped&&tkOcIsBooked(oc);
   const stopped=st==='stopped'||tkTruthy(oc.stopped),overdue=st==='overdue'||tkTruthy(oc.overdue);
-  const waiting=!booked&&!held&&!noShow;
+  const over=held||noShow||skipped;const waiting=!booked&&!over;
   const by=oc.bookedBy==='calendar'?' — booked through your Calendar':oc.bookedBy==='owner'?' — you marked it':'';
   // the call's time: Sri Lanka time, and US Eastern beside it (their side)
   const cw=tkCallWhen(oc.bookedFor);
-  const when=oc.bookedFor&&!waiting?`<p class="tk-oc-when">${held?'The call was on':noShow?'The call was set for':'The call is on'} <b>${esc(cw?cw.owner+' your time':tkDateTime(oc.bookedFor))}</b>${cw?` <span class="tk-oc-us">(${esc(cw.us)})</span>`:''}${esc(by)}</p>`:'';
-  // a call still ahead: its Google Meet link when the Calendar already has it, else the way to it in the Calendar
+  const when=oc.bookedFor&&!waiting&&!skipped?`<p class="tk-oc-when">${held?'The call was on':noShow?'The call was set for':'The call is on'} <b>${esc(cw?cw.owner+' your time':tkDateTime(oc.bookedFor))}</b>${cw?` <span class="tk-oc-us">(${esc(cw.us)})</span>`:''}${esc(by)}</p>`:'';
+  // a call still ahead: its Google Meet link when the Calendar already has it, else the way to it in the Calendar;
+  // the launch call: the approval page too (he shares his screen on the call), until the OK is in
   const mt=booked&&oc.meetingId!=null&&oc.meetingId!==''&&typeof calFind==='function'?calFind(oc.meetingId):null;const meet=mt&&typeof calMeetLink==='function'?calMeetLink(mt):'';
-  const join=booked&&oc.meetingId!=null&&oc.meetingId!==''?`<div class="tk-oc-acts">${meet?`<a class="btn" href="${esc(meet)}" target="_blank" rel="noopener noreferrer">Join Google Meet</a>`:''}<button type="button" class="btn ghost" onclick="openCalendar(${tkAttr(oc.meetingId)})">See it in the Calendar</button></div>`:'';
+  const links=[];
+  if(booked&&oc.meetingId!=null&&oc.meetingId!==''){if(meet)links.push(`<a class="btn" href="${esc(meet)}" target="_blank" rel="noopener noreferrer">Join Google Meet</a>`);links.push(`<button type="button" class="btn ghost" onclick="openCalendar(${tkAttr(oc.meetingId)})">See it in the Calendar</button>`);}
+  const approvalUrl=launch&&!ap.onCall&&!skipped?tkSafeUrl(oc.approvalUrl):'';
+  if(approvalUrl)links.push(`<a class="btn ghost" href="${esc(approvalUrl)}" target="_blank" rel="noopener noreferrer">Open the approval page</a>`);
+  const join=links.length?`<div class="tk-oc-acts">${links.join('')}</div>`:'';
   // once they asked for a time (it waits for his yes in the Calendar) the booking deadline is no longer the news
   const due=waiting&&oc.dueBy&&!oc.requestedFor?`<p class="tk-oc-due${overdue?' late':''}">Book by ${esc(tkDayName(oc.dueBy))}${overdue?' — overdue':''}</p>`:'';
+  // the launch call: where their OK stands (docs/LAUNCH-CALL.md §3)
+  let okLine='';
+  if(launch){
+    const day1=(row.day1Date&&tkDayName(row.day1Date))||'';
+    if(ap.onCall)okLine=`<p class="tk-status green tk-oc-ok">Approved on the call — sending starts on Day 1${day1?' ('+esc(day1)+')':''}.</p>`;
+    else if(ap.onPage)okLine=`<p class="tk-status green tk-oc-ok">They approved on the page on ${esc(tkDateTime(ap.onPage))} your time.${skipped?` You skipped the call${ap.skipped!=='yes'&&tkParseDate(ap.skipped)?' on '+esc(tkDateTime(ap.skipped)):''}.`:held?'':' The call is optional now — hold it anyway, or skip it.'}</p>`;
+    else if(skipped)okLine=`<p class="tk-oc-hint">You skipped the call${ap.skipped!=='yes'&&tkParseDate(ap.skipped)?' on '+esc(tkDateTime(ap.skipped)):''}.</p>`;
+    else if(held)okLine=`<p class="tk-status amber tk-oc-ok">The call is done, but their OK isn't in yet. If ${esc(first||'they')} said yes to the list and the emails, press Approved on the call — sending can't start without it.</p>`;
+    else if(booked)okLine=`<p class="tk-oc-hint">On the call, share the approval page with ${esc(first||'them')} and go through the list and the emails. When ${esc(first?first+' says':'they say')} yes, press Approved on the call.</p>`;
+  }
   const steps=(Array.isArray(oc.steps)?oc.steps:[]).filter(x=>x&&typeof x==='object');
   const stepsHtml=steps.length?`<ol class="tk-oc-steps">${steps.map(x=>{const done=tkTruthy(x.done);return `<li class="${done?'done':'todo'}"><span class="tk-oc-tick" aria-hidden="true">${done?'✓':''}</span><span><span class="tk-sr">${done?'Done: ':'Not yet: '}</span>${esc(x.label||x.key||'')}</span>${done&&x.at?`<span class="tk-oc-at" title="${esc(tkFull(x.at))}">${esc(tkDateTime(x.at))}</span>`:''}</li>`}).join('')}</ol>`:'';
   const n=Number(oc.remindersSent)||0;
-  const rem=stopped?'Reminders are stopped.':n?`${n} reminder${n!==1?'s':''} sent${waiting&&oc.nextReminderAt?' · next one '+tkDateTime(oc.nextReminderAt):''}.`:waiting&&oc.nextReminderAt?`First reminder ${tkDateTime(oc.nextReminderAt)} if they haven't booked.`:'';
+  const rem=stopped||skipped?'Reminders are stopped.':n?`${n} reminder${n!==1?'s':''} sent${waiting&&oc.nextReminderAt?' · next one '+tkDateTime(oc.nextReminderAt):''}.`:waiting&&oc.nextReminderAt?`First reminder ${tkDateTime(oc.nextReminderAt)} if they haven't booked.`:'';
   // no link of his own set: the email links the booking page (docs/CALENDAR.md), and what they pick comes to the Calendar
   const link=tkSafeUrl(oc.bookingUrl)?`Booking link in the email: ${tkLink(oc.bookingUrl)}`:'The email links your booking page. The time they pick comes to your Calendar for your yes.';
   const facts=[rem?esc(rem):'',waiting?link:'',oc.fromInbox?`Emails go from ${esc(oc.fromInbox)}.`:''].filter(Boolean).join('<br>');   // the booking link matters only until the call is booked
-  const btn=(action,label,ghost)=>`<button class="btn${ghost?' ghost':''}" onclick="trialOcAction(${tkAttr(id)},${tkAttr(action)})">${esc(label)}</button>`;
+  const btn=(action,label,ghost)=>`<button class="btn${ghost?' ghost':''}" onclick="trialOcAction(${tkAttr(id)},${tkAttr(action)}${launch?','+tkAttr('launch'):''})">${esc(label)}</button>`;
   const acts=[];
-  if(booked){acts.push(btn('markHeld','Call done'));acts.push(btn('markNoShow',"They didn't show",true));}
+  // the launch call's first button while it is booked or done and their OK is not in: Approved on the call
+  const approve=launch&&(booked||held)&&!ap.approved&&!skipped;
+  if(approve)acts.push(btn('approvedOnCall','Approved on the call'));
+  if(booked){acts.push(btn('markHeld','Call done',approve));acts.push(btn('markNoShow',"They didn't show",true));}
   // they asked for a time and it waits for his yes in the Calendar (the big button): no second way to book it here
-  const asked=!booked&&!held&&!noShow&&!!oc.requestedFor;
-  if(!booked&&!held&&!asked)acts.push(btn('resend','Send the first email again',true));
-  if(!stopped&&!held)acts.push(btn('stopReminders','Stop the reminder emails',true));
-  const book=held||asked?'':`<div class="tk-oc-book"><label for="tkOcWhen">${booked?'Call moved? Pick the new date and time (your time)':'Booked by phone or email? Pick the date and time (your time)'}</label><div class="tk-oc-book-row"><input id="tkOcWhen" type="datetime-local" data-tk-form><button class="btn${booked?' ghost':''}" onclick="trialOcMarkBooked(${tkAttr(id)})">Mark call booked</button></div></div>`;
+  const asked=waiting&&!!oc.requestedFor;
+  if(!booked&&!held&&!skipped&&!asked)acts.push(btn('resend',K.resend,true));
+  if(!stopped&&!held&&!skipped)acts.push(btn('stopReminders','Stop the reminder emails',true));
+  // they approved on the page by themselves: the call is optional — skip it (the first button while nothing is booked)
+  if(launch&&ap.onPage&&!held&&!skipped)acts.push(btn('skip','Skip the call',booked));
+  const book=held||asked||skipped?'':`<div class="tk-oc-book"><label for="${K.when}">${booked?'Call moved? Pick the new date and time (your time)':'Booked by phone or email? Pick the date and time (your time)'}</label><div class="tk-oc-book-row"><input id="${K.when}" type="datetime-local" data-tk-form><button class="btn${booked?' ghost':''}" onclick="trialOcMarkBooked(${tkAttr(id)}${launch?','+tkAttr('launch'):''})">Mark call booked</button></div></div>`;
   const body=`${oc.label?`<p class="tk-oc-say">${esc(oc.label)}</p>`:''}
-    ${when}${join}${due}${stepsHtml}
+    ${when}${okLine}${join}${due}${stepsHtml}
     ${facts?`<p class="tk-oc-facts">${facts}</p>`:''}
     <p class="tk-oc-msgs">Your emails with ${esc(first||'them')} are under Messages. <button type="button" class="tk-textbtn" onclick="tkGoTo(${tkAttr('messages')})">See the messages</button></p>
     ${book||acts.length?`<h4>Update the call</h4>${book}${acts.length?`<div class="tk-oc-acts">${acts.join('')}</div>`:''}`:''}`;
-  // past onboarding and the call is over: history — one folded line, like the application
-  if((held||noShow)&&row.state&&row.state!=='onboarding')return `<details class="tk-appbox tk-oc-done" id="tkSec-onboardcall"><summary><span class="tk-appbox-title">Onboarding call</span><span class="pill ${held?'green':'grey'}">${held?'Done':"They didn't show"}</span></summary><div class="card tk-oc">${body}</div></details>`;
-  return `<section class="card tk-oc" id="tkSec-onboardcall">
-    <h3>Onboarding call</h3>
+  // the trial has moved on and the call is over: history — one folded line, like the application
+  if(over&&row.state&&!K.open.includes(row.state))return `<details class="tk-appbox tk-oc-done" id="tkSec-${K.sec}"><summary><span class="tk-appbox-title">${K.title}</span><span class="pill ${held?'green':'grey'}">${held?'Done':skipped?'Skipped':"They didn't show"}</span></summary><div class="card tk-oc">${body}</div></details>`;
+  return `<section class="card tk-oc" id="tkSec-${K.sec}">
+    <h3>${K.title}</h3>
     ${body}
   </section>`;
 }
+function renderOnboardCall(oc,row,meta){return renderCallCard(oc,row,meta,'onboarding')}
+function renderLaunchCall(lc,row,meta){return renderCallCard(lc,row,meta,'launch')}
 
 /* -- Overview: what to do, the 13 systems at a glance, four growth numbers -- */
 function renderSystemsStrip(systems){
@@ -1171,17 +1244,19 @@ function renderRepliesTab(d){
   if(!list.length)return head;
   return head+`<div class="section-head tk-section"><h3>Newest replies</h3><span class="count">${list.length}</span></div><div class="card">${list.map(r=>`<div class="tk-list-row"><div style="min-width:0"><div class="tk-inline"><span class="pill ${tkKindClass(r.kind)}">${esc(r.kind||'?')}</span><b class="tk-reply-email tk-break">${esc(r.leadEmail||'—')}</b><span class="tk-updated" title="${esc(tkFull(r.receivedAt))}">${esc(tkRel(r.receivedAt))}</span></div>${r.snippet?`<small>${esc(r.snippet)}</small>`:''}</div></div>`).join('')}</div>`;
 }
+/* How their list and emails were approved (sequence.approvalMode): on the page (click), on the launch call, or by the owner. */
+function tkApprovalModeText(m){m=String(m||'').toLowerCase();return {click:'on the approval page',page:'on the approval page',call:'on the launch call',owner:'by you',auto:'automatically'}[m]||('by '+m)}
 function renderCopyTab(d){
   const id=(d.row||{}).id;const s=d.sequence||{};const lf=d.leadfinder||{};const changes=Array.isArray(s.changes)?s.changes:[];
   return `<div class="card tk-pad"><div class="tk-kv">
     <small>Active version</small><span>${esc(s.active||'—')}</span>
     <small>Version</small><span>${esc(s.version!=null?s.version:'—')}</span>
-    <small>Approved</small><span>${s.approvedAt?esc(tkDateTime(s.approvedAt))+(s.approvalMode?' · by '+esc(s.approvalMode):''):'<span class="pill amber">Not yet</span>'}</span>
+    <small>Approved</small><span>${s.approvedAt?esc(tkDateTime(s.approvedAt))+(s.approvalMode?' · '+esc(tkApprovalModeText(s.approvalMode)):''):'<span class="pill amber">Not yet — on the launch call, or on the approval page</span>'}</span>
     <small>Change rounds</small><span>${esc(s.round!=null?s.round:'0')}</span>
     <small>Lead Finder</small><span>${esc(lf.status||'—')}${lf.found!=null?' · '+tkNum(lf.found)+' found of '+tkNum(lf.need):''}</span>
   </div>
   ${changes.length?`<h4 class="tk-gap">Change requests</h4><ul class="tk-sys-detail">${changes.map(c=>`<li>${esc(tkDetailText(c))}</li>`).join('')}</ul>`:''}
-  <div class="tk-inline tk-gap"><button class="btn" onclick="openMachine(${tkAttr('/mc/clients/'+id+'/sequence')})">Edit the email wording ↗</button><button class="btn ghost" onclick="trialSequenceAction(${tkAttr(id)},'sendLink')">Send approval link</button><button class="btn ghost" onclick="trialSequenceAction(${tkAttr(id)},'dispatch')">Find more leads now</button></div></div>`;
+  <div class="tk-inline tk-gap"><button class="btn" onclick="openMachine(${tkAttr('/mc/clients/'+id+'/sequence')})">Edit the email wording ↗</button><button class="btn ghost" onclick="trialSequenceAction(${tkAttr(id)},'sendLink')">Send the approval page link</button><button class="btn ghost" onclick="trialSequenceAction(${tkAttr(id)},'dispatch')">Find more leads now</button></div></div>`;
 }
 function renderChecksTable(checks){
   const keys=Object.keys(checks||{});if(!keys.length)return '<div class="tk-todo-empty">No checks recorded yet.</div>';
@@ -1268,13 +1343,14 @@ function renderTrialDetail(d,tab,meta){
   d=d||{};meta=meta||{};tab=tkTabKey(tab);tab=tkTabsFor(d).some(t=>t[0]===tab)?tab:'overview';
   const row=d.row||{};const act=tkPrimaryAction(d,meta);const ab=tkAutobuy(d);
   // the purchase to-do is CheapInboxes' business once it handles this trial (never "Buy & paste" under the big button)
-  const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-|message-reply:)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application')||!!(ab&&ab.handled&&t&&(String(t.id||'').indexOf('buy:')===0||(t.action&&(t.action.view==='purchase'||t.action.section==='autobuy'))))||(act.kind==='warmupHelpers'&&tkIsWarmupTodo(t));};
+  const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-|launch-|message-reply:)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application')||!!(ab&&ab.handled&&t&&(String(t.id||'').indexOf('buy:')===0||(t.action&&(t.action.view==='purchase'||t.action.section==='autobuy'))))||(act.kind==='warmupHelpers'&&tkIsWarmupTodo(t));};
   const todos=tkTodosSorted(row).filter(t=>!mine(t));
   return renderTrialTop(d,meta,act)+
     (typeof renderMessages==='function'?`<div id="tkMsgHost">${renderMessages(d,meta)}</div>`:'')+
     (act.kind!=='calendar'&&typeof calTrialAsk==='function'?calTrialAsk(row.id):'')+   // calendar.js: a call time waiting for the owner's yes
     (typeof renderAutobuyCard==='function'?`<div id="tkAbHost">${renderAutobuyCard(d,{primary:act.kind,now:meta.now})}</div>`:'')+   // autobuy.js: their inboxes being set up
     (typeof renderWarmupCard==='function'?`<div id="tkWuHost">${renderWarmupCard(d,{primary:act.kind,now:meta.now})}</div>`:'')+   // warmup.js: their warm-up
+    (d.launchCall&&typeof d.launchCall==='object'?`<div id="tkLcHost">${renderLaunchCall(d.launchCall,row,meta)}</div>`:'')+   // the launch call, right under the warm-up (docs/LAUNCH-CALL.md)
     (d.onboardCall&&typeof d.onboardCall==='object'?`<div id="tkOcHost">${renderOnboardCall(d.onboardCall,row,meta)}</div>`:'')+
     renderApplicationBlock(d,meta)+
     (todos.length?renderTodos(todos,{title:'Also on your list',hideClient:true,noCount:true,now:meta.now}):'')+
@@ -1627,8 +1703,8 @@ function trialsRepaintTab(tab){
   host.innerHTML=renderTab(d,tab,trialsCtx(currentTrialId));
 }
 /* openTrial(id, tab, section) asks for a section (e.g. 'application'); scroll there once it exists. The machine's to-dos
-   name some sections by their data ('conversation', 'onboardCall'): those are the page's Messages and onboarding call card. */
-const TK_SECTION_ALIAS={conversation:'messages',onboardCall:'onboardcall'};
+   name some sections by their data ('conversation', 'onboardCall', 'launchCall'): those are the page's Messages and the two call cards. */
+const TK_SECTION_ALIAS={conversation:'messages',onboardCall:'onboardcall',launchCall:'launchcall',launchcall:'launchcall'};
 function trialsApplyScroll(){
   if(currentView!=='trial'||!tk.scrollTo||!currentTrialId||!tk.detail[currentTrialId])return;
   const sec=TK_SECTION_ALIAS[tk.scrollTo]||tk.scrollTo;
@@ -1813,23 +1889,28 @@ async function submitDeclineApplication(id){
 function trialResearchAgain(id){
   return trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/intake',{action:'rerunResearch'},{done:data=>{const st=String((data.result&&data.result.status)||'').toLowerCase();return st==='done'?'Research finished':st==='failed'?'Research could not finish — see the note':'Research started — it carries on in the background; refresh in a minute';},fail:'Research did not start'});
 }
-/* -- onboarding call: the owner's buttons (docs/ONBOARD-CALL.md §4–5; replies go through Messages, messages.js) --
-   POST /api/mc/clients/{id}/onboard-call → {ok, onboardCall}. The card is redrawn from the answer at
-   once; the rest of the page (and the list's plain sentence) refreshes quietly behind it. */
-function tkOcPath(id){return '/api/mc/clients/'+encodeURIComponent(id)+'/onboard-call'}
+/* -- the two calls: the owner's buttons (docs/ONBOARD-CALL.md §4–5, docs/LAUNCH-CALL.md §5; replies go through Messages, messages.js) --
+   POST /api/mc/clients/{id}/onboard-call → {ok, onboardCall} · POST /api/mc/clients/{id}/launch-call → {ok, launchCall}.
+   `kind` picks the call ('onboarding' when left out). The card is redrawn from the answer at once, the three
+   questions with it (the big button follows the call); the rest of the page (and the list's plain sentence)
+   refreshes quietly behind it. */
+function tkOcPath(id,kind){return '/api/mc/clients/'+encodeURIComponent(id)+'/'+TK_CALL_KINDS[tkCallKind(kind)].path}
 function tkOcName(id){const r=(tk.detail[id]&&tk.detail[id].row)||tkFindRow(id)||{};const s=tkSimple(r);return s.person||s.company||String(id||'')}
-function tkOcRepaint(id){
+/* Redraw one call card (or, with no kind, every call card on the page) from the cache. */
+function tkOcRepaint(id,kind){
   if(currentView!=='trial'||currentTrialId!==id)return;
-  const host=document.getElementById('tkOcHost');const d=tk.detail[id];if(!host||!d)return;
-  host.innerHTML=renderOnboardCall(d.onboardCall,d.row,{now:new Date()});
+  const d=tk.detail[id];if(!d)return;
+  (kind?[tkCallKind(kind)]:Object.keys(TK_CALL_KINDS)).forEach(k=>{const K=TK_CALL_KINDS[k];const host=document.getElementById(K.host);const c=d[K.key];if(host&&c&&typeof c==='object')host.innerHTML=renderCallCard(c,d.row,{now:new Date()},k);});
 }
-async function trialOcPost(id,body,opts){
-  opts=opts||{};
-  const r=await trialPost(tkOcPath(id),body,{confirm:opts.confirm||'',done:opts.done,fail:opts.fail||'That did not work',reload:false});
+async function trialOcPost(id,body,opts,kind){
+  opts=opts||{};kind=tkCallKind(kind);const K=TK_CALL_KINDS[kind];
+  const r=await trialPost(tkOcPath(id,kind),body,{confirm:opts.confirm||'',done:opts.done,fail:opts.fail||'That did not work',reload:false});
   if(r&&r.ok){
-    const oc=r.data&&r.data.onboardCall;
-    if(oc&&typeof oc==='object'&&tk.detail[id])tk.detail[id]=Object.assign({},tk.detail[id],{onboardCall:oc});
-    tkOcRepaint(id);
+    const c=r.data&&r.data[K.key];
+    if(c&&typeof c==='object'&&tk.detail[id]){const patch={};patch[K.key]=c;tk.detail[id]=Object.assign({},tk.detail[id],patch);}
+    tkOcRepaint(id,kind);
+    // the big button follows the call (Approved on the call → nothing more to do): the three questions at once
+    if(currentView==='trial'&&currentTrialId===id&&tk.detail[id]){const top=document.getElementById('tkTop');if(top)top.outerHTML=renderTrialTop(tk.detail[id],{now:new Date()});}
     Promise.all([loadTrial(id,true),loadHub(true)]).then(()=>{trialsRepaint('trial',{soft:true});try{renderNav();updateNotifBadge();}catch(e){}});
   }
   return r;
@@ -1840,22 +1921,28 @@ function tkOwnerInput(v){
   if(typeof calZoneToUtc==='function'){const d=calZoneToUtc(m[1],m[2],tkOwnerZone());return d&&!isNaN(d)?d:null;}
   const d=new Date(v);return isNaN(d)?null:d;
 }
-function trialOcMarkBooked(id){
-  const i=document.getElementById('tkOcWhen');const v=String((i&&i.value)||'').trim();const d=v?tkOwnerInput(v):null;
+function trialOcMarkBooked(id,kind){
+  kind=tkCallKind(kind);
+  const i=document.getElementById(TK_CALL_KINDS[kind].when);const v=String((i&&i.value)||'').trim();const d=v?tkOwnerInput(v):null;
   if(!d||isNaN(d)){toast('Pick the date and time of the call first');return Promise.resolve({ok:false});}
-  return trialOcPost(id,{action:'markBooked',when:d.toISOString()},{done:'Call marked as booked for '+tkDateTime(d)+' your time'});
+  return trialOcPost(id,{action:'markBooked',when:d.toISOString()},{done:'Call marked as booked for '+tkDateTime(d)+' your time'},kind);
 }
+/* Each button's confirm question (n = their name, K = the kind of call) and its "done" toast. The last two are
+   the launch call's only (docs/LAUNCH-CALL.md §3): its confirm words are the contract's. */
 const TK_OC_ACTIONS={
   markHeld:{done:'Marked: the call happened'},
   markNoShow:{confirm:n=>'Mark that '+n+" didn't show up for the call?",done:"Marked: they didn't show up"},
-  resend:{confirm:n=>'Send '+n+' the acceptance email again?',done:'The acceptance email was sent again'},
+  resend:{confirm:(n,K)=>'Send '+n+' '+K.firstEmail+' again?',done:K=>K.resendDone},
   stopReminders:{confirm:n=>'Stop the reminder emails to '+n+'?',done:'Reminders stopped'},
+  approvedOnCall:{launch:true,confirm:()=>'This approves their list and emails — sending can start.',done:'Approved on the call — their list and emails are approved'},
+  skip:{launch:true,confirm:n=>'Skip the launch call with '+n+'? They approved on the page, so sending can start without it.',done:'The launch call is skipped'},
 };
 /* "Mark the call done" from the top of the page: one tap, so it asks first. */
-function trialOcTopHeld(id){return trialOcPost(id,{action:'markHeld'},{confirm:'Mark the call with '+tkOcName(id)+' as done?',done:TK_OC_ACTIONS.markHeld.done})}
-function trialOcAction(id,action){
-  const a=TK_OC_ACTIONS[action];if(!a)return Promise.resolve({ok:false});
-  return trialOcPost(id,{action},{confirm:a.confirm?a.confirm(tkOcName(id)):'',done:a.done});
+function trialOcTopHeld(id,kind){kind=tkCallKind(kind);return trialOcPost(id,{action:'markHeld'},{confirm:'Mark '+TK_CALL_KINDS[kind].short+' with '+tkOcName(id)+' as done?',done:TK_OC_ACTIONS.markHeld.done},kind)}
+function trialOcAction(id,action,kind){
+  kind=tkCallKind(kind);const K=TK_CALL_KINDS[kind];const a=TK_OC_ACTIONS[action];
+  if(!a||(a.launch&&kind!=='launch'))return Promise.resolve({ok:false});
+  return trialOcPost(id,{action},{confirm:a.confirm?a.confirm(tkOcName(id),K):'',done:typeof a.done==='function'?a.done(K):a.done},kind);
 }
 /* Opening the Trials list or a trial asks the machine to look for replies and bookings now (it throttles
    this itself). Fire-and-forget: errors are ignored; if something new came in, the screen refreshes. */
@@ -1888,8 +1975,8 @@ function trialRemoveInbox(id,email){trialAction(id,{action:'removeInbox',email},
 function trialDispute(id,bookingId,action){trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/bookings',{bookingId,action},{confirm:(action==='uphold'?'Uphold the dispute (the call does not count)?':'Overturn the dispute (the call counts)?'),done:action==='uphold'?'Dispute upheld':'Dispute overturned'})}
 function trialSequenceAction(id,action){
   const body=action==='dispatch'?{action:'dispatch',mode:'refill'}:{action};
-  const conf=action==='sendLink'?'Send the approval link to the client now?':action==='dispatch'?'Look for more leads now?':'';
-  trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/sequence',body,{confirm:conf,done:action==='sendLink'?'Approval link sent':'Looking for more leads now'});
+  const conf=action==='sendLink'?'Email them the approval page link now? (Near the end of warm-up they get the launch-call invite with it by itself.)':action==='dispatch'?'Look for more leads now?':'';
+  trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/sequence',body,{confirm:conf,done:action==='sendLink'?'The approval page link was sent':'Looking for more leads now'});
 }
 function trialIntakeAction(id,action){
   const labels={rerunSetup:['Re-run the full setup check now?','Setup check started'],rerunMarket:['Re-run the market count?','Market count started'],marketOverride:['Override the market count and accept this market as big enough?','Market overridden'],rerunBookingTest:['Test the calendar link now?','Booking test started'],resendWelcome:['Resend the welcome email with the two dates?','Welcome email resent']};

@@ -41,7 +41,9 @@ const CAL_STATUS={
 const CAL_ZONE_NAMES={'Asia/Colombo':'Sri Lanka','America/New_York':'US Eastern','America/Detroit':'US Eastern','America/Indiana/Indianapolis':'US Eastern','America/Kentucky/Louisville':'US Eastern','America/Chicago':'US Central','America/Denver':'US Mountain','America/Boise':'US Mountain','America/Phoenix':'Arizona','America/Los_Angeles':'US Pacific','America/Anchorage':'Alaska','Pacific/Honolulu':'Hawaii'};
 const CAL_WHAT={requested:'Asked for this time',confirmed:'Confirmed',moved:'Moved to a new time',suggested:'Another time suggested',declined:'Declined',held:'Call done',no_show:"Marked: they didn't show",cancelled:'Cancelled',blocked:'Time blocked',unblocked:'Unblocked',added:'Added'};
 const CAL_BY={them:'by them',owner:'by you',machine:'automatically'};
-const CAL_SOURCE={booking_page:'They picked it on your booking page',owner:'You added it',inbox:'Found in your inbox (a calendar invite)',onboard_card:'Marked booked on the onboarding card'};
+const CAL_SOURCE={booking_page:'They picked it on your booking page',owner:'You added it',inbox:'Found in your inbox (a calendar invite)',onboard_card:'Marked booked on the onboarding card',launch_card:'Marked booked on the launch-call card'};
+/* The two kinds of call the machine books (docs/ONBOARD-CALL.md, docs/LAUNCH-CALL.md), in the owner's words. */
+const CAL_KINDS={onboarding:'Onboarding call',launch:'Launch call'};
 const CAL_DAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 /* The small camera beside a call that has its Google Meet link (decoration: the words say it too). */
 const CAL_CAM='<svg class="cal-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><rect x="2.5" y="6.5" width="13" height="11"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/></svg>';
@@ -130,7 +132,9 @@ function calSettings(s){
 }
 function calSettingsNow(){return calSettings(cal.settings)}
 function calMinutes(m){const n=Math.round(Number(m&&m.minutes));return n>=5&&n<=480?n:30}
-function calTitle(m){m=m||{};if(m.status==='blocked')return String(m.title||'Busy');return String(m.title||(m.company?'Call — '+m.company:'Meeting'))}
+function calIsLaunch(m){return CAL_KINDS[String((m&&m.kind)||'').toLowerCase()]==='Launch call'}
+/* The machine's title ("Launch call — Ridgeline IT"); without one, the launch call still says what it is. */
+function calTitle(m){m=m||{};if(m.status==='blocked')return String(m.title||'Busy');if(m.title)return String(m.title);return calIsLaunch(m)&&m.company?'Launch call — '+m.company:m.company?'Call — '+m.company:'Meeting'}
 function calWhoText(m){m=m||{};return m.person&&m.company?m.person+' ('+m.company+')':String(m.person||m.company||'them')}
 function calName(m){return (m&&(tkFirstName(m.person)||m.company))||'They'}
 function calSourceText(s){return CAL_SOURCE[s]||String(s||'')}
@@ -263,10 +267,11 @@ function renderCalBlock(x,model){
   const top=model.yOf(x.s);const h=Math.max(Math.round(((x.e-x.s)*CAL_PX-2)*10)/10,20);
   const w=100/(x.lanes||1),left=w*(x.lane||0);
   const who=m.status==='blocked'?calTitle(m):String(m.company||calTitle(m));
-  const meet=!!calMeetLink(m);
+  const meet=!!calMeetLink(m);const launch=calIsLaunch(m);
   const aria=calTitle(m)+(m.person&&m.status!=='blocked'?' with '+m.person:'')+'. '+calDay(d,st.ownerZone)+', '+calTime(d,st.ownerZone)+' '+calOwnerName(st)+' time ('+calWeekdayName(d,st.usZone)+' '+calTime(d,st.usZone)+' '+calZoneName(st.usZone)+'). '+x.mins+' minutes. '+S.short+'.'+(meet?' Google Meet link ready.':'');
-  // who first (the row already says the time); the time and the status word on the second line when there is room
-  return `<button type="button" class="cal-ev ${S.cls}${x.mins<=15?' short':''}" style="top:${top}px;height:${h}px;left:calc(${Math.round(left*100)/100}% + 2px);width:calc(${Math.round(w*100)/100}% - 4px)" onclick="calOpenMeeting(${tkAttr(m.id)})" title="${esc(aria)}" aria-label="${esc(aria)}"><span class="cal-ev-t">${meet?CAL_CAM:''}${esc(who)}</span>${x.mins>15?`<span class="cal-ev-s">${esc(calTime(d,st.ownerZone))} · ${esc(S.short)}</span>`:''}</button>`;
+  // who first (the row already says the time); the time and the status word on the second line when there is room —
+  // a launch call says so first on that line (drawn like an onboarding call otherwise)
+  return `<button type="button" class="cal-ev ${S.cls}${x.mins<=15?' short':''}${launch?' launch':''}" style="top:${top}px;height:${h}px;left:calc(${Math.round(left*100)/100}% + 2px);width:calc(${Math.round(w*100)/100}% - 4px)" onclick="calOpenMeeting(${tkAttr(m.id)})" title="${esc(aria)}" aria-label="${esc(aria)}"><span class="cal-ev-t">${meet?CAL_CAM:''}${esc(who)}</span>${x.mins>15?`<span class="cal-ev-s">${launch?'Launch call · ':''}${esc(calTime(d,st.ownerZone))} · ${esc(S.short)}</span>`:''}</button>`;
 }
 function renderCalGrid(model){
   const st=model.st,H=model.height;
@@ -288,7 +293,7 @@ function renderCalAgenda(model){
   if(model.empty)return `<div class="cal-agenda"><p class="cal-anone">Nothing booked this week.</p></div>`;
   return `<div class="cal-agenda">${model.days.map(d=>`<section class="cal-aday${d.today?' today':''}"><h4>${esc(d.label)}${d.today?'<span class="cal-today-tag">Today</span>':''}</h4>${d.items.length
     ?`<ol class="cal-alist">${d.items.slice().sort((a,b)=>a.t-b.t).map(x=>{const m=x.m,S=calStatusOf(m),t=new Date(x.t);const who=m.status==='blocked'?calTitle(m):String(m.company||calTitle(m));
-      return `<li><button type="button" class="cal-aitem ${S.cls}" onclick="calOpenMeeting(${tkAttr(m.id)})"><span class="cal-atime"><b>${esc(calTime(t,st.ownerZone))}</b><small>${esc(calWeekdayName(t,st.usZone)+' '+calTime(t,st.usZone))} ET</small></span><span class="cal-amain"><b>${calMeetLink(m)?CAL_CAM:''}${esc(who)}</b>${m.person&&m.status!=='blocked'?`<small>${esc(m.person)}</small>`:''}<span class="cal-astatus">${esc(S.short)} · ${x.mins} min${calMeetLink(m)?' · Google Meet':''}</span></span></button></li>`}).join('')}</ol>`
+      return `<li><button type="button" class="cal-aitem ${S.cls}${calIsLaunch(m)?' launch':''}" onclick="calOpenMeeting(${tkAttr(m.id)})"><span class="cal-atime"><b>${esc(calTime(t,st.ownerZone))}</b><small>${esc(calWeekdayName(t,st.usZone)+' '+calTime(t,st.usZone))} ET</small></span><span class="cal-amain"><b>${calMeetLink(m)?CAL_CAM:''}${esc(who)}</b>${m.person&&m.status!=='blocked'?`<small>${esc(m.person)}</small>`:''}<span class="cal-astatus">${calIsLaunch(m)?'Launch call · ':''}${esc(S.short)} · ${x.mins} min${calMeetLink(m)?' · Google Meet':''}</span></span></button></li>`}).join('')}</ol>`
     :'<p class="cal-anone">Nothing booked</p>'}</section>`).join('')}</div>`;
 }
 function renderCalRequest(m,st,meta){
@@ -355,13 +360,29 @@ function renderCalHistory(h,st){
   return `<h4 class="cal-h4">History</h4><ol class="cal-hist">${list.map(x=>`<li><span>${esc(CAL_WHAT[x.what]||String(x.what||''))}${x.by?' '+esc(CAL_BY[x.by]||'by '+x.by):''}</span><span class="cal-hist-at" title="${esc(tkFull(x.at))}">${esc(calStamp(x.at,st))}</span></li>`).join('')}</ol>`;
 }
 function calEmail(e){e=String(e||'').trim();return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']{2,}$/.test(e)?e:''}
+/* A launch call's OK (docs/LAUNCH-CALL.md §3): true when the meeting itself says approved (approvedAt / approvedOnCall /
+   approvedOnPage / approved), false when it says not yet (approvedAt null, approved false), else the trial's launch card
+   when the hub has it — and null when nobody knows (the panel then just points at the trial). */
+function calLaunchApproved(m){
+  if(!calIsLaunch(m))return null;
+  if(m.approvedAt||m.approvedOnCall||m.approvedOnPage||tkTruthy(m.approved))return true;
+  if(m.approvedAt===null||m.approved===false)return false;
+  const cid=m.clientId!=null?String(m.clientId):'';const d=cid&&typeof tk!=='undefined'&&tk.detail?tk.detail[cid]:null;const lc=d&&d.launchCall;
+  if(lc&&typeof lc==='object'&&typeof tkLcApproval==='function')return tkLcApproval(lc).approved;
+  return null;
+}
+/* The panel's shortcut: the trial, scrolled to its launch-call card, where "Approved on the call" is pressed. */
+function calLaunchApprove(id){const m=calFind(id);if(!m||m.clientId==null||m.clientId==='')return;closeModal();openTrial(String(m.clientId),null,'launchCall');}
 /* One call, opened from the grid or the phone list: who, when three ways, status in words, the note,
    the history, and the buttons its status allows. */
 function renderCalMeeting(m,st,meta){
   meta=meta||{};const now=meta.now||calNow();const id=m.id;const status=String(m.status||'');const S=calStatusOf(m);
   const w=calWhen(calHeldAt(m),st,m.theirZone);const past=!!(w&&w.d<now);
+  // a launch call that is confirmed or done and not approved yet: its first button opens the trial's launch-call card
+  const launch=calIsLaunch(m);const okState=launch?calLaunchApproved(m):null;
+  const canApprove=launch&&(status==='confirmed'||status==='held')&&m.clientId!=null&&m.clientId!==''&&okState!==true;
   let long=S.long;
-  if(status==='confirmed'&&past)long='Confirmed — did the call happen? Mark it below';
+  if(status==='confirmed'&&past)long=canApprove?'Confirmed — did the call happen? If they said yes to their list and emails, press Approved on the call':'Confirmed — did the call happen? Mark it below';
   const asked=status==='requested'&&m.proposed&&calHeldAt(m)!==m.start?calWhen(m.start,st,m.theirZone):null;
   const mail=calEmail(m.email);
   const kv=[];
@@ -375,14 +396,16 @@ function renderCalMeeting(m,st,meta){
   if(m.declineReason)kv.push(['Reason',`<span class="cal-note">${esc(m.declineReason)}</span>`]);
   if(m.source)kv.push(['From',esc(calSourceText(m.source))]);
   if(status==='requested')kv.push(['Calls happen on',st.googleMeet==='connected'?'Google Meet — the link is made when you say yes':st.meetingLink?(tkSafeUrl(st.meetingLink)?tkLink(st.meetingLink):esc(st.meetingLink)):'No meeting link set yet']);   // confirmed: the Google Meet part below the time
+  if(launch&&(status==='confirmed'||status==='held'))kv.push(['Their OK',okState===true?'In — their list and emails are approved':'Not in yet. On the call, go through the list and the emails together; when they say yes, press Approved on the call (on their trial).']);
   const b=(fn,label,ghost)=>`<button class="btn${ghost?' ghost':''}" onclick="${fn}(${tkAttr(id)})">${esc(label)}</button>`;
   const acts=[];
   if(status==='requested'){if(!past)acts.push(b('calConfirm','Say yes and email them'));acts.push(b('calOpenSuggest','Suggest another time',!past));acts.push(b('calOpenDecline','Say no…',true));}
   else if(status==='confirmed'){
-    if(past){acts.push(b('calHeld','Call done'));acts.push(b('calNoShow','No-show',true));acts.push(b('calOpenMove','Move',true));acts.push(b('calOpenCancel','Cancel',true));}
+    if(past){acts.push(b('calHeld','Call done',canApprove));acts.push(b('calNoShow','No-show',true));acts.push(b('calOpenMove','Move',true));acts.push(b('calOpenCancel','Cancel',true));}
     else{acts.push(b('calOpenMove','Move',true));acts.push(b('calHeld','Call done',true));acts.push(b('calNoShow','No-show',true));acts.push(b('calOpenCancel','Cancel',true));}
   }
   else if(status==='blocked')acts.push(b('calUnblock','Unblock'));
+  if(canApprove)acts.unshift(b('calLaunchApprove','Approved on the call'));
   return `<div class="modal-head cal-mhead"><div><h3>${esc(calTitle(m))}</h3><p>${esc(long)}</p></div></div>
     <div class="modal-body">
       ${w?`<div class="cal-when-big">${esc(w.big)} <small>${esc(calOwnerName(st))}</small></div><div class="cal-when-small">${esc(w.us)}${w.their?'<br>'+esc(w.their):''}</div>`:'<div class="cal-when-big">No time</div>'}
@@ -455,13 +478,13 @@ function calRowAsk(clientId,s){
   const m=calReqFor(clientId);if(!m)return '';
   const w=calWhen(m.start,calSettingsNow(),m.theirZone);
   const said=!!(s&&/calendar/i.test(String(s.label||'')+' '+String(s.next||'')));
-  const text=said?'Open the Calendar to say yes':'They asked for '+(w?w.big+' (your time)':'a time')+' — say yes in the Calendar';
+  const text=said?'Open the Calendar to say yes':'They asked for '+(calIsLaunch(m)?'the launch call on ':'')+(w?w.big+' (your time)':'a time')+' — say yes in the Calendar';
   return `<button type="button" class="cal-rowask" onclick="openCalendar(${tkAttr(m.id)})"><span>${esc(text)}</span><span class="cal-rowask-go" aria-hidden="true">›</span></button>`;
 }
 function calTrialAsk(clientId){
   const m=calReqFor(clientId);if(!m)return '';
   const w=calWhen(m.start,calSettingsNow(),m.theirZone);
-  return `<div class="card cal-trial-ask"><div class="cal-trial-ask-main"><b>${esc(calName(m))} asked for a call: ${esc(w?w.big:'a time')}${w?' (your time)':''}</b><small>${esc(w?w.us+' · ':'')}${calMinutes(m)} min · say yes in the Calendar</small></div><button class="btn" onclick="openCalendar(${tkAttr(m.id)})">Open the Calendar</button></div>`;
+  return `<div class="card cal-trial-ask"><div class="cal-trial-ask-main"><b>${esc(calName(m))} asked for ${calIsLaunch(m)?'the launch call':'a call'}: ${esc(w?w.big:'a time')}${w?' (your time)':''}</b><small>${esc(w?w.us+' · ':'')}${calMinutes(m)} min · say yes in the Calendar</small></div><button class="btn" onclick="openCalendar(${tkAttr(m.id)})">Open the Calendar</button></div>`;
 }
 
 /* ===================== 5. MACHINE ===================== */

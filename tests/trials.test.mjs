@@ -584,7 +584,7 @@ test('tabs: systems, inboxes, calls, replies, copy, coming up, timeline, actions
     inboxes: ['ann@acme-team.com', 'inbox rate under 80%', 'Add inbox', 'checked'],
     calls: ['bob@example.com', 'Uphold', 'Overturn', 'wrong fit'],
     replies: ['interested · 4', 'Sure, tell me more about the pricing', 'Newest replies'],
-    copy: ['Edit the email wording', 'Send approval link', 'Find more leads now', 'both'],
+    copy: ['Edit the email wording', 'Send the approval page link', 'Find more leads now', 'both', 'on the approval page'],
     comingup: ['Friday update', 'Day 29 report', 'Answer Ann about the calendar', 'Add a note', 'friday:2026-10-10', 'counters.held missing'],
     timeline: ['Dispute opened', 'Scorekeeper', 'd0 to bob@example.com'],
     actions: ['Pause sending', 'Clear legal hold', 'Run this task now', 'Automatic tasks', 'IMAP timeout', 'Mark paid', 'Log time', 'Override market count', 'Move to another step…'],
