@@ -56,6 +56,7 @@ vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'trials.js'), 'utf8'), { filename: 'trials.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'inquiries.js'), 'utf8'), { filename: 'inquiries.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'messages.js'), 'utf8'), { filename: 'messages.js' });
+vm.runInThisContext(fs.readFileSync(path.join(root, 'autobuy.js'), 'utf8'), { filename: 'autobuy.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'push.js'), 'utf8'), { filename: 'push.js' });
 supa.session = { access_token: 'test-token' }; // boot() has already seen "no session" and shown the login screen
 after(() => trialsStopTimer());
@@ -853,16 +854,17 @@ const pushJs = fs.readFileSync(path.join(root, 'push.js'), 'utf8');
 const calendarCss = fs.readFileSync(path.join(root, 'calendar.css'), 'utf8');
 const calendarJs = fs.readFileSync(path.join(root, 'calendar.js'), 'utf8');
 const messagesJs = fs.readFileSync(path.join(root, 'messages.js'), 'utf8');
+const autobuyJs = fs.readFileSync(path.join(root, 'autobuy.js'), 'utf8');
 const varsIn = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*([^;}]+)/g)].map((m) => [m[1], m[2].trim()]));
 const rootVars = varsIn(shellCss.match(/:root\{[\s\S]*?\n\}/)[0]);
 const darkVars = Object.assign({}, rootVars, varsIn(shellCss.match(/body\.dark\{[^}]*\}/)[0]));
 const noComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '');
-const allStyle = { 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'messages.js': messagesJs, 'push.js': pushJs };
+const allStyle = { 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'messages.js': messagesJs, 'autobuy.js': autobuyJs, 'push.js': pushJs };
 
 test('font: one plain system font family, no web fonts, no capitals-only labels, no letter-spacing, weights 400/600', () => {
   assert.equal(rootVars.font, '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif');
   assert.ok(!/fonts\.googleapis|fonts\.gstatic|@import|@font-face/i.test(html + css), 'no web font is loaded');
-  assert.ok(!/JetBrains|Inter Tight|var\(--mono\)|var\(--display\)/.test(noComments(html) + noComments(css) + noComments(calendarCss) + trialsJs + calendarJs + messagesJs), 'no second family');
+  assert.ok(!/JetBrains|Inter Tight|var\(--mono\)|var\(--display\)/.test(noComments(html) + noComments(css) + noComments(calendarCss) + trialsJs + calendarJs + messagesJs + autobuyJs), 'no second family');
   for (const [name, src] of Object.entries(allStyle)) {
     for (const m of src.matchAll(/font-family:\s*([^;"'}]+)/g)) assert.ok(['var(--font)', 'inherit'].includes(m[1].trim()), `${name}: font-family ${m[1]}`);
     assert.ok(!/text-transform:\s*uppercase/.test(src), `${name}: no capitals-only text`);

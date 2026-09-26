@@ -587,6 +587,57 @@
 @media(max-width:560px){.tk-set>summary{padding:12px 14px}.tk-set-body{padding:4px 14px 18px}.tk-set-links .btn{flex:1 1 100%;justify-content:center}}
 @media(max-width:560px){.tk-alert{grid-template-columns:auto 1fr}.tk-alert .tk-alert-act{grid-column:2}}
 
+/* ── Inboxes & domain (autobuy.js) ─────────────────────────────────────────
+   The owner buys on CheapInboxes; we set up the rest. The hint under the big button, the "what to buy" panel,
+   the card while it is set up, and Settings › Inboxes & domains. */
+.tk-q-hint{font-size:var(--fs-base);line-height:1.5;color:var(--muted);margin-top:12px;overflow-wrap:anywhere}
+.tk-q-hint .tk-textbtn{font-size:var(--fs-base);color:var(--text)}
+.tk-ab{padding:20px 22px;margin-bottom:18px}
+.tk-ab h3{font-size:var(--fs-h3);font-weight:600}
+.tk-ab h4{font-size:var(--fs-strong);font-weight:600;margin:22px 0 10px}
+.tk-ab-say{font-size:var(--fs-strong);font-weight:600;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
+.tk-ab .btn{min-height:46px;padding:11px 18px;font-size:var(--fs-base)}
+.tk-ab-acts{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.tk-ab-steps li.now{color:var(--text);font-weight:600}
+.tk-ab-steps li.now .tk-oc-tick{border:2px solid var(--text)}
+.tk-ab-steps li.stuck{color:var(--red);font-weight:600}
+.tk-ab-steps li.stuck .tk-oc-tick{border-color:var(--red);background:var(--red-bg);color:var(--red)}
+.tk-ab-boxes{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.tk-ab-boxes li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;min-width:0;padding:10px 12px;background:var(--surface-2);font-size:var(--fs-base);line-height:1.4}
+.tk-ab-undo{font-size:var(--fs-base);color:var(--muted);margin-top:14px}
+.tk-ab-undo .tk-textbtn{font-size:var(--fs-base)}
+.tk-abb h4{font-size:var(--fs-strong);font-weight:600;margin:22px 0 8px}
+.tk-abb h4:first-child{margin-top:0}
+.tk-abb-text{font-size:var(--fs-base);line-height:1.55;margin:10px 0;overflow-wrap:anywhere}
+.tk-abb-kv{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 12px;align-items:center;padding:8px 12px;background:var(--surface-2)}
+.tk-abb-kv small{font-size:var(--fs-small);color:var(--muted)}
+.tk-abb-kv b{font-size:var(--fs-strong);min-width:0;overflow-wrap:anywhere}
+.btn.tk-abb-copy{min-height:44px;padding:8px 14px}
+.tk-abb-box{margin-top:12px}
+.tk-abb-boxh{font-size:var(--fs-small);font-weight:600;color:var(--muted);margin-bottom:6px}
+.tk-abb-alts{margin-top:12px;border-top:1px solid var(--border-soft)}
+.tk-abb-alts>summary{display:flex;align-items:center;min-height:48px;padding:6px 0;cursor:pointer;list-style:none;font-size:var(--fs-base);font-weight:600}
+.tk-abb-alts>summary::-webkit-details-marker{display:none}
+.tk-abb-alts>summary::before{content:'▸ ';color:var(--muted);white-space:pre}
+.tk-abb-alts[open]>summary::before{content:'▾ '}
+.tk-abb-alts>summary:focus-visible{outline:2px solid var(--text)}
+.tk-abb-alts ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.tk-abb-alts li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;font-size:var(--fs-base);line-height:1.4}
+.tk-abb-open{margin-top:4px}
+.tk-abb-after{font-size:var(--fs-strong);font-weight:600;line-height:1.5;margin-top:16px;padding:12px 14px;background:var(--green-bg);color:var(--text)}
+.tk-abb .tk-textbtn{font-size:var(--fs-base);margin-top:4px}
+.tk-ab-warn{font-size:var(--fs-base);line-height:1.5;margin:14px 0;padding:10px 12px;background:var(--amber-bg);color:var(--text)}
+.tk-ab-un{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.tk-ab-un li{padding:12px 14px;border:1px solid var(--border-soft);font-size:var(--fs-base);line-height:1.5;overflow-wrap:anywhere}
+.tk-ab-facts{color:var(--muted)}
+.tk-ab-pick{margin-top:10px}
+.tk-ab-pick label{display:block;font-size:var(--fs-small);font-weight:600;margin-bottom:6px}
+.tk-ab-pickrow{display:flex;flex-wrap:wrap;gap:10px}
+.tk-ab-pickrow select{flex:1 1 200px;min-width:0;min-height:46px;padding:8px 12px;background:var(--surface);color:var(--text);border:1px solid var(--border);font:inherit;font-size:var(--fs-strong)}
+.tk-ab-pickrow select:focus{outline:2px solid var(--text);outline-offset:1px}
+.tk-ab-none{font-size:var(--fs-base);color:var(--muted);margin-top:6px}
+@media(max-width:560px){.tk-ab{padding:16px 14px}.modal-body.tk-abb{padding:16px 14px}.tk-ab-acts .btn,.tk-ab-pickrow .btn,.tk-abb-open,.tk-abb-alts li .btn{flex:1 1 100%;width:100%;justify-content:center}.tk-abb-kv{grid-template-columns:minmax(0,1fr) auto}.tk-abb-kv small{grid-column:1/-1;margin-top:4px}}
+
 /* ── Buy & paste ────────────────────────────────────────────────────────── */
 .tk-totals{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;padding:14px 18px;font-size:var(--fs-base)}
 .tk-offers td{vertical-align:middle}

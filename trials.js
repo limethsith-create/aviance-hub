@@ -47,7 +47,7 @@ const TK_TABS=[['overview','Overview'],['growth','Growth'],['systems','Parts'],[
 const TK_TAB_ALIAS={numbers:'overview',setup:'deliverability',promises:'comingup',upcoming:'comingup',reports:'comingup'};
 const TK_TRIAL_VIEWS=['trials','trialsBoard','trial','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
 /* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
-const TK_SETTINGS=['alerts','phone','google','replybot','status','behind','advanced','look','account'];
+const TK_SETTINGS=['alerts','phone','google','inboxes','replybot','status','behind','advanced','look','account'];
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
@@ -539,12 +539,30 @@ function tkRowNeedsReply(row){
   return (row.todo||[]).some(t=>t&&String(t.id||'').indexOf('onboard-reply:')===0);
 }
 function tkNeedsReply(d){d=d||{};const c=tkConv(d);return c.legacy?(c.needsReply||tkRowNeedsReply(d.row)):c.needsReply}
+/* Their domain and inboxes through CheapInboxes (email-distributor docs/AUTO-BUY.md): `autobuy` on the trial detail.
+   The owner buys in his CheapInboxes account; the system never buys — it finds the purchase and sets up the rest.
+   → null (an older system) or {status, buy (what to buy, while ready_to_buy), count (inboxes), domain, label, problem,
+   steps, mailboxes, toBuy (show "what to buy"), handled (CheapInboxes does it — not the Buy & paste page)}.
+   autobuy.js draws the "what to buy" panel and the "Inboxes & domain" card. */
+function tkAutobuy(d){
+  const a=d&&d.autobuy&&typeof d.autobuy==='object'?d.autobuy:null;if(!a)return null;
+  const status=String(a.status||'').toLowerCase();
+  const buy=a.buy&&typeof a.buy==='object'&&String(a.buy.domain||'').trim()?a.buy:null;
+  const n=buy&&Array.isArray(buy.mailboxes)?buy.mailboxes.filter(m=>m&&typeof m==='object').length:0;
+  const list=x=>Array.isArray(x)?x.filter(y=>y&&typeof y==='object'):[];
+  return {status,buy,count:n||2,domain:String((buy&&buy.domain)||a.domain||'').trim(),label:String(a.label||'').trim(),problem:String(a.problem||'').trim(),
+    steps:list(a.steps),mailboxes:list(a.mailboxes),toBuy:status==='ready_to_buy'&&!!buy,handled:status==='ready_to_buy'?!!buy:!!status&&status!=='not_set_up'};
+}
 /* tkSimple for the top of a trial page. The conversation there is fresher than the list's row: a row that still
    says "they wrote" when the conversation says answered (he just replied, or the reply bot did; the list catches
    up a moment later) asks for nothing — anything else still waiting has its own button (tkPrimaryAction). */
 function tkPageSimple(d){
   d=d||{};const s=tkSimple(d.row||{});const c=tkConv(d);
-  return !c.legacy&&!c.needsReply&&s.needsReply?Object.assign({},s,{needsReply:false,needsYou:false,next:''}):s;
+  if(!c.legacy&&!c.needsReply&&s.needsReply)return Object.assign({},s,{needsReply:false,needsYou:false,next:''});
+  // the same for the purchase: the page's `autobuy` says it is bought (CheapInboxes sets it up) while the row still says "Buy…"
+  const ab=tkAutobuy(d);
+  if(ab&&ab.handled&&!ab.toBuy&&ab.status!=='failed'&&s.needsYou&&/^buy\b/i.test(s.next.trim()))return Object.assign({},s,{needsYou:false,next:''});
+  return s;
 }
 /* Everything the simple screens show about one row — row.simple when the machine sends it, else a fallback. */
 function tkSimple(row){
@@ -665,7 +683,8 @@ function tkTodoPrimary(t,id){
 }
 /* The single most important thing the owner can do on this trial, in this order:
    a new application → a call time they asked for → their message ("Answer Sam's message") → a call to mark done → a late booking →
-   buying the domain and inboxes → anything else on the to-do list → nothing.
+   buying the domain and inboxes (on CheapInboxes when it is set up — autobuy.js; else the Buy & paste page) → anything else on
+   the to-do list → nothing. While CheapInboxes sets them up, nothing is asked (the "Inboxes & domain" card shows how far it is).
    → {kind, label (the button, or the "nothing" sentence), say (one sentence above it), run, todoId}. */
 function tkPrimaryAction(d,meta){
   d=d||{};meta=meta||{};const row=d.row||{};const id=row.id;const s=tkPageSimple(d);
@@ -688,8 +707,12 @@ function tkPrimaryAction(d,meta){
   if(oc&&(todo('onboard-mark:')||(booked&&when&&when<now)))return A('markHeld','Mark the call done',"The call was set for "+(when?tkDateTime(when):'earlier')+". If it happened, mark it done. If they didn't show, say so in the call box below.",`trialOcTopHeld(${tkAttr(id)})`,todo('onboard-mark:'));
   if(oc&&!booked&&(todo('onboard-overdue:')||tkTruthy(oc.overdue)||st==='overdue'))return A('nudge','Write to them about booking',say((who?who+" hasn't":"They haven't")+" booked the call yet, and it's late. Send a short note in the box below."),'tkFocusReply()',todo('onboard-overdue:'));
   const buy=todos.find(t=>t.action&&t.action.view==='purchase')||null;
-  if(buy||row.state==='awaiting_purchase')return A('buy','Buy the domain and inboxes',say(buy&&buy.text?tkYouNeedTo(buy.text):'You need to buy their domain and inboxes, then paste the logins.'),`openTrialPurchase(${tkAttr(id)})`,buy);
-  const rest=todos.find(t=>!/^(review:|onboard-)/.test(String(t.id||''))&&!(t.action&&t.action.section==='application'));
+  // CheapInboxes (autobuy.js): he buys there with one look at the panel; the system sets up everything after it
+  const ab=tkAutobuy(d);const inb=ab?ab.count+' inbox'+(ab.count===1?'':'es'):'';
+  if(ab&&ab.toBuy)return A('autobuy','Buy their domain and '+inb+' on CheapInboxes','Buy '+ab.domain+' and '+inb+' in your CheapInboxes account. We set up everything after that by ourselves.',`abOpenBuy(${tkAttr(id)})`,buy);
+  if(ab&&ab.status==='failed')return A('autobuyProblem','See what went wrong',ab.problem?tkSentence(ab.problem):'Setting up their inboxes ran into a problem.',`tkGoTo(${tkAttr('autobuy')})`,buy);
+  if(!(ab&&ab.handled)&&(buy||row.state==='awaiting_purchase'))return Object.assign(A('buy','Buy the domain and inboxes',say(buy&&buy.text?tkYouNeedTo(buy.text):'You need to buy their domain and inboxes, then paste the logins.'),`openTrialPurchase(${tkAttr(id)})`,buy),{hint:!!ab&&ab.status==='not_set_up'});
+  const rest=todos.find(t=>!/^(review:|onboard-)/.test(String(t.id||''))&&!(t.action&&t.action.section==='application')&&!(ab&&ab.handled&&t.action&&t.action.view==='purchase'));
   if(rest){const m=tkTodoPrimary(rest,id);const txt=tkSentence(rest.text||'');const verb=TK_VERBS.includes(txt.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,''));
     return A('todo',m.label,rest.urgent||s.needsYou?txt:'When you have a minute: '+(verb?txt.charAt(0).toLowerCase()+txt.slice(1):txt),m.run,rest);}
   if(s.needsYou)return A('look','See what needs you',say('Something here needs you.'),`tkGoTo(${tkAttr('behind')})`);
@@ -706,7 +729,9 @@ function tkNextText(s,j,act){
 }
 function renderPrimary(act){
   if(!act||act.kind==='none')return `<p class="tk-q-none">${esc(act?act.label:'')}</p>`;
-  return `${act.say?`<p class="tk-q-say">${esc(act.say)}</p>`:''}<button type="button" class="btn tk-primary" onclick="${act.run}">${esc(act.label)}</button>`;
+  // CheapInboxes not set up yet: the Buy & paste page as before, and where the easier way lives
+  const hint=act.hint?`<p class="tk-q-hint">Want the setup done for you? You buy on CheapInboxes, we do the rest. <button type="button" class="tk-textbtn" onclick="openSettings(${tkAttr('inboxes')})">Set up CheapInboxes in Settings</button></p>`:'';
+  return `${act.say?`<p class="tk-q-say">${esc(act.say)}</p>`:''}<button type="button" class="btn tk-primary" onclick="${act.run}">${esc(act.label)}</button>${hint}`;
 }
 function renderTrialTop(d,meta,act){
   d=d||{};meta=meta||{};const row=d.row||{};const j=tkStep(row);act=act||tkPrimaryAction(d,meta);
@@ -1101,17 +1126,19 @@ function renderTab(d,tab,ctx){
   }
 }
 /* One trial: the three questions, then Messages (messages.js: the whole conversation, the reply box and the
-   reply-bot switch), the onboarding call, the application, anything else on the to-do list (never the one
+   reply-bot switch), their inboxes being set up (autobuy.js), the onboarding call, the application, anything else on the to-do list (never the one
    already asked for at the top, never the call's or the application's own — those have their own place),
    then everything technical collapsed under "Behind the scenes". */
 function renderTrialDetail(d,tab,meta){
   d=d||{};meta=meta||{};tab=tkTabKey(tab);tab=tkTabsFor(d).some(t=>t[0]===tab)?tab:'overview';
-  const row=d.row||{};const act=tkPrimaryAction(d,meta);
-  const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application');};
+  const row=d.row||{};const act=tkPrimaryAction(d,meta);const ab=tkAutobuy(d);
+  // the purchase to-do is CheapInboxes' business once it handles this trial (never "Buy & paste" under the big button)
+  const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application')||!!(ab&&ab.handled&&t&&t.action&&t.action.view==='purchase');};
   const todos=tkTodosSorted(row).filter(t=>!mine(t));
   return renderTrialTop(d,meta,act)+
     (typeof renderMessages==='function'?`<div id="tkMsgHost">${renderMessages(d,meta)}</div>`:'')+
     (act.kind!=='calendar'&&typeof calTrialAsk==='function'?calTrialAsk(row.id):'')+   // calendar.js: a call time waiting for the owner's yes
+    (typeof renderAutobuyCard==='function'?`<div id="tkAbHost">${renderAutobuyCard(d,{primary:act.kind,now:meta.now})}</div>`:'')+   // autobuy.js: their inboxes being set up
     (d.onboardCall&&typeof d.onboardCall==='object'?`<div id="tkOcHost">${renderOnboardCall(d.onboardCall,row,meta)}</div>`:'')+
     renderApplicationBlock(d,meta)+
     (todos.length?renderTodos(todos,{title:'Also on your list',hideClient:true,noCount:true,now:meta.now}):'')+
@@ -1380,8 +1407,9 @@ function renderAlerts(alerts,filter,meta){
 /* -- Settings: everything that is not Trials, Calendar or Inquiries, as named sections --
    Each is a <details> with its name and a one-word state in the summary, so the page reads as a short
    list. ctx = {hub, hubErr, at, alerts, alertsErr, alertsAt, filter, open:{alerts:true…}, phone:'On'|'',
-   dark, email, now, google (messages.js googleSettingsCtx), details}. Pure: the host (trialsHostHTML) reads
-   the DOM and caches. Google Meet and Reply bot are drawn by messages.js (left out if it is not loaded). */
+   dark, email, now, google (messages.js googleSettingsCtx), inboxes (autobuy.js abSettingsCtx), details}. Pure: the host
+   (trialsHostHTML) reads the DOM and caches. Google Meet and Reply bot are drawn by messages.js, Inboxes & domains by
+   autobuy.js (each left out if its file is not loaded). */
 function renderSettings(ctx){
   ctx=ctx||{};const open=ctx.open||{};const hub=ctx.hub||null;const machine=(hub&&hub.machine)||{};
   const alerts=Array.isArray(ctx.alerts)?ctx.alerts:null;
@@ -1393,11 +1421,13 @@ function renderSettings(ctx){
   const statusBody=hub?renderSystemStatus(machine,{at:ctx.at,now:ctx.now}):ctx.hubErr?`<p class="tk-note red">${esc(ctx.hubErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Checking…');
   const gm=typeof renderGoogleMeetSet==='function'?renderGoogleMeetSet(ctx.google||{}):null;
   const rb=typeof renderReplyBotSet==='function'?renderReplyBotSet({hub,details:ctx.details}):null;
+  const ib=typeof renderAutobuySet==='function'?renderAutobuySet(ctx.inboxes||{}):null;
   return `<div class="tk-sets">`+
     sec('alerts','Alerts','Messages from the system about your trials.',unseen==null?'':unseen?`<span class="pill amber">${tkNum(unseen)} not seen</span>`:'<span class="pill green">All seen</span>',alertsBody)+
     sec('phone','Phone alerts','Get a message on your phone when something needs you.',ctx.phone==='On'?'<span class="pill green">On</span>':'<span class="pill grey">Off</span>',
       `<p class="tk-set-text">${ctx.phone==='On'?'Phone alerts are on for this device.':'Phone alerts are off on this device.'} On an iPhone, add the hub to your Home Screen first; the setup shows you how.</p><button type="button" class="btn" onclick="openPhoneAlerts()">Set up phone alerts</button>`)+
     (gm?sec('google','Google Meet','A Google Meet link for every call you say yes to.',gm.state,gm.body):'')+
+    (ib?sec('inboxes','Inboxes & domains','You buy on CheapInboxes, we set up the rest.',ib.state,ib.body):'')+
     (rb?sec('replybot','Reply bot','Answers the simple questions for you, with fixed answers.',rb.state,rb.body):'')+
     sec('status','Is everything running?','A quick health check of the system.',st?`<span class="pill ${st[0]}">${st[0]==='green'?'Yes':st[0]==='amber'?'Mostly':'Needs a look'}</span>`:'',statusBody)+
     sec('behind','Behind the scenes','Every trial by stage, every to-do and the waiting list.','',
@@ -1466,7 +1496,7 @@ async function trialsKick(view,force){
   if(view==='trials'||view==='trialsBoard')r=await loadHub(force);
   else if(view==='trial')r=await loadTrial(currentTrialId,force);
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
-  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null]);r=h&&h.ok===false?h:a;}   // Google: its own 5-minute cache, never every minute
+  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null]);r=h&&h.ok===false?h:a;}   // Google and CheapInboxes: their own 5-minute caches, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
   trialsRepaint(view,{soft:true});
   return r;
@@ -1483,7 +1513,7 @@ function trialsSettingsCtx(){
   let dark=false;try{dark=!!(document.body&&document.body.classList&&document.body.classList.contains('dark'));}catch(e){dark=false;}
   return {hub:tk.hub,hubErr:tk.hubErr,at:tk.hubAt,alerts:tk.alerts,alertsErr:tk.alertsErr,alertsAt:tk.alertsAt,filter:trialsAlertFilter,open:tk.setOpen,
     phone:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():'',dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:'',
-    google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,details:tk.detail};
+    google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,inboxes:typeof abSettingsCtx==='function'?abSettingsCtx():null,details:tk.detail};
 }
 /* #alerts and the bell open Settings with that section open and in view. */
 function openSettings(section){
@@ -1804,6 +1834,7 @@ function trialsCmdkActions(){
     {type:'Go to',label:'Is everything running?',icon:I.check||'',sub:'Settings › a quick health check',kw:'status health running machine heartbeat usage',run:()=>{closeCmdk();openSettings('status');}},
     {type:'Go to',label:'Google Meet',icon:I.calendar||'',sub:'Settings › a Meet link for every call',kw:'google meet video call link connect calendar',run:()=>{closeCmdk();openSettings('google');}},
     {type:'Go to',label:'Reply bot',icon:I.inquiry||'',sub:'Settings › what it answers for you',kw:'reply bot auto-reply automatic answers',run:()=>{closeCmdk();openSettings('replybot');}},
+    {type:'Go to',label:'Inboxes & domains',icon:I.inbox||'',sub:'Settings › your CheapInboxes account',kw:'inboxes domains cheapinboxes buy api key card',run:()=>{closeCmdk();openSettings('inboxes');}},
   ];
 }
 function trialsCmdkEntities(){
@@ -1825,6 +1856,7 @@ function trialsForget(){
   currentTrialId=null;trialTab='overview';tk.behindOpen=false;tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;
   try{inquiriesForget();}catch(e){}
   try{messagesForget();}catch(e){}
+  try{autobuyForget();}catch(e){}
   try{localStorage.removeItem(TK_SPARK_KEY);}catch(e){}
 }
 function trialsStartTimer(){if(tk.timer)return;tk.timer=setInterval(trialsTick,TK_REFRESH_MS);}

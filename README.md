@@ -24,6 +24,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `trials.js` | Trials (the list, one trial, Buy & paste, Behind the scenes) and Settings. Talks to the machine. |
 | `calendar.js`, `calendar.css` | The Calendar: requests waiting for your yes, the week, meetings, each confirmed call's Google Meet (see `email-distributor/docs/CALENDAR.md`). |
 | `messages.js` | Messages on every trial page (the whole conversation, the reply box, the reply-bot switch), Settings › Google Meet and Settings › Reply bot (see `email-distributor/docs/REPLYBOT-MEET.md`). Styles in `trials.css`. |
+| `autobuy.js` | Their domain and inboxes through CheapInboxes: the "what to buy" panel behind the big button, the "Inboxes & domain" card on a trial while it sets itself up, and Settings › Inboxes & domains (see `email-distributor/docs/AUTO-BUY.md`). Styles in `trials.css`. |
 | `trials.css` | Styles for the Trials screens, on top of the shell's CSS variables (light + dark). |
 | `inquiries.js` | Inquiries: paid-plan calls booked from the website — list, detail, status/notes, "Start a trial instead", the board strip. |
 | `push.js` | Phone alerts: the panel, turning Web Push on/off with the machine, the quiet re-subscribe after sign-in. |
@@ -35,6 +36,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `tests/simple.test.mjs` | Node tests for the simple hub: the four places and their badges, the one journey, "Needs you", the three questions and the one big button, Settings, deep links, plain words (a banned-word list), and no function name declared twice. |
 | `tests/calendar.test.mjs` | Node tests for the Calendar. |
 | `tests/messages.test.mjs` | Node tests for Messages (each kind of email, escaped; auto-reply labels; reply and bot posts), "Answer Sam's message", the Join Google Meet button and its fallback, Settings › Google Meet (states, the four actions, the return from Google) and Settings › Reply bot. |
+| `tests/autobuy.test.mjs` | Node tests for CheapInboxes: the big button and the "what to buy" panel (Copy, "Buy this one instead", "I've bought it — check now", one post per click), the card in every status (steps, current step, inboxes, the problem + "Check now", "Wrong domain? Undo"), the Buy & paste fallback with its pointer to Settings, Settings › Inboxes & domains (states, card on file, steps, Save / Test it / Forget, "This is for…" + Link it), plain words, and that nothing can place an order. |
 | `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and `sw.js` (run in a sandbox with a fake service-worker global). |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
 
@@ -78,19 +80,50 @@ sentence already does).
   waiting for an answer (`conversation.needsReply`: "Answer Sam's message" →
   the reply box under Messages) · a call whose time has passed ("Mark
   the call done", asks first) · a late booking ("Write to them about booking")
-  · "Buy the domain and inboxes" · anything else on the to-do list (not urgent:
+  · buying the domain and inboxes — with CheapInboxes set up, "Buy their domain
+  and 2 inboxes on CheapInboxes" (opens the "what to buy" panel), "See what
+  went wrong" when setting them up failed (→ the card), and nothing while it
+  sets itself up; without it, "Buy the domain and inboxes" (the Buy & paste
+  page) with "Set up CheapInboxes in Settings" under it · anything else on the to-do list (not urgent:
   "When you have a minute: …") · otherwise "Nothing — we'll tell you when
-  something needs you". Right under the questions: **Messages**. Below: the onboarding call card, the application (open
+  something needs you". Right under the questions: **Messages**. Below: the **Inboxes & domain** card (once bought), the onboarding call card, the application (open
   while it waits; once decided, one folded line), any other to-dos under "Also
   on your list", and **Behind the scenes**, folded, with everything technical.
 - **Settings** — named sections, each folds open and says its state in one
   word: **Alerts** (every alert, "Not seen" first, "Mark as seen"; `#alerts`
-  opens it), **Phone alerts**, **Google Meet**, **Reply bot**, **Is everything running?** (last check-in, last
+  opens it), **Phone alerts**, **Google Meet**, **Inboxes & domains**, **Reply bot**, **Is everything running?** (last check-in, last
   email sent, trials running, free extensions, alerts not seen, paid services
   used, setup still to finish), **Behind the scenes** (the old board: every
   to-do, all trials by stage, the waiting list, your own sending), **Advanced**
   (the full control panel — Mission Control — pages, opened signed-in in a new
   tab), **Light or dark**, **Your account** (log out).
+- **Inboxes & domain** (`autobuy.js`, `autobuy` on the trial detail —
+  `email-distributor/docs/AUTO-BUY.md`). The owner buys in his own
+  CheapInboxes account; the system never buys or spends anything — it finds
+  the purchase, matches it to the trial and sets up the rest. While a trial
+  waits for its domain (`ready_to_buy`) the big button opens a panel with
+  exactly what to buy: the domain and its price (up to 3 other free names,
+  folded, each "Buy this one instead" → `{action:'pick', domain}`), Google, the
+  two inboxes (first name, last name, email prefix, full address — each with
+  **Copy**), **Open CheapInboxes** (their order page, new tab), "After you buy,
+  we connect everything by ourselves — you'll get a message." and "I've
+  bought it — check now" (`{action:'recheck'}`). Once bought, the **Inboxes &
+  domain** card: the plain sentence, the steps with ticks and times (the
+  current one highlighted), each inbox (Being created / Created / Connected),
+  and when it failed the problem in plain words + **Check now**. "Wrong domain?
+  Undo" (`{action:'unlink'}`, asks first) until anything is connected. Every
+  post goes to `POST /api/mc/clients/{id}/autobuy`, one at a time (the button
+  is greyed out until the answer is in), and the card and the three questions
+  are redrawn from the answer's `autobuy`.
+  **Settings › Inboxes & domains** (`GET/POST /api/mc/cheapinboxes`, fetched
+  when Settings opens, at most every 5 minutes): Not set up · Connected as
+  {account} · Problem — {reason}; whether a card is on file ("Add a card in
+  your CheapInboxes account under Billing" when not); six numbered steps
+  (account → card → API key → paste it → **Save** → **Test it**); the key in a
+  password box (`saveKey`, cleared once saved, never shown back), **Test it**,
+  **Forget the key** (asks first); and purchases it couldn't match — "This is
+  for…" (the trials in the Setting-up step) + **Link it** (`{action:'link',
+  domain}`). Without CheapInboxes the Buy & paste page stays exactly as it was.
 - **Onboarding call** card (when `detail.onboardCall` exists — after Approve
   the machine sends one email asking them to book the call): its plain
   label, the five steps as ticks with times, "Book by {day}" (red when
@@ -378,7 +411,7 @@ Sign-in needs the real Supabase project.
 
 ```
 npm test          # node --test tests/*.test.mjs
-npm run check     # node --check trials.js, inquiries.js, push.js, sw.js
+npm run check     # node --check trials.js, inquiries.js, calendar.js, messages.js, autobuy.js, push.js, sw.js
 ```
 
 The tests load the shell's inline script, `trials.js`, `inquiries.js` and `push.js` into a tiny fake DOM

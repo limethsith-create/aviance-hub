@@ -480,3 +480,45 @@ export const calMeet = {
   // confirmed, a hostile link and a hostile reason
   hostile: calM({ id: 'mbad', company: 'Bad Co', person: 'Eve', start: '2026-10-01T14:00:00Z', status: 'confirmed', meetLink: 'javascript:alert(1)', meetError: '<img src=x onerror=alert(2)> went wrong' }),
 };
+
+/* ───────────── Their domain and inboxes through CheapInboxes (email-distributor docs/AUTO-BUY.md) ─────────────
+   The owner buys in his own CheapInboxes account; the system finds the purchase and sets up the rest — it never
+   buys anything. `autobuy` on the trial detail in each status, and GET /api/mc/cheapinboxes in each state. */
+const AB_STEPS = [['bought', 'You bought it'], ['domain', 'Domain live + spam protection set'], ['inboxes', '2 inboxes created'], ['connected', 'Connected to our system'], ['warmup', 'Warm-up started']];
+const AB_AT = ['2026-10-16T10:00:00Z', '2026-10-16T14:00:00Z', '2026-10-17T02:00:00Z', '2026-10-17T03:00:00Z', '2026-10-17T03:30:00Z'];
+const abSteps = (n) => AB_STEPS.map(([key, label], i) => ({ key, label, done: i < n, at: i < n ? AB_AT[i] : null }));
+/* What to buy (autobuy.buy): the listed alternatives include the chosen name again and a fourth one — the hub shows 3 others. */
+export const autobuyBuy = {
+  domain: 'getbrightdental.com', price: 9.99, provider: 'google',
+  alternatives: [{ domain: 'brightdentalhq.com', price: 9.99 }, { domain: 'getbrightdental.com', price: 9.99 }, { domain: 'trybrightdental.com', price: 10.49 }, { domain: 'brightdental.co', price: 8.99 }, { domain: 'fourth-name.com', price: 11.99 }],
+  mailboxes: [{ firstName: 'Raj', lastName: 'Patel', prefix: 'raj', email: 'raj@getbrightdental.com' }, { firstName: 'Raj', lastName: 'Patel', prefix: 'raj.patel', email: 'raj.patel@getbrightdental.com' }],
+  orderUrl: 'https://www.cheapinboxes.com/order?domain=getbrightdental.com&mailboxes=2',
+};
+const abOf = (o) => Object.assign({ status: 'not_set_up', buy: null, label: '', domain: null, steps: [], mailboxes: [], problem: null }, o);
+const abBoxes = (a, b) => [{ email: 'raj@getbrightdental.com', status: a }, { email: 'raj.patel@getbrightdental.com', status: b }];
+export const autobuyStates = {
+  not_set_up: abOf({}),
+  ready_to_buy: abOf({ status: 'ready_to_buy', buy: autobuyBuy, label: 'Buy getbrightdental.com and 2 inboxes on CheapInboxes', domain: 'getbrightdental.com', steps: abSteps(0) }),
+  provisioning: abOf({ status: 'provisioning', label: 'Setting up getbrightdental.com — about 48 hours', domain: 'getbrightdental.com', steps: abSteps(1), mailboxes: abBoxes('provisioning', 'provisioning') }),
+  connecting: abOf({ status: 'connecting', label: 'Connecting getbrightdental.com — nearly there', domain: 'getbrightdental.com', steps: abSteps(3), mailboxes: abBoxes('connected', 'active') }),
+  done: abOf({ status: 'done', label: 'getbrightdental.com and 2 inboxes are ready — warm-up has started', domain: 'getbrightdental.com', steps: abSteps(5), mailboxes: abBoxes('connected', 'connected') }),
+  failed: abOf({ status: 'failed', label: 'Setting up getbrightdental.com stopped', domain: 'getbrightdental.com', steps: abSteps(2), mailboxes: abBoxes('provisioning', 'provisioning'), problem: 'CheapInboxes could not create the inboxes because the card was declined. Update the card in your CheapInboxes account under Billing, then press Check now' }),
+};
+/* Bright Dental (state awaiting_purchase, its old "buy and paste" to-do still on the row) with CheapInboxes in one status;
+   the row's plain sentence is the machine's for that status. */
+export const brightAb = (status, simple) => ({
+  row: withSimple(bright, Object.assign({ step: 'setting_up', label: 'Setting up their inboxes (about 2 days)', next: 'Nothing for you: we connect the inboxes by ourselves', needsYou: false, since: '2026-10-16T22:00:00Z' },
+    status === 'ready_to_buy' ? { label: 'Setting up their emails (about 2 weeks)', next: 'Buy their domain and 2 inboxes on CheapInboxes', needsYou: true }
+      : status === 'failed' ? { label: 'Setting up their inboxes stopped', next: 'Update the card on CheapInboxes, then check again', needsYou: true }
+      : status === 'not_set_up' ? { label: 'Setting up their emails (about 2 weeks)', next: 'Buy the domain and 2 inboxes, then paste the logins', needsYou: true } : {}, simple)),
+  autobuy: autobuyStates[status],
+});
+const ciOf = (o) => Object.assign({ status: 'connected', account: 'Aviance Ltd', hasPaymentMethod: true, webhook: 'registered', unmatched: [] }, o);
+export const cheapStates = {
+  not_set_up: ciOf({ status: 'not_set_up', account: null, hasPaymentMethod: null, webhook: 'missing' }),
+  connected: ciOf({}),
+  noCard: ciOf({ hasPaymentMethod: false }),
+  noUpdates: ciOf({ webhook: 'missing' }),
+  broken: ciOf({ status: 'broken', problem: 'CheapInboxes turned the key down — it may have been deleted.' }),
+  unmatched: ciOf({ unmatched: [{ domain: 'brightdental-mail.com', mailboxes: 2, boughtAt: '2026-10-16T10:00:00Z' }, { domain: 'odd-name.io', mailboxes: 1, boughtAt: null }] }),
+};
