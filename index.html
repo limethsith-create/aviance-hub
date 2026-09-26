@@ -410,7 +410,7 @@ const views={
   calendar:{fn:()=>viewCalendar(),title:'Calendar',sub:'Every call, in Sri Lanka time'},
   inquiries:{fn:()=>viewInquiries(),title:'Inquiries',sub:'People who asked about a paid plan'},
   inquiry:{fn:()=>viewInquiry(),title:'Inquiry',sub:'',back:()=>render('inquiries')},
-  settings:{fn:()=>viewSettings(),title:'Settings',sub:'Alerts, Google Meet, the reply bot, and how everything is running'},
+  settings:{fn:()=>viewSettings(),title:'Settings',sub:'Alerts, Google Meet, warm-up helpers, the reply bot, and how everything is running'},
   trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every trial by stage, every to-do, the waiting list',back:()=>render('settings')},
 };
 function render(v){
@@ -429,7 +429,8 @@ function render(v){
 /* The Back button in the top bar (pages inside one of the four places). */
 function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('trials');}
 
-/* ---- Deep links: #trial/{id}, #inquiry/{id}, #calendar/{meetingId}, #alerts (Settings › Alerts), #settings, #inquiries, #calendar, #trials (what a phone alert opens),
+/* ---- Deep links: #trial/{id}, #inquiry/{id}, #calendar/{meetingId}, #alerts (Settings › Alerts), #settings, #settings/warmup (Settings › Warm-up),
+   #inquiries, #calendar, #trials (what a phone alert opens),
    and #settings/google?connected=1 | ?error=… (where Google sends the owner back after "Connect Google" → Settings › Google Meet with a message) ----
    Honoured on load and on hashchange; when signed out, kept until sign-in. */
 function parseDeepLink(h){
@@ -437,6 +438,7 @@ function parseDeepLink(h){
   if(h==='trials')return {view:'trials'};
   if(h==='alerts')return {view:'settings',section:'alerts'};
   if(h==='settings')return {view:'settings'};
+  if(h==='settings/warmup')return {view:'settings',section:'warmup'};
   if(h==='inquiries')return {view:'inquiries'};
   if(h==='calendar')return {view:'calendar'};
   const g=h.match(/^settings\/google\/?(?:\?([^#]*))?$/);
@@ -638,6 +640,7 @@ boot();
 <script src="calendar.js"></script>
 <script src="messages.js"></script>
 <script src="autobuy.js"></script>
+<script src="warmup.js"></script>
 <script src="push.js"></script>
 </body>
 </html>

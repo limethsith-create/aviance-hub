@@ -44,7 +44,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 /* ───────────── load the shell, then the section scripts ───────────── */
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
-const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'push.js'];
+const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'push.js'];
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 for (const f of FILES) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
@@ -329,11 +329,11 @@ test('buttons say exactly what happens', () => {
 });
 
 /* ───────────── 7. Settings: everything else, as named sections ───────────── */
-test('Settings: Alerts, Phone alerts, Google Meet, Inboxes & domains, Reply bot, Is everything running?, Behind the scenes, Advanced, Light or dark, Your account — each folds open, each says its state in one word', () => {
+test('Settings: Alerts, Phone alerts, Google Meet, Inboxes & domains, Warm-up, Reply bot, Is everything running?, Behind the scenes, Advanced, Light or dark, Your account — each folds open, each says its state in one word', () => {
   const ctx = { hub: fullHub, at: Date.now(), alerts: fullHub.alerts, alertsAt: Date.now(), filter: 'open', open: {}, phone: '', dark: false, email: 'owner@example.com', now: NOW };
   const out = renderSettings(ctx);
-  assert.deepEqual([...out.matchAll(/<span class="tk-set-title">([^<]+)<\/span>/g)].map((m) => m[1]), ['Alerts', 'Phone alerts', 'Google Meet', 'Inboxes &amp; domains', 'Reply bot', 'Is everything running?', 'Behind the scenes', 'Advanced', 'Light or dark', 'Your account']);
-  assert.equal(count(out, /<details class="tk-set" id="tkSet-[a-z]+" ontoggle=/g), 10, 'all folded to begin with');
+  assert.deepEqual([...out.matchAll(/<span class="tk-set-title">([^<]+)<\/span>/g)].map((m) => m[1]), ['Alerts', 'Phone alerts', 'Google Meet', 'Inboxes &amp; domains', 'Warm-up', 'Reply bot', 'Is everything running?', 'Behind the scenes', 'Advanced', 'Light or dark', 'Your account']);
+  assert.equal(count(out, /<details class="tk-set" id="tkSet-[a-z]+" ontoggle=/g), 11, 'all folded to begin with');
   assert.ok(between(out, 'tkSet-alerts', 'tkSet-phone').includes('<span class="pill amber">2 not seen</span>'));
   assert.ok(between(out, 'tkSet-phone', 'tkSet-google').includes('<span class="pill grey">Off</span>') && between(renderSettings(Object.assign({}, ctx, { phone: 'On' })), 'tkSet-phone', 'tkSet-google').includes('<span class="pill green">On</span>'));
   assert.ok(between(out, 'tkSet-status', 'tkSet-behind').includes('<span class="pill green">Yes</span>'));

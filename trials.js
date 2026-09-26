@@ -5,7 +5,8 @@
    machine does all the work; this file only shows and steers it through the
    contract in email-distributor/docs/HUB-API.md (incl. "v2 additions") and
    docs/ONBOARD-CALL.md (row.simple on the board, onboardCall on a trial) and docs/REPLYBOT-MEET.md
-   (`conversation` on a trial — drawn by messages.js as the Messages section).
+   (`conversation` on a trial — drawn by messages.js as the Messages section), docs/AUTO-BUY.md (`autobuy`,
+   autobuy.js) and docs/WARMUP-HUB.md (`warmup` on a trial and Settings › Warm-up — warmup.js).
 
    Loaded by index.html after the shell script, so it can use the shell's globals:
      esc, emptyState, toast, openModal, closeModal, render, renderNav,
@@ -47,7 +48,9 @@ const TK_TABS=[['overview','Overview'],['growth','Growth'],['systems','Parts'],[
 const TK_TAB_ALIAS={numbers:'overview',setup:'deliverability',promises:'comingup',upcoming:'comingup',reports:'comingup'};
 const TK_TRIAL_VIEWS=['trials','trialsBoard','trial','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
 /* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
-const TK_SETTINGS=['alerts','phone','google','inboxes','replybot','status','behind','advanced','look','account'];
+const TK_SETTINGS=['alerts','phone','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
+/* A to-do that opens a Settings section ({type:'view', view:'settings', section}): the button's words. */
+const TK_SETTINGS_NAMES={alerts:'Alerts',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot'};
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
@@ -114,7 +117,8 @@ function tkFindRow(id){if(!id)return null;const rows=tkAllRows(tk.hub);let r=row
 function tkClientName(id){const r=tkFindRow(id);return r&&r.name?r.name:(id||'')}
 function tkSortedStages(stages){return (stages||[]).slice().sort((a,b)=>{const ia=TK_STAGE_ORDER.indexOf(a.key),ib=TK_STAGE_ORDER.indexOf(b.key);return (ia<0?99:ia)-(ib<0?99:ib)})}
 function tkSortedSystems(systems){return (systems||[]).slice().sort((a,b)=>{const ia=TK_SYSTEM_ORDER.indexOf(a.key),ib=TK_SYSTEM_ORDER.indexOf(b.key);return (ia<0?99:ia)-(ib<0?99:ib)})}
-function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return 'Do it';case 'view':return a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open the email wording':a.view==='inquiry'?'Open the inquiry':a.view==='calendar'?'Open the Calendar':a.section==='application'?'Read the application':'Open the trial';case 'mc':return 'Open the full control panel';case 'link':return 'Open link';default:return ''}}
+function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return 'Do it';case 'view':return a.view==='settings'?tkSettingsLabel(a.section):a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open the email wording':a.view==='inquiry'?'Open the inquiry':a.view==='calendar'?'Open the Calendar':a.section==='application'?'Read the application':'Open the trial';case 'mc':return 'Open the full control panel';case 'link':return 'Open link';default:return ''}}
+function tkSettingsLabel(section){const n=TK_SETTINGS_NAMES[String(section||'')];return n?'Open Settings › '+n:'Open Settings'}
 function tkFindTodo(id){const all=[];if(tk.hub)(tk.hub.todos||[]).forEach(t=>all.push(t));tkAllRows(tk.hub).forEach(r=>(r.todo||[]).forEach(t=>all.push(Object.assign({clientId:r.id,clientName:r.name},t))));Object.keys(tk.detail).forEach(k=>{const d=tk.detail[k];if(d&&d.row)(d.row.todo||[]).forEach(t=>all.push(Object.assign({clientId:d.row.id,clientName:d.row.name},t)))});return all.find(t=>t.id===id)||null}
 function tkTabKey(tab){tab=TK_TAB_ALIAS[tab]||tab;return tab}
 
@@ -553,6 +557,27 @@ function tkAutobuy(d){
   return {status,buy,count:n||2,domain:String((buy&&buy.domain)||a.domain||'').trim(),label:String(a.label||'').trim(),problem:String(a.problem||'').trim(),
     steps:list(a.steps),mailboxes:list(a.mailboxes),toBuy:status==='ready_to_buy'&&!!buy,handled:status==='ready_to_buy'?!!buy:!!status&&status!=='not_set_up'};
 }
+/* Their warm-up (email-distributor docs/WARMUP-HUB.md): `warmup` on the trial detail — null until their inboxes are
+   connected. → null or {status (waiting_for_helpers|warming|ready|paused), label, day, of (about 14), readyBy, inboxRate,
+   inboxes, problem, missing}. warmup.js draws the "Warm-up" card; while it waits for helpers the big button opens
+   Settings › Warm-up (where the owner adds the free helper accounts the circle needs). */
+function tkTrialWarmup(d){
+  const w=d&&d.warmup&&typeof d.warmup==='object'?d.warmup:null;if(!w)return null;
+  const of=tkNorm(w.of),miss=tkNorm(w.missing);
+  return {status:String(w.status||'').toLowerCase(),label:String(w.label||'').trim(),day:tkNorm(w.day),of:of!=null&&of>0?of:14,
+    readyBy:w.readyBy?String(w.readyBy):null,inboxRate:tkNorm(w.inboxRate),problem:String(w.problem||'').trim(),missing:miss!=null&&miss>0?Math.round(miss):null,
+    inboxes:Array.isArray(w.inboxes)?w.inboxes.filter(x=>x&&typeof x==='object'&&String(x.email||'').trim()):[]};
+}
+function tkIsWarmupTodo(t){const a=(t&&t.action)||{};return a.type==='view'&&a.view==='settings'&&a.section==='warmup'}
+/* How many more helpers the circle needs: the trial's own number, else Settings › Warm-up's answer (warmup.js), else the
+   words of the to-do or the next step ("Add 2 warm-up helpers"). null = not known ("Add warm-up helpers"). */
+function tkWarmupMissing(d){
+  const w=tkTrialWarmup(d);if(w&&w.missing)return w.missing;
+  const c=typeof wuCircleNow==='function'?wuCircleNow():null;if(c&&!c.ready&&c.missing>0)return c.missing;
+  const row=(d&&d.row)||{};const t=tkTodosSorted(row).find(tkIsWarmupTodo);
+  for(const x of [t&&t.text,tkSimple(row).next]){const m=/\badd\s+(\d+)\s+(?:more\s+)?(?:warm-?up\s+)?helpers?\b/i.exec(String(x||''));if(m&&+m[1]>0)return +m[1];}
+  return null;
+}
 /* tkSimple for the top of a trial page. The conversation there is fresher than the list's row: a row that still
    says "they wrote" when the conversation says answered (he just replied, or the reply bot did; the list catches
    up a moment later) asks for nothing — anything else still waiting has its own button (tkPrimaryAction). */
@@ -562,6 +587,9 @@ function tkPageSimple(d){
   // the same for the purchase: the page's `autobuy` says it is bought (CheapInboxes sets it up) while the row still says "Buy…"
   const ab=tkAutobuy(d);
   if(ab&&ab.handled&&!ab.toBuy&&ab.status!=='failed'&&s.needsYou&&/^buy\b/i.test(s.next.trim()))return Object.assign({},s,{needsYou:false,next:''});
+  // and the warm-up: the page's `warmup` no longer waits for helpers (he just added them) while the row still asks for them
+  const wu=tkTrialWarmup(d);
+  if(wu&&wu.status!=='waiting_for_helpers'&&s.needsYou&&/\bwarm-?up helpers?\b/i.test(s.next))return Object.assign({},s,{needsYou:false,next:''});
   return s;
 }
 /* Everything the simple screens show about one row — row.simple when the machine sends it, else a fallback. */
@@ -678,13 +706,14 @@ function tkTodoPrimary(t,id){
   if(a.type==='view'&&a.view==='purchase')return {label:'Buy the domain and inboxes',run:`openTrialPurchase(${tkAttr(id)})`};
   if(a.type==='view'&&a.view==='sequence')return {label:'Open the email wording',run:`trialsSetTab(${tkAttr('copy')});tkGoTo(${tkAttr('behind')})`};
   if(a.type==='view'&&a.view==='inquiry')return {label:'Open the inquiry',run:`trialsTodoAction(${tkAttr(tid)})`};
+  if(a.type==='view'&&a.view==='settings')return {label:tkSettingsLabel(a.section),run:`openSettings(${tkAttr(a.section||'')})`};
   if(a.type==='view'&&tkTodoIsSelf(t))return {label:'See the details',run:`tkGoTo(${tkAttr('behind')})`};
   return {label:a.label||({mc:'Open the full control panel',link:'Open the link'}[a.type])||'Do it now',run:`trialsTodoAction(${tkAttr(tid)})`};
 }
 /* The single most important thing the owner can do on this trial, in this order:
    a new application → a call time they asked for → their message ("Answer Sam's message") → a call to mark done → a late booking →
-   buying the domain and inboxes (on CheapInboxes when it is set up — autobuy.js; else the Buy & paste page) → anything else on
-   the to-do list → nothing. While CheapInboxes sets them up, nothing is asked (the "Inboxes & domain" card shows how far it is).
+   buying the domain and inboxes (on CheapInboxes when it is set up — autobuy.js; else the Buy & paste page) → warm-up helpers
+   when their warm-up waits for them (Settings › Warm-up — warmup.js) → anything else on the to-do list → nothing. While CheapInboxes sets them up, nothing is asked (the "Inboxes & domain" card shows how far it is).
    → {kind, label (the button, or the "nothing" sentence), say (one sentence above it), run, todoId}. */
 function tkPrimaryAction(d,meta){
   d=d||{};meta=meta||{};const row=d.row||{};const id=row.id;const s=tkPageSimple(d);
@@ -712,6 +741,10 @@ function tkPrimaryAction(d,meta){
   if(ab&&ab.toBuy)return A('autobuy','Buy their domain and '+inb+' on CheapInboxes','Buy '+ab.domain+' and '+inb+' in your CheapInboxes account. We set up everything after that by ourselves.',`abOpenBuy(${tkAttr(id)})`,buy);
   if(ab&&ab.status==='failed')return A('autobuyProblem','See what went wrong',ab.problem?tkSentence(ab.problem):'Setting up their inboxes ran into a problem.',`tkGoTo(${tkAttr('autobuy')})`,buy);
   if(!(ab&&ab.handled)&&(buy||row.state==='awaiting_purchase'))return Object.assign(A('buy','Buy the domain and inboxes',say(buy&&buy.text?tkYouNeedTo(buy.text):'You need to buy their domain and inboxes, then paste the logins.'),`openTrialPurchase(${tkAttr(id)})`,buy),{hint:!!ab&&ab.status==='not_set_up'});
+  // warm-up (warmup.js): their inboxes wait until the warm-up circle has enough members — free helper accounts he makes once
+  const wu=tkTrialWarmup(d);
+  if(wu&&wu.status==='waiting_for_helpers'){const n=tkWarmupMissing(d);const more=n?n+' more helper'+(n===1?'':'s'):'more helpers';
+    return A('warmupHelpers',n?'Add '+n+' warm-up helper'+(n===1?'':'s'):'Add warm-up helpers',"Their inboxes can't start warming up until the warm-up circle has "+more+'. Helpers are free email accounts you make once — they help every client after this.',`openSettings(${tkAttr('warmup')})`,todos.find(tkIsWarmupTodo)||null);}
   const rest=todos.find(t=>!/^(review:|onboard-)/.test(String(t.id||''))&&!(t.action&&t.action.section==='application')&&!(ab&&ab.handled&&t.action&&t.action.view==='purchase'));
   if(rest){const m=tkTodoPrimary(rest,id);const txt=tkSentence(rest.text||'');const verb=TK_VERBS.includes(txt.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,''));
     return A('todo',m.label,rest.urgent||s.needsYou?txt:'When you have a minute: '+(verb?txt.charAt(0).toLowerCase()+txt.slice(1):txt),m.run,rest);}
@@ -735,7 +768,7 @@ function renderPrimary(act){
 }
 function renderTrialTop(d,meta,act){
   d=d||{};meta=meta||{};const row=d.row||{};const j=tkStep(row);act=act||tkPrimaryAction(d,meta);
-  let s=tkPageSimple(d);if(act.kind==='reply'&&!s.needsYou)s=Object.assign({},s,{needsYou:true});   // they wrote: his turn, even if the list has not caught up yet
+  let s=tkPageSimple(d);if((act.kind==='reply'||act.kind==='warmupHelpers')&&!s.needsYou)s=Object.assign({},s,{needsYou:true});   // they wrote / the warm-up waits for helpers: his turn, even if the list has not caught up yet
   const who=[s.person?`<b>${esc(s.person)}</b>`:'',row.contactEmail?`<a href="mailto:${esc(row.contactEmail)}">${esc(row.contactEmail)}</a>`:'',row.website?tkLink(row.website):''].filter(Boolean).join(' · ');
   const say=j.notTaken&&/^declined\.?$/i.test(s.label.trim())?'':s.label;const day=tkDayText(j,s.label);
   return `<section class="card tk-top${s.needsYou&&act.kind!=='none'?' needs':''}" id="tkTop">
@@ -1126,19 +1159,20 @@ function renderTab(d,tab,ctx){
   }
 }
 /* One trial: the three questions, then Messages (messages.js: the whole conversation, the reply box and the
-   reply-bot switch), their inboxes being set up (autobuy.js), the onboarding call, the application, anything else on the to-do list (never the one
+   reply-bot switch), their inboxes being set up (autobuy.js), their warm-up (warmup.js), the onboarding call, the application, anything else on the to-do list (never the one
    already asked for at the top, never the call's or the application's own — those have their own place),
    then everything technical collapsed under "Behind the scenes". */
 function renderTrialDetail(d,tab,meta){
   d=d||{};meta=meta||{};tab=tkTabKey(tab);tab=tkTabsFor(d).some(t=>t[0]===tab)?tab:'overview';
   const row=d.row||{};const act=tkPrimaryAction(d,meta);const ab=tkAutobuy(d);
   // the purchase to-do is CheapInboxes' business once it handles this trial (never "Buy & paste" under the big button)
-  const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application')||!!(ab&&ab.handled&&t&&t.action&&t.action.view==='purchase');};
+  const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application')||!!(ab&&ab.handled&&t&&t.action&&t.action.view==='purchase')||(act.kind==='warmupHelpers'&&tkIsWarmupTodo(t));};
   const todos=tkTodosSorted(row).filter(t=>!mine(t));
   return renderTrialTop(d,meta,act)+
     (typeof renderMessages==='function'?`<div id="tkMsgHost">${renderMessages(d,meta)}</div>`:'')+
     (act.kind!=='calendar'&&typeof calTrialAsk==='function'?calTrialAsk(row.id):'')+   // calendar.js: a call time waiting for the owner's yes
     (typeof renderAutobuyCard==='function'?`<div id="tkAbHost">${renderAutobuyCard(d,{primary:act.kind,now:meta.now})}</div>`:'')+   // autobuy.js: their inboxes being set up
+    (typeof renderWarmupCard==='function'?`<div id="tkWuHost">${renderWarmupCard(d,{primary:act.kind,now:meta.now})}</div>`:'')+   // warmup.js: their warm-up
     (d.onboardCall&&typeof d.onboardCall==='object'?`<div id="tkOcHost">${renderOnboardCall(d.onboardCall,row,meta)}</div>`:'')+
     renderApplicationBlock(d,meta)+
     (todos.length?renderTodos(todos,{title:'Also on your list',hideClient:true,noCount:true,now:meta.now}):'')+
@@ -1407,9 +1441,9 @@ function renderAlerts(alerts,filter,meta){
 /* -- Settings: everything that is not Trials, Calendar or Inquiries, as named sections --
    Each is a <details> with its name and a one-word state in the summary, so the page reads as a short
    list. ctx = {hub, hubErr, at, alerts, alertsErr, alertsAt, filter, open:{alerts:true…}, phone:'On'|'',
-   dark, email, now, google (messages.js googleSettingsCtx), inboxes (autobuy.js abSettingsCtx), details}. Pure: the host
-   (trialsHostHTML) reads the DOM and caches. Google Meet and Reply bot are drawn by messages.js, Inboxes & domains by
-   autobuy.js (each left out if its file is not loaded). */
+   dark, email, now, google (messages.js googleSettingsCtx), inboxes (autobuy.js abSettingsCtx), warmup (warmup.js
+   wuSettingsCtx), details}. Pure: the host (trialsHostHTML) reads the DOM and caches. Google Meet and Reply bot are drawn
+   by messages.js, Inboxes & domains by autobuy.js, Warm-up by warmup.js (each left out if its file is not loaded). */
 function renderSettings(ctx){
   ctx=ctx||{};const open=ctx.open||{};const hub=ctx.hub||null;const machine=(hub&&hub.machine)||{};
   const alerts=Array.isArray(ctx.alerts)?ctx.alerts:null;
@@ -1422,12 +1456,14 @@ function renderSettings(ctx){
   const gm=typeof renderGoogleMeetSet==='function'?renderGoogleMeetSet(ctx.google||{}):null;
   const rb=typeof renderReplyBotSet==='function'?renderReplyBotSet({hub,details:ctx.details}):null;
   const ib=typeof renderAutobuySet==='function'?renderAutobuySet(ctx.inboxes||{}):null;
+  const wu=typeof renderWarmupSet==='function'?renderWarmupSet(ctx.warmup||{}):null;
   return `<div class="tk-sets">`+
     sec('alerts','Alerts','Messages from the system about your trials.',unseen==null?'':unseen?`<span class="pill amber">${tkNum(unseen)} not seen</span>`:'<span class="pill green">All seen</span>',alertsBody)+
     sec('phone','Phone alerts','Get a message on your phone when something needs you.',ctx.phone==='On'?'<span class="pill green">On</span>':'<span class="pill grey">Off</span>',
       `<p class="tk-set-text">${ctx.phone==='On'?'Phone alerts are on for this device.':'Phone alerts are off on this device.'} On an iPhone, add the hub to your Home Screen first; the setup shows you how.</p><button type="button" class="btn" onclick="openPhoneAlerts()">Set up phone alerts</button>`)+
     (gm?sec('google','Google Meet','A Google Meet link for every call you say yes to.',gm.state,gm.body):'')+
     (ib?sec('inboxes','Inboxes & domains','You buy on CheapInboxes, we set up the rest.',ib.state,ib.body):'')+
+    (wu?sec('warmup','Warm-up','Free helper email accounts that warm up new inboxes.',wu.state,wu.body):'')+
     (rb?sec('replybot','Reply bot','Answers the simple questions for you, with fixed answers.',rb.state,rb.body):'')+
     sec('status','Is everything running?','A quick health check of the system.',st?`<span class="pill ${st[0]}">${st[0]==='green'?'Yes':st[0]==='amber'?'Mostly':'Needs a look'}</span>`:'',statusBody)+
     sec('behind','Behind the scenes','Every trial by stage, every to-do and the waiting list.','',
@@ -1496,7 +1532,7 @@ async function trialsKick(view,force){
   if(view==='trials'||view==='trialsBoard')r=await loadHub(force);
   else if(view==='trial')r=await loadTrial(currentTrialId,force);
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
-  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null]);r=h&&h.ok===false?h:a;}   // Google and CheapInboxes: their own 5-minute caches, never every minute
+  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes and the warm-up circle: their own 5-minute caches, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
   trialsRepaint(view,{soft:true});
   return r;
@@ -1513,9 +1549,10 @@ function trialsSettingsCtx(){
   let dark=false;try{dark=!!(document.body&&document.body.classList&&document.body.classList.contains('dark'));}catch(e){dark=false;}
   return {hub:tk.hub,hubErr:tk.hubErr,at:tk.hubAt,alerts:tk.alerts,alertsErr:tk.alertsErr,alertsAt:tk.alertsAt,filter:trialsAlertFilter,open:tk.setOpen,
     phone:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():'',dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:'',
-    google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,inboxes:typeof abSettingsCtx==='function'?abSettingsCtx():null,details:tk.detail};
+    google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,inboxes:typeof abSettingsCtx==='function'?abSettingsCtx():null,
+    warmup:typeof wuSettingsCtx==='function'?wuSettingsCtx():null,details:tk.detail};
 }
-/* #alerts and the bell open Settings with that section open and in view. */
+/* #alerts, #settings/warmup, the bell and to-dos ({view:'settings', section}) open Settings with that section open and in view. */
 function openSettings(section){
   if(section&&TK_SETTINGS.includes(section)){tk.setOpen[section]=true;tk.setScroll=section;}
   render('settings');
@@ -1630,6 +1667,7 @@ function tkOpenTodoTarget(t){
   const a=(t&&t.action)||{};
   if(a.type==='view'&&a.view==='inquiry'){if(a.inquiryId)openInquiry(a.inquiryId);else render('inquiries');return;}
   if(a.type==='view'&&a.view==='calendar'){if(typeof openCalendar==='function')openCalendar(a.meetingId!=null&&a.meetingId!==''?String(a.meetingId):null);else render('calendar');return;}   // meeting-request:{id}
+  if(a.type==='view'&&a.view==='settings'){openSettings(a.section!=null&&a.section!==''?String(a.section):null);return;}   // e.g. Settings › Warm-up, Settings › Inboxes & domains
   const cid=a.clientId||t.clientId;if(!cid){render('trials');return;}
   if(a.type==='view'&&a.view==='purchase')openTrialPurchase(cid);
   else if(a.type==='view'&&a.view==='sequence')openTrial(cid,'copy');
@@ -1835,6 +1873,7 @@ function trialsCmdkActions(){
     {type:'Go to',label:'Google Meet',icon:I.calendar||'',sub:'Settings › a Meet link for every call',kw:'google meet video call link connect calendar',run:()=>{closeCmdk();openSettings('google');}},
     {type:'Go to',label:'Reply bot',icon:I.inquiry||'',sub:'Settings › what it answers for you',kw:'reply bot auto-reply automatic answers',run:()=>{closeCmdk();openSettings('replybot');}},
     {type:'Go to',label:'Inboxes & domains',icon:I.inbox||'',sub:'Settings › your CheapInboxes account',kw:'inboxes domains cheapinboxes buy api key card',run:()=>{closeCmdk();openSettings('inboxes');}},
+    {type:'Go to',label:'Warm-up helpers',icon:I.sun||'',sub:'Settings › Warm-up',kw:'warm-up warmup helpers circle gmail yahoo aol icloud gmx yandex app password',run:()=>{closeCmdk();openSettings('warmup');}},
   ];
 }
 function trialsCmdkEntities(){
@@ -1857,6 +1896,7 @@ function trialsForget(){
   try{inquiriesForget();}catch(e){}
   try{messagesForget();}catch(e){}
   try{autobuyForget();}catch(e){}
+  try{warmupForget();}catch(e){}
   try{localStorage.removeItem(TK_SPARK_KEY);}catch(e){}
 }
 function trialsStartTimer(){if(tk.timer)return;tk.timer=setInterval(trialsTick,TK_REFRESH_MS);}

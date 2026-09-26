@@ -522,3 +522,48 @@ export const cheapStates = {
   broken: ciOf({ status: 'broken', problem: 'CheapInboxes turned the key down — it may have been deleted.' }),
   unmatched: ciOf({ unmatched: [{ domain: 'brightdental-mail.com', mailboxes: 2, boughtAt: '2026-10-16T10:00:00Z' }, { domain: 'odd-name.io', mailboxes: 1, boughtAt: null }] }),
 };
+
+/* ───── Warm-up (email-distributor docs/WARMUP-HUB.md) ─────
+   GET /api/mc/warmup (the circle, the helpers, the kinds of helper account with their steps) and `warmup` on a trial.
+   The system never creates accounts: the owner makes each helper once; the circle needs 8 members. */
+export const warmupProviders = [
+  { key: 'google', label: 'Gmail', steps: ['Make a new Gmail account.', 'Turn on 2-Step Verification in its Google account.', 'Open myaccount.google.com/apppasswords and make an app password.', 'Paste the address and the 16-letter app password below.'], note: 'Use the app password, not the normal Gmail password.', passwordLabel: '16-letter app password' },
+  { key: 'yahoo', label: 'Yahoo', steps: ['Make a new Yahoo account.', 'Open Account security and press Generate app password.', 'Paste the address and the app password below.'], note: 'Yahoo no longer lets apps use the normal password.', passwordLabel: 'app password' },
+  { key: 'aol', label: 'AOL', steps: ['Make a new AOL account.', 'Open Account security and press Generate app password.', 'Paste the address and the app password below.'], note: '', passwordLabel: 'app password' },
+  { key: 'icloud', label: 'iCloud', steps: ['Make an Apple Account with an @icloud.com address.', 'Turn on two-factor authentication.', 'Open account.apple.com › Sign-In and Security › App-Specific Passwords and make one.', 'Paste the address and the app-specific password below.'], note: '', passwordLabel: 'app-specific password' },
+  { key: 'gmx', label: 'GMX', steps: ['Make a gmx.com account.', 'In GMX open Settings › POP3 & IMAP and switch access on.', 'Paste the address and the password below.'], note: 'GMX switches that setting off after a long quiet spell; the circle checks in every 30 minutes, which keeps it on.', passwordLabel: 'password' },
+  { key: 'webde', label: 'WEB.DE', steps: ['Make a web.de account.', 'Open Settings › POP3/IMAP and switch it on.', 'Paste the address and the password below.'], note: '', passwordLabel: 'password' },
+  { key: 'yandex', label: 'Yandex', steps: ['Make a Yandex account (it asks for a phone number).', 'Open Settings › Email clients and switch on both options.', 'Open id.yandex.com › Security › App passwords and make one for Mail.', 'Paste the address and the app password below.'], note: '', passwordLabel: 'app password' },
+];
+const wuHelper = (email, provider, providerLabel, health, problem) => ({ email, provider, providerLabel, health, lastOkAt: health === 'ok' ? '2026-10-17T10:00:00Z' : null, problem: problem || null, sentToday: health === 'ok' ? 3 : 0 });
+export const warmupHelpersList = [
+  wuHelper('mia.helper@gmail.com', 'google', 'Gmail', 'ok'),
+  wuHelper('sun.helper@yahoo.com', 'yahoo', 'Yahoo Mail', 'new'),
+  wuHelper('old.helper@aol.com', 'aol', 'AOL Mail', 'failing', 'AOL said the app password is wrong — make a new one under Account security.'),
+  wuHelper('rest.helper@gmx.com', 'gmx', 'GMX', 'disabled'),
+];
+const wuCircleOf = (o) => Object.assign({ members: 6, helpers: 3, clientInboxes: 1, avianceInboxes: 2, min: 8, ready: false, missing: 2, label: '6 of 8 in the warm-up circle — add 2 more helpers' }, o);
+export const warmupStates = {
+  short: { circle: wuCircleOf({}), helpers: warmupHelpersList, providers: warmupProviders },
+  ready: { circle: wuCircleOf({ members: 9, helpers: 6, ready: true, missing: 0, label: '9 in the warm-up circle — enough for new inboxes' }), helpers: warmupHelpersList, providers: warmupProviders },
+  empty: { circle: wuCircleOf({ members: 3, helpers: 0, missing: 5, label: '3 of 8 in the warm-up circle — add 5 more helpers' }), helpers: [], providers: warmupProviders },
+  oneShort: { circle: wuCircleOf({ members: 7, helpers: 4, missing: 1, label: null }), helpers: warmupHelpersList, providers: warmupProviders },
+  // an older system: no `circle` and no `providers` — its members list, minPool and its own health words
+  older: { members: [1, 2, 3, 4, 5].map((i) => ({ email: 'm' + i + '@x.com' })), minPool: 8, helpers: [{ email: 'a@yahoo.com', provider: 'yahoo', health: 'auth_failed', enabled: '1' }, { email: 'b@gmail.com', provider: 'google', health: 'ok', enabled: '0' }], presets: [] },
+};
+/* `warmup` on the trial detail, in each status (Gale Roofing's two inboxes). */
+const galeBox = (email, day, rate, ready) => ({ email, day, sentToday: day ? 8 : 0, inboxRate7d: rate, ready: !!ready });
+export const galeWarmup = {
+  warming: { status: 'warming', label: 'Warming up — day 5 of about 14 · 96% reach the inbox', day: 5, of: 14, readyBy: '2026-10-26', inboxRate: 0.96, inboxes: [galeBox('mia@galeroofing-mail.com', 5, 0.96), galeBox('hello@galeroofing-mail.com', 4, null)], problem: null },
+  waiting: { status: 'waiting_for_helpers', label: 'Waiting for warm-up helpers — 6 of 8 in the circle', day: 0, of: 14, readyBy: null, inboxRate: null, inboxes: [galeBox('mia@galeroofing-mail.com', 0, null), galeBox('hello@galeroofing-mail.com', 0, null)], problem: null },
+  ready: { status: 'ready', label: 'Warm-up done — ready for Day 1', day: 14, of: 14, readyBy: null, inboxRate: 0.95, inboxes: [galeBox('mia@galeroofing-mail.com', 14, 0.95, true), galeBox('hello@galeroofing-mail.com', 14, 0.94, true)], problem: null },
+  paused: { status: 'paused', label: 'Warm-up paused on day 7', day: 7, of: 14, readyBy: null, inboxRate: 0.78, inboxes: [galeBox('mia@galeroofing-mail.com', 7, 0.78)], problem: 'Fewer than 8 in 10 warm-up emails reached the inbox, so it slowed down to recover' },
+};
+export const galeWarmupTodo = { id: 'warmup-helpers:gale-roofing', text: 'Add 2 warm-up helpers — Settings › Warm-up', detail: 'The circle has 6 of the 8 it needs', urgent: true, since: '2026-10-17T08:00:00Z', action: { type: 'view', view: 'settings', section: 'warmup' } };
+/* Gale Roofing with its warm-up in one status. The machine's plain sentence for the warming step is the warm-up label;
+   while it waits for helpers the row needs the owner and carries the "Add 2 warm-up helpers" to-do. */
+export const galeWu = (status, simple, rowExtra) => ({
+  row: withSimple(Object.assign({}, gale, status === 'waiting' ? { todo: [galeWarmupTodo] } : {}, rowExtra), Object.assign({ step: 'warming_up', label: galeWarmup[status].label, next: 'Nothing for you: the first emails go out on Mon 26 Oct', needsYou: false, since: '2026-10-12T09:00:00Z' },
+    status === 'waiting' ? { next: 'Add 2 warm-up helpers — Settings › Warm-up', needsYou: true } : {}, simple)),
+  warmup: galeWarmup[status],
+});
