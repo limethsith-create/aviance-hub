@@ -567,3 +567,71 @@ export const galeWu = (status, simple, rowExtra) => ({
     status === 'waiting' ? { next: 'Add 2 warm-up helpers — Settings › Warm-up', needsYou: true } : {}, simple)),
   warmup: galeWarmup[status],
 });
+
+/* ───── Keys and Your details (email-distributor docs/KEYS.md; keys.js) ─────
+   GET /api/mc/keys in a few states — the server lists the cards in its own order (the optional ones before GitHub);
+   the hub reorders them. A key's value is never in the answer; the repository name (a plain setting) is. */
+export const KEYS_REPO = 'limethsith-create/email-distributor';
+const KY_CHECKED = 'Steps checked against their own help pages on 2026-09-26.';
+const kyGuides = {
+  PLACES_API_KEY: { url: 'https://console.cloud.google.com/', free: "The market count is free (IDs only); the lead finder's searches have 1,000 free a month. Google needs a card on the project but nothing is charged for the trial's use.", steps: ['Go to console.cloud.google.com and sign in with your Google account.', 'At the top, open the project picker → New project. Name it "Aviance" and create it. Make sure it is the selected project.', 'In the search bar type "Places API (New)", open it and press Enable.', 'APIs & Services → Credentials → Create credentials → API key.', 'Copy the key (it starts with AIza) and paste it here.'], note: KY_CHECKED },
+  QUICKEMAILVERIFICATION_API_KEY: { url: 'https://quickemailverification.com/', free: '100 checks a day (sign up with a work email address, not Gmail).', steps: ['Sign up at quickemailverification.com with your work email address and confirm it.', 'Sign in → API Settings → Add API Key → give it a name (for example "Aviance") → Add.', 'Copy the key and paste it here.'], note: KY_CHECKED },
+  VERIFALIA: { url: 'https://verifalia.com/', free: '25 checks a day (one free account per organisation), reset at midnight GMT.', steps: ['Sign up at verifalia.com and confirm your email.', 'In the client area open Account → Users → Create a user. Give it a user name and a password.', 'Paste that user name and password here.'], note: KY_CHECKED },
+  REOON_API_KEY: { url: 'https://emailverifier.reoon.com/', free: '20 checks a day (up to 600 a month) plus 100 on signup; paid packs never expire.', steps: ['Sign up at emailverifier.reoon.com and confirm your email.', 'Sign in → API Settings → Create API Key → give it a name → Create.', 'Copy the key and paste it here.'], note: 'Their menus may have moved — check on their site.' },
+  ZEROBOUNCE_API_KEY: { url: 'https://www.zerobounce.net/', free: '100 checks a month (sign up with a business email address).', steps: ['Sign up at zerobounce.net with your business email address and confirm it.', 'Sign in → API → API Keys.', 'Copy the key and paste it here.'], note: 'Their menus may have moved — check on their site.' },
+  HUNTER_API_KEY: { url: 'https://hunter.io/api-keys', free: '50 credits a month; a check costs half a credit, so about 100 checks. Hunter allows one account per person.', steps: ['Sign up at hunter.io and confirm your email.', 'Open hunter.io/api-keys (Dashboard → API) and copy the key.', 'Paste it here.'], note: KY_CHECKED },
+  GITHUB_TOKEN: { url: 'https://github.com/settings/personal-access-tokens/new', free: 'Free. The token only lets the machine start the lead finder job in your repository.', steps: ['On github.com click your profile picture → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.', 'Token name: "Aviance lead finder". Expiration: the longest you are offered (you paste a new one when it runs out).', 'Repository access: Only select repositories → ' + KEYS_REPO + '.', 'Permissions → Repository permissions: Contents = Read and write.', 'Generate token → copy it (GitHub shows it once) → paste it here.'], note: KY_CHECKED },
+  GITHUB_REPO: { url: 'https://github.com/' + KEYS_REPO, free: 'A plain setting, not a key. Leave the default unless the repository moved.', steps: ['Only change this if the code moved to another repository: paste it as owner/repository.'], note: KY_CHECKED },
+};
+const kyCard = (name, short, label, o) => Object.assign({ name, label, short, optional: false, secret: true, fields: [name], set: false, from: null, savedAt: null, testedAt: null, ok: null, problem: null, detail: null }, kyGuides[name], o);
+const kyCards = (o) => [
+  kyCard('PLACES_API_KEY', 'Google Places key', 'Google Places key — finds businesses, reads reviews and market size', o.PLACES_API_KEY),
+  kyCard('QUICKEMAILVERIFICATION_API_KEY', 'QuickEmailVerification key', 'QuickEmailVerification key — checks 100 addresses a day free', o.QUICKEMAILVERIFICATION_API_KEY),
+  kyCard('VERIFALIA', 'Verifalia login', 'Verifalia login — 25 a day free', Object.assign({ fields: ['VERIFALIA_USERNAME', 'VERIFALIA_PASSWORD'], parts: ['username', 'password'] }, o.VERIFALIA)),
+  kyCard('REOON_API_KEY', 'Reoon key', 'Reoon key — 20 a day free', o.REOON_API_KEY),
+  kyCard('ZEROBOUNCE_API_KEY', 'ZeroBounce key', 'ZeroBounce key — 100 a month free', Object.assign({ optional: true }, o.ZEROBOUNCE_API_KEY)),
+  kyCard('HUNTER_API_KEY', 'Hunter key', 'Hunter key — about 100 checks a month free (optional)', Object.assign({ optional: true }, o.HUNTER_API_KEY)),
+  kyCard('GITHUB_TOKEN', 'GitHub token', 'GitHub token — starts the lead finder', o.GITHUB_TOKEN),
+  kyCard('GITHUB_REPO', 'GitHub repository', 'GitHub repository — where the lead finder runs (leave the default unless it moved)', Object.assign({ secret: false, value: null, default: KEYS_REPO }, o.GITHUB_REPO)),
+];
+const kySet = (ok, extra) => Object.assign({ set: true, from: 'hub', savedAt: '2026-10-15T09:00:00Z', testedAt: '2026-10-17T09:00:00Z', ok, problem: ok === false ? 'Verifalia turned the login down — check the user name and password.' : ok === null ? 'not tested yet' : null }, extra);
+export const keysStates = {
+  // a fresh machine: nothing pasted yet
+  fresh: { keys: kyCards({}), encKey: true },
+  // Places works, QuickEmailVerification not tested yet, Verifalia has a problem, Reoon not set, GitHub token set by the developer on the server, Hunter works
+  mixed: { keys: kyCards({ PLACES_API_KEY: kySet(true), QUICKEMAILVERIFICATION_API_KEY: kySet(null), VERIFALIA: kySet(false), GITHUB_TOKEN: kySet(true, { from: 'env', savedAt: null }), HUNTER_API_KEY: kySet(true) }), encKey: true },
+  // everything in place; the repository changed by the owner
+  all: { keys: kyCards({ PLACES_API_KEY: kySet(true), QUICKEMAILVERIFICATION_API_KEY: kySet(true), VERIFALIA: kySet(true), REOON_API_KEY: kySet(true), GITHUB_TOKEN: kySet(true), GITHUB_REPO: { set: true, from: 'hub', value: 'aviance/leadfinder' } }), encKey: true },
+  // no password lock on the server yet
+  noLock: { keys: kyCards({}), encKey: false },
+};
+/* GET /api/mc/config as the machine lists it: one row per top-level setting, the fields inside (the hub's eight
+   details live in OWNER, ONBOARDCALL, CALENDAR, PAYMENT and REVIEW). */
+const cfgRow = (key, def, value) => ({ key, default: def, value, overridden: JSON.stringify(def) !== JSON.stringify(value), toSet: JSON.stringify(value).includes('null') });
+const OWNER_DEF = { usHours: ['09:00', '17:00'], signerName: null, address: null, email: null, telegramChatId: null };
+const ONB_DEF = { inbox: null, bookingUrl: null, callMinutes: 30, minNoticeHours: 12, daysAhead: 14 };
+const CAL_DEF = { hours: ['09:00', '17:00'], days: [1, 2, 3, 4, 5], slotMinutes: 30, meetingLink: null, ownerZone: 'Asia/Colombo', usZone: 'America/New_York' };
+export const configStates = {
+  // a fresh machine: nothing filled in
+  empty: { settings: [cfgRow('OWNER', OWNER_DEF, OWNER_DEF), cfgRow('PAYMENT', { paypalMe: null, wiseDetails: null }, { paypalMe: null, wiseDetails: null }), cfgRow('ONBOARDCALL', ONB_DEF, ONB_DEF), cfgRow('CALENDAR', CAL_DEF, CAL_DEF), cfgRow('REVIEW', { clutchUrl: null }, { clutchUrl: null }), cfgRow('REPLYBOT', { enabled: true, maxPerDay: 3 }, { enabled: true, maxPerDay: 3 })] },
+  // the name, the email and the call link are in; the address, PayPal, Wise and Clutch are not
+  some: { settings: [
+    cfgRow('OWNER', OWNER_DEF, Object.assign({}, OWNER_DEF, { signerName: 'Limeth Sith', email: 'owner@example.com' })),
+    cfgRow('PAYMENT', { paypalMe: null, wiseDetails: null }, { paypalMe: null, wiseDetails: null }),
+    cfgRow('ONBOARDCALL', ONB_DEF, ONB_DEF),
+    cfgRow('CALENDAR', CAL_DEF, Object.assign({}, CAL_DEF, { meetingLink: 'https://meet.google.com/abc-defg-hij' })),
+    cfgRow('REVIEW', { clutchUrl: null }, { clutchUrl: null }),
+    cfgRow('REPLYBOT', { enabled: true, maxPerDay: 3 }, { enabled: true, maxPerDay: 3 }),
+  ] },
+  // a machine that lists one row per field instead (key 'OWNER.signerName')
+  dotted: { settings: [
+    { key: 'OWNER.signerName', default: null, value: 'Limeth Sith', overridden: true, toSet: false },
+    { key: 'OWNER.address', default: null, value: null, overridden: false, toSet: true },
+    { key: 'OWNER.email', default: null, value: 'owner@example.com', overridden: true, toSet: false },
+    { key: 'ONBOARDCALL.inbox', default: null, value: null, overridden: false, toSet: true },
+    { key: 'CALENDAR.meetingLink', default: null, value: null, overridden: false, toSet: true },
+    { key: 'PAYMENT.paypalMe', default: null, value: 'https://paypal.me/aviance', overridden: true, toSet: false },
+    { key: 'PAYMENT.wiseDetails', default: null, value: 'Wise USD account 123', overridden: true, toSet: false },
+    { key: 'REVIEW.clutchUrl', default: null, value: null, overridden: false, toSet: true },
+  ] },
+};

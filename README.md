@@ -26,6 +26,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `messages.js` | Messages on every trial page (the whole conversation, the reply box, the reply-bot switch), Settings › Google Meet and Settings › Reply bot (see `email-distributor/docs/REPLYBOT-MEET.md`). Styles in `trials.css`. |
 | `autobuy.js` | Their domain and inboxes through CheapInboxes: the "what to buy" panel behind the big button, the "Inboxes & domain" card on a trial while it sets itself up, and Settings › Inboxes & domains (see `email-distributor/docs/AUTO-BUY.md`). Styles in `trials.css`. |
 | `warmup.js` | Warm-up: Settings › Warm-up (the circle meter, why helpers exist, the helpers with Test / Remove, Add a helper) and the "Warm-up" card on a trial; while a trial waits for helpers its big button is "Add N warm-up helpers" (see `email-distributor/docs/WARMUP-HUB.md`). Styles in `trials.css`. |
+| `keys.js` | The owner's own set-up, so he never opens Vercel: Settings › Keys (one card per service key — status in words, the steps and an "Open …" link, a password box, Test and save / Test / Forget; a value is never shown back) over `GET/POST /api/mc/keys`, and Settings › Your details (name, address, email, the onboarding inbox, call link, PayPal.me, Wise, Clutch — each with its own Save, "Still to fill in: N", the two the first trial needs marked in amber) over `GET/POST /api/mc/config` (see `email-distributor/docs/KEYS.md`). Styles in `trials.css`. |
 | `trials.css` | Styles for the Trials screens, on top of the shell's CSS variables (light + dark). |
 | `inquiries.js` | Inquiries: paid-plan calls booked from the website — list, detail, status/notes, "Start a trial instead", the board strip. |
 | `push.js` | Phone alerts: the panel, turning Web Push on/off with the machine, the quiet re-subscribe after sign-in. |
@@ -39,6 +40,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `tests/messages.test.mjs` | Node tests for Messages (each kind of email, escaped; auto-reply labels; reply and bot posts), "Answer Sam's message", the Join Google Meet button and its fallback, Settings › Google Meet (states, the four actions, the return from Google) and Settings › Reply bot. |
 | `tests/autobuy.test.mjs` | Node tests for CheapInboxes: the big button and the "what to buy" panel (Copy, "Buy this one instead", "I've bought it — check now", one post per click), the card in every status (steps, current step, inboxes, the problem + "Check now", "Wrong domain? Undo"), the Buy & paste fallback with its pointer to Settings, Settings › Inboxes & domains (states, card on file, steps, Save / Test it / Forget, "This is for…" + Link it), plain words, and that nothing can place an order. |
 | `tests/warmup.test.mjs` | Node tests for the warm-up: the circle meter in each state, the helpers' health words, Test / Remove bodies, Add a helper (kinds, steps, password label, the body, greyed out while testing, success and refusal), the trial card, the "Add N warm-up helpers" big button, `#settings/warmup`, the `{view:'settings', section}` to-do, plain words. |
+| `tests/keys.test.mjs` | Node tests for Settings › Keys (cards per status, order, env-set keys without a box, save / test / forget bodies incl. Verifalia's two fields, a refused key keeps what was typed, a saved one is cleared and never drawn, no encryption key) and Settings › Your details (the eight boxes, required marks, "Still to fill in", save / clear bodies for both row shapes, checks), `#settings/keys`, `#settings/details`, ⌘K, the "Is everything running?" pointers, plain words, touch targets. |
 | `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and `sw.js` (run in a sandbox with a fake service-worker global). |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
 | `tests/journey.test.mjs` | The dress rehearsal: the machine's 29 real snapshots of one applicant's whole trial (application → … → paid), each drawn with the real hub code on a device set to US Pacific — the Trials list, the three questions and the big button, Messages, the call / inboxes / warm-up cards, every Behind-the-scenes tab, the Calendar and Settings. Checks: nothing broken or empty on screen, the journey step is the machine's, the big button is what the owner must do, red only when he is needed, plain words, Sri Lanka time with US Eastern beside a call. `HUB_JOURNEY_REPORT=path npm test` writes what the owner sees at every step as plain text. |
@@ -95,7 +97,7 @@ sentence already does).
   on your list", and **Behind the scenes**, folded, with everything technical.
 - **Settings** — named sections, each folds open and says its state in one
   word: **Alerts** (every alert, "Not seen" first, "Mark as seen"; `#alerts`
-  opens it), **Phone alerts**, **Google Meet**, **Inboxes & domains**, **Warm-up** (`#settings/warmup` opens it), **Reply bot**, **Is everything running?** (last check-in, last
+  opens it), **Phone alerts**, **Your details** (`#settings/details`), **Keys** (`#settings/keys`), **Google Meet**, **Inboxes & domains**, **Warm-up** (`#settings/warmup` opens it), **Reply bot**, **Is everything running?** (last check-in, last
   email sent, trials running, free extensions, alerts not seen, paid services
   used, setup still to finish), **Behind the scenes** (the old board: every
   to-do, all trials by stage, the waiting list, your own sending), **Advanced**
@@ -319,7 +321,7 @@ only works for the hub **added to the Home Screen and opened from there**
 5. Tap **Send a test**. "Test alert from Aviance" should pop up within seconds.
 
 Tapping an alert opens the trial it is about (`/#trial/{id}`), the inquiry
-(`/#inquiry/{id}`), the Calendar (`/#calendar`), Settings › Alerts (`/#alerts`), Settings › Warm-up (`/#settings/warmup`) or the list (`/#trials`) — signing in first if
+(`/#inquiry/{id}`), the Calendar (`/#calendar`), Settings › Alerts (`/#alerts`), Settings › Warm-up (`/#settings/warmup`), Settings › Keys (`/#settings/keys`), Settings › Your details (`/#settings/details`) or the list (`/#trials`) — signing in first if
 needed. Urgent alerts stay on screen until tapped; a repeat of the same alert
 replaces the previous one. If alerts are blocked later: iPhone Settings →
 Notifications → Aviance → Allow Notifications.

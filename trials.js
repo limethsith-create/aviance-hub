@@ -6,7 +6,8 @@
    contract in email-distributor/docs/HUB-API.md (incl. "v2 additions") and
    docs/ONBOARD-CALL.md (row.simple on the board, onboardCall on a trial) and docs/REPLYBOT-MEET.md
    (`conversation` on a trial — drawn by messages.js as the Messages section), docs/AUTO-BUY.md (`autobuy`,
-   autobuy.js) and docs/WARMUP-HUB.md (`warmup` on a trial and Settings › Warm-up — warmup.js).
+   autobuy.js), docs/WARMUP-HUB.md (`warmup` on a trial and Settings › Warm-up — warmup.js) and docs/KEYS.md
+   (Settings › Keys and Settings › Your details — keys.js).
 
    Loaded by index.html after the shell script, so it can use the shell's globals:
      esc, emptyState, toast, openModal, closeModal, render, renderNav,
@@ -48,9 +49,9 @@ const TK_TABS=[['overview','Overview'],['growth','Growth'],['systems','Parts'],[
 const TK_TAB_ALIAS={numbers:'overview',setup:'deliverability',promises:'comingup',upcoming:'comingup',reports:'comingup'};
 const TK_TRIAL_VIEWS=['trials','trialsBoard','trial','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
 /* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
-const TK_SETTINGS=['alerts','phone','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
+const TK_SETTINGS=['alerts','phone','details','keys','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
 /* A to-do that opens a Settings section ({type:'view', view:'settings', section}): the button's words. */
-const TK_SETTINGS_NAMES={alerts:'Alerts',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot'};
+const TK_SETTINGS_NAMES={alerts:'Alerts',details:'Your details',keys:'Keys',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot'};
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
@@ -472,8 +473,13 @@ function renderSystemStatus(machine,meta){
   if(u.reoon)usage.push('Reoon '+(u.reoon.remaining!=null?tkNum(u.reoon.remaining)+' left':tkPct(u.reoon.pct)));
   const setup=machine.setup||{};const missing=Object.keys(TK_SETUP_NAMES).filter(k=>setup[k]===false).map(k=>TK_SETUP_NAMES[k]);
   const rows=[['Last check-in',esc(ago)],['Last email sent',esc(hb.lastSendAt?tkRel(hb.lastSendAt,meta.now):'—')],['Trials running',`${tkNum(machine.activeTrials)} of ${tkNum(machine.maxActiveTrials)}`],['Free extensions',tkNum(machine.extensions)],['Alerts not seen yet',tkNum(machine.openAlerts)],['Paid services used',usage.length?esc(usage.join(' · ')):'—']];
+  // what the owner can still fill in himself (keys.js): the keys still to paste and the details still empty
+  const left=meta.left||{};const lk=Number(left.keys)||0,ld=Number(left.details)||0;
+  const yours=[lk?`${lk} key${lk===1?'':'s'} still to paste <button type="button" class="tk-textbtn" onclick="openSettings(${tkAttr('keys')})">Open Settings › Keys</button>`:'',
+    ld?`${ld} of your details still to fill in <button type="button" class="tk-textbtn" onclick="openSettings(${tkAttr('details')})">Open Settings › Your details</button>`:''].filter(Boolean);
   return `<p class="tk-status ${st[0]}">${esc(st[1])}</p>
     <div class="tk-kv">${rows.map(([k,v])=>`<small>${esc(k)}</small><span>${v}</span>`).join('')}</div>
+    ${yours.length?`<p class="tk-note tk-gap">Not finished yet: ${yours.join(' · ')}</p>`:''}
     ${missing.length?`<p class="tk-note tk-gap">Setup is not finished. Still to set: ${esc(missing.join(', '))}. <button type="button" class="tk-textbtn" onclick="openMachine('/mc/config')">Open advanced settings ↗</button></p>`:''}
     <div class="tk-inline tk-gap">${tkUpdatedStamp(meta.at)}<button class="btn ghost" onclick="trialsRefresh()">Check again</button></div>`;
 }
@@ -1538,8 +1544,9 @@ function renderAlerts(alerts,filter,meta){
    Each is a <details> with its name and a one-word state in the summary, so the page reads as a short
    list. ctx = {hub, hubErr, at, alerts, alertsErr, alertsAt, filter, open:{alerts:true…}, phone:'On'|'',
    dark, email, now, google (messages.js googleSettingsCtx), inboxes (autobuy.js abSettingsCtx), warmup (warmup.js
-   wuSettingsCtx), details}. Pure: the host (trialsHostHTML) reads the DOM and caches. Google Meet and Reply bot are drawn
-   by messages.js, Inboxes & domains by autobuy.js, Warm-up by warmup.js (each left out if its file is not loaded). */
+   wuSettingsCtx), details, keys (keys.js kySettingsCtx), owner (keys.js ydSettingsCtx), left ({keys, details} still to do)}.
+   Pure: the host (trialsHostHTML) reads the DOM and caches. Google Meet and Reply bot are drawn by messages.js, Inboxes &
+   domains by autobuy.js, Warm-up by warmup.js, Your details and Keys by keys.js (each left out if its file is not loaded). */
 function renderSettings(ctx){
   ctx=ctx||{};const open=ctx.open||{};const hub=ctx.hub||null;const machine=(hub&&hub.machine)||{};
   const alerts=Array.isArray(ctx.alerts)?ctx.alerts:null;
@@ -1548,15 +1555,19 @@ function renderSettings(ctx){
   const pages=typeof MACHINE_PAGES!=='undefined'?MACHINE_PAGES:[];
   const sec=(key,title,sub,state,body)=>`<details class="tk-set" id="${esc('tkSet-'+key)}"${open[key]?' open':''} ontoggle="trialsSettingsToggle(${tkAttr(key)},this.open)"><summary><span class="tk-set-head"><span class="tk-set-title">${esc(title)}</span><span class="tk-set-sub">${esc(sub)}</span></span>${state||''}</summary><div class="tk-set-body">${body}</div></details>`;
   const alertsBody=alerts?renderAlerts(alerts,ctx.filter,{at:ctx.alertsAt,now:ctx.now}):ctx.alertsErr?`<p class="tk-note red">${esc(ctx.alertsErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Loading your alerts…');
-  const statusBody=hub?renderSystemStatus(machine,{at:ctx.at,now:ctx.now}):ctx.hubErr?`<p class="tk-note red">${esc(ctx.hubErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Checking…');
+  const statusBody=hub?renderSystemStatus(machine,{at:ctx.at,now:ctx.now,left:ctx.left}):ctx.hubErr?`<p class="tk-note red">${esc(ctx.hubErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Checking…');
   const gm=typeof renderGoogleMeetSet==='function'?renderGoogleMeetSet(ctx.google||{}):null;
   const rb=typeof renderReplyBotSet==='function'?renderReplyBotSet({hub,details:ctx.details}):null;
   const ib=typeof renderAutobuySet==='function'?renderAutobuySet(ctx.inboxes||{}):null;
   const wu=typeof renderWarmupSet==='function'?renderWarmupSet(ctx.warmup||{}):null;
+  const yd=typeof renderDetailsSet==='function'?renderDetailsSet(ctx.owner||{}):null;   // keys.js: Your details, Keys
+  const ky=typeof renderKeysSet==='function'?renderKeysSet(ctx.keys||{}):null;
   return `<div class="tk-sets">`+
     sec('alerts','Alerts','Messages from the system about your trials.',unseen==null?'':unseen?`<span class="pill amber">${tkNum(unseen)} not seen</span>`:'<span class="pill green">All seen</span>',alertsBody)+
     sec('phone','Phone alerts','Get a message on your phone when something needs you.',ctx.phone==='On'?'<span class="pill green">On</span>':'<span class="pill grey">Off</span>',
       `<p class="tk-set-text">${ctx.phone==='On'?'Phone alerts are on for this device.':'Phone alerts are off on this device.'} On an iPhone, add the hub to your Home Screen first; the setup shows you how.</p><button type="button" class="btn" onclick="openPhoneAlerts()">Set up phone alerts</button>`)+
+    (yd?sec('details','Your details','Your name, address and links — what the emails say about you.',yd.state,yd.body):'')+
+    (ky?sec('keys','Keys','The keys for the free services the system uses. Paste each one once.',ky.state,ky.body):'')+
     (gm?sec('google','Google Meet','A Google Meet link for every call you say yes to.',gm.state,gm.body):'')+
     (ib?sec('inboxes','Inboxes & domains','You buy on CheapInboxes, we set up the rest.',ib.state,ib.body):'')+
     (wu?sec('warmup','Warm-up','Free helper email accounts that warm up new inboxes.',wu.state,wu.body):'')+
@@ -1631,7 +1642,7 @@ async function trialsKick(view,force){
   if(view==='trials'||view==='trialsBoard')r=await loadHub(force);
   else if(view==='trial')r=await loadTrial(currentTrialId,force);
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
-  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes and the warm-up circle: their own 5-minute caches, never every minute
+  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
   trialsRepaint(view,{soft:true});
   return r;
@@ -1649,7 +1660,8 @@ function trialsSettingsCtx(){
   return {hub:tk.hub,hubErr:tk.hubErr,at:tk.hubAt,alerts:tk.alerts,alertsErr:tk.alertsErr,alertsAt:tk.alertsAt,filter:trialsAlertFilter,open:tk.setOpen,
     phone:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():'',dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:'',
     google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,inboxes:typeof abSettingsCtx==='function'?abSettingsCtx():null,
-    warmup:typeof wuSettingsCtx==='function'?wuSettingsCtx():null,details:tk.detail};
+    warmup:typeof wuSettingsCtx==='function'?wuSettingsCtx():null,details:tk.detail,
+    keys:typeof kySettingsCtx==='function'?kySettingsCtx():null,owner:typeof ydSettingsCtx==='function'?ydSettingsCtx():null,left:typeof kyStillToDo==='function'?kyStillToDo():null};
 }
 /* #alerts, #settings/warmup, the bell and to-dos ({view:'settings', section}) open Settings with that section open and in view. */
 function openSettings(section){
@@ -1982,6 +1994,8 @@ function trialsCmdkActions(){
     {type:'Go to',label:'Reply bot',icon:I.inquiry||'',sub:'Settings › what it answers for you',kw:'reply bot auto-reply automatic answers',run:()=>{closeCmdk();openSettings('replybot');}},
     {type:'Go to',label:'Inboxes & domains',icon:I.inbox||'',sub:'Settings › your CheapInboxes account',kw:'inboxes domains cheapinboxes buy api key card',run:()=>{closeCmdk();openSettings('inboxes');}},
     {type:'Go to',label:'Warm-up helpers',icon:I.sun||'',sub:'Settings › Warm-up',kw:'warm-up warmup helpers circle gmail yahoo aol icloud gmx yandex app password',run:()=>{closeCmdk();openSettings('warmup');}},
+    {type:'Go to',label:'Your details',icon:I.gear||'',sub:'Settings › your name, address and links',kw:'your details name address email inbox call link paypal wise clutch review owner',run:()=>{closeCmdk();openSettings('details');}},
+    {type:'Go to',label:'Keys',icon:I.gear||'',sub:'Settings › the keys for the free services',kw:'keys key api google places quickemailverification verifalia reoon github token repository zerobounce hunter',run:()=>{closeCmdk();openSettings('keys');}},
   ];
 }
 function trialsCmdkEntities(){
@@ -2005,6 +2019,7 @@ function trialsForget(){
   try{messagesForget();}catch(e){}
   try{autobuyForget();}catch(e){}
   try{warmupForget();}catch(e){}
+  try{keysForget();}catch(e){}
   try{localStorage.removeItem(TK_SPARK_KEY);}catch(e){}
 }
 function trialsStartTimer(){if(tk.timer)return;tk.timer=setInterval(trialsTick,TK_REFRESH_MS);}
