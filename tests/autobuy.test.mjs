@@ -220,7 +220,7 @@ test('the card, per status: the steps ticked with times, the current one highlig
   assert.ok(p.startsWith('<section class="card tk-ab" id="tkSec-autobuy">') && p.includes('<h3>Inboxes &amp; domain</h3>') && p.includes('<p class="tk-ab-say">Setting up getbrightdental.com — about 48 hours</p>'));
   assert.deepEqual(stepClasses(p), ['done', 'now', 'todo', 'todo', 'todo']);
   assert.ok(p.includes('<li class="now" aria-current="step"><span class="tk-oc-tick" aria-hidden="true"></span><span><span class="tk-sr">Now: </span>Domain live + spam protection set</span><span class="tk-oc-at">Working on it</span></li>'));
-  assert.ok(between(p, 'You bought it', '</li>').includes(`<span class="tk-oc-at" title="${new Date('2026-10-16T10:00:00Z').toLocaleString()}">`), 'when it was done');
+  assert.ok(between(p, 'You bought it', '</li>').includes(`<span class="tk-oc-at" title="${tkFull('2026-10-16T10:00:00Z')}">`), 'when it was done (Sri Lanka time, whatever the device)');
   assert.equal(count(p, /<span class="pill amber">Being created<\/span>/g), 2);
   assert.ok(p.includes('<span class="tk-break">raj.patel@getbrightdental.com</span>'));
   const c = card('connecting');

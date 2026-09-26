@@ -41,6 +41,8 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `tests/warmup.test.mjs` | Node tests for the warm-up: the circle meter in each state, the helpers' health words, Test / Remove bodies, Add a helper (kinds, steps, password label, the body, greyed out while testing, success and refusal), the trial card, the "Add N warm-up helpers" big button, `#settings/warmup`, the `{view:'settings', section}` to-do, plain words. |
 | `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and `sw.js` (run in a sandbox with a fake service-worker global). |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
+| `tests/journey.test.mjs` | The dress rehearsal: the machine's 29 real snapshots of one applicant's whole trial (application → … → paid), each drawn with the real hub code on a device set to US Pacific — the Trials list, the three questions and the big button, Messages, the call / inboxes / warm-up cards, every Behind-the-scenes tab, the Calendar and Settings. Checks: nothing broken or empty on screen, the journey step is the machine's, the big button is what the owner must do, red only when he is needed, plain words, Sri Lanka time with US Eastern beside a call. `HUB_JOURNEY_REPORT=path npm test` writes what the owner sees at every step as plain text. |
+| `tests/journey-fixtures.mjs`, `tests/fixtures/journey/` | A trimmed copy of the machine's snapshots (`email-distributor/tests/fixtures/journey/`) without repeats; `node tests/fixtures/journey/trim.mjs` copies them again. |
 
 ## Screens
 
@@ -435,6 +437,7 @@ Sign-in needs the real Supabase project.
 
 ```
 npm test          # node --test tests/*.test.mjs
+HUB_JOURNEY_REPORT=/tmp/journey.txt npm test   # + a plain-text report of every step of the journey
 npm run check     # node --check trials.js, inquiries.js, calendar.js, messages.js, autobuy.js, warmup.js, push.js, sw.js
 ```
 

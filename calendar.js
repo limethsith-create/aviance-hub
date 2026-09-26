@@ -324,7 +324,7 @@ function calHoursLine(st,monday){
 function renderCalIntro(st,monday){
   const link=st.meetingLink?(tkSafeUrl(st.meetingLink)?tkLink(st.meetingLink):esc(st.meetingLink)):'';
   return `<div class="cal-intro"><p class="cal-explain">Clients pick a time on your booking page; you say yes here; they get an invite.</p>
-    <p class="cal-facts">${link?`Calls happen on: ${link}`:"Calls happen on: no meeting link set yet, so the email says you'll send the link before the call."}<br>${esc(calHoursLine(st,monday))}</p></div>`;
+    <p class="cal-facts">${st.googleMeet==='connected'?'Calls happen on: Google Meet. Each call you say yes to gets its own link.':link?`Calls happen on: ${link}`:"Calls happen on: no meeting link set yet, so the email says you'll send the link before the call."}<br>${esc(calHoursLine(st,monday))}</p></div>`;
 }
 function renderCalLegend(){
   return `<div class="cal-legend" aria-label="What the colours mean"><span><i class="cal-sw confirmed"></i>Confirmed</span><span><i class="cal-sw requested"></i>Waiting for your yes</span><span><i class="cal-sw suggested"></i>Waiting for them</span><span><i class="cal-sw held"></i>Call done</span><span><i class="cal-sw blocked"></i>Busy</span><span><i class="cal-sw noshow"></i>No-show</span><span class="cal-legend-open"><i class="cal-sw open"></i>White = your call hours</span></div>`;
@@ -342,7 +342,7 @@ function renderCalendar(data,meta){
     const model=calWeekModel(monday,data.meetings,st,{now,showGone:meta.showGone});
     week=(model.dst?`<div class="tk-note">${esc(model.dst)}</div>`:'')+renderCalLegend()+
       (model.empty?'<p class="cal-empty">Nothing booked this week. When a client picks a time on your booking page, it shows up here for your yes.</p>':'')+
-      renderCalGrid(model)+renderCalAgenda(model);
+      renderCalGrid(model)+(model.empty?'':renderCalAgenda(model));   // an empty week: the line above says it once (a phone showed it twice)
   }
   const foot=`<div class="cal-foot">${meta.at?tkUpdatedStamp(meta.at):''}<button type="button" class="tk-textbtn" onclick="calRefresh()">Refresh</button></div>`;
   return renderCalIntro(st,monday)+renderCalRequests(reqs,st,{now,focus:meta.focus})+
@@ -374,7 +374,7 @@ function renderCalMeeting(m,st,meta){
   if(m.note)kv.push(['Their note',`<span class="cal-note">${esc(m.note)}</span>`]);
   if(m.declineReason)kv.push(['Reason',`<span class="cal-note">${esc(m.declineReason)}</span>`]);
   if(m.source)kv.push(['From',esc(calSourceText(m.source))]);
-  if(status==='requested')kv.push(['Calls happen on',st.meetingLink?(tkSafeUrl(st.meetingLink)?tkLink(st.meetingLink):esc(st.meetingLink)):'No meeting link set yet']);   // confirmed: the Google Meet part below the time
+  if(status==='requested')kv.push(['Calls happen on',st.googleMeet==='connected'?'Google Meet — the link is made when you say yes':st.meetingLink?(tkSafeUrl(st.meetingLink)?tkLink(st.meetingLink):esc(st.meetingLink)):'No meeting link set yet']);   // confirmed: the Google Meet part below the time
   const b=(fn,label,ghost)=>`<button class="btn${ghost?' ghost':''}" onclick="${fn}(${tkAttr(id)})">${esc(label)}</button>`;
   const acts=[];
   if(status==='requested'){if(!past)acts.push(b('calConfirm','Say yes and email them'));acts.push(b('calOpenSuggest','Suggest another time',!past));acts.push(b('calOpenDecline','Say no…',true));}

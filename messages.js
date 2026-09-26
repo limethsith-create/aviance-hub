@@ -147,9 +147,15 @@ function renderMessages(d,meta){
   let bot='';
   if(c.bot){
     const on=tkTruthy(c.bot.enabled);const sent=tkNorm(c.bot.sentToday),max=tkNorm(c.bot.maxPerDay);
-    const note=on?'It answers the simple questions for you — times, price, what to prepare. Anything else waits for you.'+(sent!=null&&max!=null?' '+sent+' of '+max+' auto-replies sent today.':''):'Off: you answer every message from '+name+' yourself.';
+    // switched on, but not answering them now (it only answers while they are onboarding): say so — never "it answers for you"
+    const idle=on&&c.bot.answersNow!=null&&!tkTruthy(c.bot.answersNow);
+    const why=String(c.bot.why||'').trim().replace(/\s*\([^)]*\)\s*(?=[.!]?$)/,'').replace(/[.\s]+$/,'');
+    const note=idle?(why||'The reply bot only answers while they are onboarding')+'. You answer '+name+' yourself now.':on?'It answers the simple questions for you — times, price, what to prepare. Anything else waits for you.'+(sent!=null&&max!=null?' '+sent+' of '+max+' auto-replies sent today.':''):'Off: you answer every message from '+name+' yourself.';
     bot=`<div class="tk-bot"><button type="button" class="tk-switch${on?' on':''}" role="switch" aria-checked="${on}" onclick="msgBot(${tkAttr(id)},${on?'false':'true'})"><span class="tk-switch-track" aria-hidden="true"><span class="tk-switch-knob"></span></span><span class="tk-switch-text">Reply bot for ${esc(name)}: <b>${on?'On':'Off'}</b></span></button><p class="tk-bot-note">${esc(note)}</p></div>`;
   }
+  // no emails yet (a new application, say): one folded line — an empty box and a reply form would push what matters down a phone
+  if(!list.length&&!c.needsReply)return `<section class="card tk-msgs tk-msgs-none" id="tkSec-messages"><details class="tk-msgs-fold"><summary><span class="tk-msgs-foldt">Messages</span><span class="tk-msgs-sub">${esc('No emails with '+name+' yet')}</span></summary>
+    ${reply}${bot}</details></section>`;
   return `<section class="card tk-msgs" id="tkSec-messages">
     <div class="tk-msgs-head"><h3>Messages</h3><span class="tk-msgs-sub">${esc('Every email between you and '+name+'. The newest is at the bottom.')}</span></div>
     ${chat}${wait}${reply}${bot}

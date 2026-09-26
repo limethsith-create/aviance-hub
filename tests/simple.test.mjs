@@ -194,7 +194,7 @@ test('the one big button, for each situation (and the order when several apply)'
   cal.reqs = [];
   const mreq = sit((d) => { d.row.todo = [{ id: 'meeting-request:m77', text: 'Say yes to Sam\'s call time', urgent: true, action: { type: 'view', view: 'calendar', clientId: 'ecreek-it', meetingId: 'm77' } }]; d.onboardCall.requestedFor = '2026-09-30T18:00:00Z'; d.onboardCall.theirZone = 'America/Denver'; });
   assert.deepEqual(buttons(top(mreq)), [['Say yes to their call time', 'openCalendar(&quot;m77&quot;)']]);
-  assert.ok(top(mreq).includes('Sam asked for a call on Wed 30 Sep · 11:30 pm (your time). Say yes, or suggest another time.'));
+  assert.ok(top(mreq).includes('Sam asked for a call on Wed 30 Sep · 11:30 pm your time (Wed 2:00 pm US Eastern). Say yes, or suggest another time.'));
   assert.ok(!renderTrialDetail(mreq, 'overview', { now: NOW }).includes('Also on your list'), 'the to-do is not listed twice');
   // a booked call whose time has passed → mark it done (asks first)
   const past = sit((d) => { Object.assign(d.onboardCall, { status: 'booked', bookedFor: '2026-10-16T15:00:00Z', bookedBy: 'calendar' }); });
@@ -214,7 +214,7 @@ test('the one big button, for each situation (and the order when several apply)'
   assert.ok(top(dispute).includes('When you have a minute: decide the dispute on the call with bob@example.com.'));
   const paid = { row: row(simpleRows.cobalt, { step: 'finished', needsYou: true, next: '' }) };
   paid.row.todo = [Object.assign({}, simpleRows.cobalt.todo[0], { urgent: true })];
-  assert.deepEqual(buttons(top(paid)), [['Do it now', 'trialsTodoAction(&quot;paid:cobalt-hvac&quot;)']]);
+  assert.deepEqual(buttons(top(paid)), [['Mark the invoice paid', 'trialsTodoAction(&quot;paid:cobalt-hvac&quot;)']], 'an api to-do says what it does (markPaid)');
   // the system says it needs him but sent no to-do → look behind the scenes
   assert.deepEqual(buttons(top({ row: row(acme, { step: 'sending', needsYou: true, next: '' , label: 'Sending' }), })).length, 1);
   const look = { row: Object.assign(row(acme, { step: 'sending', needsYou: true, next: '', label: 'Sending' }), { todo: [] }) };

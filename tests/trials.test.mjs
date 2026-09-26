@@ -293,7 +293,9 @@ test('Trials list: one row per trial client — company, person, the journey (ba
   // done / not taken: folded, with a count, remembered when opened
   const done = between(html, '<details class="tk-done"');
   assert.ok(done.startsWith('<details class="tk-done" id="tkDoneGroup" ontoggle="trialsDoneToggle(this.open)">'), 'closed by default');
-  assert.ok(done.includes('Done / not taken') && done.includes('<span class="tk-done-count">2</span>') && done.includes('Finished — became a client') && done.includes('Step 5 of 5 — Done'));
+  assert.ok(done.includes('Done / not taken') && done.includes('<span class="tk-done-count">1</span>') && !done.includes('Cobalt HVAC'), 'only what has nothing left');
+  // finished, but a to-do is still open (the month-one invoice to mark paid): kept in view, not folded away
+  assert.ok(going.includes('Cobalt HVAC') && going.includes('Finished — became a client') && going.includes('Step 5 of 5 — Done'));
   const iris = between(done, 'Iris Dental', '</button>');
   assert.ok(iris.includes('<span class="pill grey">Not taken</span>') && !iris.includes('tk-bar5') && !iris.includes('tk-person-say'), 'declined: "Not taken", no journey, no second "Declined"');
   assert.ok(renderTrialList(simpleHub, { doneOpen: true }).includes('id="tkDoneGroup" open'), 'stays open across the 60-second refresh');
@@ -341,7 +343,9 @@ test('Trials list: an older machine without row.simple falls back to the state a
   const going = between(html, 'In progress</h3>', '<details');
   assert.ok(going.includes('Acme Plumbing') && going.includes('Sending — Day 12 of 30') && going.includes('Decide the dispute on the call with bob@example.com') && going.includes('Ann Lee'));
   assert.ok(going.includes('Step 4 of 5 — Sending emails'), 'the step comes from the state');
-  assert.ok(between(html, '<details class="tk-done"').includes('Cobalt HVAC'), 'converted → Done');
+  assert.ok(going.includes('Cobalt HVAC') && !between(html, '<details class="tk-done"').includes('Cobalt HVAC'), 'converted, invoice still to mark paid → still in view');
+  const paid = Object.assign({}, fullHub, { stages: fullHub.stages.map((st) => Object.assign({}, st, { clients: st.clients.map((r) => (r.id === 'cobalt-hvac' ? Object.assign({}, r, { todo: [] }) : r)) })) });
+  assert.ok(between(renderTrialList(paid, { now: NOW }), '<details class="tk-done"').includes('Cobalt HVAC'), 'converted and nothing left → Done');
   const e = renderTrialList(emptyHub, { now: NOW });
   assert.ok(e.includes('No trials yet') && e.includes('When someone applies on your website, they show up here.') && e.includes('Add a trial client yourself'));
   assert.ok(tkSimple({}).label === '—' && tkSimple({ state: 'sending' }).step === 'sending' && tkSimple({ state: 'declined' }).done);
@@ -425,7 +429,7 @@ test('onboarding call card: label, five steps with times, Book by, buttons by st
   assert.ok(late.includes('<p class="tk-oc-due late">Book by ' + tkDayName('2026-10-20T10:00:00Z') + ' — overdue</p>'));
   // booked → Call done / They didn't show, no "Book by", no resend
   const booked = renderOnboardCall(Object.assign({}, onboardCall, { status: 'booked', bookedFor: '2026-10-20T15:00:00Z', bookedBy: 'calendar' }), row);
-  assert.ok(booked.includes('The call is on <b>' + tkDateTime('2026-10-20T15:00:00Z') + '</b> — they booked it on your calendar'));
+  assert.ok(booked.includes('The call is on <b>Tue 20 Oct, 8:30 pm your time</b> <span class="tk-oc-us">(Tue 11:00 am US Eastern)</span> — booked through your Calendar'), 'Sri Lanka time, US Eastern beside it');
   assert.ok(booked.includes('&quot;markHeld&quot;)">Call done</button>') && booked.includes("&quot;markNoShow&quot;)\">They didn't show</button>"));
   assert.ok(!booked.includes('Book by') && !booked.includes('Send the first email again') && booked.includes('Call moved? Pick the new date and time'));
   // held → quiet: no buttons, the link to the messages stays
@@ -433,7 +437,7 @@ test('onboarding call card: label, five steps with times, Book by, buttons by st
   assert.ok(held.includes('The call was on') && !held.includes('Mark call booked') && !held.includes('Update the call') && held.includes('See the messages'));
   // stopped → no Stop reminders; no booking link → plain words; unsafe link → no href; hostile values escaped
   const stopped = renderOnboardCall(Object.assign({}, onboardCall, { status: 'stopped', stopped: true, bookingUrl: null }), row);
-  assert.ok(stopped.includes('Reminders are stopped.') && !stopped.includes('Stop the reminder emails') && stopped.includes('No booking link: the email asks them to reply with times that suit them.'));
+  assert.ok(stopped.includes('Reminders are stopped.') && !stopped.includes('Stop the reminder emails') && stopped.includes('The email links your booking page. The time they pick comes to your Calendar for your yes.'), 'no link of his own: the booking page (never "reply with times")');
   const evil = renderOnboardCall(Object.assign({}, onboardCall, { label: '<img src=x onerror=alert(1)>', fromInbox: '<b>x</b>', bookingUrl: 'javascript:alert(2)', steps: [{ key: 'sent', label: '<i>x</i>', done: true, at: 'nope' }], thread: [{ dir: 'in', at: null, subject: '<u>s</u>', text: '<a href="javascript:alert(3)">x</a>', kind: 'reply' }] }), Object.assign({}, row, { simple: Object.assign({}, row.simple, { person: '<b>Eve</b> X' }) }));
   assert.ok(!/<img src=x|<b>x<\/b>|<i>x<\/i>|<u>s<\/u>|<a href="javascript|<b>Eve/.test(evil) && !evil.includes('href="javascript'));
   assert.ok(evil.includes('&lt;img src=x onerror=alert(1)&gt;') && evil.includes('Your emails with &lt;b&gt;Eve&lt;/b&gt; are under Messages.'));
@@ -536,7 +540,7 @@ test('Overview (behind the scenes): the 13-part strip, four growth numbers with 
   const g14 = tkSliceGrowth(makeGrowth(45), 14);
   const html = renderTrialDetail(detail, 'overview', { now: NOW, spark: { g: g14, state: null } });
   assert.ok(html.includes('Sending — Day 12 of 30'));
-  const iTodo = html.indexOf('Decide the dispute on the call'), iBehind = html.indexOf('id="tkBehind"'), iSys = html.indexOf('<h3>Parts</h3>'), iGrow = html.indexOf('<h3>Growth</h3>');
+  const iTodo = html.indexOf('decide the dispute on the call'), iBehind = html.indexOf('id="tkBehind"'), iSys = html.indexOf('<h3>Parts</h3>'), iGrow = html.indexOf('<h3>Growth</h3>');
   assert.ok(iTodo > 0 && iTodo < iBehind && iBehind < iSys && iSys < iGrow, 'order: the to-do at the top, then behind the scenes: parts, growth');
   assert.ok(html.includes('>Decide the dispute</button>') && html.includes('When you have a minute: decide the dispute on the call with bob@example.com.'), 'not urgent: "when you have a minute"');
   assert.equal(count(html, /class="tk-strip-item /g), 13, '13 systems in the strip');

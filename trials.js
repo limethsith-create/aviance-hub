@@ -93,11 +93,36 @@ function tkParseDate(v){if(!v)return null;if(v instanceof Date)return isNaN(v)?n
 function tkRel(v,now){const d=tkParseDate(v);if(!d)return '—';const diff=((now||new Date())-d)/1000;const a=Math.abs(diff);
   const f=a<5?'':a<60?Math.round(a)+' s':a<3600?Math.round(a/60)+' min':a<172800?Math.round(a/3600)+' h':Math.round(a/86400)+' d';
   if(!f)return 'just now';return diff>=0?f+' ago':'in '+f}
-function tkDate(v){const d=tkParseDate(v);if(!d)return '—';const y=d.getFullYear()!==new Date().getFullYear();return d.toLocaleDateString(undefined,y?{month:'short',day:'numeric',year:'numeric'}:{month:'short',day:'numeric'})}
-function tkDateTime(v){const d=tkParseDate(v);if(!d)return '—';return d.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}
-function tkDayName(v){const d=tkParseDate(v);return d?d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'}):String(v||'')}
-function tkDayShort(v){const d=tkParseDate(v);return d?d.toLocaleDateString(undefined,{day:'numeric',month:'short'}):String(v||'')}
-function tkFull(v){const d=tkParseDate(v);return d?d.toLocaleString():''}
+/* Every time the owner reads is Sri Lanka time (his zone — the Calendar's ownerZone when it has been asked for), whatever
+   zone the phone or laptop is set to, in one style: "Fri 2 Oct, 1:10 am". A bare date ("2026-10-21", a trial's Day 1)
+   is a calendar day, never moved by a zone. US Eastern goes beside a call's time (tkCallWhen). */
+const TK_OWNER_ZONE='Asia/Colombo';
+const TK_US_ZONE='America/New_York';
+const tkFmtCache={};
+function tkOwnerZone(){const z=typeof cal!=='undefined'&&cal&&cal.settings&&cal.settings.ownerZone;return z&&typeof calZoneOk==='function'&&calZoneOk(z)?z:TK_OWNER_ZONE}
+function tkZoned(v){
+  if(v==null||v==='')return null;
+  const m=typeof v==='string'&&/^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if(m)return {d:new Date(Date.UTC(+m[1],+m[2]-1,+m[3],12)),zone:'UTC'};
+  const d=tkParseDate(v);return d?{d,zone:tkOwnerZone()}:null;
+}
+function tkParts(d,zone){
+  const k=zone;if(!tkFmtCache[k])tkFmtCache[k]=new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'short',day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true});
+  const p={};tkFmtCache[k].formatToParts(d).forEach(x=>{p[x.type]=x.value;});return p;
+}
+function tkClock(p){return p.hour+':'+p.minute+' '+String(p.dayPeriod||'').toLowerCase()}
+function tkDate(v){const z=tkZoned(v);if(!z)return '—';const p=tkParts(z.d,z.zone);const y=Number(p.year)!==new Date().getFullYear();return p.day+' '+p.month+(y?' '+p.year:'')}
+function tkDateTime(v){const z=tkZoned(v);if(!z)return '—';const p=tkParts(z.d,z.zone);return p.weekday+' '+p.day+' '+p.month+(z.zone==='UTC'?'':', '+tkClock(p))}
+function tkDayName(v){const z=tkZoned(v);if(!z)return String(v||'');const p=tkParts(z.d,z.zone);return p.weekday+' '+p.day+' '+p.month}
+function tkDayShort(v){const z=tkZoned(v);if(!z)return String(v||'');const p=tkParts(z.d,z.zone);return p.day+' '+p.month}
+function tkFull(v){const z=tkZoned(v);if(!z)return '';const p=tkParts(z.d,z.zone);return p.weekday+' '+p.day+' '+p.month+' '+p.year+(z.zone==='UTC'?'':', '+tkClock(p)+' '+(typeof calZoneName==='function'?calZoneName(z.zone):'Sri Lanka')+' time')}
+/* A call's time for the owner: "Tue 6 Oct, 8:30 pm your time (Tue 11:00 am US Eastern)" — {owner, us, text}. */
+function tkCallWhen(v){
+  const d=tkParseDate(v);if(!d||(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)))return null;
+  const a=tkParts(d,tkOwnerZone()),b=tkParts(d,TK_US_ZONE);
+  const owner=a.weekday+' '+a.day+' '+a.month+', '+tkClock(a);const us=b.weekday+' '+tkClock(b)+' US Eastern';
+  return {owner,us,text:owner+' your time ('+us+')'};
+}
 function tkDot(c){return `<span class="tk-dot ${esc(c||'grey')}"></span>`}
 function tkHealthClass(h){h=String(h||'').toLowerCase();return h==='green'?'green':(h==='yellow'||h==='amber')?'amber':h==='red'?'red':'grey'}
 function tkStateLabel(row){row=row||{};return row.stateLabel||TK_STATE_LABEL[row.state]||row.state||'—'}
@@ -107,7 +132,14 @@ function tkKindClass(k){k=String(k||'').toLowerCase();if(k==='interested')return
 function tkHeartbeatClass(hb){if(!hb||hb.ageSec==null||hb.ageSec==='')return 'red';const a=Number(hb.ageSec);if(isNaN(a))return 'red';return a<=180?'green':a<=900?'amber':'red'}
 /* Machine `errors` come as an array of strings or an object {field: message}. */
 function tkErrorList(errors){if(!errors)return [];if(Array.isArray(errors))return errors.map(String);if(typeof errors==='object')return Object.keys(errors).map(k=>k==='_form'?String(errors[k]):k+': '+String(errors[k]));return [String(errors)]}
-function tkDetailText(d){if(d==null||d==='')return '';if(typeof d==='string')return d;try{const s=JSON.stringify(d);return s.length>220?s.slice(0,217)+'…':s}catch(e){return String(d)}}
+/* An event's detail in words: "sending day 1 · inboxes 2" — never raw JSON, never "null" (empty values are left out). */
+function tkDetailText(d){
+  if(d==null||d==='')return '';if(typeof d!=='object')return String(d);
+  const val=v=>v==null||v===''?'':Array.isArray(v)?(v.length?v.length+' item'+(v.length===1?'':'s'):''):typeof v==='object'?'':typeof v==='boolean'?(v?'yes':'no'):String(v);
+  const words=k=>String(k).replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_]+/g,' ').toLowerCase();
+  const s=Array.isArray(d)?d.map(val).filter(Boolean).join(', '):Object.keys(d).map(k=>{const v=val(d[k]);return v?words(k)+' '+v:''}).filter(Boolean).join(' · ');
+  return s.length>220?s.slice(0,217)+'…':s;
+}
 /* Only http(s) links from machine data (research crawls, registrars, reports) — never javascript: or data:. */
 function tkSafeUrl(u){u=String(u==null?'':u).trim();return /^https?:\/\/[^\s]+$/i.test(u)?u:''}
 function tkLink(u,label){const s=tkSafeUrl(u);const text=label!=null&&label!==''?String(label):s.replace(/^https?:\/\//i,'').replace(/\/$/,'');return s?`<a href="${esc(s)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`:esc(label||'')}
@@ -117,7 +149,23 @@ function tkFindRow(id){if(!id)return null;const rows=tkAllRows(tk.hub);let r=row
 function tkClientName(id){const r=tkFindRow(id);return r&&r.name?r.name:(id||'')}
 function tkSortedStages(stages){return (stages||[]).slice().sort((a,b)=>{const ia=TK_STAGE_ORDER.indexOf(a.key),ib=TK_STAGE_ORDER.indexOf(b.key);return (ia<0?99:ia)-(ib<0?99:ib)})}
 function tkSortedSystems(systems){return (systems||[]).slice().sort((a,b)=>{const ia=TK_SYSTEM_ORDER.indexOf(a.key),ib=TK_SYSTEM_ORDER.indexOf(b.key);return (ia<0?99:ia)-(ib<0?99:ib)})}
-function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return 'Do it';case 'view':return a.view==='settings'?tkSettingsLabel(a.section):a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open the email wording':a.view==='inquiry'?'Open the inquiry':a.view==='calendar'?'Open the Calendar':a.section==='application'?'Read the application':'Open the trial';case 'mc':return 'Open the full control panel';case 'link':return 'Open link';default:return ''}}
+/* What a to-do's "api" action does, from its body (docs/HUB-API.md "Actions the hub calls"): ack (an alert), clearLegalHold,
+   clearSendHold, markPaid … — so each button says exactly what happens instead of "Do it". */
+function tkApiKind(t){const a=(t&&t.action)||{};if(a.type!=='api')return '';const b=a.body&&typeof a.body==='object'?a.body:{};const act=String(b.action||'');
+  if(/\/api\/mc\/alerts$/.test(String(a.path||''))&&act==='ack')return 'ack';return act}
+/* The open alert an "alert-{id}:{client}" to-do is about (the board's alerts), or null. */
+function tkTodoAlert(t){const a=(t&&t.action)||{};const b=a.body&&typeof a.body==='object'?a.body:{};const id=b.id!=null?String(b.id):Array.isArray(b.ids)&&b.ids.length?String(b.ids[0]):'';
+  return id&&tk.hub?(tk.hub.alerts||[]).find(x=>x&&String(x.id)===id)||null:null}
+function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return {ack:'Mark as seen',clearLegalHold:'Clear the hold',clearSendHold:'Clear the hold',markPaid:'Mark paid'}[tkApiKind(t)]||'Do it';case 'view':return a.view==='settings'?tkSettingsLabel(a.section):a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open the email wording':a.view==='inquiry'?'Open the inquiry':a.view==='calendar'?'Open the Calendar':a.section==='application'?'Read the application':'Open the trial';case 'mc':return 'Open the full control panel';case 'link':return 'Open link';default:return ''}}
+/* A to-do as an instruction for the "You need to…" line: an alert to look at reads "Read the angry reply and mark it as
+   seen" (its text is only the alert's title, "Angry reply: Ridgeline IT"); anything else is its own text. */
+function tkTodoAsk(t){
+  const text=String((t&&t.text)||'').trim();
+  if(tkApiKind(t)==='ack'){const what=text.replace(/\s*\(\d+ alerts?\)\s*$/i,'').split(/\s*[:—–]\s*/)[0].trim();return what?'Read the '+what.toLowerCase()+' and mark it as seen':'Read the alert and mark it as seen';}
+  return text;
+}
+/* A to-do's detail line, unless it is only an id ("re0eea7d9132c5cd6") — the owner never reads ids. */
+function tkTodoDetail(t){const x=String((t&&t.detail)||'').trim();return /^[a-z0-9_:.-]{10,}$/i.test(x)&&/\d/.test(x)&&!/\s/.test(x)?'':x}
 function tkSettingsLabel(section){const n=TK_SETTINGS_NAMES[String(section||'')];return n?'Open Settings › '+n:'Open Settings'}
 function tkFindTodo(id){const all=[];if(tk.hub)(tk.hub.todos||[]).forEach(t=>all.push(t));tkAllRows(tk.hub).forEach(r=>(r.todo||[]).forEach(t=>all.push(Object.assign({clientId:r.id,clientName:r.name},t))));Object.keys(tk.detail).forEach(k=>{const d=tk.detail[k];if(d&&d.row)(d.row.todo||[]).forEach(t=>all.push(Object.assign({clientId:d.row.id,clientName:d.row.name},t)))});return all.find(t=>t.id===id)||null}
 function tkTabKey(tab){tab=TK_TAB_ALIAS[tab]||tab;return tab}
@@ -432,6 +480,8 @@ function renderSystemStatus(machine,meta){
 
 /* -- to-dos -- */
 /* On the trial's own page, an "Open trial" button would go nowhere — leave it off. */
+/* A to-do about a part of the trial page itself (view detail + a section): on that page it scrolls there, never "Open the trial". */
+function tkTodoHere(t){const a=(t&&t.action)||{};return a.type==='view'&&(!a.view||a.view==='detail')&&a.section?String(a.section):''}
 function tkTodoIsSelf(t){const a=(t&&t.action)||{};return a.type==='view'&&(!a.view||a.view==='detail')&&!a.section}
 function renderTodoButton(t){const label=tkTodoLabel(t);if(!label)return '';const a=t.action||{};const cls=a.type==='api'||(a.type==='view'&&a.view==='purchase')?'btn':'btn ghost';return `<button class="${cls}" onclick="trialsTodoAction(${tkAttr(t.id)})">${esc(label)}</button>`}
 function renderTodos(todos,opts){
@@ -442,8 +492,8 @@ function renderTodos(todos,opts){
     const client=!opts.hideClient&&(t.clientName||t.clientId)?`<span class="tk-client" onclick="${inq?`openInquiry(${tkAttr(inq)})`:`openTrial(${tkAttr(t.clientId)})`}">${esc(t.clientName||t.clientId)}</span> · `:'';
     return `<div class="tk-todo ${t.urgent?'urgent':''}">
       ${t.urgent?'<span class="pill red">Urgent</span>':tkDot('grey')}
-      <div class="tk-todo-main"><b>${esc(t.text||'')}</b><small>${client}${t.detail?esc(t.detail)+' · ':''}<span class="tk-since" title="Due since ${esc(tkFull(t.since))}">${esc(tkRel(t.since,opts.now))}</span></small></div>
-      <div class="tk-todo-act">${opts.hideClient&&tkTodoIsSelf(t)?'':renderTodoButton(t)}</div>
+      <div class="tk-todo-main"><b>${esc(t.text||'')}</b><small>${client}${tkTodoDetail(t)?esc(tkTodoDetail(t))+' · ':''}<span class="tk-since" title="Due since ${esc(tkFull(t.since))}">${esc(tkRel(t.since,opts.now))}</span></small></div>
+      <div class="tk-todo-act">${opts.hideClient&&tkTodoIsSelf(t)?'':opts.hideClient&&tkTodoHere(t)?`<button class="btn ghost" onclick="tkGoTo(${tkAttr(tkTodoHere(t))})">Show me</button>`:renderTodoButton(t)}</div>
     </div>`}).join(''):`<div class="tk-todo-empty">${esc(opts.empty||'Nothing waiting on you.')}</div>`;
   return `<div class="section-head tk-section"><h3>${esc(title)}</h3>${opts.noCount?'':`<span class="count">${todos.length}</span>`}</div><div class="card tk-todos">${body}</div>`;
 }
@@ -606,7 +656,9 @@ function tkSimple(row){
     needsYou:needsReply||(s?tkTruthy(s.needsYou):(tkIsUnderReview(row)||(row.todo||[]).some(t=>t&&t.urgent))),
     since:s?s.since||null:null,
     day:s?tkNorm(s.dayOf30):tkNorm(row.trialDay),   // the machine's dayOf30 when it sends row.simple (only while sending)
-    done:step==='finished'||step==='declined'||(!s&&TK_DONE_STATES.includes(row.state)),
+    // a finished trial still waiting for their Day 30 decision stays under "In progress" (not folded away with the done ones)
+    // (and so does one with a to-do still open — the month-one invoice to mark paid is never folded away)
+    done:(step==='finished'||step==='declined'||(!s&&TK_DONE_STATES.includes(row.state)))&&row.state!=='deciding'&&!tkTodosSorted(row).length,
   };
 }
 /* Where a row is on the one journey: {n: 1–5 (0 = unknown), name, notTaken, day (Day N of 30, only while sending)}. */
@@ -663,7 +715,7 @@ function tkListGroups(hub){
 function renderTrialRow(x){
   const r=x.row,s=x.s;const review=tkIsUnderReview(r);const j=tkStep(r);
   const go=review?`openTrial(${tkAttr(r.id)},null,'application')`:`openTrial(${tkAttr(r.id)})`;
-  const firstTodo=(tkTodosSorted(r)[0]||{}).text;
+  const firstTodo=tkTodoAsk(tkTodosSorted(r)[0]);
   const next=/^nothing\b/i.test(s.next)?'':s.next;   // "Nothing for you: …" never becomes "You need to…"
   // they wrote and nobody has answered: that is the red line, whatever else is waiting (the reply box is on their page)
   const you=s.needsReply?(tkFirstName(s.person)||'They')+' wrote — answer them':s.needsYou?(tkYouNeedTo(next||firstTodo)||'Something here needs you. Open it to see what.'):'';
@@ -698,17 +750,36 @@ function renderTrialList(hub,meta){
    call card, the application, anything else on the to-do list, then "Behind the scenes" (collapsed). */
 function tkTabsFor(d){return TK_TABS}
 function renderTabBar(active,d){return `<div class="tk-tabs" id="tkTabBar" role="tablist"><div class="seg">${tkTabsFor(d).map(([k,l])=>`<button role="tab" aria-selected="${k===active}" class="${k===active?'active':''}" onclick="trialsSetTab(${tkAttr(k)})">${esc(l)}</button>`).join('')}</div></div>`}
-/* The one button for a to-do that is not about the call or the application. `run` is attribute-ready. */
-function tkTodoPrimary(t,id){
-  const a=(t&&t.action)||{};const tid=String((t&&t.id)||'');
+/* The newest reply of one kind on this trial (d.replies, newest first) → {text, who, at} for a quote, or null. */
+function tkReplyQuote(d,kind){
+  const list=(d&&Array.isArray(d.replies)?d.replies:[]).filter(r=>r&&String(r.kind||'').toLowerCase()===kind&&String(r.snippet||'').trim());
+  const ms=r=>{const x=tkParseDate(r.receivedAt);return x?x.getTime():0};const r=list.sort((a,b)=>ms(b)-ms(a))[0];
+  return r?{text:String(r.snippet).trim(),who:String(r.leadEmail||'').trim(),at:r.receivedAt||null}:null;
+}
+const TK_ALERT_REPLY={angry_reply:'angry',legal_reply:'legal'};
+/* The one button for a to-do that is not about the call or the application. `run` is attribute-ready.
+   → {label, run, say?, quote?}: an "api" to-do says exactly what it does (Mark as seen, Clear the hold, Mark the invoice
+   paid) and, where the owner must read something first, shows it (the angry or legal reply itself). */
+function tkTodoPrimary(t,id,d){
+  const a=(t&&t.action)||{};const tid=String((t&&t.id)||'');const run=`trialsTodoAction(${tkAttr(tid)})`;
   if(tid.indexOf('dispute:')===0)return {label:'Decide the dispute',run:`trialsSetTab(${tkAttr('calls')});tkGoTo(${tkAttr('behind')})`};
-  if(a.type==='view'&&a.view==='calendar')return {label:'Say yes to their call time',run:`trialsTodoAction(${tkAttr(tid)})`};
+  if(a.type==='view'&&a.view==='calendar')return {label:'Say yes to their call time',run};
   if(a.type==='view'&&a.view==='purchase')return {label:'Buy the domain and inboxes',run:`openTrialPurchase(${tkAttr(id)})`};
   if(a.type==='view'&&a.view==='sequence')return {label:'Open the email wording',run:`trialsSetTab(${tkAttr('copy')});tkGoTo(${tkAttr('behind')})`};
-  if(a.type==='view'&&a.view==='inquiry')return {label:'Open the inquiry',run:`trialsTodoAction(${tkAttr(tid)})`};
+  if(a.type==='view'&&a.view==='inquiry')return {label:'Open the inquiry',run};
   if(a.type==='view'&&a.view==='settings')return {label:tkSettingsLabel(a.section),run:`openSettings(${tkAttr(a.section||'')})`};
   if(a.type==='view'&&tkTodoIsSelf(t))return {label:'See the details',run:`tkGoTo(${tkAttr('behind')})`};
-  return {label:a.label||({mc:'Open the full control panel',link:'Open the link'}[a.type])||'Do it now',run:`trialsTodoAction(${tkAttr(tid)})`};
+  const k=tkApiKind(t);
+  if(k==='clearLegalHold'){const q=tkReplyQuote(d,'legal');
+    return {label:'Clear the hold and send again',run,quote:q,say:'A prospect replied with a legal threat, so sending stopped. They are off every list already. '+(q?'Read what they wrote, then clear the hold to start sending again.':'Read the legal reply under Behind the scenes › Replies, then clear the hold to start sending again.')};}
+  if(k==='clearSendHold')return {label:'Clear the hold and send again',run};
+  if(k==='ack'){const al=tkTodoAlert(t);const kind=al&&TK_ALERT_REPLY[String(al.key||'')];const q=kind?tkReplyQuote(d,kind):null;
+    const what=tkTodoAsk(t).replace(/^Read the /,'').replace(/ and mark it as seen$/,'');
+    return {label:'Mark as seen',run,quote:q,say:kind==='angry'?'An angry reply came in. They are off every list already, so there is nothing to answer. Read it, then mark it as seen.':tkSentence(String(t.text||'').trim()||'An alert')+' Read it, then mark the '+what+' as seen.'};}
+  if(k==='markPaid'){const inv=d&&d.invoice&&typeof d.invoice==='object'?d.invoice:null;const amt=inv?tkNorm(inv.amount):null;const plan=inv&&inv.plan?tkHuman(inv.plan):'';
+    const sent=inv&&(inv.sentAt||inv.issuedAt)?' went out '+tkDayName(inv.sentAt||inv.issuedAt):' is out';
+    return {label:'Mark the invoice paid',run,say:'Their first invoice'+(plan||amt!=null?' ('+[plan,amt!=null?'$'+amt.toLocaleString('en-US'):''].filter(Boolean).join(', ')+')':'')+sent+'. When the money lands, mark it paid.'};}
+  return {label:a.label||({mc:'Open the full control panel',link:'Open the link'}[a.type])||'Do it now',run};
 }
 /* The single most important thing the owner can do on this trial, in this order:
    a new application → a call time they asked for → their message ("Answer Sam's message") → a call to mark done → a late booking →
@@ -720,22 +791,25 @@ function tkPrimaryAction(d,meta){
   const oc=d.onboardCall&&typeof d.onboardCall==='object'?d.onboardCall:null;const now=meta.now?new Date(meta.now):new Date();
   const todos=tkTodosSorted(row);const todo=p=>todos.find(t=>String(t.id||'').indexOf(p)===0)||null;
   const who=tkFirstName(s.person);const first=who||'They';
-  const machineSays=s.needsYou&&s.next&&!/^nothing\b/i.test(s.next)?tkYouNeedTo(s.next):'';
+  // the machine's next step, as "You need to…" — not "Open it and…" (this is it) and never "Nothing for you…"
+  const machineSays=s.needsYou&&s.next&&!/^(nothing|open it)\b/i.test(s.next)?tkYouNeedTo(s.next):'';
   const say=fallback=>machineSays||fallback;
   const A=(kind,label,text,run,t)=>({kind,label,say:text||'',run:run||'',todoId:t&&t.id!=null?String(t.id):null});
   const pending=d.application&&typeof d.application==='object'?d.application.review==='pending':tkIsUnderReview(row);
-  if(pending)return A('review','Read the application and say yes or no',say('They applied for a trial. Read what they sent, then say yes or no.'),`tkGoTo(${tkAttr('application')})`,todo('review:'));
+  if(pending)return A('review','Read the application and say yes or no',say(first+' applied for a trial. Read what they sent and what we found, then say yes or no.'),`tkGoTo(${tkAttr('application')})`,todo('review:'));
   const req=typeof calReqFor==='function'?calReqFor(id):null;const mreq=todo('meeting-request:');
   const mid=req?req.id:mreq&&mreq.action&&mreq.action.meetingId!=null?mreq.action.meetingId:null;
   if(req||mreq){const at=req?req.start:oc&&oc.requestedFor;const w=at&&typeof calWhen==='function'&&typeof calSettingsNow==='function'?calWhen(at,calSettingsNow(),req?req.theirZone:oc&&oc.theirZone):null;
-    return A('calendar','Say yes to their call time',first+' asked for a call on '+(w?w.big+' (your time)':'a time you can see in the Calendar')+'. Say yes, or suggest another time.',mid!=null?`openCalendar(${tkAttr(mid)})`:"render('calendar')",mreq);}
+    return A('calendar','Say yes to their call time',first+' asked for a call on '+(w?w.big+' your time ('+w.us+')':'a time you can see in the Calendar')+'. Say yes, or suggest another time.',mid!=null?`openCalendar(${tkAttr(mid)})`:"render('calendar')",mreq);}
   const st=String((oc&&oc.status)||'').toLowerCase();const booked=!!(oc&&tkOcIsBooked(oc));
   // their message waits for an answer (conversation.needsReply) — the hub's own words: the box lives under Messages
-  if(tkNeedsReply(d))return A('reply',who?'Answer '+who+"'s message":'Answer their message',first+' wrote to you. Read it under Messages below and write back there.','tkFocusReply()',todo('onboard-reply:'));
+  if(tkNeedsReply(d))return A('reply',who?'Answer '+who+"'s message":'Answer their message',first+' wrote to you. Read it under Messages below and write back there.','tkFocusReply()',todo('onboard-reply:')||todo('message-reply:'));
   const when=oc&&tkParseDate(oc.bookedFor);
-  if(oc&&(todo('onboard-mark:')||(booked&&when&&when<now)))return A('markHeld','Mark the call done',"The call was set for "+(when?tkDateTime(when):'earlier')+". If it happened, mark it done. If they didn't show, say so in the call box below.",`trialOcTopHeld(${tkAttr(id)})`,todo('onboard-mark:'));
+  if(oc&&(todo('onboard-mark:')||(booked&&when&&when<now)))return A('markHeld','Mark the call done',"The call was set for "+(when?tkDateTime(when)+' your time':'earlier')+". If it happened, mark it done. If they didn't show, say so in the call box below.",`trialOcTopHeld(${tkAttr(id)})`,todo('onboard-mark:'));
   if(oc&&!booked&&(todo('onboard-overdue:')||tkTruthy(oc.overdue)||st==='overdue'))return A('nudge','Write to them about booking',say((who?who+" hasn't":"They haven't")+" booked the call yet, and it's late. Send a short note in the box below."),'tkFocusReply()',todo('onboard-overdue:'));
-  const buy=todos.find(t=>t.action&&t.action.view==='purchase')||null;
+  // the buying to-do: the Buy & paste page's (view purchase), or CheapInboxes' (buy:{id} → the "autobuy" section)
+  const isBuy=t=>!!(t&&((t.action&&(t.action.view==='purchase'||t.action.section==='autobuy'))||String(t.id||'').indexOf('buy:')===0));
+  const buy=todos.find(isBuy)||null;
   // CheapInboxes (autobuy.js): he buys there with one look at the panel; the system sets up everything after it
   const ab=tkAutobuy(d);const inb=ab?ab.count+' inbox'+(ab.count===1?'':'es'):'';
   if(ab&&ab.toBuy)return A('autobuy','Buy their domain and '+inb+' on CheapInboxes','Buy '+ab.domain+' and '+inb+' in your CheapInboxes account. We set up everything after that by ourselves.',`abOpenBuy(${tkAttr(id)})`,buy);
@@ -745,17 +819,26 @@ function tkPrimaryAction(d,meta){
   const wu=tkTrialWarmup(d);
   if(wu&&wu.status==='waiting_for_helpers'){const n=tkWarmupMissing(d);const more=n?n+' more helper'+(n===1?'':'s'):'more helpers';
     return A('warmupHelpers',n?'Add '+n+' warm-up helper'+(n===1?'':'s'):'Add warm-up helpers',"Their inboxes can't start warming up until the warm-up circle has "+more+'. Helpers are free email accounts you make once — they help every client after this.',`openSettings(${tkAttr('warmup')})`,todos.find(tkIsWarmupTodo)||null);}
-  const rest=todos.find(t=>!/^(review:|onboard-)/.test(String(t.id||''))&&!(t.action&&t.action.section==='application')&&!(ab&&ab.handled&&t.action&&t.action.view==='purchase'));
-  if(rest){const m=tkTodoPrimary(rest,id);const txt=tkSentence(rest.text||'');const verb=TK_VERBS.includes(txt.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,''));
-    return A('todo',m.label,rest.urgent||s.needsYou?txt:'When you have a minute: '+(verb?txt.charAt(0).toLowerCase()+txt.slice(1):txt),m.run,rest);}
+  const rest=todos.find(t=>!/^(review:|onboard-|message-reply:)/.test(String(t.id||''))&&!(t.action&&t.action.section==='application')&&!(ab&&ab.handled&&isBuy(t)));
+  if(rest){const m=tkTodoPrimary(rest,id,d);const txt=tkSentence(m.say||rest.text||'');const verb=TK_VERBS.includes(txt.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,''));
+    return Object.assign(A('todo',m.label,rest.urgent||s.needsYou||m.say?txt:'When you have a minute: '+(verb?txt.charAt(0).toLowerCase()+txt.slice(1):txt),m.run,rest),{quote:m.quote||null});}
   if(s.needsYou)return A('look','See what needs you',say('Something here needs you.'),`tkGoTo(${tkAttr('behind')})`);
+  // nothing to do — but a call still ahead is his to join, and on Day 30 the decision is theirs
+  const ahead=booked&&when&&when>=now?tkCallWhen(oc.bookedFor):null;
+  if(ahead)return A('none','Nothing until the call. Join it on '+ahead.owner+' your time.');
+  if(row.state==='deciding')return A('none','Nothing. '+first+' '+(who?'chooses':'choose')+" on the decision page — we'll tell you what they pick.");
   return A('none',"Nothing — we'll tell you when something needs you");
 }
 /* "What happens next?" — never the same words as the other two answers. */
-function tkNextText(s,j,act){
+function tkNextText(s,j,act,d,now){
   if(s.needsYou&&act&&act.kind!=='none')return "It's your turn. Once you've done the step below, we carry on.";
   const n=String(s.next||'').trim().replace(/^nothing\s+(?:for\s+you|to\s+do)\s*[:—–-]\s*/i,'');
+  // his own step (not marked urgent) is under "What do you need to do?" — not said twice
+  if(act&&act.kind!=='none'&&n&&TK_VERBS.includes(n.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,'')))return "Once you've done the step below, we carry on.";
   if(n&&!/^nothing\b/i.test(n))return tkSentence(n);
+  // "Nothing for you until the call": the call itself, in his time and US Eastern
+  const oc=d&&d.onboardCall&&typeof d.onboardCall==='object'?d.onboardCall:null;const at=oc&&tkOcIsBooked(oc)?tkParseDate(oc.bookedFor):null;
+  if(at&&at>=(now?new Date(now):new Date())){const w=tkCallWhen(oc.bookedFor);if(w)return 'The onboarding call: '+w.text+'.';}
   if(j&&j.notTaken)return "Nothing. We didn't take this one.";
   if(j&&j.n===5)return 'Nothing. This trial is finished.';
   return "Nothing for now. We'll tell you when something changes.";
@@ -764,7 +847,8 @@ function renderPrimary(act){
   if(!act||act.kind==='none')return `<p class="tk-q-none">${esc(act?act.label:'')}</p>`;
   // CheapInboxes not set up yet: the Buy & paste page as before, and where the easier way lives
   const hint=act.hint?`<p class="tk-q-hint">Want the setup done for you? You buy on CheapInboxes, we do the rest. <button type="button" class="tk-textbtn" onclick="openSettings(${tkAttr('inboxes')})">Set up CheapInboxes in Settings</button></p>`:'';
-  return `${act.say?`<p class="tk-q-say">${esc(act.say)}</p>`:''}<button type="button" class="btn tk-primary" onclick="${act.run}">${esc(act.label)}</button>${hint}`;
+  const q=act.quote&&act.quote.text?`<blockquote class="tk-q-quote"><p>${esc('“'+act.quote.text+'”')}</p>${act.quote.who||act.quote.at?`<footer>${esc([act.quote.who,act.quote.at?tkDateTime(act.quote.at)+' your time':''].filter(Boolean).join(' · '))}</footer>`:''}</blockquote>`:'';
+  return `${act.say?`<p class="tk-q-say">${esc(act.say)}</p>`:''}${q}<button type="button" class="btn tk-primary" onclick="${act.run}">${esc(act.label)}</button>${hint}`;
 }
 function renderTrialTop(d,meta,act){
   d=d||{};meta=meta||{};const row=d.row||{};const j=tkStep(row);act=act||tkPrimaryAction(d,meta);
@@ -774,7 +858,7 @@ function renderTrialTop(d,meta,act){
   return `<section class="card tk-top${s.needsYou&&act.kind!=='none'?' needs':''}" id="tkTop">
     ${who?`<p class="tk-top-who">${who}</p>`:''}
     <div class="tk-q"><h3 class="tk-q-title">Where are they?</h3>${renderJourney(j)}${say?`<p class="tk-q-big">${esc(say)}</p>`:''}${day?`<p class="tk-q-day">${esc(day)}</p>`:''}</div>
-    <div class="tk-q"><h3 class="tk-q-title">What happens next?</h3><p class="tk-q-text">${esc(tkNextText(s,j,act))}</p></div>
+    <div class="tk-q"><h3 class="tk-q-title">What happens next?</h3><p class="tk-q-text">${esc(tkNextText(s,j,act,d,meta.now))}</p></div>
     <div class="tk-q tk-q-you"><h3 class="tk-q-title">What do you need to do?</h3>${renderPrimary(act)}</div>
   </section>`;
 }
@@ -812,28 +896,40 @@ function renderOnboardCall(oc,row,meta){
   const held=st==='held',noShow=st==='no_show',booked=tkOcIsBooked(oc);
   const stopped=st==='stopped'||tkTruthy(oc.stopped),overdue=st==='overdue'||tkTruthy(oc.overdue);
   const waiting=!booked&&!held&&!noShow;
-  const by=oc.bookedBy==='calendar'?' — they booked it on your calendar':oc.bookedBy==='owner'?' — you marked it':'';
-  const when=oc.bookedFor&&!waiting?`<p class="tk-oc-when">${held?'The call was on':noShow?'The call was set for':'The call is on'} <b>${esc(tkDateTime(oc.bookedFor))}</b>${esc(by)}</p>`:'';
-  const due=waiting&&oc.dueBy?`<p class="tk-oc-due${overdue?' late':''}">Book by ${esc(tkDayName(oc.dueBy))}${overdue?' — overdue':''}</p>`:'';
+  const by=oc.bookedBy==='calendar'?' — booked through your Calendar':oc.bookedBy==='owner'?' — you marked it':'';
+  // the call's time: Sri Lanka time, and US Eastern beside it (their side)
+  const cw=tkCallWhen(oc.bookedFor);
+  const when=oc.bookedFor&&!waiting?`<p class="tk-oc-when">${held?'The call was on':noShow?'The call was set for':'The call is on'} <b>${esc(cw?cw.owner+' your time':tkDateTime(oc.bookedFor))}</b>${cw?` <span class="tk-oc-us">(${esc(cw.us)})</span>`:''}${esc(by)}</p>`:'';
+  // a call still ahead: its Google Meet link when the Calendar already has it, else the way to it in the Calendar
+  const mt=booked&&oc.meetingId!=null&&oc.meetingId!==''&&typeof calFind==='function'?calFind(oc.meetingId):null;const meet=mt&&typeof calMeetLink==='function'?calMeetLink(mt):'';
+  const join=booked&&oc.meetingId!=null&&oc.meetingId!==''?`<div class="tk-oc-acts">${meet?`<a class="btn" href="${esc(meet)}" target="_blank" rel="noopener noreferrer">Join Google Meet</a>`:''}<button type="button" class="btn ghost" onclick="openCalendar(${tkAttr(oc.meetingId)})">See it in the Calendar</button></div>`:'';
+  // once they asked for a time (it waits for his yes in the Calendar) the booking deadline is no longer the news
+  const due=waiting&&oc.dueBy&&!oc.requestedFor?`<p class="tk-oc-due${overdue?' late':''}">Book by ${esc(tkDayName(oc.dueBy))}${overdue?' — overdue':''}</p>`:'';
   const steps=(Array.isArray(oc.steps)?oc.steps:[]).filter(x=>x&&typeof x==='object');
   const stepsHtml=steps.length?`<ol class="tk-oc-steps">${steps.map(x=>{const done=tkTruthy(x.done);return `<li class="${done?'done':'todo'}"><span class="tk-oc-tick" aria-hidden="true">${done?'✓':''}</span><span><span class="tk-sr">${done?'Done: ':'Not yet: '}</span>${esc(x.label||x.key||'')}</span>${done&&x.at?`<span class="tk-oc-at" title="${esc(tkFull(x.at))}">${esc(tkDateTime(x.at))}</span>`:''}</li>`}).join('')}</ol>`:'';
   const n=Number(oc.remindersSent)||0;
   const rem=stopped?'Reminders are stopped.':n?`${n} reminder${n!==1?'s':''} sent${waiting&&oc.nextReminderAt?' · next one '+tkDateTime(oc.nextReminderAt):''}.`:waiting&&oc.nextReminderAt?`First reminder ${tkDateTime(oc.nextReminderAt)} if they haven't booked.`:'';
-  const link=tkSafeUrl(oc.bookingUrl)?`Booking link in the email: ${tkLink(oc.bookingUrl)}`:'No booking link: the email asks them to reply with times that suit them.';
-  const facts=[rem?esc(rem):'',link,oc.fromInbox?`Emails go from ${esc(oc.fromInbox)}.`:''].filter(Boolean).join('<br>');
+  // no link of his own set: the email links the booking page (docs/CALENDAR.md), and what they pick comes to the Calendar
+  const link=tkSafeUrl(oc.bookingUrl)?`Booking link in the email: ${tkLink(oc.bookingUrl)}`:'The email links your booking page. The time they pick comes to your Calendar for your yes.';
+  const facts=[rem?esc(rem):'',waiting?link:'',oc.fromInbox?`Emails go from ${esc(oc.fromInbox)}.`:''].filter(Boolean).join('<br>');   // the booking link matters only until the call is booked
   const btn=(action,label,ghost)=>`<button class="btn${ghost?' ghost':''}" onclick="trialOcAction(${tkAttr(id)},${tkAttr(action)})">${esc(label)}</button>`;
   const acts=[];
   if(booked){acts.push(btn('markHeld','Call done'));acts.push(btn('markNoShow',"They didn't show",true));}
-  if(!booked&&!held)acts.push(btn('resend','Send the first email again',true));
+  // they asked for a time and it waits for his yes in the Calendar (the big button): no second way to book it here
+  const asked=!booked&&!held&&!noShow&&!!oc.requestedFor;
+  if(!booked&&!held&&!asked)acts.push(btn('resend','Send the first email again',true));
   if(!stopped&&!held)acts.push(btn('stopReminders','Stop the reminder emails',true));
-  const book=held?'':`<div class="tk-oc-book"><label for="tkOcWhen">${booked?'Call moved? Pick the new date and time':'Booked by phone or email? Pick the date and time'}</label><div class="tk-oc-book-row"><input id="tkOcWhen" type="datetime-local" data-tk-form><button class="btn${booked?' ghost':''}" onclick="trialOcMarkBooked(${tkAttr(id)})">Mark call booked</button></div></div>`;
-  return `<section class="card tk-oc" id="tkSec-onboardcall">
-    <h3>Onboarding call</h3>
-    ${oc.label?`<p class="tk-oc-say">${esc(oc.label)}</p>`:''}
-    ${when}${due}${stepsHtml}
+  const book=held||asked?'':`<div class="tk-oc-book"><label for="tkOcWhen">${booked?'Call moved? Pick the new date and time (your time)':'Booked by phone or email? Pick the date and time (your time)'}</label><div class="tk-oc-book-row"><input id="tkOcWhen" type="datetime-local" data-tk-form><button class="btn${booked?' ghost':''}" onclick="trialOcMarkBooked(${tkAttr(id)})">Mark call booked</button></div></div>`;
+  const body=`${oc.label?`<p class="tk-oc-say">${esc(oc.label)}</p>`:''}
+    ${when}${join}${due}${stepsHtml}
     ${facts?`<p class="tk-oc-facts">${facts}</p>`:''}
     <p class="tk-oc-msgs">Your emails with ${esc(first||'them')} are under Messages. <button type="button" class="tk-textbtn" onclick="tkGoTo(${tkAttr('messages')})">See the messages</button></p>
-    ${book||acts.length?`<h4>Update the call</h4>${book}${acts.length?`<div class="tk-oc-acts">${acts.join('')}</div>`:''}`:''}
+    ${book||acts.length?`<h4>Update the call</h4>${book}${acts.length?`<div class="tk-oc-acts">${acts.join('')}</div>`:''}`:''}`;
+  // past onboarding and the call is over: history — one folded line, like the application
+  if((held||noShow)&&row.state&&row.state!=='onboarding')return `<details class="tk-appbox tk-oc-done" id="tkSec-onboardcall"><summary><span class="tk-appbox-title">Onboarding call</span><span class="pill ${held?'green':'grey'}">${held?'Done':"They didn't show"}</span></summary><div class="card tk-oc">${body}</div></details>`;
+  return `<section class="card tk-oc" id="tkSec-onboardcall">
+    <h3>Onboarding call</h3>
+    ${body}
   </section>`;
 }
 
@@ -1135,7 +1231,7 @@ function renderActionsTab(d){
   </div>
   <div class="section-head tk-section"><h3>Re-run a step</h3></div>
   <div class="card tk-pad"><div class="tk-inline"><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunSetup')">Re-run setup check</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunMarket')">Re-run market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'marketOverride')">Override market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunBookingTest')">Re-test booking link</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'resendWelcome')">Resend welcome email</button></div></div>
-  ${inv?`<div class="section-head tk-section"><h3>Invoice</h3></div><div class="card tk-pad"><div class="tk-kv"><small>Number</small><span>${esc(inv.number||'—')}</span><small>Amount</small><span>${tkMoney(inv.amount)}</span><small>Issued</small><span>${esc(tkDate(inv.issuedAt))}</span><small>Due</small><span>${esc(tkDate(inv.dueDate))}</span><small>Paid</small><span>${inv.paidAt?'<span class="pill green">Paid '+esc(tkDate(inv.paidAt))+'</span>':'<span class="pill amber">Unpaid</span>'}</span></div></div>`:''}
+  ${inv?`<div class="section-head tk-section"><h3>Invoice</h3></div><div class="card tk-pad"><div class="tk-kv"><small>Number</small><span>${esc(inv.number||inv.invoiceNo||'—')}</span>${inv.plan?`<small>Plan</small><span>${esc(tkHuman(inv.plan))}</span>`:''}<small>Amount</small><span>${tkMoney(inv.amount)}</span><small>Issued</small><span>${esc(tkDate(inv.issuedAt||inv.sentAt))}</span>${inv.dueDate?`<small>Due</small><span>${esc(tkDate(inv.dueDate))}</span>`:''}<small>Paid</small><span>${inv.paidAt||inv.status==='paid'?'<span class="pill green">Paid'+(inv.paidAt?' '+esc(tkDate(inv.paidAt)):'')+'</span>':'<span class="pill amber">Not paid yet</span>'}</span></div></div>`:''}
   ${renderLinks(d.links)}
   ${jobNames.length?`<div class="section-head tk-section"><h3>Automatic tasks</h3><span class="count">${jobNames.length}</span></div><div class="card tk-scroll"><table class="tk-table"><tr><th>Task</th><th>Last run</th><th>Took</th><th>Result</th></tr>${jobNames.map(j=>{const r=jobs[j]||{};return `<tr><td>${esc(j)}</td><td class="num" title="${esc(tkFull(r.at))}">${esc(r.at?tkRel(r.at):'never')}</td><td class="num">${r.ms!=null?tkNum(r.ms)+' ms':'—'}</td><td class="wrap">${r.at==null?'—':r.ok===false||r.error?`<span class="pill red">Error</span> <span class="tk-small">${esc(r.error||'')}</span>`:'<span class="pill green">OK</span>'}</td></tr>`}).join('')}</table></div>`:''}`;
 }
@@ -1154,7 +1250,7 @@ function renderTab(d,tab,ctx){
     case 'comingup':return renderComingUpTab(d);
     case 'timeline':return renderTimeline(d.events);
     case 'actions':return renderActionsTab(d);
-    case 'application':return d.application?renderApplication(d):renderOverviewTab(d,ctx);
+    case 'application':return d.application?renderApplication(d,ctx):renderOverviewTab(d,ctx);
     default:return renderOverviewTab(d,ctx);
   }
 }
@@ -1166,7 +1262,7 @@ function renderTrialDetail(d,tab,meta){
   d=d||{};meta=meta||{};tab=tkTabKey(tab);tab=tkTabsFor(d).some(t=>t[0]===tab)?tab:'overview';
   const row=d.row||{};const act=tkPrimaryAction(d,meta);const ab=tkAutobuy(d);
   // the purchase to-do is CheapInboxes' business once it handles this trial (never "Buy & paste" under the big button)
-  const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application')||!!(ab&&ab.handled&&t&&t.action&&t.action.view==='purchase')||(act.kind==='warmupHelpers'&&tkIsWarmupTodo(t));};
+  const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-|message-reply:)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application')||!!(ab&&ab.handled&&t&&(String(t.id||'').indexOf('buy:')===0||(t.action&&(t.action.view==='purchase'||t.action.section==='autobuy'))))||(act.kind==='warmupHelpers'&&tkIsWarmupTodo(t));};
   const todos=tkTodosSorted(row).filter(t=>!mine(t));
   return renderTrialTop(d,meta,act)+
     (typeof renderMessages==='function'?`<div id="tkMsgHost">${renderMessages(d,meta)}</div>`:'')+
@@ -1298,12 +1394,12 @@ function renderResearch(r,id){
 }
 /* The application itself: when it came, the fit check, the fit score, what we found, every answer, and
    (while it waits) the two buttons. Who they are is already at the top of the page. */
-function renderApplicationCard(d){
-  const row=d.row||{};const id=row.id;const app=d.application||{};const fit=app.fit||{};const lines=fit.lines||[];const answers=app.answers||[];
+function renderApplicationCard(d,meta){
+  meta=meta||{};const row=d.row||{};const id=row.id;const app=d.application||{};const fit=app.fit||{};const lines=fit.lines||[];const answers=app.answers||[];
   const review=String(app.review||'').toLowerCase();const pending=review==='pending';
   const decided=review==='approved'?`You said yes ${esc(tkDateTime(app.decidedAt))}. They were emailed.`:review==='declined'?`You said no ${esc(tkDateTime(app.decidedAt))}.${app.declineReason?` The reason they were sent: “${esc(app.declineReason)}”`:''}`:'';
   return `<div class="card tk-app${pending?' pending':''}">
-    <p class="tk-app-who">Sent ${esc(tkDateTime(app.receivedAt))} (${esc(tkRel(app.receivedAt))}) from ${esc(tkSourceText(app.source))}.</p>
+    <p class="tk-app-who">Sent ${esc(tkDateTime(app.receivedAt))} your time (${esc(tkRel(app.receivedAt,meta.now?new Date(meta.now):undefined))}) from ${esc(tkSourceText(app.source))}.</p>
     <h4>Fit check</h4>
     <div class="tk-fit-summary">${tkVerdictPill(fit.verdict)}<span>${esc(fit.summary||'')}</span></div>
     ${lines.length?`<div class="tk-fit">${lines.map(l=>`<div class="tk-fit-line"><div>${tkFitPill(l.status)}</div><div><b>${esc(l.label||l.rule||'')}</b>${l.note?`<small>${esc(l.note)}</small>`:''}</div></div>`).join('')}</div>`:''}
@@ -1315,16 +1411,16 @@ function renderApplicationCard(d){
   </div>`;
 }
 function tkReviewPill(review){return review==='approved'?'<span class="pill green">You said yes</span>':review==='declined'?'<span class="pill grey">You said no</span>':''}
-function renderApplication(d){
+function renderApplication(d,meta){
   const review=String(((d&&d.application)||{}).review||'').toLowerCase();
-  return `<div class="section-head tk-section" id="tkSec-application"><h3>Their application</h3>${tkReviewPill(review)}</div>${renderApplicationCard(d)}`;
+  return `<div class="section-head tk-section" id="tkSec-application"><h3>Their application</h3>${tkReviewPill(review)}</div>${renderApplicationCard(d,meta)}`;
 }
 /* On the trial page: open while it waits for the owner; once decided, one closed line to look back at. */
-function renderApplicationBlock(d){
+function renderApplicationBlock(d,meta){
   const app=d&&d.application;if(!app||typeof app!=='object')return '';
   const review=String(app.review||'').toLowerCase();
-  if(review==='pending')return renderApplication(d);
-  return `<details class="tk-appbox" id="tkSec-application"><summary><span class="tk-appbox-title">Their application</span>${tkReviewPill(review)}</summary>${renderApplicationCard(d)}</details>`;
+  if(review==='pending')return renderApplication(d,meta);
+  return `<details class="tk-appbox" id="tkSec-application"><summary><span class="tk-appbox-title">Their application</span>${tkReviewPill(review)}</summary>${renderApplicationCard(d,meta)}</details>`;
 }
 function renderDeclineModal(d){
   const row=(d&&d.row)||{};const id=row.id;const app=(d&&d.application)||{};
@@ -1519,10 +1615,13 @@ function trialsRepaintTab(tab){
   const d=tk.detail[currentTrialId];const host=document.getElementById('tkTabHost');if(!d||!host)return;
   host.innerHTML=renderTab(d,tab,trialsCtx(currentTrialId));
 }
-/* openTrial(id, tab, section) asks for a section (e.g. 'application'); scroll there once it exists. */
+/* openTrial(id, tab, section) asks for a section (e.g. 'application'); scroll there once it exists. The machine's to-dos
+   name some sections by their data ('conversation', 'onboardCall'): those are the page's Messages and onboarding call card. */
+const TK_SECTION_ALIAS={conversation:'messages',onboardCall:'onboardcall'};
 function trialsApplyScroll(){
   if(currentView!=='trial'||!tk.scrollTo||!currentTrialId||!tk.detail[currentTrialId])return;
-  const el=document.getElementById(tk.scrollTo==='behind'?'tkBehind':'tkSec-'+tk.scrollTo);tk.scrollTo=null;
+  const sec=TK_SECTION_ALIAS[tk.scrollTo]||tk.scrollTo;
+  const el=document.getElementById(sec==='behind'?'tkBehind':'tkSec-'+sec);tk.scrollTo=null;
   const box=el&&el.closest?el.closest('details'):null;if(box&&!box.open)box.open=true;   // e.g. a decided application sits behind the scenes
   // Instant, not smooth: smooth scrolling needs animation frames, which browsers pause in hidden tabs.
   if(el&&el.scrollIntoView)try{el.scrollIntoView({block:'start'});}catch(e){el.scrollIntoView();}
@@ -1609,6 +1708,7 @@ function openTrial(id,tab,section){if(!id)return;id=String(id);if(id!==currentTr
 function tkGoTo(section){tk.scrollTo=String(section||'');trialsApplyScroll();}
 function tkFocusReply(){
   const t=document.getElementById('tkMsgReply');if(!t){tkGoTo('messages');return;}
+  const box=t.closest?t.closest('details'):null;if(box&&!box.open)box.open=true;   // Messages folded (no emails yet): open it first
   if(t.scrollIntoView)try{t.scrollIntoView({block:'center'});}catch(e){t.scrollIntoView();}
   try{t.focus();}catch(e){}
 }
@@ -1722,10 +1822,16 @@ async function trialOcPost(id,body,opts){
   }
   return r;
 }
+/* The picker's "2026-10-06T20:30" is the owner's time (Sri Lanka), whatever zone the device is set to. */
+function tkOwnerInput(v){
+  const m=/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(v||'').trim());if(!m)return null;
+  if(typeof calZoneToUtc==='function'){const d=calZoneToUtc(m[1],m[2],tkOwnerZone());return d&&!isNaN(d)?d:null;}
+  const d=new Date(v);return isNaN(d)?null:d;
+}
 function trialOcMarkBooked(id){
-  const i=document.getElementById('tkOcWhen');const v=String((i&&i.value)||'').trim();const d=v?new Date(v):null;
+  const i=document.getElementById('tkOcWhen');const v=String((i&&i.value)||'').trim();const d=v?tkOwnerInput(v):null;
   if(!d||isNaN(d)){toast('Pick the date and time of the call first');return Promise.resolve({ok:false});}
-  return trialOcPost(id,{action:'markBooked',when:d.toISOString()},{done:'Call marked as booked for '+tkDateTime(d)});
+  return trialOcPost(id,{action:'markBooked',when:d.toISOString()},{done:'Call marked as booked for '+tkDateTime(d)+' your time'});
 }
 const TK_OC_ACTIONS={
   markHeld:{done:'Marked: the call happened'},
@@ -1857,8 +1963,10 @@ function trialsNotifs(){
   const n=[];if(!trialsIsAdmin()||!tk.hub)return n;
   // a call time they asked for is listed once, by the Calendar (calendarNotifs), when the Calendar already knows it
   const inCal=t=>{const a=t.action||{};return a.view==='calendar'&&a.meetingId!=null&&typeof cal!=='undefined'&&cal.reqs.some(m=>m&&String(m.id)===String(a.meetingId));};
-  (tk.hub.todos||[]).filter(t=>t.urgent&&!inCal(t)).forEach(t=>n.push({dot:'var(--red)',t:t.text||'To-do',s:(t.clientName||t.clientId||'Trial')+(t.detail?' · '+t.detail:''),go:()=>tkOpenTodoTarget(t)}));
-  (tk.hub.alerts||[]).filter(a=>a.urgent&&!a.acknowledged).forEach(a=>n.push({dot:'var(--red)',t:a.title||'Alert',s:'Alert'+(a.clientId?' · '+tkClientName(a.clientId):''),go:()=>openSettings('alerts')}));
+  const todos=(tk.hub.todos||[]).filter(t=>t.urgent&&!inCal(t));
+  todos.forEach(t=>n.push({dot:'var(--red)',t:t.text||'To-do',s:(t.clientName||t.clientId||'Trial')+(tkTodoDetail(t)?' · '+tkTodoDetail(t):''),go:()=>tkOpenTodoTarget(t)}));
+  const asTodo=a=>todos.some(t=>String(t.id||'').indexOf('alert-'+a.id+':')===0);   // "alert-{id}:{client}": the same alert, already listed
+  (tk.hub.alerts||[]).filter(a=>a.urgent&&!a.acknowledged&&!asTodo(a)).forEach(a=>n.push({dot:'var(--red)',t:a.title||'Alert',s:'Alert'+(a.clientId?' · '+tkClientName(a.clientId):''),go:()=>openSettings('alerts')}));
   return n;
 }
 function trialsCmdkActions(){

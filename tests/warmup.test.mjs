@@ -306,7 +306,7 @@ test('Add a helper, end to end: pick → checks the boxes → posts {addHelper, 
 });
 
 /* ───────────── 4. the trial page ───────────── */
-test('trial page: the "Warm-up" card — the bar (day N of about 14), how many reach the inbox, each inbox with its day and rate, "Ready to start sending around …"; the label only when the top of the page does not already say it', () => {
+test('trial page: the "Warm-up" card — the bar (day N of about 14), how many reach the inbox, each inbox with its day and rate, "Warm-up should be done around …" and Day 1 beside it; the label only when the top of the page does not already say it', () => {
   const d = galeWu('warming');
   const t = top(d);
   assert.ok(t.includes('<p class="tk-q-big">Warming up — day 5 of about 14 · 96% reach the inbox</p>'), 'the machine\'s label is the big sentence at the top');
@@ -315,7 +315,7 @@ test('trial page: the "Warm-up" card — the bar (day N of about 14), how many r
   assert.ok(!card.includes('tk-wu-say'), 'not said twice');
   assert.ok(card.includes('<div class="tk-wu-prog"><div class="tk-wu-bar" role="progressbar" aria-valuemin="0" aria-valuemax="14" aria-valuenow="5" aria-label="Day 5 of about 14"><span style="width:36%"></span></div><p class="tk-wu-day">Day 5 of about 14</p></div>'));
   assert.ok(card.includes('<p class="tk-wu-rate"><b>96%</b> reach the inbox</p>'));
-  assert.ok(card.includes(`<p class="tk-wu-ready">Ready to start sending around ${tkDayName('2026-10-26')}.</p>`));
+  assert.ok(card.includes(`<p class="tk-wu-ready">Warm-up should be done around ${tkDayName('2026-10-26')}. First emails: ${tkDayName('2026-10-26')}.</p>`), 'when warm-up is done, and the first emails (Day 1) beside it');
   assert.ok(card.includes('<h4>Each inbox</h4><ul class="tk-wu-boxes"><li><span class="tk-break">mia@<wbr>galeroofing-mail.com</span><span class="tk-wu-ibx">Day 5 · 96% reach the inbox</span></li><li><span class="tk-break">hello@<wbr>galeroofing-mail.com</span><span class="tk-wu-ibx">Day 4 · not measured yet</span></li></ul>'));
   assert.ok(!card.includes('<button'), 'nothing to press while it warms');
   const at = (s) => card.indexOf(s);
@@ -366,7 +366,7 @@ test('trial page: waiting for helpers → the big button is "Add 2 warm-up helpe
   assert.ok(!renderTrialDetail(twice, 'overview', { now: NOW }).includes('Also on your list'), 'a second copy of that to-do is not listed either');
   const card = renderWarmupCard(d);
   assert.ok(card.includes('<p class="tk-wu-text">It starts by itself as soon as the circle has enough helpers.</p>') && !card.includes('tk-wu-bar'), 'no bar before it starts');
-  assert.equal(count(card, /<span class="tk-wu-ibx">Not started yet<\/span>/g), 2, 'each inbox: not started yet (never "Day 0")');
+  assert.equal(count(card, /<span class="tk-wu-ibx">Waiting for helpers<\/span>/g), 2, 'each inbox: waiting for helpers (never "Day 0" or "Day 1")');
   assert.ok(!card.includes('tk-wu-say'), 'the row already says it');
   // with Settings' answer in hand: how full the circle is
   wuState.s = clone(warmupStates.short);

@@ -502,7 +502,7 @@ test('Trials list + trial page: a client who asked for a time says "They asked f
     assert.ok(said.includes('<span>Open the Calendar to say yes</span>'), 'the machine already said it: just the link');
     // the trial page: saying yes to the time is the big button at the top — said once, not a second card
     const page = renderTrialDetail(ecreekDetail, 'overview', { now: CAL_NOW });
-    assert.ok(page.includes('<p class="tk-q-say">Sam asked for a call on Wed 30 Sep · 11:30 pm (your time). Say yes, or suggest another time.</p><button type="button" class="btn tk-primary" onclick="openCalendar(&quot;mreq1&quot;)">Say yes to their call time</button>'));
+    assert.ok(page.includes('<p class="tk-q-say">Sam asked for a call on Wed 30 Sep · 11:30 pm your time (Wed 2:00 pm US Eastern). Say yes, or suggest another time.</p><button type="button" class="btn tk-primary" onclick="openCalendar(&quot;mreq1&quot;)">Say yes to their call time</button>'));
     assert.ok(!page.includes('cal-trial-ask'));
     // a new application outranks it: then the time they asked for still shows, as its own card above the call
     const both = Object.assign({}, ecreekDetail, { application: Object.assign({}, ecreekDetail.application, { review: 'pending' }) });

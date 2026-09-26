@@ -20,7 +20,7 @@
        and the password (labelled the way that provider calls it) → "Test and add" (greyed out, "Testing the login…",
        until the answer is in) → "Added — Gmail helper is working" or the reason in plain words.
      · On a trial: the "Warm-up" card — a simple bar (day N of about 14), how many reach the inbox, each inbox, and
-       "Ready to start sending around …". While it waits for helpers the big button is "Add N warm-up helpers"
+       "Warm-up should be done around … First emails: …" (Day 1). While it waits for helpers the big button is "Add N warm-up helpers"
        (trials.js tkPrimaryAction) and opens Settings › Warm-up.
 
    Loaded after autobuy.js: reuses tk, currentView, machineFetch, loadHub, trialsRepaint, openSettings, openMachine,
@@ -190,11 +190,13 @@ function renderWarmupCard(d,meta){
   }
   const rateTxt=w.inboxRate!=null?tkRate(w.inboxRate):'';
   const rate=rateTxt&&!said(new RegExp(rateTxt.replace('%','\\s*%')+'\\s+reach(es)?\\s+the\\s+inbox','i'))?`<p class="tk-wu-rate"><b>${esc(rateTxt)}</b> reach the inbox</p>`:'';
-  const readyBy=w.readyBy?`<p class="tk-wu-ready">${esc('Ready to start sending around '+tkDayName(w.readyBy)+'.')}</p>`:'';
+  // when warm-up should be done — and, beside it, the day the first emails go (the trial's Day 1), so the two never look like one date
+  const day1=!ready&&(d.row||{}).day1Date?tkDayName(d.row.day1Date):'';
+  const readyBy=w.readyBy?`<p class="tk-wu-ready">${esc('Warm-up should be done around '+tkDayName(w.readyBy)+'.'+(day1?' First emails: '+day1+'.':''))}</p>`:'';
   const problem=w.problem?`<p class="tk-status red">${esc(tkSentence(w.problem))}</p>`:'';
   const boxes=w.inboxes.length?`<h4>Each inbox</h4><ul class="tk-wu-boxes">${w.inboxes.map(x=>{
     const dd=tkNorm(x.day);const r=tkNorm(x.inboxRate7d);const rate=r!=null?tkRate(r)+' reach the inbox':'';
-    const facts=dd!=null&&dd>0?'Day '+Math.round(dd)+' · '+(rate||'not measured yet'):rate||'Not started yet';   // day 0: waiting to start
+    const facts=waiting?'Waiting for helpers':dd!=null&&dd>0?'Day '+Math.round(dd)+' · '+(rate||'not measured yet'):rate||'Not started yet';   // day 0 (or the circle is short): waiting to start
     return `<li><span class="tk-break">${esc(x.email).replace(/@/g,'@<wbr>')}</span><span class="tk-wu-ibx">${esc(facts)}</span>${tkTruthy(x.ready)?'<span class="pill green">Ready</span>':''}</li>`;
   }).join('')}</ul>`:'';
   return `<section class="card tk-wu" id="tkSec-warmup">

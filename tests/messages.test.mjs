@@ -131,7 +131,8 @@ test('Messages: the reply box ("Send to Sam", 2 000 characters), the waiting lin
   assert.ok(cant.includes('<p class="tk-msgs-cant">Set up the inbox in Settings to reply from here.</p>') && !cant.includes('<textarea'));
   // nothing yet
   const none = renderMessages({ row: simpleRows.gale, conversation: { thread: [], needsReply: false, canReply: true, bot: null } });
-  assert.ok(none.includes('<p class="tk-chat-empty">No emails with Mia yet.</p>') && !none.includes('tkChat') && !none.includes('tk-switch'), 'no bot data: no switch');
+  assert.ok(none.includes('<details class="tk-msgs-fold"><summary><span class="tk-msgs-foldt">Messages</span><span class="tk-msgs-sub">No emails with Mia yet</span></summary>') && !none.includes('tkChat') && !none.includes('tk-switch'), 'nothing yet: one folded line (the reply box inside); no bot data: no switch');
+  assert.ok(none.includes('id="tkSec-messages"') && none.includes('<textarea id="tkMsgReply"'), 'still there to write the first email');
   // an older system: the onboarding call's thread, no switch
   const legacy = renderMessages(ecreekDetail);
   assert.ok(legacy.includes('Hi Sam, good news') && legacy.includes('<b>Reminder — sent automatically</b>') && !legacy.includes('tk-switch') && legacy.includes('Send to Sam'));

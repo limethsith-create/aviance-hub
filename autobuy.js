@@ -113,6 +113,9 @@ function renderAutobuyCard(d,meta){
     return `<section class="card tk-ab" id="tkSec-autobuy"><h3>Inboxes &amp; domain</h3><p class="tk-ab-say">${esc('Waiting for you to buy '+ab.domain+' and '+abInboxes(ab.count)+' on CheapInboxes.')}</p><div class="tk-ab-acts"><button type="button" class="btn ghost" onclick="abOpenBuy(${tkAttr(id)})">See what to buy</button></div></section>`;
   }
   const failed=ab.status==='failed',done=ab.status==='done';
+  // the inboxes are ready but the warm-up waits for helpers (warmup.js): never "warm-up has started" beside it
+  const wuWaits=(tkTrialWarmup(d)||{}).status==='waiting_for_helpers';
+  if(wuWaits)ab.steps=ab.steps.map(x=>String(x.key||'')==='warmup'?Object.assign({},x,{done:false,label:'Warm-up waits for more helpers'}):x);
   const cur=done?-1:ab.steps.findIndex(x=>!tkTruthy(x.done));
   const sr={done:'Done: ',now:'Now: ',stuck:'Stuck here: ',todo:'Not yet: '};
   const steps=ab.steps.length?`<ol class="tk-oc-steps tk-ab-steps">${ab.steps.map((x,i)=>{
@@ -124,7 +127,8 @@ function renderAutobuyCard(d,meta){
     const st=String(m.status||'').toLowerCase();const p=AB_BOX[st]||['grey',tkHuman(st)||'Waiting'];
     return `<li><span class="tk-break">${esc(m.email||'')}</span><span class="pill ${p[0]}">${esc(p[1])}</span></li>`;
   }).join('')}</ul>`:'';
-  const say=ab.label||(ab.domain?(done?ab.domain+' and its inboxes are ready':'Setting up '+ab.domain):'');
+  let say=ab.label||(ab.domain?(done?ab.domain+' and its inboxes are ready':'Setting up '+ab.domain):'');
+  if(wuWaits)say=say.replace(/\s*[—–-]\s*warm-?up has (started|begun)\.?$/i,'')+(done&&!/helper/i.test(say)?' — warm-up waits for more helpers':'');
   const problem=failed?`<p class="tk-status red">${esc(ab.problem?tkSentence(ab.problem):'Setting up their inboxes ran into a problem.')}</p><div class="tk-ab-acts"><button type="button" class="btn" onclick="abRecheck(${tkAttr(id)},this)">Check now</button></div>`:'';
   const undo=abCanUndo(ab)?`<p class="tk-ab-undo">Wrong domain? <button type="button" class="tk-textbtn" onclick="abUnlink(${tkAttr(id)},this)">Undo</button></p>`:'';
   return `<section class="card tk-ab" id="tkSec-autobuy">
