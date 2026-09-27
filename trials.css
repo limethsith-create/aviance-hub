@@ -299,6 +299,12 @@
 .tk-cm-show{color:var(--text);text-decoration:underline;text-underline-offset:2px}
 .tk-cm-sys[open] .tk-cm-open,.tk-cm-sys:not([open]) .tk-cm-close{display:none}
 .tk-cm-sys .tk-cm-text{max-width:86%;margin:4px auto 8px;padding:10px 14px;border:1px dashed var(--border-soft);color:var(--text);text-align:left}
+/* how one of our emails went, under it (HUB-API "Delivery monitoring"): grey; a bounce red (needs you); an important
+   email not opened after two working days amber (waiting). On a folded automatic email: its own line in the summary. */
+.tk-cm-st{display:block;font-size:var(--fs-small);line-height:1.45;color:var(--muted);margin-top:6px;overflow-wrap:anywhere}
+.tk-cm-st.bounced{color:var(--red);font-weight:600}
+.tk-cm-st.unopened{color:var(--amber);font-weight:600}
+.tk-cm-sys>summary .tk-cm-st{flex-basis:100%;margin-top:0}
 .tk-msgs-wait{font-size:var(--fs-base);font-weight:600;color:var(--red);line-height:1.5;margin-top:12px}
 .tk-msgs-reply{margin-top:14px}
 .tk-msgs-reply label{display:block;font-size:var(--fs-small);font-weight:600;margin-bottom:7px}
@@ -320,7 +326,7 @@
 .tk-bot-note{font-size:var(--fs-small);color:var(--muted);line-height:1.5;margin-top:2px}
 @media(max-width:560px){.tk-msgs{padding:16px 14px}.tk-chat{padding:8px;max-height:65vh}.tk-cm{max-width:94%}.tk-cm-sys .tk-cm-text{max-width:100%}
   /* an automatic email on a phone: its subject and "show" on one line, the time under it — two lines, not four */
-  .tk-cm-sys>summary{display:grid;grid-template-columns:minmax(0,1fr) auto;justify-content:stretch;text-align:left;gap:2px 12px;padding:6px 8px}.tk-cm-sys>summary .tk-cm-at{grid-column:1/-1}}
+  .tk-cm-sys>summary{display:grid;grid-template-columns:minmax(0,1fr) auto;justify-content:stretch;text-align:left;gap:2px 12px;padding:6px 8px}.tk-cm-sys>summary .tk-cm-at,.tk-cm-sys>summary .tk-cm-st{grid-column:1/-1}}
 /* no emails yet: Messages is one folded line */
 .tk-msgs-fold>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;min-height:44px;cursor:pointer;list-style:none}
 .tk-msgs-fold>summary::-webkit-details-marker{display:none}

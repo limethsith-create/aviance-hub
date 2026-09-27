@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NOW, acme, bright, fullHub, simpleRows, simpleHub, stagesWith, onboardCall, ecreekDetail, ecreekConvDetail, fernDetail, detail, inquirySummaryOf, inquiryRecords, calWeek, calSettingsFixture, CAL_NOW } from './fixtures.mjs';
+import { NOW, acme, bright, fullHub, simpleRows, simpleHub, stagesWith, onboardCall, ecreekDetail, ecreekConvDetail, fernDetail, detail, inquirySummaryOf, inquiryRecords, calWeek, calSettingsFixture, CAL_NOW, deliveryEntries, unopenedTodo, deliveryAlerts } from './fixtures.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -307,6 +307,16 @@ test('plain words: no jargon (state, pipeline, tick, heartbeat, machine, systems
     assert.ok(!text.includes(d.row.id) && !/\b[a-z]+_[a-z_]+\b/.test(text), d.row.id + ': no ids');
   }
   calendarForget();
+  // how each email went (Messages), the "hasn't opened" to-do and the new alerts' to-dos (HUB-API "Delivery monitoring")
+  const msgs = renderMessages(Object.assign({}, ecreekConvDetail, { conversation: Object.assign({}, ecreekConvDetail.conversation, { thread: Object.values(deliveryEntries) }) })).replace(/<div class="tk-cm-text">[\s\S]*?<\/div>/g, '').replace(/<div class="tk-cm-subj">[\s\S]*?<\/div>/g, '');
+  assert.ok(msgs.includes('tk-cm-st bounced') && msgs.includes('tk-cm-st unopened'), 'the status lines are there to check');
+  const watch = [unopenedTodo('ecreek-it', 'Sam')].concat(deliveryAlerts.map((a) => ({ id: 'alert-' + a.id + ':ecreek-it', text: a.title, urgent: true, action: { type: 'api', method: 'POST', path: '/api/mc/alerts', body: { action: 'ack', id: a.id } } })))
+    .map((t) => ({ row: Object.assign({}, simpleRows.ecreek, { todo: [t], simple: Object.assign({}, simpleRows.ecreek.simple, { needsYou: true, next: '', needsReply: false }) }) }));
+  for (const [where, h] of [['Messages with delivery', msgs], ...watch.map((d) => [d.row.todo[0].id + ' top', top(d)]), ['Trials list with the delivery to-dos', renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({ live: watch.map((d, i) => Object.assign({}, d.row, { id: 'w' + i })) }) }), { now: NOW })]]) {
+    const text = visibleText(h);
+    assert.ok(!BANNED.test(text), where + ': ' + (text.match(BANNED) || [])[0]);
+    assert.ok(!/\b[a-z]+_[a-z_]+\b/.test(text) && !/\bundefined\b|\bnull\b|\[object Object\]/.test(text), where + ': ' + (text.match(/\b[a-z]+_[a-z_]+\b|\bundefined\b|\bnull\b|\[object Object\]/) || [])[0]);
+  }
   // Settings, the phone alerts panel and the sign-in screen are plain too (the word "system" once, when needed)
   const set = visibleText(renderSettings({ hub: fullHub, alerts: fullHub.alerts, open: TK_SETTINGS.reduce((o, k) => (o[k] = true, o), {}), phone: 'On', email: 'owner@example.com', now: NOW }));
   assert.ok(!/\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|jwt|payload)\b/i.test(set), 'Settings: ' + (set.match(/\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|jwt|payload)\b/i) || [])[0]);

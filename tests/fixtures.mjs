@@ -507,7 +507,40 @@ export const botRuleWords = {
   price: 'explained the trial is free',
   what_needed: 'sent the one-page form',
   not_interested: 'said goodbye and stopped reminders',
+  who_are_you: 'said who you are and how their email reached you',
+  later: "they said not now — said you'll check back",
 };
+/* Delivery monitoring (HUB-API "Delivery monitoring (2026-09-27)"): conversation entries carry how each of our emails
+   went. One entry of each kind, shaped as the contract (statusText in the owner's clock, as the machine words it). */
+const DM = (o) => Object.assign({ dir: 'out', at: '2026-10-20T14:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'x', text: 'x', kind: 'reminder', auto: false, rule: null,
+  accepted: true, messageId: '<MSGID_1>', openedAt: null, bouncedAt: null, bounceReason: null, repliedAt: null, milestone: false, unopenedAt: null, status: 'delivered', statusAt: '2026-10-20T14:00:00Z', statusText: 'delivered · not opened yet' }, o);
+export const deliveryEntries = {
+  sent: DM({ id: 'd-sent', status: 'sent', statusText: 'sent Tue 8:10 pm', accepted: null, messageId: null }),
+  delivered: DM({ id: 'd-delivered', kind: 'owner_reply', status: 'delivered', statusText: 'delivered' }),
+  notOpened: DM({ id: 'd-notopened', kind: 'reminder', statusText: 'delivered · not opened yet' }),
+  opened: DM({ id: 'd-opened', kind: 'next_steps', milestone: true, status: 'opened', openedAt: '2026-10-20T14:40:00Z', statusText: 'delivered · opened Tue 8:10 pm' }),
+  replied: DM({ id: 'd-replied', kind: 'acceptance', milestone: true, status: 'replied', repliedAt: '2026-10-20T14:40:00Z', statusText: 'replied Tue 8:10 pm' }),
+  older: DM({ id: 'd-older', kind: 'next_steps', status: 'opened', openedAt: '2026-10-10T14:40:00Z', statusText: 'delivered · opened Sat 10 Oct, 8:10 pm' }),
+  bounced: DM({ id: 'd-bounced', kind: 'launch_invite', milestone: true, status: 'bounced', bouncedAt: '2026-10-20T14:01:00Z', bounceReason: '550 5.1.1 <sam@ecreek.io>: Recipient address rejected: User unknown in virtual mailbox table', statusText: 'bounced Tue 7:31 pm' }),
+  unopened: DM({ id: 'd-unopened', kind: 'system', subject: 'We start on Monday 26 October', template: 'welcome_two_dates', milestone: true, unopenedAt: '2026-10-22T14:00:00Z', statusText: 'delivered · not opened yet' }),
+  // an email from before tracking (older data): none of the new fields
+  untracked: { id: 'd-untracked', dir: 'out', at: '2026-10-01T14:00:00Z', subject: 'x', text: 'x', kind: 'acceptance', auto: false, rule: null },
+  // theirs: no status (null on dir 'in')
+  theirs: { id: 'd-in', dir: 'in', at: '2026-10-20T15:00:00Z', from: 'sam@ecreek.io', subject: 'Re: x', text: 'Thanks', kind: 'reply', auto: false, rule: null, status: null, statusText: null, accepted: null, milestone: false, unopenedAt: null },
+};
+/* The "hasn't opened" to-do (HUB-API "To-do and `simple`"), as the machine words it. */
+export const unopenedTodo = (id, first, what) => ({
+  id: 'unopened:' + id, text: first + ' hasn\'t opened the “' + (what || 'we start on') + '” email — call or text them?',
+  detail: 'Sent Tue 20 Oct, 7:30 pm (your time) · not opened since · press this once you have reached them', urgent: true, since: '2026-10-22T14:00:00Z',
+  action: { type: 'api', method: 'POST', path: '/api/mc/clients/' + id + '/messages', body: { action: 'unopenedDone' }, confirm: 'Did you reach ' + first + '? This clears the reminder.' },
+});
+/* The four new owner alerts (HUB-API "Alerts (phone + email)" under Delivery monitoring, and the reply bot's `later`). */
+export const deliveryAlerts = [
+  { id: 'a-failed', at: '2026-10-20T14:10:00Z', key: 'client_email_failed', clientId: 'ecreek-it', title: 'Could not send Sam the “we start on” email', urgent: true, delivered: true },
+  { id: 'a-bounced', at: '2026-10-20T14:01:00Z', key: 'client_email_bounced', clientId: 'ecreek-it', title: 'The launch-call invite email to Sam bounced', urgent: true, delivered: true },
+  { id: 'a-unopened', at: '2026-10-22T14:00:00Z', key: 'client_email_unopened', clientId: 'ecreek-it', title: 'Sam hasn\'t opened the decision email', urgent: false, delivered: true },
+  { id: 'a-later', at: '2026-11-02T14:00:00Z', key: 'bot_later_due', clientId: 'ecreek-it', title: 'Check back with Sam — they said not now on Mon 5 Oct', urgent: false, delivered: true },
+];
 /* GET /api/mc/google in each of its four states (as built: + clientFrom, brokenAt, problem, encKey). */
 const G_REDIRECT = 'https://email-distributor.vercel.app/api/google/callback';
 const gs = (o) => Object.assign({ account: null, redirectUri: G_REDIRECT, hasClient: true, clientFrom: 'saved', connectedAt: null, brokenAt: null, problem: null, encKey: true }, o);

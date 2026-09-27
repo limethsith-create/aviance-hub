@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NOW, simpleRows, simpleHub, stagesWith, ecreekDetail, ecreekConvDetail, conversation, botRuleWords, googleStates, googleErrorCodes, calMeet, calMeetings, calSettingsFixture, CAL_NOW, fullHub } from './fixtures.mjs';
+import { NOW, simpleRows, simpleHub, stagesWith, ecreekDetail, ecreekConvDetail, conversation, botRuleWords, googleStates, googleErrorCodes, calMeet, calMeetings, calSettingsFixture, CAL_NOW, fullHub, deliveryEntries, unopenedTodo, deliveryAlerts } from './fixtures.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -45,7 +45,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'push.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'keys.js', 'push.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 
@@ -497,4 +497,230 @@ test('files: messages.js is loaded by index.html (after calendar.js, before push
   assert.match(css, /\.tk-msgs-reply textarea\{[^}]*font-size:var\(--fs-strong\)/, '17 px in the reply box (no iPhone zoom)');
   assert.ok(/@media\(max-width:560px\)\{\.tk-msgs\{padding:16px 14px\}/.test(css), 'phone padding');
   assert.ok(!/\.tk-(cm|chat|msgs)[^{]*\{[^}]*(width:\s*\d{3,}px|min-width:\s*\d{3,}px)/.test(css), 'nothing wider than a phone');
+});
+
+/* ───────────── 8. how each of our emails went (HUB-API "Delivery monitoring") ───────────── */
+const BROKEN = /\bundefined\b|\bnull\b|\bNaN\b|\[object Object\]|Invalid Date/;
+const plain = (where, h) => {
+  const t = visibleText(h);
+  assert.ok(!BROKEN.test(t), where + ': broken value "' + (t.match(new RegExp('.{0,40}(' + BROKEN.source + ').{0,20}')) || [])[0] + '"');
+  assert.ok(!BANNED.test(t), where + ': jargon "' + (t.match(BANNED) || [])[0] + '"');
+  assert.ok(!/\b[a-z]+_[a-z_]+\b/.test(t), where + ': a code name "' + (t.match(/\b[a-z]+_[a-z_]+\b/) || [])[0] + '"');
+};
+test('status line: under each of our emails the system\'s own words (statusText) in a small grey line — sent, delivered, not opened yet, opened, replied, and an older date', () => {
+  const E = deliveryEntries;
+  const line = (m) => renderMsgEntry(m, {});
+  assert.ok(line(E.sent).includes('<div class="tk-cm-text">x</div><p class="tk-cm-st">sent Tue 8:10 pm</p></div>'), 'under the email, grey (no tone class)');
+  assert.ok(line(E.delivered).includes('<p class="tk-cm-st">delivered</p>'), 'a personal reply (no pixel): "delivered"');
+  assert.ok(line(E.opened).includes('<p class="tk-cm-st">delivered · opened Tue 8:10 pm</p>'), 'a milestone that was opened: grey');
+  assert.ok(line(E.replied).includes('<p class="tk-cm-st">replied Tue 8:10 pm</p>'));
+  assert.ok(line(E.older).includes('<p class="tk-cm-st">delivered · opened Sat 10 Oct, 8:10 pm</p>'));
+  // an ordinary email not opened yet is only grey — amber is for an important one after two working days
+  assert.ok(line(E.notOpened).includes('<p class="tk-cm-st">delivered · not opened yet</p>'));
+  assert.equal(msgStatus(E.notOpened).tone, '');
+  // a folded automatic email: the line is in its summary, seen without opening it
+  const sys = line(Object.assign({}, E.notOpened, { kind: 'system', subject: 'Your first emails went out' }));
+  assert.ok(sys.includes('<span class="tk-cm-sys-t">We sent: Your first emails went out</span>') && between(sys, '<summary>', '</summary>').includes('<span class="tk-cm-st">delivered · not opened yet</span>'));
+  // the auto-replies and his own replies too (ours), the "sent automatically" ones too
+  assert.ok(line(Object.assign({}, E.delivered, { kind: 'auto_reply', auto: true, rule: 'price' })).includes('<p class="tk-cm-st">delivered</p>'));
+  assert.ok(line(Object.assign({}, E.replied, { kind: 'acceptance' })).includes('<b>Acceptance email — sent automatically</b>'));
+  for (const [k, m] of Object.entries(E)) plain('status ' + k, line(m));
+});
+
+test('status line: a bounce is red with why in plain words; an important email not opened after two working days is amber ("not opened yet")', () => {
+  const E = deliveryEntries;
+  const b = renderMsgEntry(E.bounced, {});
+  assert.ok(b.includes('<p class="tk-cm-st bounced" title="The reason given: 550 5.1.1 &lt;sam@ecreek.io&gt;: Recipient address rejected: User unknown in virtual mailbox table">bounced Tue 7:31 pm<span class="tk-cm-why"> — that email address does not exist</span></p>'), b);
+  assert.ok(!visibleText(b).includes('550') && !visibleText(b).includes('Recipient'), 'the returned email\'s own words stay out of sight (the tooltip keeps them)');
+  // the reasons, in plain words; anything else is "sent it back"; no reason → nothing after it
+  const W = [['550 5.1.1 The email account that you tried to reach does not exist.', 'that email address does not exist'], ['550 No such user here', 'that email address does not exist'], ['552 5.2.2 Mailbox full', 'their mailbox is full'],
+    ['550 5.1.2 Host unknown', "that email address's domain does not exist"], ['554 5.7.1 Message rejected as spam', 'their email provider refused it'], ['421 4.4.2 Connection timed out', "their email provider didn't take it"], ['something odd happened', 'their email provider sent it back']];
+  for (const [r, w] of W) assert.equal(msgBounceWords(r), w, r);
+  assert.equal(msgBounceWords(null), ''); assert.equal(msgBounceWords('  '), '');
+  const noWhy = renderMsgEntry(Object.assign({}, E.bounced, { bounceReason: null }), {});
+  assert.ok(noWhy.includes('<p class="tk-cm-st bounced">bounced Tue 7:31 pm</p>'), 'no reason: just the red line, no title');
+  assert.ok(renderMsgEntry(Object.assign({}, E.bounced, { statusText: null }), {}).includes('<p class="tk-cm-st bounced" title="The reason given: 550'), 'a bounce without its words still shows, red');
+  // amber: a milestone with unopenedAt and no openedAt (the "hasn't opened" to-do was raised)
+  const u = renderMsgEntry(E.unopened, {});
+  assert.ok(between(u, '<summary>', '</summary>').includes('<span class="tk-cm-st unopened">delivered · not opened yet</span>'), u);
+  assert.equal(msgStatus(Object.assign({}, E.unopened, { statusText: 'sent Tue 8:10 pm' })).text, 'sent Tue 8:10 pm · not opened yet', '"not opened yet" said once, always');
+  assert.equal(msgStatus(Object.assign({}, E.unopened, { openedAt: '2026-10-22T15:00:00Z', status: 'opened', statusText: 'delivered · opened Thu 8:30 pm' })).tone, '', 'opened since: grey');
+  assert.equal(msgStatus(Object.assign({}, E.unopened, { milestone: false })).tone, '', 'not a watched email: grey');
+  assert.equal(msgStatus(Object.assign({}, E.unopened, { unopenedAt: null })).tone, '', 'not raised yet: grey');
+  assert.equal(msgStatus(Object.assign({}, E.unopened, { status: 'replied', repliedAt: '2026-10-22T15:00:00Z', statusText: 'replied Thu 8:30 pm' })).tone, '', 'they wrote back: grey');
+  // tones are words, never "red" (red on a page means "needs you" — the alert says that)
+  const css = fs.readFileSync(path.join(root, 'trials.css'), 'utf8');
+  assert.match(css, /\.tk-cm-st\{[^}]*font-size:var\(--fs-small\)[^}]*color:var\(--muted\)/);
+  assert.match(css, /\.tk-cm-st\.bounced\{color:var\(--red\);font-weight:600\}/); assert.match(css, /\.tk-cm-st\.unopened\{color:var\(--amber\);font-weight:600\}/);
+  assert.match(css, /\.tk-cm-sys>summary \.tk-cm-at,\.tk-cm-sys>summary \.tk-cm-st\{grid-column:1\/-1\}/, 'on a phone: its own line under the time');
+  plain('bounced', b); plain('unopened', u);
+});
+
+test('status line: their emails show nothing; older emails without the new fields show nothing — never "undefined" or "null"; every value escaped', () => {
+  const E = deliveryEntries;
+  assert.ok(!renderMsgEntry(E.theirs, {}).includes('tk-cm-st'), 'theirs: nothing');
+  assert.ok(!renderMsgEntry(Object.assign({}, E.theirs, { status: 'delivered', statusText: 'delivered' }), {}).includes('tk-cm-st'), 'theirs, even if a status came with it');
+  assert.ok(!renderMsgEntry(E.untracked, {}).includes('tk-cm-st'), 'older data: nothing');
+  for (const x of [{ statusText: null }, { statusText: undefined, status: undefined }, { statusText: '' }, { statusText: '   ' }, { statusText: 42 }, { statusText: { a: 1 } }]) {
+    const h = renderMsgEntry(Object.assign({}, E.notOpened, x), {});
+    assert.ok(!h.includes('tk-cm-st') && !BROKEN.test(visibleText(h)), JSON.stringify(x));
+  }
+  assert.equal(msgStatus(null), null); assert.equal(msgStatus({ dir: 'in', statusText: 'x' }), null);
+  // the old conversation (no status anywhere): Messages is exactly as before
+  assert.ok(!renderMessages(ecreekConvDetail).includes('tk-cm-st'));
+  // escaped
+  const x = renderMsgEntry(Object.assign({}, E.bounced, { statusText: '<img src=x onerror=alert(1)>', bounceReason: '"><script>alert(2)</script>' }), {});
+  assert.ok(!x.includes('<img') && !x.includes('<script') && x.includes('&lt;img src=x onerror=alert(1)&gt;') && x.includes('title="The reason given: &quot;&gt;&lt;script&gt;'));
+});
+
+test('Messages with delivery: one line under each of our emails (none under theirs), in the conversation order; the onboarding call card sends him to the same Messages', () => {
+  const E = deliveryEntries;
+  const d = clone(ecreekConvDetail);
+  d.conversation.thread = [E.replied, E.theirs, E.delivered, E.bounced, E.unopened, E.untracked, E.opened];
+  const h = renderMessages(d);
+  assert.equal(count(h, /class="tk-cm-st[ "]/g), 5, 'five of ours carry a status; theirs and the untracked one do not');
+  for (const m of [E.replied, E.delivered, E.bounced, E.unopened, E.opened]) assert.ok(h.includes('>' + m.statusText), m.id);
+  assert.ok(!between(h, '<div class="tk-cm in">', '</div></div>').includes('tk-cm-st'));
+  plain('Messages', h.replace(/<div class="tk-cm-text">[\s\S]*?<\/div>/g, ''));
+  // the call cards do not repeat the emails: one conversation, under Messages
+  const card = renderOnboardCall(d.onboardCall, d.row, {});
+  assert.ok(card.includes('See the messages') && !card.includes('tk-cm-st'));
+});
+
+/* ───────────── 9. the "hasn't opened" to-do and its big button ───────────── */
+const unopenedPage = () => convPage((d) => {
+  const t = unopenedTodo('ecreek-it', 'Sam');
+  d.row = row(simpleRows.ecreek, { step: 'sending', dayOf30: 2, needsYou: true, next: t.text, label: 'Sending — day 2 of 30, 0 calls booked' });
+  d.row.state = 'sending'; d.row.todo = [t]; d.onboardCall = null;
+  d.conversation = Object.assign(clone(conversation), { needsReply: false, thread: conversation.thread.concat([deliveryEntries.unopened]) });
+  return d;
+});
+test('"Sam hasn\'t opened the … email": the big button "I\'ve reached Sam" (red — needs him), the sentence with when it went, the amber line in Messages; the list says it as it is; Behind the scenes says what the button does', () => {
+  const d = unopenedPage();
+  const act = tkPrimaryAction(d, { now: NOW });
+  assert.equal(act.kind, 'todo'); assert.equal(act.todoId, 'unopened:ecreek-it');
+  const t = top(d);
+  assert.deepEqual(bigButtons(t), [["I've reached Sam", 'trialsTodoAction(&quot;unopened:ecreek-it&quot;)']]);
+  assert.ok(visibleText(t).includes("Sam hasn't opened the “we start on” email — call or text them? Sent Tue 20 Oct, 7:30 pm (your time). Once you've reached Sam, press the button — it clears this reminder."), visibleText(t));
+  assert.ok(t.startsWith('<section class="card tk-top needs"'), 'red: it needs him');
+  const page = renderTrialDetail(d, 'overview', { now: NOW });
+  assert.ok(!page.includes('<h3>Also on your list</h3>'), 'the big button — not listed again');
+  assert.ok(between(page, 'id="tkSec-messages"', '</section>').includes('<span class="tk-cm-st unopened">delivered · not opened yet</span>'), 'the email itself, in amber');
+  // the list: under "Needs you", the machine's own question as the red line (never "You need to: Sam hasn't…")
+  const hub = Object.assign(clone(simpleHub), { stages: stagesWith({ live: [d.row] }) });
+  const list = renderTrialList(hub, { now: NOW });
+  assert.ok(list.includes('<span class="tk-person-you">Sam hasn\'t opened the “we start on” email — call or text them?</span>'), between(list, 'tk-person-you', '</span>'));
+  assert.equal(tkYouNeedTo('Sam hasn\'t opened the “we start on” email — call or text them?'), 'Sam hasn\'t opened the “we start on” email — call or text them?');
+  assert.equal(tkYouNeedTo('Buy x.com'), 'You need to buy x.com.'); assert.equal(tkYouNeedTo('Something odd'), 'You need to: Something odd.', 'as before');
+  // Behind the scenes › Every to-do / "Also on your list": the button says what it does
+  assert.equal(tkTodoLabel(d.row.todo[0]), "I've reached them");
+  assert.ok(renderTodos([Object.assign({ clientId: 'ecreek-it', clientName: 'eCreek IT' }, d.row.todo[0])]).includes('<button class="btn" onclick="trialsTodoAction(&quot;unopened:ecreek-it&quot;)">I\'ve reached them</button>'));
+  assert.equal(tkTodoPrimary(Object.assign({}, d.row.todo[0], { detail: '' }), 'ecreek-it', { row: {} }).label, "I've reached them", 'no name: "them"');
+  for (const [w, h] of [['top', t], ['list', list], ['page', page.replace(/<div class="tk-cm-text">[\s\S]*?<\/div>/g, '')]]) plain(w, h);
+});
+
+test('"I\'ve reached Sam": asks the to-do\'s own question, posts {action:\'unopenedDone\'} to /messages once, then reads the trial and the list again; "no" sends nothing; from the list, the trial kept from before is read again when opened', async () => {
+  asOwner(); trialsForget(); calendarForget(); asOwner();
+  const d = unopenedPage(); const after = clone(d); after.row.todo = []; Object.assign(after.row.simple, { needsYou: false, next: 'Nothing for you: replies come to you as alerts' }); after.conversation.thread = after.conversation.thread.map((m) => (m.id === 'd-unopened' ? Object.assign({}, m, { unopenedAt: null }) : m));
+  const hub = Object.assign(clone(simpleHub), { stages: stagesWith({ live: [d.row] }) }); const hubAfter = Object.assign(clone(simpleHub), { stages: stagesWith({ live: [after.row] }) });
+  let asked = null; let done = false; const calls = [];
+  globalThis.confirm = (q) => { asked = q; return true; };
+  globalThis.fetch = async (url, init) => {
+    const u = new URL(url); calls.push([init.method, u.pathname, init.body ? JSON.parse(init.body) : null]);
+    if (u.pathname === '/api/mc/clients/ecreek-it/messages') { done = true; return ok({ ok: true, conversation: after.conversation })(); }
+    if (u.pathname === '/api/mc/hub/ecreek-it') return ok(done ? after : d)();
+    if (u.pathname === '/api/mc/hub') return ok(done ? hubAfter : hub)();
+    return ok({ ok: true, checked: 0, newReplies: 0, booked: 0, remindersSent: 0 })();
+  };
+  try {
+    trialsIngestHub(clone(hub)); tk.detail['ecreek-it'] = clone(d); tk.detailAt['ecreek-it'] = Date.now(); openTrial('ecreek-it'); await tick(); calls.length = 0;
+    // "no": nothing is sent
+    globalThis.confirm = (q) => { asked = q; return false; };
+    await trialsTodoAction('unopened:ecreek-it');
+    assert.equal(asked, 'Did you reach Sam? This clears the reminder.'); assert.equal(calls.length, 0, 'no → nothing sent');
+    // "yes"
+    globalThis.confirm = (q) => { asked = q; return true; };
+    const r = await trialsTodoAction('unopened:ecreek-it');
+    assert.ok(r && r.ok);
+    assert.deepEqual(calls[0], ['POST', '/api/mc/clients/ecreek-it/messages', { action: 'unopenedDone' }]);
+    assert.equal(calls.filter((c) => c[0] === 'POST').length, 1, 'posted once');
+    assert.ok(calls.some((c) => c[0] === 'GET' && c[1] === '/api/mc/hub/ecreek-it') && calls.some((c) => c[0] === 'GET' && c[1] === '/api/mc/hub'), 'the trial and the list read again');
+    assert.ok(el('toast').innerHTML.includes('Done — the reminder is cleared'));
+    assert.deepEqual(tk.detail['ecreek-it'].row.todo, []); assert.equal(tkPrimaryAction(tk.detail['ecreek-it'], { now: NOW }).kind, 'none', 'the big button goes');
+    assert.ok(!el('tkHost').innerHTML.includes("I've reached Sam") && !el('tkHost').innerHTML.includes('tk-cm-st unopened'), 'the page redrawn: no button, no amber');
+    // pressed from the list (not on the trial page): the kept trial is read again when he opens it
+    render('trials'); await tick(); done = false; trialsIngestHub(clone(hub)); tk.detail['ecreek-it'] = clone(d); tk.detailAt['ecreek-it'] = Date.now(); calls.length = 0;
+    await trialsTodoAction('unopened:ecreek-it');
+    assert.deepEqual(calls[0], ['POST', '/api/mc/clients/ecreek-it/messages', { action: 'unopenedDone' }]);
+    assert.equal(tk.detailAt['ecreek-it'], 0, 'marked to be read again');
+  } finally { offline(); trialsStopTimer(); calendarStopTimer(); currentView = 'trials'; trialsForget(); await tick(); }
+});
+
+/* ───────────── 10. the new owner alerts ───────────── */
+test('alerts: "could not send" and "bounced" are urgent (red, the bell, a to-do that says what to do); "hasn\'t opened" and "check back" are quiet notes — the system\'s own titles, in plain words', () => {
+  asOwner(); trialsForget(); asOwner();
+  const hub = Object.assign(clone(fullHub), { alerts: clone(deliveryAlerts) });
+  trialsIngestHub(hub); tk.alerts = clone(deliveryAlerts);
+  const list = renderAlerts(clone(deliveryAlerts), 'open', { now: NOW });
+  for (const a of deliveryAlerts) {
+    const at = list.indexOf('<b>' + esc(a.title) + '</b>'); assert.ok(at > 0, a.key + ': the title as the system words it');
+    const item = list.slice(list.lastIndexOf('<div class="tk-alert ', at), list.indexOf('</div></div>', list.indexOf('tk-alert-act', at)));
+    assert.ok(item.includes(a.urgent ? '<span class="pill red">Urgent</span>' : '<span class="pill grey">Note</span>'), a.key + ': ' + (a.urgent ? 'urgent' : 'a note'));
+    assert.ok(item.includes('>Ecreek IT</button>') || item.includes('class="tk-client"'), a.key + ': which trial');
+    assert.ok(item.includes('>Mark as seen</button>'), a.key);
+  }
+  plain('Settings › Alerts', list);
+  // the bell: only the two urgent ones
+  const bell = trialsNotifs().map((x) => x.t);
+  assert.ok(bell.includes('Could not send Sam the “we start on” email') && bell.includes('The launch-call invite email to Sam bounced'));
+  assert.ok(!bell.some((x) => /hasn't opened|Check back/.test(x)), 'quiet ones stay out of the bell');
+  // their to-dos (the usual alert one): what to do, then mark it as seen — on the list, on the page
+  const td = (a) => ({ id: 'alert-' + a.id + ':ecreek-it', clientId: 'ecreek-it', text: a.title, urgent: true, action: { type: 'api', method: 'POST', path: '/api/mc/alerts', body: { action: 'ack', id: a.id } } });
+  const [failed, bounced, , later] = deliveryAlerts.map(td);
+  assert.equal(tkTodoAsk(failed, 'Sam'), 'Reach Sam another way — an email to them could not be sent — then mark it as seen');
+  assert.equal(tkTodoAsk(bounced, 'Sam'), "Check Sam's email address — an email to them bounced — then mark it as seen");
+  assert.equal(tkTodoAsk(bounced), 'Check their email address — an email to them bounced — then mark it as seen');
+  assert.equal(tkTodoAsk(later), 'Check back with Sam — they said not now on Mon 5 Oct — then mark it as seen', 'a title that already says what to do');
+  assert.equal(tkTodoAsk({ id: 'x', text: 'Angry reply: Acme', action: { type: 'api', path: '/api/mc/alerts', body: { action: 'ack', id: 'zz' } } }), 'Read the angry reply and mark it as seen', 'the others as before');
+  // without the board's alert, the title still tells which it is
+  trialsForget(); asOwner();
+  assert.equal(tkTodoAsk(failed, 'Sam'), 'Reach Sam another way — an email to them could not be sent — then mark it as seen');
+  assert.equal(tkTodoAsk(bounced, 'Sam'), "Check Sam's email address — an email to them bounced — then mark it as seen");
+  trialsIngestHub(hub);
+  const page = (t, next) => convPage((d) => { d.row = row(simpleRows.ecreek, { step: 'sending', needsYou: true, next, label: 'Sending — day 2 of 30' }); d.row.state = 'sending'; d.row.todo = [t]; d.onboardCall = null; d.conversation = Object.assign(clone(conversation), { needsReply: false }); return d; });
+  const f = page(failed, 'Reach Sam another way — an email to them could not be sent — then mark the alert as seen');
+  assert.deepEqual(bigButtons(top(f)), [['Mark as seen', 'trialsTodoAction(&quot;alert-a-failed:ecreek-it&quot;)']]);
+  assert.ok(visibleText(top(f)).includes('Could not send Sam the “we start on” email. Reach Sam another way — call or text — then mark it as seen.'), visibleText(top(f)));
+  const b = page(bounced, "Check Sam's email address — an email to them bounced — then mark the alert as seen");
+  assert.ok(visibleText(top(b)).includes("The launch-call invite email to Sam bounced. Check Sam's email address with them, then mark it as seen."), visibleText(top(b)));
+  const l = page(later, '');
+  assert.ok(visibleText(top(l)).includes('Check back with Sam — they said not now on Mon 5 Oct. Then mark it as seen.'), visibleText(top(l)));
+  // the list: the system's next step, as "You need to…" ("reach" is a verb now)
+  const rows = Object.assign(clone(simpleHub), { stages: stagesWith({ live: [f.row, Object.assign(clone(b.row), { id: 'b2', name: 'B2' })] }) });
+  const lh = renderTrialList(rows, { now: NOW });
+  assert.ok(lh.includes('<span class="tk-person-you">You need to reach Sam another way — an email to them could not be sent — then mark the alert as seen.</span>') && lh.includes('<span class="tk-person-you">You need to check Sam\'s email address — an email to them bounced — then mark the alert as seen.</span>'));
+  for (const [w, h] of [['failed top', top(f)], ['bounced top', top(b)], ['later top', top(l)], ['list', lh]]) plain(w, h);
+  trialsForget();
+});
+
+/* ───────────── 11. Settings › Reply bot: the two new answers ───────────── */
+test('Settings › Reply bot: "They ask who you are, or how you got their email" and "They say not now, or later" (check back in N weeks — REPLYBOT.laterWeeks from the settings the hub already reads; "a few weeks" without it); the Messages labels for both', () => {
+  const t = visibleText(renderReplyBotSet({ hub: fullHub }).body);
+  assert.ok(t.includes('They ask who you are, or how you got their email — says honestly how their email reached you (they applied on your website, or wrote through its form) and gives your website. If they came to you another way, it leaves the answer to you.'));
+  assert.ok(t.includes("They say not now, or later — says no problem and that you'll check back in a few weeks, and stops the reminders. On that day you get a reminder to check back with them."), 'no settings read: no number made up');
+  // GET /api/mc/config: one row per top-level setting (the field inside), or a row per field — both shapes
+  const cfg = { settings: [{ key: 'OWNER', default: {}, value: {} }, { key: 'REPLYBOT', default: { enabled: true, maxPerDay: 3, laterWeeks: 4 }, value: { enabled: true, maxPerDay: 3, laterWeeks: 6 }, overridden: true }] };
+  assert.ok(visibleText(renderReplyBotSet({ hub: fullHub, config: cfg }).body).includes("you'll check back in 6 weeks, and stops"));
+  assert.ok(visibleText(renderReplyBotSet({ config: { settings: [{ key: 'REPLYBOT', default: { laterWeeks: 4 }, value: {} }] } }).body).includes('check back in 4 weeks'), 'unset: its default');
+  assert.ok(visibleText(renderReplyBotSet({ config: { settings: [{ key: 'REPLYBOT.laterWeeks', default: 4, value: 1 }] } }).body).includes('check back in 1 week,'), 'a row per field; one week');
+  for (const bad of [{ settings: [{ key: 'REPLYBOT', value: { laterWeeks: 'soon' } }] }, { settings: [{ key: 'REPLYBOT', value: { laterWeeks: -2 } }] }, { settings: [] }, null])
+    assert.ok(visibleText(renderReplyBotSet({ config: bad }).body).includes('check back in a few weeks'), JSON.stringify(bad));
+  assert.equal(msgLaterWeeks({ settings: [{ key: 'REPLYBOT', value: { laterWeeks: 4 } }] }), 4);
+  // Settings passes what Your details read (GET /api/mc/config)
+  const s = renderSettings({ hub: fullHub, alerts: [], open: { replybot: true }, owner: { data: cfg }, now: NOW });
+  assert.ok(visibleText(between(s, 'id="tkSet-replybot"', 'id="tkSet-status"')).includes('check back in 6 weeks'));
+  plain('Settings › Reply bot', renderReplyBotSet({ hub: fullHub, config: cfg }).body);
+  // in Messages: what the bot did, in the owner's words
+  assert.ok(renderMsgEntry({ dir: 'out', kind: 'auto_reply', auto: true, rule: 'who_are_you', text: 'x' }, {}).includes('<b>Auto-reply</b><span class="tk-cm-rule"> · said who you are and how their email reached you</span>'));
+  assert.ok(renderMsgEntry({ dir: 'out', kind: 'auto_reply', auto: true, rule: 'later', text: 'x' }, {}).includes("<b>Auto-reply</b><span class=\"tk-cm-rule\"> · they said not now — said you'll check back</span>"));
 });

@@ -71,7 +71,7 @@ const TK_DONE_STATES=['converted','not_now','retired','deleted','declined','clos
 const TK_STEPS=['Applied','Onboarding call','Setting up','Sending emails','Done'];
 const TK_STEP_OF={new:1,queued:1,accepted:2,call_booked:2,setting_up:3,warming_up:3,sending:4,deciding:5,finished:5};
 /* "You need to answer Sam…" reads right when the machine's sentence starts with one of these verbs. */
-const TK_VERBS=['add','answer','approve','book','buy','call','check','choose','confirm','decide','decline','email','fill','give','hold','join','look','mark','open','paste','pick','press','read','reply','review','say','see','send','skip','tell','write'];
+const TK_VERBS=['add','answer','approve','book','buy','call','check','choose','confirm','decide','decline','email','fill','give','hold','join','look','mark','open','paste','pick','press','reach','read','reply','review','say','see','send','skip','tell','write'];
 
 /* Last good answers live here so navigating back is instant. */
 const tk={hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},
@@ -160,12 +160,33 @@ function tkApiKind(t){const a=(t&&t.action)||{};if(a.type!=='api')return '';cons
 /* The open alert an "alert-{id}:{client}" to-do is about (the board's alerts), or null. */
 function tkTodoAlert(t){const a=(t&&t.action)||{};const b=a.body&&typeof a.body==='object'?a.body:{};const id=b.id!=null?String(b.id):Array.isArray(b.ids)&&b.ids.length?String(b.ids[0]):'';
   return id&&tk.hub?(tk.hub.alerts||[]).find(x=>x&&String(x.id)===id)||null:null}
-function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return {ack:'Mark as seen',clearLegalHold:'Clear the hold',clearSendHold:'Clear the hold',markPaid:'Mark paid'}[tkApiKind(t)]||'Do it';case 'view':return a.view==='settings'?tkSettingsLabel(a.section):a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open the email wording':a.view==='inquiry'?'Open the inquiry':a.view==='calendar'?'Open the Calendar':a.section==='application'?'Read the application':'Open the trial';case 'mc':return 'Open the full control panel';case 'link':return 'Open link';default:return ''}}
+/* What each "api" to-do's button says (Behind the scenes, "Also on your list") and the note after it works. unopenedDone:
+   "Sam hasn't opened the … email — call or text them?" (HUB-API "Delivery monitoring") — pressed once he has reached them. */
+const TK_API_LABEL={ack:'Mark as seen',clearLegalHold:'Clear the hold',clearSendHold:'Clear the hold',markPaid:'Mark paid',unopenedDone:"I've reached them"};
+const TK_API_DONE={unopenedDone:'Done — the reminder is cleared'};
+/* The alerts whose to-do is something to do, not only to read (HUB-API "Delivery monitoring"): a client email that could
+   not be sent, one that bounced. ask → the "You need to…" line; say → the sentence above the big button. f = first name. */
+const TK_ALERT_DO={
+  client_email_failed:{ask:f=>'Reach '+(f||'them')+' another way — an email to them could not be sent — then mark it as seen',say:f=>'Reach '+(f||'them')+' another way — call or text — then mark it as seen.'},
+  client_email_bounced:{ask:f=>'Check '+(f?f+"'s":'their')+' email address — an email to them bounced — then mark it as seen',say:f=>'Check '+(f?f+"'s":'their')+' email address with them, then mark it as seen.'},
+};
+/* An alert to-do's kind: from the board's alert, else from its title (the machine's words, HUB-API "Alerts"). */
+function tkTodoAlertKey(t){
+  const al=tkTodoAlert(t);if(al&&al.key)return String(al.key);
+  const x=String((t&&t.text)||'');
+  return /^could not send\b/i.test(x)?'client_email_failed':/\bemail to .+ bounced\b/i.test(x)?'client_email_bounced':'';
+}
+function tkTodoLabel(t){const a=(t&&t.action)||{};if(a.label)return a.label;switch(a.type){case 'api':return TK_API_LABEL[tkApiKind(t)]||'Do it';case 'view':return a.view==='settings'?tkSettingsLabel(a.section):a.view==='purchase'?'Buy & paste':a.view==='sequence'?'Open the email wording':a.view==='inquiry'?'Open the inquiry':a.view==='calendar'?'Open the Calendar':a.section==='application'?'Read the application':'Open the trial';case 'mc':return 'Open the full control panel';case 'link':return 'Open link';default:return ''}}
 /* A to-do as an instruction for the "You need to…" line: an alert to look at reads "Read the angry reply and mark it as
    seen" (its text is only the alert's title, "Angry reply: Ridgeline IT"); anything else is its own text. */
-function tkTodoAsk(t){
+function tkTodoAsk(t,first){
   const text=String((t&&t.text)||'').trim();
-  if(tkApiKind(t)==='ack'){const what=text.replace(/\s*\(\d+ alerts?\)\s*$/i,'').split(/\s*[:—–]\s*/)[0].trim();return what?'Read the '+what.toLowerCase()+' and mark it as seen':'Read the alert and mark it as seen';}
+  if(tkApiKind(t)==='ack'){
+    const act=TK_ALERT_DO[tkTodoAlertKey(t)];if(act)return act.ask(first||'');
+    // an alert that already says what to do ("Check back with Sam — they said not now on …"): that, then mark it as seen
+    const base=text.replace(/\s*\(\d+ alerts?\)\s*$/i,'').replace(/[.\s]+$/,'');
+    if(base&&TK_VERBS.includes(base.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,'')))return base+' — then mark it as seen';
+    const what=text.replace(/\s*\(\d+ alerts?\)\s*$/i,'').split(/\s*[:—–]\s*/)[0].trim();return what?'Read the '+what.toLowerCase()+' and mark it as seen':'Read the alert and mark it as seen';}
   return text;
 }
 /* A to-do's detail line, unless it is only an id ("re0eea7d9132c5cd6") — the owner never reads ids. */
@@ -711,7 +732,10 @@ function renderJourney(j){
 function tkYouNeedTo(t){
   t=String(t||'').trim().replace(/\.+$/,'');if(!t)return '';
   const w=t.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,'');
-  return TK_VERBS.includes(w)?'You need to '+t.charAt(0).toLowerCase()+t.slice(1)+'.':'You need to: '+t+'.';
+  if(TK_VERBS.includes(w))return 'You need to '+t.charAt(0).toLowerCase()+t.slice(1)+'.';
+  // a question that says it all ("Sam hasn't opened the “we start on” email — call or text them?"): as it is
+  if(/\?$/.test(t))return t.charAt(0).toUpperCase()+t.slice(1);
+  return 'You need to: '+t+'.';
 }
 /* The trial clients only (the stages) — not the owner's own aviance/_test rows, not the queue list. */
 function tkListRows(hub){const out=[],seen={};((hub&&hub.stages)||[]).forEach(st=>(st.clients||[]).forEach(r=>{if(r&&r.id!=null&&!seen[r.id]){seen[r.id]=1;out.push(r);}}));return out}
@@ -728,7 +752,7 @@ function tkListGroups(hub){
 function renderTrialRow(x){
   const r=x.row,s=x.s;const review=tkIsUnderReview(r);const j=tkStep(r);
   const go=review?`openTrial(${tkAttr(r.id)},null,'application')`:`openTrial(${tkAttr(r.id)})`;
-  const firstTodo=tkTodoAsk(tkTodosSorted(r)[0]);
+  const firstTodo=tkTodoAsk(tkTodosSorted(r)[0],tkFirstName(s.person));
   const next=/^nothing\b/i.test(s.next)?'':s.next;   // "Nothing for you: …" never becomes "You need to…"
   // they wrote and nobody has answered: that is the red line, whatever else is waiting (the reply box is on their page)
   const you=s.needsReply?(tkFirstName(s.person)||'They')+' wrote — answer them':s.needsYou?(tkYouNeedTo(next||firstTodo)||'Something here needs you. Open it to see what.'):'';
@@ -786,8 +810,17 @@ function tkTodoPrimary(t,id,d){
   if(k==='clearLegalHold'){const q=tkReplyQuote(d,'legal');
     return {label:'Clear the hold and send again',run,quote:q,say:'A prospect replied with a legal threat, so sending stopped. They are off every list already. '+(q?'Read what they wrote, then clear the hold to start sending again.':'Read the legal reply under Behind the scenes › Replies, then clear the hold to start sending again.')};}
   if(k==='clearSendHold')return {label:'Clear the hold and send again',run};
+  const who=tkFirstName(tkSimple((d&&d.row)||{}).person);
+  // they haven't opened an important email (HUB-API "Delivery monitoring"): call or text them, then press it — it asks
+  // "Did you reach Sam?" (the to-do's own confirm) and clears the reminder
+  if(k==='unopenedDone'){const sent=tkTodoDetail(t).split(/\s+·\s+/)[0];
+    return {label:"I've reached "+(who||'them'),run,say:tkSentence(String(t.text||'').trim()||(who||'They')+" haven't opened an important email — call or text them?")+(/^sent\b/i.test(sent)?' '+tkSentence(sent):'')+" Once you've reached "+(who||'them')+', press the button — it clears this reminder.'};}
   if(k==='ack'){const al=tkTodoAlert(t);const kind=al&&TK_ALERT_REPLY[String(al.key||'')];const q=kind?tkReplyQuote(d,kind):null;
-    const what=tkTodoAsk(t).replace(/^Read the /,'').replace(/ and mark it as seen$/,'');
+    // an email to them could not be sent / bounced: what to do about it, not only "read it"
+    const act=TK_ALERT_DO[tkTodoAlertKey(t)];
+    if(act)return {label:'Mark as seen',run,say:tkSentence(String(t.text||'').trim().replace(/\s*\(\d+ alerts?\)\s*$/i,'')||'An email to them did not arrive')+' '+act.say(who)};
+    const ask=tkTodoAsk(t,who);if(/ — then mark it as seen$/.test(ask))return {label:'Mark as seen',run,say:tkSentence(ask.replace(/ — then mark it as seen$/,''))+' Then mark it as seen.'};
+    const what=ask.replace(/^Read the /,'').replace(/ and mark it as seen$/,'');
     return {label:'Mark as seen',run,quote:q,say:kind==='angry'?'An angry reply came in. They are off every list already, so there is nothing to answer. Read it, then mark it as seen.':tkSentence(String(t.text||'').trim()||'An alert')+' Read it, then mark the '+what+' as seen.'};}
   if(k==='markPaid'){const inv=d&&d.invoice&&typeof d.invoice==='object'?d.invoice:null;const amt=inv?tkNorm(inv.amount):null;const plan=inv&&inv.plan?tkHuman(inv.plan):'';
     const sent=inv&&(inv.sentAt||inv.issuedAt)?' went out '+tkDayName(inv.sentAt||inv.issuedAt):' is out';
@@ -1322,7 +1355,7 @@ function renderActionsTab(d){
     <div class="tk-inline tk-gap"><input id="tkMinutes" data-tk-form type="number" min="1" max="600" placeholder="Minutes" style="width:110px"><button class="btn ghost" onclick="trialLogTime(${tkAttr(id)})">Log time</button></div>
   </div>
   <div class="section-head tk-section"><h3>Re-run a step</h3></div>
-  <div class="card tk-pad"><div class="tk-inline"><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunSetup')">Re-run setup check</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunMarket')">Re-run market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'marketOverride')">Override market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunBookingTest')">Re-test booking link</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'resendWelcome')">Resend welcome email</button></div></div>
+  <div class="card tk-pad"><div class="tk-inline"><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunSetup')">Re-run setup check</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunMarket')">Re-run market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'marketOverride')">Override market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunBookingTest')">Re-test booking link</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'resendWelcome')">Send the “we start on” email again</button></div></div>
   ${inv?`<div class="section-head tk-section"><h3>Invoice</h3></div><div class="card tk-pad"><div class="tk-kv"><small>Number</small><span>${esc(inv.number||inv.invoiceNo||'—')}</span>${inv.plan?`<small>Plan</small><span>${esc(tkHuman(inv.plan))}</span>`:''}<small>Amount</small><span>${tkMoney(inv.amount)}</span><small>Issued</small><span>${esc(tkDate(inv.issuedAt||inv.sentAt))}</span>${inv.dueDate?`<small>Due</small><span>${esc(tkDate(inv.dueDate))}</span>`:''}<small>Paid</small><span>${inv.paidAt||inv.status==='paid'?'<span class="pill green">Paid'+(inv.paidAt?' '+esc(tkDate(inv.paidAt)):'')+'</span>':'<span class="pill amber">Not paid yet</span>'}</span></div></div>`:''}
   ${renderLinks(d.links)}
   ${jobNames.length?`<div class="section-head tk-section"><h3>Automatic tasks</h3><span class="count">${jobNames.length}</span></div><div class="card tk-scroll"><table class="tk-table"><tr><th>Task</th><th>Last run</th><th>Took</th><th>Result</th></tr>${jobNames.map(j=>{const r=jobs[j]||{};return `<tr><td>${esc(j)}</td><td class="num" title="${esc(tkFull(r.at))}">${esc(r.at?tkRel(r.at):'never')}</td><td class="num">${r.ms!=null?tkNum(r.ms)+' ms':'—'}</td><td class="wrap">${r.at==null?'—':r.ok===false||r.error?`<span class="pill red">Error</span> <span class="tk-small">${esc(r.error||'')}</span>`:'<span class="pill green">OK</span>'}</td></tr>`}).join('')}</table></div>`:''}`;
@@ -1424,6 +1457,7 @@ function tkSrcName(u){
   if(h==='maps.google.com'||h==='goo.gl'||(/^google\.[a-z.]+$/.test(h)&&p.indexOf('/maps')===0))return 'Google Maps';
   if(h==='web.archive.org')return 'Web archive (old copies of their site)';
   if(h==='sec.gov'||/\.sec\.gov$/.test(h))return 'SEC filing';
+  if(h==='census.gov'||/\.census\.gov$/.test(h))return 'Census Bureau figures';   // the survey page the revenue benchmark comes from
   const s=h+p;return s.length>60?s.slice(0,57)+'…':s;
 }
 /* A record's name after a sentence, in plain words (the folded list keeps the full name): a Census benchmark is "Census
@@ -1754,7 +1788,7 @@ function renderSettings(ctx){
   const alertsBody=alerts?renderAlerts(alerts,ctx.filter,{at:ctx.alertsAt,now:ctx.now}):ctx.alertsErr?`<p class="tk-note red">${esc(ctx.alertsErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Loading your alerts…');
   const statusBody=hub?renderSystemStatus(machine,{at:ctx.at,now:ctx.now,left:ctx.left}):ctx.hubErr?`<p class="tk-note red">${esc(ctx.hubErr)} <button type="button" class="tk-textbtn" onclick="trialsRetry()">Try again</button></p>`:renderLoading('Checking…');
   const gm=typeof renderGoogleMeetSet==='function'?renderGoogleMeetSet(ctx.google||{}):null;
-  const rb=typeof renderReplyBotSet==='function'?renderReplyBotSet({hub,details:ctx.details}):null;
+  const rb=typeof renderReplyBotSet==='function'?renderReplyBotSet({hub,details:ctx.details,config:ctx.owner&&ctx.owner.data}):null;   // config: GET /api/mc/config (REPLYBOT.laterWeeks)
   const ib=typeof renderAutobuySet==='function'?renderAutobuySet(ctx.inboxes||{}):null;
   const wu=typeof renderWarmupSet==='function'?renderWarmupSet(ctx.warmup||{}):null;
   const yd=typeof renderDetailsSet==='function'?renderDetailsSet(ctx.owner||{}):null;   // keys.js: Your details, Keys
@@ -1964,7 +1998,10 @@ function trialsTodoAction(id){
   const t=tkFindTodo(id);if(!t){toast('That to-do is gone — refreshing');trialsRefresh();return;}
   const a=t.action||{};
   switch(a.type){
-    case 'api':trialPost(a.path,a.body!==undefined?a.body:{},{method:a.method||'POST',confirm:a.confirm||'',done:'Done — '+(t.text||'')});break;
+    // asks the to-do's own question first (a.confirm), posts, then reloads what is on screen (trialsAfterAction: the
+    // trial and the list); a trial kept from before, not on screen now, is read again when it is next opened
+    case 'api':return trialPost(a.path,a.body!==undefined?a.body:{},{method:a.method||'POST',confirm:a.confirm||'',done:TK_API_DONE[tkApiKind(t)]||'Done — '+(t.text||'')}).then(r=>{
+      const cid=a.clientId||t.clientId;if(r&&r.ok&&cid&&tk.detail[cid]&&!(currentView==='trial'&&currentTrialId===cid))tk.detailAt[cid]=0;return r;});
     case 'view':tkOpenTodoTarget(t);break;
     case 'mc':openMachine(a.path||'/mc');break;
     case 'link':if(tkSafeUrl(a.url))window.open(a.url,'_blank','noopener');break;
@@ -2100,7 +2137,7 @@ function trialSequenceAction(id,action){
   trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/sequence',body,{confirm:conf,done:action==='sendLink'?'The approval page link was sent':'Looking for more leads now'});
 }
 function trialIntakeAction(id,action){
-  const labels={rerunSetup:['Re-run the full setup check now?','Setup check started'],rerunMarket:['Re-run the market count?','Market count started'],marketOverride:['Override the market count and accept this market as big enough?','Market overridden'],rerunBookingTest:['Test the calendar link now?','Booking test started'],resendWelcome:['Resend the welcome email with the two dates?','Welcome email resent']};
+  const labels={rerunSetup:['Re-run the full setup check now?','Setup check started'],rerunMarket:['Re-run the market count?','Market count started'],marketOverride:['Override the market count and accept this market as big enough?','Market overridden'],rerunBookingTest:['Test the calendar link now?','Booking test started'],resendWelcome:['Send '+tkClientName(id)+' the “we start on” email again?',(d)=>{const r=(d&&d.result)||{};return r.sent?'The “we start on” email was sent again':r.skipped?'Not sent: the start day is not fixed yet — it goes by itself the day before':'Done';}]};
   const l=labels[action]||['Run '+action+'?','Done'];
   const body={action};if(action==='marketOverride')body.note='Overridden from the hub';
   trialPost('/api/mc/clients/'+encodeURIComponent(id)+'/intake',body,{confirm:l[0],done:l[1]});

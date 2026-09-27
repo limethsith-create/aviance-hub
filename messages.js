@@ -18,14 +18,21 @@
        (theirs on the left, grey; ours on the right, outlined; the reply bot's marked "Auto-reply · …";
        automatic emails folded to one line "We sent: …"), times in Sri Lanka time with US Eastern small,
        newest at the bottom and scrolled into view; a reply box and the reply-bot switch for this person.
+       Under each of our emails a small grey line says how it went, in the system's own words (HUB-API "Delivery
+       monitoring": statusText — "delivered · opened Tue 8:10 pm"); a bounce is red with why in plain words; an important
+       email not opened after two working days is amber ("not opened yet"). Their emails, and older ones without it, show
+       nothing. The call cards send the owner here for the emails (one conversation), so this is the one place it shows.
      · Settings › Google Meet: the status in words, the set-up steps, Client ID + secret, Connect Google,
        Test it, Disconnect.
-     · Settings › Reply bot: what it answers, in plain words (switching it off for everyone stays in Advanced).
+     · Settings › Reply bot: what it answers, in plain words (switching it off for everyone stays in Advanced) — with
+       "who are you / how did you get my email" and "not now" (its check-back weeks from REPLYBOT.laterWeeks when
+       GET /api/mc/config has been read; read-only, like the rest).
 
    Loaded after trials.js, inquiries.js and calendar.js: reuses tk, currentTrialId, machineFetch, trialPost,
    loadTrial, loadHub, trialsRepaint, renderTrialTop, tkConv, tkThreadSorted, tkSimple, tkFirstName,
    tkOcPath, tkOcName, tkOcRepaint, tkAttr, tkSafeUrl, tkLink, tkParseDate, tkFull, tkTruthy, tkNorm,
-   tkMachineUrl, renderLoading, openMachine and the shell's esc / toast / renderNav / updateNotifBadge.
+   tkMachineUrl, renderLoading, openMachine and the shell's esc / toast / renderNav / updateNotifBadge; at run time
+   (never at load) keys.js's ydRows / ydValueOf, when that file is loaded, to read REPLYBOT.laterWeeks.
    Rules as in trials.js: every machine string through esc(), links through tkSafeUrl/tkLink, ids into
    handlers only through tkAttr(); render functions never touch the DOM; nothing runs at load time.
    ========================================================================== */
@@ -44,6 +51,8 @@ const MSG_RULES={
   price:'explained the trial is free',
   what_needed:'sent the one-page form',
   not_interested:'said goodbye and stopped reminders',
+  who_are_you:'said who you are and how their email reached you',
+  later:"they said not now — said you'll check back",
 };
 /* Our automatic emails that are part of the talk (shown in full; `system` ones fold to one line). */
 const MSG_AUTO_KINDS={acceptance:'Acceptance email — sent automatically',reminder:'Reminder — sent automatically',booking:'Booking email — sent automatically',
@@ -68,15 +77,27 @@ const GM_ERRORS={
   no_refresh_token:"Google didn't hand over a lasting connection. Press Connect Google again.",
   google_down:GM_HICCUP,google:GM_HICCUP,server:GM_HICCUP,no_code:GM_HICCUP,
 };
-/* The reply bot's rules in plain words, for Settings › Reply bot (read-only; the wording lives in Advanced). */
+/* The reply bot's rules in plain words, for Settings › Reply bot (read-only; the wording lives in Advanced).
+   A function gets {weeks}: REPLYBOT.laterWeeks from GET /api/mc/config when it is loaded, else null. */
 const MSG_BOT_RULES=[
   ["They ask when you're free",'sends your booking link and three free times.'],
   ['They suggest a time',"if you're free then, pencils it in and says you'll confirm (you still say yes in the Calendar); if not, sends three free times."],
   ['They need to move the call','sends the booking page so they can pick another time.'],
   ['They ask what it costs','explains the 30-day trial is free, with no card.'],
   ['They ask what to prepare','sends the one-page form.'],
+  ['They ask who you are, or how you got their email','says honestly how their email reached you (they applied on your website, or wrote through its form) and gives your website. If they came to you another way, it leaves the answer to you.'],
+  ['They say not now, or later',o=>"says no problem and that you'll check back "+(o.weeks?'in '+o.weeks+' week'+(o.weeks===1?'':'s'):'in a few weeks')+', and stops the reminders. On that day you get a reminder to check back with them.'],
   ["They're not interested",'says goodbye, stops the reminders and tells you.'],
   ['They just say thanks','nothing — no reply needed.'],
+];
+/* Under each of our emails: how it went (docs/HUB-API.md "Delivery monitoring › Conversation entries"). A bounce says why
+   in plain words — the first rule that matches the returned email's reason; anything else is "sent it back". */
+const MSG_BOUNCE=[
+  [/does ?n[o']?t exist|no such (user|mailbox|recipient|address)|user(name)? (unknown|not found)|unknown (user|recipient|mailbox|address)|recipient (address )?(rejected|not found|unknown|invalid)|address rejected|mailbox (not found|unavailable|does not exist)|invalid (recipient|mailbox|address)|\b5\.1\.1\b/i,'that email address does not exist'],
+  [/mailbox (is )?full|over (the )?quota|quota exceeded|insufficient storage|\b5\.2\.2\b/i,'their mailbox is full'],
+  [/domain (not found|does not exist)|host (not found|unknown)|no mx|unrout(e)?able|\b5\.1\.2\b|\b5\.4\.4\b/i,"that email address's domain does not exist"],
+  [/spam|blocked|block ?list|blacklist|reputation|policy|denied|\b5\.7\.\d+\b/i,'their email provider refused it'],
+  [/timed? ?out|temporar|try again|deferred|\b4\.\d\.\d+\b/i,"their email provider didn't take it"],
 ];
 
 /* Google Meet: the last status, its error, the "you're back from Google" message and the last test. */
@@ -113,6 +134,32 @@ function msgWho(m,first,contact){
 }
 /* "Re: Re: Your call" and "Your call" are the same subject: shown once, when it changes. */
 function msgSubjectKey(s){return String(s||'').replace(/^\s*((re|fwd?|aw)\s*:\s*)+/i,'').trim().toLowerCase()}
+/* Why an email bounced, in plain words ('' when the reason is empty). */
+function msgBounceWords(reason){
+  const r=String(reason==null?'':reason).trim();if(!r)return '';
+  for(const [re,w] of MSG_BOUNCE)if(re.test(r))return w;
+  return 'their email provider sent it back';
+}
+/* How one of our emails went → {tone: ''|'bounced'|'unopened', text, why?, raw?} or null (their messages, and older
+   emails the system sent before it tracked them, show nothing). `text` is the system's statusText as it is ("delivered ·
+   opened Tue 8:10 pm", in his clock); a bounce is red with why; an important email (a "milestone") not opened after
+   two working days is amber. */
+function msgStatus(m){
+  if(!m||typeof m!=='object'||String(m.dir)==='in')return null;
+  const st=String(m.status==null?'':m.status).toLowerCase();
+  const text=typeof m.statusText==='string'?m.statusText.trim():'';
+  if(st==='bounced'){const raw=typeof m.bounceReason==='string'?m.bounceReason.trim():'';return {tone:'bounced',text:text||'bounced',why:msgBounceWords(raw),raw};}
+  if(!text)return null;
+  const unopened=tkTruthy(m.milestone)&&!!m.unopenedAt&&!m.openedAt&&st!=='replied'&&!m.repliedAt;
+  if(unopened)return {tone:'unopened',text:/\bnot opened\b/i.test(text)?text:text+' · not opened yet'};
+  return {tone:'',text};
+}
+/* The small line under one of our emails ('' for theirs). tag: 'p' under a message, 'span' in a folded line's summary. */
+function renderMsgStatus(m,tag){
+  const s=msgStatus(m);if(!s)return '';tag=tag==='span'?'span':'p';
+  const why=s.why?`<span class="tk-cm-why"> — ${esc(s.why)}</span>`:'';
+  return `<${tag} class="tk-cm-st${s.tone?' '+s.tone:''}"${s.raw?` title="${esc('The reason given: '+s.raw)}"`:''}>${esc(s.text)}${why}</${tag}>`;
+}
 
 /* ===================== 2. RENDERERS (pure: data → HTML) ===================== */
 /* One email in the chat. ctx: {first, contact, subject: show the subject line}. */
@@ -120,11 +167,12 @@ function renderMsgEntry(m,ctx){
   ctx=ctx||{};const inb=String(m.dir)==='in';const k=String(m.kind||'').toLowerCase();const w=msgWhen(m.at);
   const at=w?`<span class="tk-cm-at" title="${esc(tkFull(m.at))}">${esc(w.lk)} <small>(US Eastern ${esc(w.us)})</small></span>`:'';
   // an automatic email the machine sends to every client (trial dates, reports…): one line, "show" opens it
-  if(!inb&&k==='system')return `<details class="tk-cm-sys"><summary><span class="tk-cm-sys-t">We sent: ${esc(m.subject||'an automatic email')}</span><span class="tk-cm-show" aria-hidden="true"><span class="tk-cm-open">show</span><span class="tk-cm-close">hide</span></span>${at}</summary><div class="tk-cm-text">${esc(m.text||'')}</div></details>`;
+  // (how it went — delivered, opened, bounced — shows on the folded line too, without opening it)
+  if(!inb&&k==='system')return `<details class="tk-cm-sys"><summary><span class="tk-cm-sys-t">We sent: ${esc(m.subject||'an automatic email')}</span><span class="tk-cm-show" aria-hidden="true"><span class="tk-cm-open">show</span><span class="tk-cm-close">hide</span></span>${at}${renderMsgStatus(m,'span')}</summary><div class="tk-cm-text">${esc(m.text||'')}</div></details>`;
   const auto=msgIsAuto(m);const rule=auto?msgRuleText(m.rule):'';
   // "Auto-reply · sent your booking link" stays one phrase when it wraps on a phone
   const head=auto?`<span class="tk-cm-who"><b>Auto-reply</b>${rule?`<span class="tk-cm-rule"> · ${esc(rule)}</span>`:''}</span>`:`<b>${esc(msgWho(m,ctx.first,ctx.contact))}</b>`;
-  return `<div class="tk-cm ${inb?'in':'out'}${auto?' auto':''}"><div class="tk-cm-head">${head}${at}</div>${ctx.subject&&m.subject?`<div class="tk-cm-subj">${esc(m.subject)}</div>`:''}<div class="tk-cm-text">${esc(m.text||'')}</div></div>`;
+  return `<div class="tk-cm ${inb?'in':'out'}${auto?' auto':''}"><div class="tk-cm-head">${head}${at}</div>${ctx.subject&&m.subject?`<div class="tk-cm-subj">${esc(m.subject)}</div>`:''}<div class="tk-cm-text">${esc(m.text||'')}</div>${inb?'':renderMsgStatus(m)}</div>`;
 }
 /* Messages, on every trial page: the whole conversation (oldest at the top, newest at the bottom),
    a line when they are waiting for an answer, the reply box (or why there is none) and the reply-bot switch. */
@@ -229,8 +277,15 @@ function renderGoogleMeetSet(g){
 
 /* -- Settings › Reply bot -- read-only, in plain words. There is no switch for everyone in the contract, so it
    says where that lives (Advanced); if the system ever sends replyBot {enabled} on the board, its state shows. */
+/* REPLYBOT.laterWeeks from GET /api/mc/config (Settings › Your details loads it: a REPLYBOT row with the field inside,
+   or its own row 'REPLYBOT.laterWeeks') → a whole number of weeks, or null when the answer does not carry it. */
+function msgLaterWeeks(config){
+  if(!config||typeof ydRows!=='function'||typeof ydValueOf!=='function')return null;
+  const v=ydValueOf(ydRows(config),'REPLYBOT.laterWeeks');if(!v.known)return null;
+  const n=Number(v.value!==''?v.value:v.def);return Number.isInteger(n)&&n>0&&n<100?n:null;
+}
 function renderReplyBotSet(ctx){
-  ctx=ctx||{};const hub=ctx.hub||null;
+  ctx=ctx||{};const hub=ctx.hub||null;const weeks=msgLaterWeeks(ctx.config);
   const rb=hub&&((hub.machine&&hub.machine.replyBot)||hub.replyBot);
   const known=!!(rb&&typeof rb==='object'&&rb.enabled!=null);const on=known&&tkTruthy(rb.enabled);
   let max=known?tkNorm(rb.maxPerDay):null;
@@ -239,7 +294,7 @@ function renderReplyBotSet(ctx){
   const body=`${known?`<p class="tk-status ${on?'green':'grey'}">${on?'On for everyone.':'Off for everyone: nobody gets an auto-reply.'}</p>`:''}
     <p class="tk-set-text">When someone writes back, the reply bot answers the simple things for you with fixed answers (no AI). Anything else waits for you, and you get an alert.</p>
     <h4 class="tk-set-h4">What it answers</h4>
-    <ul class="tk-bot-rules">${MSG_BOT_RULES.map(([a,b])=>`<li><b>${esc(a)}</b> — ${esc(b)}</li>`).join('')}</ul>
+    <ul class="tk-bot-rules">${MSG_BOT_RULES.map(([a,b])=>`<li><b>${esc(a)}</b> — ${esc(typeof b==='function'?b({weeks}):b)}</li>`).join('')}</ul>
     <h4 class="tk-set-h4">What it never does</h4>
     <p class="tk-set-text">${esc('It never answers automatic emails (out of office, bounces), a message you already answered, or a message older than 3 days. It sends '+(max!=null?'at most '+max+' emails':'only a few emails')+' a day to one person, and it waits a few minutes first, so you can answer yourself. It never makes up a price.')}</p>
     <p class="tk-set-text">To turn it off for one person, use the switch under Messages on their trial page. To turn it off for everyone, or change what it says, open Advanced settings.</p>

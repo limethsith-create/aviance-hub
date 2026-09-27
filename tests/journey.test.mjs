@@ -142,6 +142,8 @@ function drawStep(s) {
   return out;
 }
 
+/* The angry reply's alert on a step's board (its id changes whenever the machine's snapshots are made again). */
+const angryAlert = (s) => { const a = (s.board.alerts || []).find((x) => x.key === 'angry_reply' && !x.acknowledged); assert.ok(a, s.step + ': the angry reply\'s alert'); return a; };
 /* What the owner must do at each step (the big button), from the machine's own story of the trial. */
 const DO = {
   '00-owner-setup': null,
@@ -164,7 +166,7 @@ const DO = {
   '19-launch-day-before': ['none', /^Nothing until the launch call\. Join it on Tue 20 Oct, 8:30 pm your time\.$/],
   '20-launch-approved': ['none'],
   '21-day-1': ['none'],
-  '22-replies': ['todo', 'Mark as seen', 'trialsTodoAction(&quot;alert-1792771202250-vlo4yc:ridgelineit&quot;)'],
+  '22-replies': ['todo', 'Mark as seen', (s) => 'trialsTodoAction(&quot;alert-' + angryAlert(s).id + ':ridgelineit&quot;)'],
   '23-prospect-booked': ['none'],
   '24-client-writes': ['reply', "Answer Dana's message", 'tkFocusReply()'],
   '25-owner-answered': ['none'], '26-call-showed': ['none'],
@@ -284,11 +286,13 @@ test('01–02 the research brief: "Before the call" first under "What we found" 
     const marks = [...para.matchAll(/<a class="tk-brief-mark" href="([^"]*)"[^>]*>(\d+)<\/a>/g)];
     assert.deepEqual([...new Set(marks.map((m) => m[1]))], urls, p + ': each page linked, in order');
     for (const m of marks) assert.equal(Number(m[2]), urls.indexOf(m[1]) + 1, p + ': ' + m[1] + ' is number ' + (urls.indexOf(m[1]) + 1));
-    assert.ok(para.includes('<span class="tk-sr">Source: </span>fit score</span>') && para.includes('<span class="tk-sr">Source: </span>Census figures</span>') && para.includes('<span class="tk-sr">Source: </span>USAspending.gov</span>'), p + ': records in plain words');
+    assert.ok(para.includes('<span class="tk-sr">Source: </span>fit score</span>') && para.includes('<span class="tk-sr">Source: </span>USAspending.gov</span>'), p + ': records in plain words');
     assert.ok(card.includes('<details class="tk-brief-src"><summary>Where this comes from<span class="tk-brief-count">' + b.sources.length + ' sources</span></summary>'), p + ': the sources, folded');
     const list = flat(between(card, '<details class="tk-brief-src">', '</details>'));
-    assert.ok(list.includes('1 ridgelineit.com/services 2 ridgelineit.com 3 Web archive (old copies of their site) Census SUSB 2022 NAICS 541512/541513, Service Leadership USAspending.gov 4 ridgelineit.com/case-studies/law-firm-office-move'), list);
-    assert.ok(list.includes('6 Google Maps') && list.includes('10 Google News fit score'), list);
+    // the Census source is its survey page now (no table codes): a numbered link, named in plain words
+    assert.ok(para.includes('<a class="tk-brief-mark" href="https://www.census.gov/programs-surveys/susb.html" target="_blank" rel="noopener noreferrer" title="Census Bureau figures" aria-label="Source 4: Census Bureau figures">4</a>'), p + ': the Census page, numbered');
+    assert.ok(list.includes('1 ridgelineit.com/services 2 ridgelineit.com 3 Web archive (old copies of their site) 4 Census Bureau figures Service Leadership (industry benchmark) USAspending.gov 5 ridgelineit.com/case-studies/law-firm-office-move'), list);
+    assert.ok(list.includes('7 Google Maps') && list.includes('11 Google News fit score'), list);
   }
 });
 
@@ -308,7 +312,7 @@ test('01 the company file, research v4: who buys from them, in the news (the new
   assert.ok(co.includes('<b>Queen City Tech Partners</b> · 4.9★ from 212 reviews · <a href="https://www.qctechpartners.com/"') && co.includes('<b>Uptown Computer Help</b> · 4.2★ from 19 reviews · <a href="https://maps.google.com/?cid=5104"'));
   assert.ok(flat(co).includes('From a Google Maps search for “Computer support and services in Charlotte, NC”. For the call only — we never email them, and they never become leads.'));
   const wr = grp('What they write about');
-  assert.ok(flat(wr).includes('How often they post: About 6 posts a year, last one 58 days ago.') && flat(wr).includes('microsoft 365 — 2 times in 1 post') && flat(wr).includes('phishing emails — 2 times in 1 post'));
+  assert.ok(flat(wr).includes('How often they post: About 6 posts a year, last one 58 days ago.') && flat(wr).includes('Microsoft 365 — 2 times in 1 post') && flat(wr).includes('phishing emails — 2 times in 1 post'));
   assert.ok(!BANNED.test(hubText(o.found)), 'plain words: ' + (hubText(o.found).match(BANNED) || [])[0]);
 });
 
@@ -501,8 +505,9 @@ test('22 an angry reply: the reply itself at the top, "Mark as seen" (it acknowl
   const calls = [];
   globalThis.fetch = async (url, init) => { const u = new URL(url); calls.push([init.method, u.pathname, init.body ? JSON.parse(init.body) : null]); return { ok: true, status: 200, text: async () => JSON.stringify(u.pathname === '/api/mc/hub' ? s.board : u.pathname.startsWith('/api/mc/hub/') ? s.detail : { ok: true }) }; };
   try {
-    trialsTodoAction('alert-1792771202250-vlo4yc:ridgelineit'); await new Promise((r) => setTimeout(r, 10));
-    assert.deepEqual(calls[0], ['POST', '/api/mc/alerts', { action: 'ack', id: '1792771202250-vlo4yc' }]);
+    const al = angryAlert(s);
+    trialsTodoAction('alert-' + al.id + ':ridgelineit'); await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(calls[0], ['POST', '/api/mc/alerts', { action: 'ack', id: al.id }]);
   } finally { offline(); trialsStopTimer(); calendarStopTimer(); }
 });
 
@@ -525,7 +530,7 @@ test('27 legal hold: the legal reply itself, then "Clear the hold and send again
   const s = byStep('27');
   const o = drawStep(s);
   assert.ok(flat(o.list).includes('Sending stopped — a prospect replied with a legal threat You need to read the legal reply, then clear the hold.'));
-  assert.ok(o.top.includes('<blockquote class="tk-q-quote"><p>“Forwarding this to our attorney. Cease and desist.”</p><footer>alan@ellislaw40.com · Wed 28 Oct, 8:10 pm your time</footer></blockquote>'));
+  assert.ok(o.top.includes('<blockquote class="tk-q-quote"><p>“Forwarding this to our attorney. Cease and desist.”</p><footer>alan@quinnlaw160.com · Wed 28 Oct, 8:10 pm your time</footer></blockquote>'));
   assert.ok(flat(o.top).includes('A prospect replied with a legal threat, so sending stopped. They are off every list already. Read what they wrote, then clear the hold to start sending again.'));
   // the machine's to-do detail is a reply id: never shown (Behind the scenes, the bell)
   const rid = s.detail.replies.find((r) => r.kind === 'legal').id;
@@ -614,6 +619,136 @@ test('Messages: the reply bot switch says the truth — on, but only answering w
   assert.ok(!flat(o.messages).includes('It answers the simple questions for you') && !flat(o.messages).includes('auto-replies sent today'));
 });
 
+/* ───────────── how each email we sent went (HUB-API "Delivery monitoring", 2026-09-27) ───────────── */
+/* Every "how it went" line under our emails in Messages: [tone, text] ('' = grey). */
+const statusLines = (h) => [...h.matchAll(/<(?:p|span) class="tk-cm-st( bounced| unopened)?"[^>]*>([\s\S]*?)<\/(?:p|span)>(?=<\/div>|<\/summary>)/g)].map((m) => [(m[1] || '').trim(), flat(m[2])]);
+test('every step: under each email we sent, a small grey line in the machine\'s own words (statusText) — none under hers, none for an email without it; never "undefined", "null" or jargon; the new subjects; the "we start on" email after the launch call', () => {
+  let seen = 0;
+  for (const s of J) {
+    if (!s.detail) continue;
+    const o = drawStep(s);
+    const thread = ((s.detail.conversation || {}).thread || []);
+    const want = thread.filter((m) => m.dir !== 'in' && ((typeof m.statusText === 'string' && m.statusText.trim()) || m.status === 'bounced')).map((m) => m.statusText.trim());
+    const got = statusLines(o.messages);
+    assert.equal(got.length, want.length, s.step + ': one line under each of our emails that says how it went');
+    assert.deepEqual(got.map((x) => x[1]).sort(), want.slice().sort(), s.step + ': the machine\'s words, as they are');
+    assert.ok(thread.filter((m) => m.dir === 'in').every((m) => m.status == null && m.statusText == null), s.step + ': hers carry none');
+    assert.ok(!/<div class="tk-cm in">(?:(?!<div class="tk-cm |<details class="tk-cm-sys").)*tk-cm-st/s.test(o.messages), s.step + ': no line under hers');
+    // nothing bounced and nothing waited two working days unopened on this journey: all grey
+    assert.deepEqual(got.filter((x) => x[0]), [], s.step + ': no red or amber on a journey where every email arrived');
+    for (const [, t] of got) {
+      assert.ok(!BROKEN.test(t) && !BANNED.test(t) && !/\b[a-z]+_[a-z_]+\b/.test(t), s.step + ': "' + t + '"');
+      assert.match(t, /^(sent|delivered|replied|bounced)\b/, s.step + ': ' + t);
+    }
+    seen += got.length;
+  }
+  assert.ok(seen > 200, 'the journey carries the new fields (' + seen + ' lines)');
+  // 03: the acceptance email's new subject, delivered, not opened yet (grey: it is only a day old)
+  let o = drawStep(byStep('03'));
+  assert.ok(o.messages.includes('<div class="tk-cm-subj">Let\'s book your onboarding call</div>'));
+  assert.ok(o.messages.includes('<div class="tk-cm out"><div class="tk-cm-head"><b>Acceptance email — sent automatically</b>') && o.messages.includes('</div><p class="tk-cm-st">delivered · not opened yet</p></div>'));
+  // 04: she wrote back — the acceptance email says "replied"; her message has no line; the bot's answer "delivered"
+  o = drawStep(byStep('04'));
+  assert.deepEqual(statusLines(o.messages), [['', 'replied Fri 6:35 pm'], ['', 'delivered']]);
+  // 13: a folded automatic email says it on its own line, without opening it
+  o = drawStep(byStep('13'));
+  assert.ok(o.messages.includes('<span class="tk-cm-sys-t">We sent: Your signed trial agreement</span>') && /We sent: Your signed trial agreement<\/span>[\s\S]*?<span class="tk-cm-st">delivered · opened Wed 8 pm<\/span><\/summary>/.test(o.messages));
+  // 15: the launch-call invite's new subject
+  o = drawStep(byStep('15'));
+  assert.ok(o.messages.includes('<div class="tk-cm-subj">Your list is ready</div>') && o.messages.includes('<b>Launch-call invite — sent automatically</b>'));
+  // 21: "We start on Wednesday 21 October" (welcome_two_dates) now goes once Day 1 is fixed — after the launch call's OK
+  const s21 = byStep('21'); o = drawStep(s21);
+  const w = s21.detail.conversation.thread.find((m) => m.template === 'welcome_two_dates');
+  assert.equal(w.subject, 'We start on Wednesday 21 October');
+  assert.ok(new Date(w.at) > new Date(s21.detail.launchCall.approvedOnCall), 'after "Approved on the call"');
+  const iStart = o.messages.indexOf('We sent: We start on Wednesday 21 October'); const iRem = o.messages.indexOf('Our launch call tomorrow');
+  assert.ok(iStart > 0 && iRem > 0 && iStart > iRem, 'in the chat: after the launch call\'s reminder');
+  assert.ok(/We sent: We start on Wednesday 21 October<\/span>[\s\S]*?<span class="tk-cm-st">delivered · not opened yet<\/span><\/summary>/.test(o.messages));
+  assert.ok(!byStep('09').detail.conversation.thread.some((m) => m.template === 'welcome_two_dates'), 'not at the setup check any more');
+  // 22: she opened it
+  assert.ok(/We sent: We start on Wednesday 21 October<\/span>[\s\S]*?<span class="tk-cm-st">delivered · opened Thu 4:30 pm<\/span>/.test(drawStep(byStep('22')).messages));
+  // the seed test's plain note (2026-09-27, integration) shows in Behind the scenes › Deliverability — only when the test was thin
+  // (with the 8 helpers the hub asks for, the test was not thin: no note — the machine only writes one when it was)
+  const dv = flat(drawStep(s21).tabs.find(([t]) => t === 'deliverability')[1]);
+  assert.ok(!dv.includes('Tested with'), 'no thin-test note with 8 helpers');
+});
+
+/* The delivery watch between the machine's snapshots: step 21, two US working days later (Fri 23 Oct, before step 22),
+   as the machine then sends it (HUB-API "To-do and simple", "Alerts"). */
+function watchStep(fn) {
+  const s = clone(byStep('21')); s.at = '2026-10-23T13:00:00Z';
+  const rows = [s.detail.row, ...s.board.stages.flatMap((st) => st.clients).filter((x) => x.id === ID)];
+  const w = s.detail.conversation.thread.find((m) => m.template === 'welcome_two_dates');
+  fn(s, rows, w);
+  return s;
+}
+test('the delivery watch on the journey: Dana hasn\'t opened "We start on…" after two working days — amber under it, "Needs you" with the machine\'s question, the big button "I\'ve reached Dana" (asks, posts unopenedDone, reads the trial again); a bounce — red with why, "Check Dana\'s email address"; a failed send — "Reach Dana another way"; the quiet alerts are notes', async () => {
+  const text = "Dana hasn't opened the “we start on” email — call or text them?";
+  const todo = { id: 'unopened:' + ID, clientId: ID, clientName: 'Ridgeline IT', text, detail: 'Sent Wed 21 Oct, 5:30 pm (your time) · not opened since · press this once you have reached them', urgent: true, since: '2026-10-23T12:00:00Z',
+    action: { type: 'api', method: 'POST', path: '/api/mc/clients/' + ID + '/messages', body: { action: 'unopenedDone' }, confirm: 'Did you reach Dana? This clears the reminder.' } };
+  const unopened = watchStep((s, rows, w) => {
+    // (in the journey she opened it; here she has not)
+    Object.assign(w, { unopenedAt: '2026-10-23T12:00:00Z', openedAt: null, status: 'delivered', statusText: 'delivered · not opened yet' });
+    for (const r of rows) { r.todo = [clone(todo)]; Object.assign(r.simple, { needsYou: true, next: text }); }
+    s.board.todos = [clone(todo)].concat(s.board.todos || []);
+    s.board.alerts.unshift({ id: 'u1', at: '2026-10-23T12:00:00Z', key: 'client_email_unopened', clientId: ID, title: "Dana hasn't opened the “we start on” email", urgent: false, delivered: true });
+  });
+  let o = drawStep(unopened);
+  clean('unopened: list', o.list); clean('unopened: page', o.page);
+  assert.equal(o.act.kind, 'todo'); assert.equal(o.act.todoId, 'unopened:' + ID);
+  assert.deepEqual(buttons(o.top), [["I've reached Dana", 'trialsTodoAction(&quot;unopened:ridgelineit&quot;)']]);
+  assert.ok(flat(o.top).includes(text + " Sent Wed 21 Oct, 5:30 pm (your time). Once you've reached Dana, press the button — it clears this reminder."), flat(o.top));
+  assert.ok(o.top.includes('<section class="card tk-top needs"') && flat(o.list).includes('Needs you') && o.list.includes('<span class="tk-person-you">' + text + '</span>'));
+  assert.equal(o.also, '', 'the big button — not listed again');
+  assert.deepEqual(statusLines(o.messages).filter((x) => x[0]), [['unopened', 'delivered · not opened yet']], 'amber under that one email only');
+  assert.equal(trialsNotifs().filter((x) => x.t === text).length, 1, 'the bell: once');
+  const alerts = renderAlerts(tk.alerts, 'open', { now: o.now });
+  assert.ok(alerts.includes('<span class="pill grey">Note</span>') && alerts.includes("<b>Dana hasn't opened the “we start on” email</b>"), 'the quiet alert: a note');
+  for (const [where, h] of [['list', o.list], ['top', o.top], ['Messages', o.messages], ['alerts', alerts]]) assert.ok(!BANNED.test(hubText(h)), 'unopened ' + where + ': ' + (hubText(h).match(BANNED) || [])[0]);
+  // pressing it: the to-do's own question, POST …/messages {action:'unopenedDone'}, then the trial and the list again
+  const after = byStep('21'); let asked = null; const calls = [];
+  globalThis.confirm = (q) => { asked = q; return true; };
+  globalThis.fetch = async (url, init) => { const u = new URL(url); calls.push([init.method, u.pathname, init.body ? JSON.parse(init.body) : null]); return { ok: true, status: 200, text: async () => JSON.stringify(u.pathname.endsWith('/messages') ? { ok: true, conversation: after.detail.conversation } : u.pathname === '/api/mc/hub' ? after.board : u.pathname.startsWith('/api/mc/hub/') ? after.detail : { ok: true }) }; };
+  try {
+    currentView = 'trial'; currentTrialId = ID;
+    await trialsTodoAction('unopened:' + ID);
+    assert.equal(asked, 'Did you reach Dana? This clears the reminder.');
+    assert.deepEqual(calls[0], ['POST', '/api/mc/clients/' + ID + '/messages', { action: 'unopenedDone' }]);
+    assert.ok(calls.some((c) => c[0] === 'GET' && c[1] === '/api/mc/hub/' + ID) && calls.some((c) => c[0] === 'GET' && c[1] === '/api/mc/hub'), 'the trial read again');
+    assert.equal(tkPrimaryAction(tk.detail[ID], { now: new Date(unopened.at) }).kind, 'none', 'the big button goes');
+  } finally { offline(); trialsStopTimer(); calendarStopTimer(); currentView = 'trials'; }
+
+  // a bounce: red under the email with why; the alert's to-do says what to do
+  const bounced = watchStep((s, rows, w) => {
+    Object.assign(w, { status: 'bounced', statusAt: '2026-10-21T12:01:00Z', statusText: 'bounced Wed 5:31 pm', bouncedAt: '2026-10-21T12:01:00Z', bounceReason: '550 5.1.1 <dana@ridgelineit.com>: Recipient address rejected: User unknown in virtual mailbox table' });
+    const al = { id: 'b1', at: '2026-10-21T12:01:00Z', key: 'client_email_bounced', clientId: ID, title: 'The “we start on” email to Dana bounced', urgent: true, delivered: true };
+    s.board.alerts.unshift(al);
+    const t = { id: 'alert-b1:' + ID, clientId: ID, clientName: 'Ridgeline IT', text: al.title, detail: 'Alert 2 d ago · acknowledge it once handled', urgent: true, since: al.at, action: { type: 'api', method: 'POST', path: '/api/mc/alerts', body: { action: 'ack', id: 'b1' } } };
+    for (const r of rows) { r.todo = [clone(t)]; r.openAlerts = 1; r.urgentAlerts = 1; Object.assign(r.simple, { needsYou: true, next: "Check Dana's email address — an email to them bounced — then mark the alert as seen" }); }
+  });
+  o = drawStep(bounced);
+  clean('bounced: page', o.page); clean('bounced: list', o.list);
+  assert.deepEqual(statusLines(o.messages).filter((x) => x[0]), [['bounced', 'bounced Wed 5:31 pm — that email address does not exist']]);
+  assert.deepEqual(buttons(o.top), [['Mark as seen', 'trialsTodoAction(&quot;alert-b1:ridgelineit&quot;)']]);
+  assert.ok(flat(o.top).includes("The “we start on” email to Dana bounced. Check Dana's email address with them, then mark it as seen."), flat(o.top));
+  assert.ok(o.list.includes("<span class=\"tk-person-you\">You need to check Dana's email address — an email to them bounced — then mark the alert as seen.</span>"));
+  const bal = renderAlerts(tk.alerts, 'open', { now: o.now });
+  assert.ok(bal.includes('<span class="pill red">Urgent</span>') && bal.includes('<b>The “we start on” email to Dana bounced</b>'));
+  // a failed send (tried again 10 minutes later, still not sent)
+  const failed = watchStep((s, rows) => {
+    const al = { id: 'f1', at: '2026-10-21T12:10:00Z', key: 'client_email_failed', clientId: ID, title: 'Could not send Dana the “we start on” email', urgent: true, delivered: true };
+    s.board.alerts.unshift(al);
+    const t = { id: 'alert-f1:' + ID, clientId: ID, clientName: 'Ridgeline IT', text: al.title, urgent: true, since: al.at, action: { type: 'api', method: 'POST', path: '/api/mc/alerts', body: { action: 'ack', id: 'f1' } } };
+    for (const r of rows) { r.todo = [clone(t)]; Object.assign(r.simple, { needsYou: true, next: 'Reach Dana another way — an email to them could not be sent — then mark the alert as seen' }); }
+  });
+  o = drawStep(failed);
+  clean('failed: page', o.page);
+  assert.ok(flat(o.top).includes('Could not send Dana the “we start on” email. Reach Dana another way — call or text — then mark it as seen.'), flat(o.top));
+  assert.ok(o.list.includes('<span class="tk-person-you">You need to reach Dana another way — an email to them could not be sent — then mark the alert as seen.</span>'));
+  for (const [where, h] of [['bounced top', drawStep(bounced).top], ['bounced Messages', drawStep(bounced).messages], ['failed top', o.top], ['failed list', o.list]]) assert.ok(!BANNED.test(hubText(h)), where + ': ' + (hubText(h).match(BANNED) || [])[0]);
+  trialsForget();
+});
+
 test('Settings on the journey: 00 the first setup (the automatic check-in is not running yet), 10 CheapInboxes connected, 12 the warm-up circle full', () => {
   let o = drawStep(byStep('00'));
   const run = flat(between(o.settings, 'id="tkSet-status"', 'id="tkSet-behind"'));
@@ -645,8 +780,10 @@ function journeyLine(row) {
 const indent = (t, n) => screenText(t, true).split('\n').map((l) => ' '.repeat(n) + l).join('\n');
 function messagesSummary(h) {
   if (h.includes('class="tk-msgs-fold"')) return '    (one folded line) ' + flat(between(h, '<span class="tk-msgs-sub">', '</span>'));
-  const items = [...h.matchAll(/<div class="tk-cm (in|out)[^"]*"><div class="tk-cm-head">([\s\S]*?)<\/div>[\s\S]*?<div class="tk-cm-text">([\s\S]*?)<\/div><\/div>|<details class="tk-cm-sys"><summary>([\s\S]*?)<\/summary>/g)];
-  const lines = items.map((m) => (m[4] ? flat(m[4]).replace(/ show /, ' ') : flat(m[2]) + ' — “' + decode(m[3]).replace(/\s+/g, ' ').trim().slice(0, 90) + (decode(m[3]).length > 90 ? '…' : '') + '”'));
+  // each email, and under ours how it went ("delivered · opened Tue 8:10 pm"), in [brackets]
+  const items = [...h.matchAll(/<div class="tk-cm (in|out)[^"]*"><div class="tk-cm-head">([\s\S]*?)<\/div>[\s\S]*?<div class="tk-cm-text">([\s\S]*?)<\/div>(?:<p class="tk-cm-st[^"]*"[^>]*>([\s\S]*?)<\/p>)?<\/div>|<details class="tk-cm-sys"><summary>([\s\S]*?)(?:<span class="tk-cm-st[^"]*"[^>]*>([\s\S]*?)<\/span>)?<\/summary>/g)];
+  const st = (x) => (x ? ' [' + flat(x) + ']' : '');
+  const lines = items.map((m) => (m[5] ? flat(m[5]).replace(/ show$/, '').replace(/ show /, ' ') + st(m[6]) : flat(m[2]) + ' — “' + decode(m[3]).replace(/\s+/g, ' ').trim().slice(0, 90) + (decode(m[3]).length > 90 ? '…' : '') + '”' + st(m[4])));
   const rest = flat(between(h, '<p class="tk-msgs-wait">') ? h.slice(h.indexOf('<p class="tk-msgs-wait">')) : h.slice(h.indexOf('<div class="tk-msgs-reply">')));
   return '    ' + (lines.length ? lines.length + ' email' + (lines.length === 1 ? '' : 's') + ', newest last:' : 'No emails yet.') + '\n' +
     lines.slice(-4).map((l) => '      · ' + l).join('\n') + (lines.length ? '\n' : '') + '    ' + rest.replace(/0 \/ 2000 /, '').replace(/ Send to Dana/, ' [Send to Dana]');
