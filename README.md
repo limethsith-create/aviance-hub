@@ -43,7 +43,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `tests/keys.test.mjs` | Node tests for Settings › Keys (cards per status, order, env-set keys without a box, save / test / forget bodies incl. Verifalia's two fields, a refused key keeps what was typed, a saved one is cleared and never drawn, no encryption key) and Settings › Your details (the eight boxes, required marks, "Still to fill in", save / clear bodies for both row shapes, checks), `#settings/keys`, `#settings/details`, ⌘K, the "Is everything running?" pointers, plain words, touch targets. |
 | `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and `sw.js` (run in a sandbox with a fake service-worker global). |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
-| `tests/journey.test.mjs` | The dress rehearsal: the machine's 29 real snapshots of one applicant's whole trial (application → … → paid), each drawn with the real hub code on a device set to US Pacific — the Trials list, the three questions and the big button, Messages, the call / inboxes / warm-up cards, every Behind-the-scenes tab, the Calendar and Settings. Checks: nothing broken or empty on screen, the journey step is the machine's, the big button is what the owner must do, red only when he is needed, plain words, Sri Lanka time with US Eastern beside a call. `HUB_JOURNEY_REPORT=path npm test` writes what the owner sees at every step as plain text. |
+| `tests/journey.test.mjs` | The dress rehearsal: the machine's 34 real snapshots of one applicant's whole trial (application → onboarding call → warm-up → the launch call → sending → paid), each drawn with the real hub code on a device set to US Pacific — the Trials list, the three questions and the big button, Messages, the call / inboxes / warm-up / launch-call cards, "What we found" (the brief and the company file), every Behind-the-scenes tab, the Calendar and Settings; plus the moment of the launch call itself (between two snapshots). Checks: nothing broken or empty on screen, the journey step is the machine's, the big button is what the owner must do, red only when he is needed, plain words, Sri Lanka time with US Eastern beside a call. `HUB_JOURNEY_REPORT=path npm test` writes what the owner sees at every step as plain text. |
 | `tests/journey-fixtures.mjs`, `tests/fixtures/journey/` | A trimmed copy of the machine's snapshots (`email-distributor/tests/fixtures/journey/`) without repeats; `node tests/fixtures/journey/trim.mjs` copies them again. |
 
 ## Screens
@@ -58,7 +58,8 @@ paste, an inquiry, Behind the scenes) have a Back arrow in the top bar.
 **One journey, everywhere the same:** ① Applied → ② Onboarding call →
 ③ Setting up → ④ Sending emails → ⑤ Done, from the machine's
 `row.simple.step` (new/queued → 1, accepted/call_booked → 2,
-setting_up/warming_up → 3, sending → 4, finished → 5; declined is "Not taken",
+setting_up/warming_up → 3, sending → 4, deciding/finished → 5 — `deciding`, Day 30
+passed and their decision pending, stays under In progress; declined is "Not taken",
 grey, no journey). While sending it also says "Day 12 of 30" (unless the plain
 sentence already does).
 
@@ -95,6 +96,23 @@ sentence already does).
   something needs you". Right under the questions: **Messages**. Below: the **Inboxes & domain** card (once bought), the **Warm-up** card (once `warmup` is set), the onboarding call card, the application (open
   while it waits; once decided, one folded line), any other to-dos under "Also
   on your list", and **Behind the scenes**, folded, with everything technical.
+- **What we found** (inside the application; `application.research`,
+  `email-distributor/docs/HUB-API.md` "Applicant research"). At the top,
+  **Before the call** (`renderBrief`): the machine's brief (`research.brief`, up
+  to 12 plain sentences) as one readable paragraph; after each sentence a small
+  mark — a numbered link when the source is a page (`tkSafeUrl`, new tab;
+  "Google Maps", "Google News", "Web archive" named in words), the record's name
+  as plain text otherwise ("fit score", "USAspending.gov", a Census benchmark as
+  "Census figures"); every source once under it, folded ("Where this comes
+  from · 13 sources"). No brief → no card. Then the summary, the flags, About
+  the company and the **Full company file**, which adds (folded): **Who buys
+  from them** (`deep.customers`: the line, the kinds of customers as pills with
+  their counts, the clients they name with a link to the page), **In the news**
+  (`deep.news`: each story's title as a safe link, source · date, its flags as
+  small pills — "New office", "Lawsuit"…; the search as a caption), **Competitors
+  nearby** (`deep.competitors`: name, rating and reviews, their site and Google
+  Maps; the search as a caption; "we never email them") and **What they write
+  about** (`deep.topics`: how often they post, the words they use most).
 - **Settings** — named sections, each folds open and says its state in one
   word: **Alerts** (every alert, "Not seen" first, "Mark as seen"; `#alerts`
   opens it), **Phone alerts**, **Your details** (`#settings/details`), **Keys** (`#settings/keys`), **Google Meet**, **Inboxes & domains**, **Warm-up** (`#settings/warmup` opens it), **Reply bot**, **Is everything running?** (last check-in, last
@@ -165,7 +183,10 @@ sentence already does).
   warm-up the machine sends the launch invite: their list and their emails
   are ready, go through them together; `email-distributor/docs/LAUNCH-CALL.md`).
   It is the SAME card (`renderCallCard`, drawn with `kind: 'launch'`), right
-  under the Warm-up card, above the folded onboarding call: the five steps,
+  under the Warm-up card, above the folded onboarding call. At its top:
+  **Before the call** — the research brief (`application.research.brief`, the
+  same `renderBrief` card as at the top of "What we found"), open while the
+  call is ahead, one closed line once it is over. Then the five steps,
   "Book by", the messages link, Join Google Meet / See it in the Calendar, and
   **Open the approval page** (a safe link, new tab — he shares his screen on
   the call). Two extra buttons: **Approved on the call** (first while the call

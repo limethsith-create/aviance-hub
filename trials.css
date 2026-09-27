@@ -814,6 +814,41 @@ a.btn{text-decoration:none}
 .tk-file-list{margin:4px 0 0;padding-left:20px}
 .tk-file-list li{font-size:var(--fs-base);line-height:1.55;margin-bottom:6px;overflow-wrap:anywhere}
 .tk-file-list .tk-muted{font-size:var(--fs-small)}
+/* research v4 in the file: the pills under a headline / the kinds of customers, the search each list came from */
+.tk-file-pills{margin:6px 0 4px}
+.tk-file-sub{display:block;font-size:var(--fs-small);color:var(--muted);line-height:1.5}
+.tk-file-cap{font-size:var(--fs-small);color:var(--muted);line-height:1.5;margin:0 0 8px;overflow-wrap:anywhere}
+
+/* "Before the call" — the research brief (renderBrief), at the top of "What we found" and of the launch-call card:
+   one readable paragraph, a small mark after each sentence (a numbered link to the page, or the record's name),
+   every source once under it, folded. Tokens only — nothing under the 13 px floor. */
+.tk-brief{border:1px solid var(--border-soft);background:var(--surface-2);padding:14px 16px;margin:0 0 14px}
+.tk-brief .tk-brief-title{font-size:var(--fs-strong);font-weight:600;margin:0 0 8px}
+.tk-brief-text{font-size:var(--fs-base);line-height:1.7;margin:0;overflow-wrap:anywhere}
+.tk-brief-marks{margin-left:2px}
+.tk-brief-mark{display:inline-block;vertical-align:super;font-size:var(--fs-min);line-height:1.25;padding:1px 6px;margin:0 0 0 3px;border:1px solid var(--border);background:var(--surface);color:var(--muted);text-decoration:none;white-space:normal;overflow-wrap:anywhere}
+a.tk-brief-mark{min-width:24px;text-align:center;color:var(--text);font-weight:600}
+a.tk-brief-mark:hover,a.tk-brief-mark:focus-visible{background:var(--text);color:var(--bg)}
+.tk-brief-src{margin-top:10px;border-top:1px solid var(--border-soft)}
+.tk-brief-src>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:44px;font-size:var(--fs-small);font-weight:600}
+.tk-brief-src>summary::-webkit-details-marker{display:none}
+.tk-brief-src>summary::before{content:'▸';color:var(--muted)}
+.tk-brief-src[open]>summary::before{content:'▾'}
+.tk-brief-count{font-weight:400;font-size:var(--fs-small);color:var(--muted)}
+.tk-brief-src ul{list-style:none;margin:0;padding:0}
+.tk-brief-src li{display:flex;gap:10px;align-items:baseline;font-size:var(--fs-small);line-height:1.5;margin:0 0 8px;min-width:0}
+.tk-brief-src li>span:last-child{min-width:0;overflow-wrap:anywhere}
+.tk-brief-n{flex:none;min-width:24px;text-align:center;font-size:var(--fs-min);color:var(--muted);border:1px solid var(--border);background:var(--surface)}
+.tk-brief-n-t{border-color:transparent;background:none}
+.tk-oc .tk-brief{margin:12px 0 4px}
+/* after the call: the same card, one closed line */
+.tk-brief-fold{padding:0 16px}
+.tk-brief-fold[open]{padding-bottom:14px}
+.tk-brief.tk-brief-fold>.tk-brief-title{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:48px;margin:0}
+.tk-brief-fold>summary::-webkit-details-marker{display:none}
+.tk-brief-fold>summary::before{content:'▸';color:var(--muted)}
+.tk-brief-fold[open]>summary::before{content:'▾'}
+@media(max-width:560px){.tk-brief{padding:12px}.tk-brief-text{line-height:1.65}}
 
 /* ── Keys and Your details (keys.js) ───────────────────────────────────────
    Settings › Keys (one card per key: the status in words, the steps, a password box, Test and save / Test / Forget)

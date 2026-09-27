@@ -5,8 +5,9 @@
    What is checked: the one call card, drawn for the launch call (renderCallCard, the onboarding card reused — not a
    second card) in every status; the two new buttons (Approved on the call, Skip the call) and their contract bodies +
    confirm words; the big button's words per to-do; the Calendar's "Launch call" label and the panel's shortcut;
-   Messages' labels for the invite; no jargon; and a journey-style pass over the whole page in every status.
-   The machine's journey snapshots (tests/fixtures/journey) do not carry `launchCall` yet, so this builds from fixtures.
+   Messages' labels for the invite; the research brief "Before the call" at the top of the card; no jargon; and a
+   journey-style pass over the whole page in every status. The machine's own launch-call steps (15–20 of its journey
+   snapshots, tests/fixtures/journey) are drawn by tests/journey.test.mjs; this file covers every status with fixtures.
 
    Same set-up as simple.test.mjs: the shell's inline script, then every section script, a tiny fake DOM, no network. */
 import test, { after } from 'node:test';
@@ -15,7 +16,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NOW, simpleHub, simpleRows, onboardCall, ecreekDetail, launchCalls, launchSimple, galeLaunch, calLaunch, calLaunchWeek, calSettingsFixture, botRuleWords } from './fixtures.mjs';
+import { NOW, simpleHub, simpleRows, onboardCall, ecreekDetail, launchCalls, launchSimple, galeLaunch, calLaunch, calLaunchWeek, calSettingsFixture, botRuleWords, researchBrief } from './fixtures.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -408,16 +409,53 @@ test('journey-style: the whole trial page (front, every tab), the list row and t
   trialsForget(); calendarForget();
 });
 
-test('files: the styles keep the readability floor (tokens only), the new calendar class is drawn like a call; the machine\'s snapshots: a note when they gain launchCall', () => {
+test('"Before the call" on the launch-call card: the research brief at its top — the same card as under "What we found" (one function), open while the call is ahead, one closed line once it is over; none without a brief; a repaint keeps it', () => {
+  const withBrief = (st) => { const d = galeLaunch(st); d.application.research = { status: 'done', at: '2026-09-28T09:05:00Z', brief: clone(researchBrief) }; return d; };
+  const lcPart = (d) => part(renderTrialDetail(d, 'overview', { now: NOW }), '<div id="tkLcHost">');
+  for (const st of STATUSES) {
+    const c = lcPart(withBrief(st));
+    const folded = ['held', 'approvedOnCall', 'skipped'].includes(st);
+    if (folded) assert.ok(/<(section class="card tk-oc" id="tkSec-launchcall">\s*<h3>Launch call<\/h3>|div class="card tk-oc">)\s*<details class="tk-brief tk-brief-fold"><summary class="tk-brief-title">Before the call<span class="tk-brief-count">what we found<\/span><\/summary>/.test(c), st + ': the call is over — the brief is one closed line at the top');
+    else assert.ok(c.includes('<h3>Launch call</h3>\n    <div class="tk-brief"><h4 class="tk-brief-title">Before the call</h4><p class="tk-brief-text">'), st + ': the brief open, first on the card');
+    assert.ok(c.indexOf('tk-brief') < c.indexOf('class="tk-oc-say"'), st + ': above the call\'s own sentence');
+    const words = hubText(c);
+    assert.ok(!BANNED.test(words) && !BROKEN.test(flat(c)), st + ': plain words: ' + (words.match(BANNED) || [])[0]);
+    for (const re of EMPTY) { const m = c.match(re); assert.ok(!m, st + ': an empty label: ' + (m && m[0])); }
+  }
+  // one function, both places: the same paragraph and the same sources under "What we found"
+  const d = withBrief('booked'); const page = renderTrialDetail(d, 'overview', { now: NOW });
+  const onCard = between(part(page, '<div id="tkLcHost">'), '<p class="tk-brief-text">', '</details>');
+  const inFound = between(between(page, '<h4>What we found</h4>'), '<p class="tk-brief-text">', '</details>');
+  assert.ok(onCard.length > 500 && onCard === inFound, 'the same card in both places');
+  // no brief (older research, nothing found) → no card, no empty heading
+  for (const b of [undefined, null, { text: '', sentences: [], sources: [] }]) {
+    const x = galeLaunch('booked'); if (b !== undefined) x.application.research = { status: 'done', brief: b };
+    const c = lcPart(x); assert.ok(!c.includes('tk-brief') && !c.includes('Before the call'), JSON.stringify(b));
+  }
+  assert.ok(!renderLaunchCall(d.launchCall, d.row, { now: NOW }).includes('tk-brief'), 'the card alone, without meta.brief: nothing');
+  assert.ok(!renderOnboardCall(d.onboardCall, d.row, { now: NOW, brief: researchBrief }).includes('tk-brief'), 'the onboarding card never shows it');
+  // after a button, the card is redrawn from the cache: the brief stays
+  asOwner(); currentView = 'trial'; currentTrialId = ID; tk.detail[ID] = withBrief('booked'); el('tkLcHost').innerHTML = '';
+  tkOcRepaint(ID, 'launch');
+  assert.ok(el('tkLcHost').innerHTML.includes('<h4 class="tk-brief-title">Before the call</h4>'));
+  currentView = 'trials'; trialsForget();
+});
+
+test('files: the styles keep the readability floor (tokens only), the new calendar class is drawn like a call; the machine\'s snapshots carry launchCall from the invite on', () => {
   const css = fs.readFileSync(path.join(root, 'trials.css'), 'utf8'); const ccss = fs.readFileSync(path.join(root, 'calendar.css'), 'utf8');
   assert.match(css, /\.tk-oc-ok\{/); assert.match(css, /\.tk-oc-hint\{[^}]*font-size:var\(--fs-base\)/);
   assert.ok(!/\.tk-oc-(ok|hint)\{[^}]*font-size:\s*(\d|1[0-2])px/.test(css));
   assert.match(ccss, /\.cal-ev\.launch,\.cal-aitem\.launch\{border-left-style:double\}/);
-  // the trimmed journey snapshots: once the machine's carry launchCall, tests/fixtures/journey/trim.mjs copies them and the
-  // journey test draws the real steps — until then this file's fixtures stand in
+  // the trimmed journey snapshots (tests/fixtures/journey/trim.mjs): the launch call from step 15 (the invite) on —
+  // tests/journey.test.mjs draws those real steps
   const dir = path.join(root, 'tests', 'fixtures', 'journey');
-  const withLaunch = fs.readdirSync(dir).filter((f) => /^\d\d-.*\.json$/.test(f)).filter((f) => fs.readFileSync(path.join(dir, f), 'utf8').includes('"launchCall"'));
-  assert.ok(Array.isArray(withLaunch), 'snapshots with launchCall so far: ' + withLaunch.length);
+  const withLaunch = fs.readdirSync(dir).filter((f) => /^\d\d-.*\.json$/.test(f)).filter((f) => /"launchCall":\{/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+  assert.equal(withLaunch[0], '15-launch-invite.json', 'the first snapshot with a launch call is the invite');
+  assert.ok(withLaunch.includes('20-launch-approved.json'));
+  // the brief's styles: tokens only, nothing under the 13 px floor, a 44 px target to open the sources
+  assert.ok(!/\.tk-brief[^{]*\{[^}]*font-size:\s*\d+px/.test(css), 'the brief: font sizes are tokens');
+  assert.match(css, /\.tk-brief-src>summary\{[^}]*min-height:44px/);
+  assert.match(css, /\.tk-brief-mark\{[^}]*font-size:var\(--fs-min\)/);
 });
 
 test('the Calendar strips on the Trials screens say it is the launch call they asked for', () => {

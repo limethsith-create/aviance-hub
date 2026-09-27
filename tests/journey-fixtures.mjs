@@ -1,5 +1,6 @@
 /* The machine's journey snapshots, as the hub's tests use them: one applicant (Dana Whitfield, Ridgeline IT) from the
-   website form to the paid invoice — 29 real answers of GET /api/mc/hub (`board`) and GET /api/mc/hub/{id} (`detail`),
+   website form, the onboarding call, warm-up, the launch call, sending, to the paid invoice — 34 real answers of
+   GET /api/mc/hub (`board`) and GET /api/mc/hub/{id} (`detail`),
    plus `extra.calendar` (GET /api/mc/calendar), `extra.cheapinboxes` and `extra.warmupSettings` where the machine saved
    them. tests/fixtures/journey/trim.mjs copied them here without repeats; loadJourney() puts the repeats back. */
 import fs from 'node:fs';
@@ -15,6 +16,7 @@ function unpack(v, prev) {
     if (v.$same === 1 && Object.keys(v).length === 1) return clone(prev);
     if (Array.isArray(v.$append) && Object.keys(v).length === 1) return clone(prev).concat(unpack(v.$append));
     if (Array.isArray(v.$prepend) && Object.keys(v).length === 1) return unpack(v.$prepend).concat(clone(prev));
+    if (Array.isArray(v.$grow) && Object.keys(v).length === 1) return v.$grow.map((x, i) => unpack(x, Array.isArray(prev) && i < prev.length ? prev[i] : undefined));
     const out = {};
     for (const [k, x] of Object.entries(v)) out[k] = unpack(x, isObj(prev) ? prev[k] : undefined);
     return out;
@@ -40,7 +42,7 @@ export function loadJourney(dir = JOURNEY_DIR) {
       if (!base) throw new Error(f + ': detail.row points at a board row that is not there');
       d.row = Object.assign(clone(base), clone(d.row.set || {}));
     }
-    if (d && isObj(d.onboardCall) && d.onboardCall.thread === '$conversation.thread') d.onboardCall.thread = clone((d.conversation || {}).thread || []);
+    for (const k of ['onboardCall', 'launchCall']) if (d && isObj(d[k]) && d[k].thread === '$conversation.thread') d[k].thread = clone((d.conversation || {}).thread || []);
     out.push(s);
     prev = s;
   }

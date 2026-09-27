@@ -1,5 +1,6 @@
 /* Copies the machine's journey snapshots (email-distributor tests/fixtures/journey/NN-step.json — its real hub
-   answers along one applicant's trial) into this folder, trimmed to what the hub reads and without repeats.
+   answers along one applicant's trial) into this folder, trimmed to what the hub reads and without repeats. A step file
+   here that the machine no longer has (a renamed or renumbered step) is removed, so the two folders always match.
      node tests/fixtures/journey/trim.mjs [path to email-distributor/tests/fixtures/journey]
    Lossless for everything the hub draws, except: detail.profile, detail.trial and detail.virtualNow (the hub never
    reads them) are left out, detail.events keeps its newest 10 (Behind the scenes › History), board.alerts its newest
@@ -7,8 +8,12 @@
      {"$same":1}            the same value as in the step before, at the same place (a list as long as the step
                             before's is compared item by item)
      {"$append":[…]}        the step before's list plus these at the end   ({"$prepend":[…]}: at the start)
+     {"$grow":[…]}          a longer list whose first items are the step before's items changed a little: each of
+                            those is written against the same item the step before (with the markers above), the
+                            new ones at the end as they are
      {"$boardRow":id,"set":{…}}  detail.row = that client's row on the board, with these fields changed
-     "$conversation.thread" onboardCall.thread is the conversation's thread (the contract says it is the same list) */
+     "$conversation.thread" onboardCall.thread / launchCall.thread is the conversation's thread (the contract says it
+                            is the same list) */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,6 +47,11 @@ function pack(cur, prev, depth) {
     const n = prev.length;
     if (same(cur.slice(0, n), prev)) return { $append: cur.slice(n) };
     if (same(cur.slice(cur.length - n), prev)) return { $prepend: cur.slice(0, cur.length - n) };
+    // e.g. the conversation: one more email, and the machine's snapshot renumbered the link tokens in the old ones
+    if (depth < 6) {
+      const g = { $grow: cur.map((v, i) => (i < n ? pack(v, prev[i], depth + 1) : v)) };
+      if (JSON.stringify(g).length < JSON.stringify(cur).length) return g;
+    }
   }
   return cur;
 }
@@ -51,6 +61,8 @@ function boardRow(board, id) {
 }
 
 const files = fs.readdirSync(from).filter((f) => /^\d\d-.*\.json$/.test(f)).sort();
+if (!files.length) throw new Error('no NN-step.json snapshots in ' + from);
+for (const f of fs.readdirSync(here)) if (/^\d\d-.*\.json$/.test(f) && !files.includes(f)) fs.unlinkSync(path.join(here, f));
 let prev, total = 0;
 for (const f of files) {
   const full = trim(JSON.parse(fs.readFileSync(path.join(from, f), 'utf8')));
@@ -62,8 +74,11 @@ for (const f of files) {
       for (const k of new Set([...Object.keys(br), ...Object.keys(full.detail.row)])) if (!same(br[k], full.detail.row[k])) diff[k] = full.detail.row[k] === undefined ? null : full.detail.row[k];
       out.detail.row = { $boardRow: br.id, set: diff };
     }
-    const oc = full.detail.onboardCall, c = full.detail.conversation;
-    if (oc && c && Array.isArray(oc.thread) && same(oc.thread, c.thread) && out.detail.onboardCall && typeof out.detail.onboardCall === 'object' && !out.detail.onboardCall.$same) out.detail.onboardCall.thread = '$conversation.thread';
+    const c = full.detail.conversation;
+    for (const k of ['onboardCall', 'launchCall']) {
+      const call = full.detail[k];
+      if (call && c && Array.isArray(call.thread) && same(call.thread, c.thread) && out.detail[k] && typeof out.detail[k] === 'object' && !out.detail[k].$same) out.detail[k].thread = '$conversation.thread';
+    }
   }
   const text = JSON.stringify(out) + '\n';
   fs.writeFileSync(path.join(here, f), text);

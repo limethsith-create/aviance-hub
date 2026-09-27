@@ -5,7 +5,8 @@
    machine does all the work; this file only shows and steers it through the
    contract in email-distributor/docs/HUB-API.md (incl. "v2 additions") and
    docs/ONBOARD-CALL.md (row.simple on the board, onboardCall on a trial), docs/LAUNCH-CALL.md (launchCall on a
-   trial — the same card, drawn for the launch call, with Approved on the call / Skip the call) and docs/REPLYBOT-MEET.md
+   trial — the same card, drawn for the launch call, with Approved on the call / Skip the call, and the research brief
+   "Before the call" at its top — renderBrief, the same card as at the top of "What we found") and docs/REPLYBOT-MEET.md
    (`conversation` on a trial — drawn by messages.js as the Messages section), docs/AUTO-BUY.md (`autobuy`,
    autobuy.js), docs/WARMUP-HUB.md (`warmup` on a trial and Settings › Warm-up — warmup.js) and docs/KEYS.md
    (Settings › Keys and Settings › Your details — keys.js).
@@ -65,9 +66,10 @@ const TK_PRE_WARMUP=['applied','queued','onboarding','awaiting_purchase','setup_
 /* The simple Trials list: rows in these states sit in the collapsed "Finished / declined" group (older machines without row.simple). */
 const TK_DONE_STATES=['converted','not_now','retired','deleted','declined','closed_silent'];
 /* The one journey, the same on every screen: five numbered steps in plain words.
-   row.simple.step → the step number; 'declined' is "Not taken" (grey, no journey). */
+   row.simple.step → the step number; 'declined' is "Not taken" (grey, no journey). 'deciding' (Day 30 passed, their
+   decision pending) is drawn where 'finished' is (HUB-API.md) — but stays under "In progress" until they decide. */
 const TK_STEPS=['Applied','Onboarding call','Setting up','Sending emails','Done'];
-const TK_STEP_OF={new:1,queued:1,accepted:2,call_booked:2,setting_up:3,warming_up:3,sending:4,finished:5};
+const TK_STEP_OF={new:1,queued:1,accepted:2,call_booked:2,setting_up:3,warming_up:3,sending:4,deciding:5,finished:5};
 /* "You need to answer Sam…" reads right when the machine's sentence starts with one of these verbs. */
 const TK_VERBS=['add','answer','approve','book','buy','call','check','choose','confirm','decide','decline','email','fill','give','hold','join','look','mark','open','paste','pick','press','read','reply','review','say','see','send','skip','tell','write'];
 
@@ -872,10 +874,14 @@ function tkPrimaryAction(d,meta){
 /* "What happens next?" — never the same words as the other two answers. */
 function tkNextText(s,j,act,d,now){
   if(s.needsYou&&act&&act.kind!=='none')return "It's your turn. Once you've done the step below, we carry on.";
-  const n=String(s.next||'').trim().replace(/^nothing\s+(?:for\s+you|to\s+do)\s*[:—–-]\s*/i,'');
+  // "Nothing for you: X" / "Nothing. X" (Day 30: "Nothing. Dana chooses on the decision page.") → X
+  const n=String(s.next||'').trim().replace(/^nothing(?:\s+(?:for\s+you|to\s+do))?\s*[:.—–-]\s*/i,'');
   // his own step (not marked urgent) is under "What do you need to do?" — not said twice
   if(act&&act.kind!=='none'&&n&&TK_VERBS.includes(n.split(/\s+/)[0].toLowerCase().replace(/[^a-z]/g,'')))return "Once you've done the step below, we carry on.";
   if(n&&!/^nothing\b/i.test(n))return tkSentence(n);
+  // a call's time just passed and the page already asks him to hold it / mark it (the list has not caught up yet):
+  // never "Nothing for now" beside that big button
+  if(act&&['launchHold','launchApprove','markHeld'].includes(act.kind))return "Once you've done the step below, we carry on.";
   // "Nothing for you until the call": the call itself, in his time and US Eastern — the onboarding call, or the launch call
   const nowD=now?new Date(now):new Date();
   const oc=d&&d.onboardCall&&typeof d.onboardCall==='object'?d.onboardCall:null;const at=oc&&tkOcIsBooked(oc)?tkParseDate(oc.bookedFor):null;
@@ -997,7 +1003,11 @@ function renderCallCard(oc,row,meta,kind){
   // they approved on the page by themselves: the call is optional — skip it (the first button while nothing is booked)
   if(launch&&ap.onPage&&!held&&!skipped)acts.push(btn('skip','Skip the call',booked));
   const book=held||asked||skipped?'':`<div class="tk-oc-book"><label for="${K.when}">${booked?'Call moved? Pick the new date and time (your time)':'Booked by phone or email? Pick the date and time (your time)'}</label><div class="tk-oc-book-row"><input id="${K.when}" type="datetime-local" data-tk-form><button class="btn${booked?' ghost':''}" onclick="trialOcMarkBooked(${tkAttr(id)}${launch?','+tkAttr('launch'):''})">Mark call booked</button></div></div>`;
-  const body=`${oc.label?`<p class="tk-oc-say">${esc(oc.label)}</p>`:''}
+  // the launch call: the brief to read before it, at the top (the same card as under "What we found": meta.brief);
+  // once the call is over (held, no-show, skipped) or approved on it, folded to one line — approved on the page only,
+  // the call may still happen: open
+  const brief=launch?renderBrief(meta.brief,{h:'h4',folded:over||!!ap.onCall}):'';
+  const body=`${brief}${oc.label?`<p class="tk-oc-say">${esc(oc.label)}</p>`:''}
     ${when}${okLine}${join}${due}${stepsHtml}
     ${facts?`<p class="tk-oc-facts">${facts}</p>`:''}
     <p class="tk-oc-msgs">Your emails with ${esc(first||'them')} are under Messages. <button type="button" class="tk-textbtn" onclick="tkGoTo(${tkAttr('messages')})">See the messages</button></p>
@@ -1010,6 +1020,7 @@ function renderCallCard(oc,row,meta,kind){
   </section>`;
 }
 function renderOnboardCall(oc,row,meta){return renderCallCard(oc,row,meta,'onboarding')}
+/* meta.brief: application.research.brief (tkResearchBrief(d)) — drawn at the top as "Before the call". */
 function renderLaunchCall(lc,row,meta){return renderCallCard(lc,row,meta,'launch')}
 
 /* -- Overview: what to do, the 13 systems at a glance, four growth numbers -- */
@@ -1350,7 +1361,7 @@ function renderTrialDetail(d,tab,meta){
     (act.kind!=='calendar'&&typeof calTrialAsk==='function'?calTrialAsk(row.id):'')+   // calendar.js: a call time waiting for the owner's yes
     (typeof renderAutobuyCard==='function'?`<div id="tkAbHost">${renderAutobuyCard(d,{primary:act.kind,now:meta.now})}</div>`:'')+   // autobuy.js: their inboxes being set up
     (typeof renderWarmupCard==='function'?`<div id="tkWuHost">${renderWarmupCard(d,{primary:act.kind,now:meta.now})}</div>`:'')+   // warmup.js: their warm-up
-    (d.launchCall&&typeof d.launchCall==='object'?`<div id="tkLcHost">${renderLaunchCall(d.launchCall,row,meta)}</div>`:'')+   // the launch call, right under the warm-up (docs/LAUNCH-CALL.md)
+    (d.launchCall&&typeof d.launchCall==='object'?`<div id="tkLcHost">${renderLaunchCall(d.launchCall,row,Object.assign({},meta,{brief:tkResearchBrief(d)}))}</div>`:'')+   // the launch call, right under the warm-up (docs/LAUNCH-CALL.md)
     (d.onboardCall&&typeof d.onboardCall==='object'?`<div id="tkOcHost">${renderOnboardCall(d.onboardCall,row,meta)}</div>`:'')+
     renderApplicationBlock(d,meta)+
     (todos.length?renderTodos(todos,{title:'Also on your list',hideClient:true,noCount:true,now:meta.now}):'')+
@@ -1397,7 +1408,111 @@ function tkBig(n){n=Number(n);if(!isFinite(n))return '—';return '$'+(n>=1e6?(M
 function tkGroup(title,count,body,open){if(!body)return '';return `<details class="tk-file-group"${open?' open':''}><summary><span class="tk-file-title">${esc(title)}</span>${count!=null?`<span class="tk-file-count">${esc(count)}</span>`:''}</summary><div class="tk-file-body">${body}</div></details>`}
 function tkList(items,fn){items=(items||[]).filter(Boolean);return items.length?`<ul class="tk-file-list">${items.map(x=>`<li>${fn(x)}</li>`).join('')}</ul>`:''}
 function tkSrc(page){return page?` <span class="tk-muted">— ${esc(page)}</span>`:''}
-function renderDeep(d){
+/* A page of their site after a fact ("— /about", "— home page"): a link to it when their website's address is known. */
+function tkPageMark(page,base){
+  page=typeof page==='string'?page.trim():'';if(!page)return '';
+  let u=tkSafeUrl(page);
+  if(!u&&page.charAt(0)==='/'&&tkSafeUrl(base)){try{u=tkSafeUrl(new URL(page,tkSafeUrl(base)).href)}catch(e){u=''}}
+  const name=tkSafeUrl(page)?tkSrcName(page):page==='/'?'home page':page;
+  return ` <span class="tk-muted">— ${u?tkLink(u,name):esc(name)}</span>`;
+}
+/* A source's address in plain words: "Google Maps", "Google News", "Web archive", else "ridgelineit.com/services". */
+function tkSrcName(u){
+  u=tkSafeUrl(u);if(!u)return '';let h='',p='';
+  try{const x=new URL(u);h=x.hostname.toLowerCase().replace(/^www\./,'');p=(x.pathname+x.search).replace(/\/$/,'')}catch(e){return u.replace(/^https?:\/\//i,'').replace(/\/$/,'')}
+  if(h==='news.google.com')return 'Google News';
+  if(h==='maps.google.com'||h==='goo.gl'||(/^google\.[a-z.]+$/.test(h)&&p.indexOf('/maps')===0))return 'Google Maps';
+  if(h==='web.archive.org')return 'Web archive (old copies of their site)';
+  if(h==='sec.gov'||/\.sec\.gov$/.test(h))return 'SEC filing';
+  const s=h+p;return s.length>60?s.slice(0,57)+'…':s;
+}
+/* A record's name after a sentence, in plain words (the folded list keeps the full name): a Census benchmark is "Census
+   figures", a trailing "(RDAP)"-style code is left out. */
+function tkSrcLabel(x){x=String(x==null?'':x).trim();if(/^census\b/i.test(x))return 'Census figures';return x.replace(/\s*\([A-Z]{2,}\)$/,'')||x}
+/* The brief the owner reads before the launch call (machine Research v4, `application.research.brief`): up to 12 plain
+   sentences, each followed by where it came from — a page or a story (a small numbered link) or a record's name (plain
+   text) — and every source once under it, folded. Drawn by this one function at the top of "What we found" and at the
+   top of the launch-call card. Nothing at all when the brief is empty. */
+function tkResearchBrief(d){const r=d&&d.application&&typeof d.application==='object'?d.application.research:null;const b=r&&typeof r==='object'?r.brief:null;return b&&typeof b==='object'&&!Array.isArray(b)?b:null}
+function renderBrief(b,opts){
+  opts=opts||{};if(!b||typeof b!=='object'||Array.isArray(b))return '';
+  const str=v=>typeof v==='string'?v.trim():'';
+  // a source is a web page (http/https) or a plain name; anything else that looks like a link (javascript:, data:…) is left out
+  const okSrc=x=>!!x&&(!!tkSafeUrl(x)||!/^[a-z][a-z0-9+.-]*:/i.test(x));
+  const srcOf=s=>[...new Set((Array.isArray(s&&s.sources)?s.sources:[]).map(str).filter(okSrc))];
+  const sents=(Array.isArray(b.sentences)?b.sentences:[]).filter(s=>s&&typeof s==='object'&&str(s.text));
+  const text=str(b.text);
+  if(!sents.length&&!text)return '';
+  // every source once, in the order the paragraph first uses it (then any the list names that no sentence does);
+  // the pages are numbered 1, 2, 3… in that order, a record's name keeps its words
+  const all=[];const add=x=>{if(x&&!all.includes(x))all.push(x)};
+  sents.forEach(s=>srcOf(s).forEach(add));(Array.isArray(b.sources)?b.sources:[]).map(str).filter(okSrc).forEach(add);
+  const num={};let n=0;all.forEach(x=>{if(tkSafeUrl(x))num[x]=++n});
+  const mark=x=>{const u=tkSafeUrl(x);const name=tkSrcName(u);
+    return u?`<a class="tk-brief-mark" href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="${esc(name)}" aria-label="Source ${num[x]}: ${esc(name)}">${num[x]}</a>`
+      :`<span class="tk-brief-mark tk-brief-label" title="${esc(x)}"><span class="tk-sr">Source: </span>${esc(tkSrcLabel(x))}</span>`};
+  const para=sents.length?sents.map(s=>{const src=srcOf(s);return `<span class="tk-brief-s">${esc(str(s.text))}${src.length?`<span class="tk-brief-marks">${src.map(mark).join('')}</span>`:''}</span>`}).join(' '):esc(text);
+  const list=all.length?`<details class="tk-brief-src"><summary>Where this comes from<span class="tk-brief-count">${all.length} source${all.length!==1?'s':''}</span></summary>
+    <ul>${all.map(x=>{const u=tkSafeUrl(x);return u?`<li><span class="tk-brief-n">${num[x]}</span><span>${tkLink(u,tkSrcName(u))}</span></li>`:`<li><span class="tk-brief-n tk-brief-n-t" aria-hidden="true">·</span><span>${esc(x)}</span></li>`}).join('')}</ul>
+    <p class="tk-help">Each fact comes from the page or record marked after it. Nothing is guessed: what we couldn't find is left out.</p></details>`:'';
+  // after the call (opts.folded) the same card, one closed line: the call's outcome comes first
+  if(opts.folded)return `<details class="tk-brief tk-brief-fold"><summary class="tk-brief-title">Before the call<span class="tk-brief-count">what we found</span></summary><p class="tk-brief-text">${para}</p>${list}</details>`;
+  const h=opts.h==='h4'?'h4':'h5';
+  return `<div class="tk-brief"><${h} class="tk-brief-title">Before the call</${h}><p class="tk-brief-text">${para}</p>${list}</div>`;
+}
+/* The four parts of the company file the call uses (Research v4): the news, what they write about, who buys from them,
+   the competitors nearby. Each is '' when there is nothing to show. */
+const TK_NEWS_KIND={layoffs:'Layoffs',lawsuit:'Lawsuit',acquisition:'Bought or sold',funding:'Raised money','new office':'New office',award:'Award'};
+function tkNewsPart(nw){
+  if(!nw||typeof nw!=='object')return '';
+  const str=v=>typeof v==='string'?v.trim():'';
+  const items=(Array.isArray(nw.items)?nw.items:[]).filter(x=>x&&typeof x==='object'&&str(x.title));
+  const flags=(Array.isArray(nw.flags)?nw.flags:[]).filter(f=>f&&typeof f==='object'&&str(f.kind)&&str(f.title));
+  const hit=(f,x)=>(str(f.link)&&str(f.link)===str(x.link))||str(f.title)===str(x.title);
+  // a flagged headline the list left out is shown too
+  const rows=items.concat(flags.filter(f=>!items.some(x=>hit(f,x))));
+  const pill=f=>{const k=str(f.kind).toLowerCase();return `<span class="pill ${String(f.level)==='warn'?'amber':'grey'}">${esc(TK_NEWS_KIND[k]||tkSentence(k).replace(/\.$/,''))}</span>`};
+  const q=str(nw.query);
+  const list=tkList(rows,x=>{const fl=flags.filter(f=>hit(f,x));const when=str(x.date)?tkDate(x.date):'';const meta=[str(x.source),when&&when!=='—'?when:''].filter(Boolean).join(' · ');
+    return `${tkLink(x.link,str(x.title))}${meta?`<br><span class="tk-muted">${esc(meta)}</span>`:''}${fl.length?`<span class="tk-pills tk-file-pills">${fl.map(pill).join('')}</span>`:''}`});
+  const none=nw.error?"<p class=\"tk-file-note\">We couldn't read the news this time.</p>":rows.length?'':`<p class="tk-file-note">Nothing in the news${q?` for “${esc(q)}”`:''}.</p>`;
+  const cap=q&&rows.length?`<p class="tk-file-cap">From a Google News search for “${esc(q)}”${tkSafeUrl(nw.url)?` · ${tkLink(nw.url,'see the search ↗')}`:''}.</p>`:'';
+  return list+none+cap;
+}
+function tkTopicsPart(tp){
+  if(!tp||typeof tp!=='object')return '';
+  const str=v=>typeof v==='string'?v.trim():'';const times=(k,one,many)=>k==null||!isFinite(Number(k))?'':tkNum(k)+' '+(Number(k)===1?one:many);
+  const pairs=(Array.isArray(tp.pairs)?tp.pairs:[]).filter(p=>p&&typeof p==='object'&&str(p.text));
+  const rh=tp.rhythm&&typeof tp.rhythm==='object'&&str(tp.rhythm.text)?tp.rhythm:null;
+  return [
+    rh?`<p class="tk-file-note"><b>How often they post:</b> ${esc(tkSentence(str(rh.text)))}${rh.atLeast?' <span class="tk-file-sub">At least that — their site lists more posts than we read.</span>':''}</p>`:'',
+    pairs.length?`<div class="tk-file-note"><b>The words they use most</b>${tkList(pairs,p=>{const c=[times(p.count,'time','times'),times(p.posts,'post','posts')].filter(Boolean);return `<b>${esc(str(p.text))}</b>${c.length?` <span class="tk-muted">— ${esc(c.join(' in '))}</span>`:''}`})}</div>`:'',
+  ].join('');
+}
+function tkCustomersPart(cu,site){
+  if(!cu||typeof cu!=='object')return '';
+  const str=v=>typeof v==='string'?v.trim():'';
+  const segs=(Array.isArray(cu.segments)?cu.segments:[]).filter(s=>s&&typeof s==='object'&&str(s.name));
+  const exs=(Array.isArray(cu.examples)?cu.examples:[]).filter(x=>x&&typeof x==='object'&&str(x.name));
+  const how={'client list':'in their client list',testimonial:'gave a testimonial','case study':'a case study'};
+  return [
+    str(cu.line)?`<p class="tk-file-note">${esc(str(cu.line))}</p>`:'',
+    segs.length?`<div class="tk-file-note"><b>Kinds of customers</b><span class="tk-pills tk-file-pills">${segs.map(s=>`<span class="pill blue">${esc(str(s.name))}${s.count!=null&&isFinite(Number(s.count))?' · '+tkNum(s.count):''}</span>`).join('')}</span><span class="tk-file-sub">The number is how many of their pages, testimonials, case studies and named clients point to that kind of customer.</span></div>`:'',
+    exs.length?`<div class="tk-file-note"><b>Clients they name</b>${tkList(exs,x=>{const h=str(x.how).toLowerCase();return `${esc(str(x.name))}${h?` <span class="tk-muted">(${esc(how[h]||h)})</span>`:''}${tkPageMark(x.page,site)}`})}</div>`:'',
+  ].join('');
+}
+function tkCompetitorsPart(co){
+  if(!co||typeof co!=='object')return '';
+  const str=v=>typeof v==='string'?v.trim():'';
+  const rivals=(Array.isArray(co.items)?co.items:[]).filter(x=>x&&typeof x==='object'&&str(x.name));
+  const q=str(co.query);
+  if(!rivals.length)return q?`<p class="tk-file-note">Nothing else came up on Google Maps for “${esc(q)}”.</p>`:'';
+  const list=tkList(rivals,x=>{const r=x.rating!=null&&x.rating!==''&&isFinite(Number(x.rating))?Number(x.rating):null;const n=x.reviews!=null&&isFinite(Number(x.reviews))?Number(x.reviews):null;
+    const links=[tkSafeUrl(x.website)?tkLink(x.website,tkSrcName(x.website)):'',tkSafeUrl(x.mapsUrl)?tkLink(x.mapsUrl,'Google Maps ↗'):''].filter(Boolean);
+    return `<b>${esc(str(x.name))}</b>${r!=null?` · ${esc(r)}★${n!=null?` from ${tkNum(n)} review${n!==1?'s':''}`:''}`:n!=null?` · ${tkNum(n)} review${n!==1?'s':''}`:''}${links.length?' · '+links.join(' · '):''}${str(x.address)?`<br><span class="tk-muted">${esc(str(x.address))}</span>`:''}`});
+  return `${list}${q?`<p class="tk-file-cap">From a Google Maps search for “${esc(q)}”.</p>`:''}<p class="tk-help">For the call only — we never email them, and they never become leads.</p>`;
+}
+function renderDeep(d,site){
   if(!d||typeof d!=='object')return '';
   const m=d.money||{};const fed=m.federal||null;const sec=m.sec||null;const o=d.offers||{};const e=d.emailSetup||null;const h=d.history||null;
   const money=[
@@ -1418,7 +1533,7 @@ function renderDeep(d){
   ].filter(Boolean).join('');
   const hist=[
     d.company&&(d.company.founded||d.company.employees)?`<div class="tk-file-note">${d.company.founded?`Founded <b>${esc(d.company.founded)}</b>`:''}${d.company.employees?` · ${esc(d.company.employees)} employees (their site's company data)`:''}</div>`:'',
-    h&&h.firstSeen?`<div class="tk-file-note">Website online since <b>${esc(h.firstSeen)}</b> · captured in ${esc(h.monthsCaptured)} months by the Wayback Machine</div>`:'',
+    h&&h.firstSeen?`<div class="tk-file-note">Website online since <b>${esc(h.firstSeen)}</b>${h.monthsCaptured?` · the web archive (web.archive.org) has copies from ${esc(h.monthsCaptured)} month${Number(h.monthsCaptured)!==1?'s':''}`:''}</div>`:'',
     (d.timeline||[]).length?`<div class="tk-file-note"><b>Their home page, year by year</b>${tkList(d.timeline,y=>`<b>${esc(y.year)}</b>${(y.changed||[]).length?' <span class="pill amber">changed</span>':''} · ${tkLink(y.url,y.title||'(no title)')}${y.headline?`<br><span class="tk-muted">${esc(y.headline)}</span>`:''}`)}</div>`:'',
     d.blog&&d.blog.posts?`<div class="tk-file-note">Blog: <b>${esc(d.blog.posts)}</b> posts read${d.blog.latest?` · latest ${esc(d.blog.latest)}`:''}${d.blog.first?` · earliest seen ${esc(d.blog.first)}`:''}</div>`:'',
   ].filter(Boolean).join('');
@@ -1439,15 +1554,20 @@ function renderDeep(d){
   const docs=tkList(d.documents,x=>`${tkLink(x.url,x.title||'Document')}${x.pages?` · ${esc(x.pages)} page${x.pages!==1?'s':''}`:''}${x.words?` · ${esc(x.words)} words`:''}${(x.credentials||[]).length?` · mentions ${esc(x.credentials.join(', '))}`:''}${x.excerpt?`<br><span class="tk-muted">${esc(x.excerpt)}</span>`:''}`);
   const places=[tkList(d.addresses,a=>esc(a))].filter(Boolean).join('');
   const oCount=(o.promos||[]).length+(o.plans||[]).length+(o.ctas||[]).length+(o.magnets||[]).length;
+  // Research v4: the news, what they write about, who buys from them, the competitors nearby (for the call)
+  const nItems=d.news&&Array.isArray(d.news.items)?d.news.items.filter(x=>x&&x.title).length:0;
+  const cItems=d.competitors&&Array.isArray(d.competitors.items)?d.competitors.items.filter(x=>x&&x.name).length:0;
+  const v4=tkGroup('Who buys from them',null,tkCustomersPart(d.customers,site))+tkGroup('In the news',nItems?nItems+' stor'+(nItems!==1?'ies':'y'):null,tkNewsPart(d.news))+
+    tkGroup('Competitors nearby',cItems?cItems+' nearby':null,tkCompetitorsPart(d.competitors))+tkGroup('What they write about',null,tkTopicsPart(d.topics));
   return `<div class="tk-file"><div class="tk-file-head"><h5>Full company file</h5><span class="tk-muted">${esc(d.facts||0)} facts from ${esc(d.pagesRead||0)} pages${(d.documents||[]).length?` and ${d.documents.length} document${d.documents.length!==1?'s':''}`:''} · ${esc(Number(d.words||0).toLocaleString())} words read</span></div>
-    ${tkGroup('Money',null,money,true)}${tkGroup('Offers',oCount||null,offers,true)}${tkGroup('History',(d.timeline||[]).length?d.timeline.length+' years':null,hist)}
+    ${tkGroup('Money',null,money,true)}${tkGroup('Offers',oCount||null,offers,true)}${v4}${tkGroup('History',(d.timeline||[]).length?d.timeline.length+' years':null,hist)}
     ${tkGroup('People',(d.people||[]).length||null,people)}${tkGroup('Customers and proof',((d.clients||[]).length+(d.testimonials||[]).length+(d.caseStudies||[]).length)||null,proof)}
     ${tkGroup('Certifications, partners, awards',(d.credentials||[]).length||null,creds)}${tkGroup('Tools and email setup',(d.tech||[]).length||null,tools)}
     ${tkGroup('Documents',(d.documents||[]).length||null,docs)}${tkGroup('Addresses',(d.addresses||[]).length||null,places)}
-    <p class="tk-help">Collected by the machine the moment they applied: every page of their site it may read, their PDFs, their DNS, the Wayback Machine, USAspending.gov and SEC EDGAR. Fixed rules, no AI; every line keeps where it came from.</p></div>`;
+    <p class="tk-help">Collected the moment they applied: every page of their site we may read, their PDFs, their email settings, old copies of their site (web.archive.org), Google News, Google Maps, USAspending.gov and SEC EDGAR. Fixed rules, no AI; every line keeps where it came from.</p></div>`;
 }
 /* What the machine found out about the applicant (website crawl + Google Places + market count). */
-function renderResearch(r,id){
+function renderResearch(r,id,now){
   const head=`<div class="tk-research-head"><h4>What we found</h4>${id?`<button class="btn ghost tk-btn-s" onclick="trialResearchAgain(${tkAttr(id)})">Research again</button>`:''}</div>`;
   if(!r)return id?head+'<div class="tk-research-pending">No research yet.</div>':'';
   const st=String(r.status||'').toLowerCase();
@@ -1467,12 +1587,13 @@ function renderResearch(r,id){
   if((w.emails||[]).length)rows.push(['Emails on the site',esc(w.emails.join(', '))]);
   if(socials.length)rows.push(['Social',socials.map(k=>tkLink(w.socials[k],k.charAt(0).toUpperCase()+k.slice(1))).join(' · ')]);
   return head+`
+    ${renderBrief(r.brief)}
     ${r.summary?`<p class="tk-research-summary">${esc(r.summary)}</p>`:''}
     ${flags.length?`<div class="tk-flags">${flags.map(f=>`<div class="tk-flag ${String(f.level)==='warn'?'warn':'info'}"><span class="pill ${String(f.level)==='warn'?'amber':'grey'}">${String(f.level)==='warn'?'Check':'Note'}</span><span>${esc(f.text)}</span></div>`).join('')}</div>`:''}
     ${rows.length?`<div class="tk-about"><h5>About the company</h5><div class="tk-kv">${rows.map(([k,v])=>`<small>${esc(k)}</small><span>${v}</span>`).join('')}</div></div>`:''}
-    ${renderDeep(r.deep)}
+    ${renderDeep(r.deep,w.url)}
     ${m&&m.estimate!=null?`<div class="tk-market"><h5>Their market</h5><p>About <b>${tkNum(m.estimate)}</b> matching companies for “${esc(m.query||'')}”${m.source?` <span class="tk-muted">(${esc(m.source==='places'?'Google Places':m.source==='overpass'?'OpenStreetMap':m.source)})</span>`:''}.</p></div>`:''}
-    ${r.at?`<p class="tk-help">Researched ${esc(tkRel(r.at))}. Facts copied from their site and Google — nothing guessed.</p>`:''}`;
+    ${r.at?`<p class="tk-help">Researched ${esc(tkRel(r.at,now?new Date(now):undefined))}. Facts copied from their site and Google — nothing guessed.</p>`:''}`;
 }
 /* The application itself: when it came, the fit check, the fit score, what we found, every answer, and
    (while it waits) the two buttons. Who they are is already at the top of the page. */
@@ -1486,7 +1607,7 @@ function renderApplicationCard(d,meta){
     <div class="tk-fit-summary">${tkVerdictPill(fit.verdict)}<span>${esc(fit.summary||'')}</span></div>
     ${lines.length?`<div class="tk-fit">${lines.map(l=>`<div class="tk-fit-line"><div>${tkFitPill(l.status)}</div><div><b>${esc(l.label||l.rule||'')}</b>${l.note?`<small>${esc(l.note)}</small>`:''}</div></div>`).join('')}</div>`:''}
     ${renderFitScore(app.research)}
-    ${renderResearch(app.research,id)}
+    ${renderResearch(app.research,id,meta.now)}
     <h4>Their answers</h4>
     ${answers.length?`<dl class="tk-answers">${answers.map(x=>`<dt>${esc(x.q||'')}</dt><dd>${x.a!=null&&x.a!==''?esc(x.a):'<span class="tk-muted">(no answer)</span>'}</dd>`).join('')}</dl>`:'<div class="tk-muted">No answers stored.</div>'}
     ${pending?`<div class="tk-app-actions"><button class="btn" onclick="trialApproveApplication(${tkAttr(id)})">Say yes and email them</button><button class="btn ghost" onclick="openDeclineApplication(${tkAttr(id)})">Say no…</button></div>`:decided?`<div class="tk-app-decided">${decided}</div>`:''}
@@ -1900,7 +2021,7 @@ function tkOcName(id){const r=(tk.detail[id]&&tk.detail[id].row)||tkFindRow(id)|
 function tkOcRepaint(id,kind){
   if(currentView!=='trial'||currentTrialId!==id)return;
   const d=tk.detail[id];if(!d)return;
-  (kind?[tkCallKind(kind)]:Object.keys(TK_CALL_KINDS)).forEach(k=>{const K=TK_CALL_KINDS[k];const host=document.getElementById(K.host);const c=d[K.key];if(host&&c&&typeof c==='object')host.innerHTML=renderCallCard(c,d.row,{now:new Date()},k);});
+  (kind?[tkCallKind(kind)]:Object.keys(TK_CALL_KINDS)).forEach(k=>{const K=TK_CALL_KINDS[k];const host=document.getElementById(K.host);const c=d[K.key];if(host&&c&&typeof c==='object')host.innerHTML=renderCallCard(c,d.row,{now:new Date(),brief:tkResearchBrief(d)},k);});
 }
 async function trialOcPost(id,body,opts,kind){
   opts=opts||{};kind=tkCallKind(kind);const K=TK_CALL_KINDS[kind];

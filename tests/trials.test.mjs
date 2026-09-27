@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NOW, acme, bright, fern, fernApplication, fernDetail, stagesWith, fullHub, emptyHub, detail, tinyGrowth, makeGrowth, research, shoppingV2, brightPurchase, inquiryRecords, inquiryCounts, inquirySummaryOf, hubWithInquiries, noInquiries, simpleRows, simpleHub, onboardCall, ecreekDetail } from './fixtures.mjs';
+import { NOW, acme, bright, fern, fernApplication, fernDetail, stagesWith, fullHub, emptyHub, detail, tinyGrowth, makeGrowth, research, researchBrief, deepV4, shoppingV2, brightPurchase, inquiryRecords, inquiryCounts, inquirySummaryOf, hubWithInquiries, noInquiries, simpleRows, simpleHub, onboardCall, ecreekDetail } from './fixtures.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1363,4 +1363,99 @@ test('full company file: money with its basis, offers, history, people, proof, t
   assert.ok(h.includes('Hosted by Microsoft 365') && h.includes('gethillit.com · has mail servers · <b>points at their site</b>'));
   assert.ok(h.includes('href="https://hill-it.com/cap.pdf"') && h.includes('mentions CMMC'));
   assert.equal(renderDeep(null), '');
+});
+
+/* ───────────── research v4: the brief "Before the call" and the four new parts of the company file ───────────── */
+const plainText = (h) => String(h || '').replace(/<span class="tk-sr">[\s\S]*?<\/span>/g, '').replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
+const JARGON = /\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|dns|jwt|config|payload|mission control|cron|redis|endpoint|webhook)\b/i;
+const NOT_DRAWN = /\bundefined\b|\bnull\b|\bNaN\b|\[object Object\]|Invalid Date/;
+
+test('the brief "Before the call": the sentences as one paragraph, after each a small numbered link (a page) or the record\'s name (plain text); every source once under it, folded; all escaped; an empty brief shows nothing', () => {
+  const h = renderBrief(researchBrief);
+  assert.ok(h.startsWith('<div class="tk-brief"><h5 class="tk-brief-title">Before the call</h5><p class="tk-brief-text">'));
+  const para = between(h, '<p class="tk-brief-text">', '</p>');
+  assert.equal(count(para, /<span class="tk-brief-s">/g), 8, 'the eight sentences with words (a blank one is left out), in one paragraph');
+  assert.ok(para.includes('dental &amp; medical practices.') && para.includes('Smile &lt;b&gt;Austin&lt;/b&gt;.') && !para.includes('<b>Austin'), 'escaped');
+  // the pages: numbered 1, 2, 3… in the order the paragraph first uses them — each a safe link, in a new tab
+  const marks = [...para.matchAll(/<a class="tk-brief-mark" href="([^"]*)" target="_blank" rel="noopener noreferrer" title="([^"]*)" aria-label="Source (\d+): ([^"]*)">(\d+)<\/a>/g)].map((m) => [m[5], m[1], m[2]]);
+  assert.deepEqual(marks, [['1', 'https://fernit.com/services', 'fernit.com/services'], ['2', 'https://fernit.com/', 'fernit.com'], ['3', 'https://fernit.com/clients', 'fernit.com/clients'], ['4', 'https://maps.google.com/?cid=123456', 'Google Maps'], ['5', 'https://news.google.com/rss/articles/fern-award', 'Google News']]);
+  assert.equal(count(between(para, 'Smile', '</span></span>'), /class="tk-brief-mark"/g), 2, 'the same page twice in one sentence: one mark');
+  // a record's name: plain text, never a link (a Census benchmark in plain words; "(RDAP)" left off — the full name is in the list)
+  assert.ok(para.includes('<span class="tk-brief-mark tk-brief-label" title="Census SUSB 2022 NAICS 541512/541513, Service Leadership"><span class="tk-sr">Source: </span>Census figures</span>'));
+  for (const n of ['USAspending.gov', 'domain registration', 'fit score']) assert.ok(para.includes('<span class="tk-sr">Source: </span>' + n + '</span>'), n);
+  assert.ok(para.includes('Nothing here has a source.</span>'), 'a sentence without a source: no mark');
+  assert.ok(!h.includes('javascript:'), 'an unsafe link is neither linked nor shown');
+  // the sources: folded, each once — pages with their number and a link, names as text
+  assert.ok(h.includes('<details class="tk-brief-src"><summary>Where this comes from<span class="tk-brief-count">10 sources</span></summary>') && !/tk-brief-src" open/.test(h), 'folded');
+  const li = [...between(h, '<details class="tk-brief-src">', '</details>').matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => plainText(m[1]));
+  assert.deepEqual(li, ['1 fernit.com/services', '2 fernit.com', '3 fernit.com/clients', '· Census SUSB 2022 NAICS 541512/541513, Service Leadership', '· USAspending.gov', '4 Google Maps', '5 Google News', '· domain registration (RDAP)', '· fit score', '6 Web archive (old copies of their site)']);
+  assert.equal(count(h, /href="https:\/\/fernit\.com\/"/g), 2, 'fernit.com: one mark, one line in the list');
+  assert.ok(!JARGON.test(plainText(h)) && !NOT_DRAWN.test(plainText(h)));
+  // nothing to show → nothing at all
+  for (const b of [null, undefined, {}, [], 'text', { text: '', sentences: [] }, { text: '  ', sentences: [{ text: ' ', sources: ['https://x.com'] }], sources: ['https://x.com'] }]) assert.equal(renderBrief(b), '', JSON.stringify(b));
+  // an older brief with only the paragraph: shown as it is
+  assert.ok(renderBrief({ text: 'Acme <sells> pipes.', sentences: null, sources: ['fit score'] }).includes('<p class="tk-brief-text">Acme &lt;sells&gt; pipes.</p>'));
+  // after the call: the same card, one closed line
+  const f = renderBrief(researchBrief, { folded: true, h: 'h4' });
+  assert.ok(f.startsWith('<details class="tk-brief tk-brief-fold"><summary class="tk-brief-title">Before the call<span class="tk-brief-count">what we found</span></summary>') && f.includes(para));
+  assert.equal(tkSrcName('https://www.google.com/maps/place/x'), 'Google Maps'); assert.equal(tkSrcName('https://www.sec.gov/cgi-bin/browse-edgar?x=1'), 'SEC filing'); assert.equal(tkSrcName('javascript:alert(1)'), '');
+  const long = tkSrcName('https://example.com/' + 'a'.repeat(80)); assert.ok(long.length <= 60 && long.endsWith('…'), 'a long address is cut: ' + long);
+});
+
+test('"What we found": the brief is the first thing under the heading (above the summary); none when the machine sent none; the trial page draws it inside the application', () => {
+  const r = Object.assign({}, research, { brief: researchBrief, deep: deepV4 });
+  const h = renderResearch(r, 'fern-it', NOW);
+  const iHead = h.indexOf('<h4>What we found</h4>'), iBrief = h.indexOf('<div class="tk-brief">'), iSum = h.indexOf('class="tk-research-summary"');
+  assert.ok(iHead >= 0 && iHead < iBrief && iBrief < iSum, 'heading → Before the call → the summary');
+  assert.equal(h.slice(iHead + '<h4>What we found</h4>'.length, iBrief).replace(/<button[\s\S]*?<\/button>/, '').replace(/<\/div>|\s/g, ''), '', 'nothing between the heading (and Research again) and the brief');
+  assert.equal(count(h, /class="tk-brief"/g), 1);
+  for (const b of [null, undefined, { text: '', sentences: [], sources: [] }]) assert.ok(!renderResearch(Object.assign({}, research, { brief: b }), 'x', NOW).includes('tk-brief'), 'no brief: no card');
+  assert.ok(!renderResearch({ status: 'pending', brief: researchBrief }, 'x').includes('tk-brief'), 'still researching: no card');
+  const page = renderTrialDetail(Object.assign({}, fernDetail, { application: Object.assign({}, fernApplication, { research: r }) }), 'overview', { now: NOW });
+  assert.ok(page.indexOf('id="tkSec-application"') < page.indexOf('<div class="tk-brief">') && page.indexOf('<div class="tk-brief">') < page.indexOf('Their answers'));
+  assert.match(h, /Researched [^<]* ago\./, '"ago" from the page\'s own moment, never "in …"');
+});
+
+test('the company file (research v4): "Who buys from them", "In the news", "Competitors nearby", "What they write about" — plain words, escaped, safe links only; each one left out when the machine sent nothing', () => {
+  const h = renderDeep(deepV4, 'https://fernit.com');
+  const grp = (t) => { const i = h.indexOf('<span class="tk-file-title">' + t + '</span>'); assert.ok(i > 0, t); return h.slice(i, h.indexOf('</details>', i)); };
+  const order = ['Who buys from them', 'In the news', 'Competitors nearby', 'What they write about'].map((t) => h.indexOf('<span class="tk-file-title">' + t + '</span>'));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'in this order');
+  assert.ok(!/<details class="tk-file-group" open><summary><span class="tk-file-title">(Who buys|In the news|Competitors|What they write)/.test(h), 'folded (the brief above says the short version)');
+  // who buys from them: the line, the kinds as pills with their counts, the named clients with a link to the page that names them
+  const who = grp('Who buys from them');
+  assert.ok(who.includes('<p class="tk-file-note">They mostly serve dental practices; named clients include Smile Austin &amp; Dr. Lee.</p>'));
+  assert.ok(who.includes('<span class="pill blue">dental practices · 9</span><span class="pill blue">medical &amp; &lt;clinics&gt; · 1</span>'));
+  assert.ok(who.includes('Smile Austin <span class="tk-muted">(in their client list)</span> <span class="tk-muted">— <a href="https://fernit.com/clients" target="_blank" rel="noopener noreferrer">/clients</a></span>'));
+  assert.ok(who.includes('Dr. Lee &lt;DDS&gt; <span class="tk-muted">(gave a testimonial)</span> <span class="tk-muted">— <a href="https://fernit.com/" target="_blank" rel="noopener noreferrer">home page</a></span>') && who.includes('<li>No Page Dental</li>'));
+  assert.ok(renderDeep(deepV4).includes('Smile Austin <span class="tk-muted">(in their client list)</span> <span class="tk-muted">— /clients</span>'), 'no website address known: the page as text');
+  // in the news: the title as a safe link, the source and date, the flags as small pills (a flagged story the list left out too)
+  const news = grp('In the news');
+  assert.ok(news.includes('<span class="tk-file-count">2 stories</span>'));
+  assert.ok(news.includes('<a href="https://news.google.com/rss/articles/fern-award" target="_blank" rel="noopener noreferrer">Fern IT wins a &lt;Best Places&gt; to Work award</a><br><span class="tk-muted">Austin Business Journal · 2 May'));
+  assert.ok(news.includes('<span class="pill grey">Award</span>') && news.includes('<span class="pill amber">Lawsuit</span>') && news.includes('Former client sues Fern IT over outage'));
+  assert.ok(news.includes('<li>Clinics in Austin hit by ransomware<br><span class="tk-muted">KXAN</span></li>'), 'an unsafe link: the title as text; no date: none shown');
+  assert.ok(news.includes('From a Google News search for “Fern IT” · <a href="https://news.google.com/rss/search?q=%22Fern+IT%22+Austin"'));
+  const nw = (patch) => renderDeep(Object.assign({}, deepV4, { news: Object.assign({}, deepV4.news, patch) }));
+  assert.ok(nw({ items: [], flags: [] }).includes('<p class="tk-file-note">Nothing in the news for “Fern IT”.</p>'));
+  assert.ok(nw({ items: [], flags: [], error: 'HTTP 503' }).includes("We couldn't read the news this time.") && !nw({ items: [], flags: [], error: 'HTTP 503' }).includes('503'), 'an error in plain words, never the code');
+  assert.ok(nw({ flags: [{ kind: 'new office', level: 'info', title: 'Fern IT wins a <Best Places> to Work award' }, { kind: '', level: 'warn', title: 'x' }] }).includes('<span class="pill grey">New office</span>'), 'matched by title; a flag without a kind is no pill');
+  // competitors nearby: name, rating and reviews, their site and Google Maps (safe links only), the search as a caption
+  const co = grp('Competitors nearby');
+  assert.ok(co.includes('<span class="tk-file-count">3 nearby</span>'));
+  assert.ok(co.includes('<b>Hill Country IT</b> · 4.9★ from 212 reviews · <a href="https://www.hillcountryit.com/" target="_blank" rel="noopener noreferrer">hillcountryit.com</a> · <a href="https://maps.google.com/?cid=9001" target="_blank" rel="noopener noreferrer">Google Maps ↗</a><br><span class="tk-muted">1 Main St, Austin, TX</span>'));
+  assert.ok(co.includes('<li><b>Tiny &lt;Tech&gt;</b> · 5★ from 1 review</li>') && co.includes('<b>No Rating Co</b> · <a href="https://maps.google.com/?cid=9003"'));
+  assert.ok(co.includes('<p class="tk-file-cap">From a Google Maps search for “Computer support and services in Austin, TX”.</p>') && co.includes('we never email them, and they never become leads'));
+  assert.ok(renderDeep(Object.assign({}, deepV4, { competitors: { query: 'Roofers in Austin, TX', items: [] } })).includes('Nothing else came up on Google Maps for “Roofers in Austin, TX”.'));
+  // what they write about: how often they post, the words they use most
+  const wr = grp('What they write about');
+  assert.ok(wr.includes('<b>How often they post:</b> About 2 posts a month, last one 12 days ago. <span class="tk-file-sub">At least that — their site lists more posts than we read.</span>'));
+  assert.ok(wr.includes('<b>hipaa compliance</b> <span class="tk-muted">— 6 times in 4 posts</span>') && wr.includes('<b>dental &lt;practices&gt;</b> <span class="tk-muted">— 1 time in 1 post</span>'));
+  // nothing sent → no group; broken values never drawn; no jargon; no unsafe link
+  const bare = renderDeep({ facts: 1, pagesRead: 1, words: 1, news: null, topics: { pairs: [], rhythm: null }, customers: { segments: [], examples: [], line: null }, competitors: null });
+  for (const t of ['Who buys from them', 'In the news', 'Competitors nearby', 'What they write about']) assert.ok(!bare.includes('>' + t + '<'), t + ': left out');
+  const odd = renderDeep({ news: { items: [null, 'x', { title: 7 }], flags: 'x' }, topics: { pairs: [{ text: 'a b', count: null, posts: 'x' }], rhythm: { text: '' } }, customers: { segments: [{ name: 'law firms', count: null }], examples: [{ name: 'A', page: 12 }], line: 5 }, competitors: { items: [{ name: 'B', rating: 'x', reviews: undefined }] } });
+  assert.ok(!NOT_DRAWN.test(plainText(odd)), plainText(odd));
+  assert.ok(odd.includes('<span class="pill blue">law firms</span>') && odd.includes('<b>a b</b></li>') && odd.includes('<li><b>B</b></li>'));
+  assert.ok(!JARGON.test(plainText(h)) && !NOT_DRAWN.test(plainText(h)) && !h.includes('javascript:'), 'plain words: ' + (plainText(h).match(JARGON) || [])[0]);
 });

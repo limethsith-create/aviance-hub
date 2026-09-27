@@ -221,6 +221,54 @@ export const research = {
 };
 fernApplication.research = research;
 
+/* Research v4 (HUB-API.md "Applicant research"): research.brief — the sentences the owner reads before the launch call,
+   each with its sources (a page's full URL, or a plain label) — and the four new parts of research.deep. Dirty on
+   purpose: a tag in a sentence, an unsafe link, a source used twice, a sentence without a source, a Census label. */
+export const researchBrief = {
+  text: 'Fern IT sells Managed IT to dental practices. They mostly serve dental practices.',
+  sentences: [
+    { text: 'Fern IT sells Managed IT, Cybersecurity and HIPAA compliance to dental & medical practices.', sources: ['https://fernit.com/services'] },
+    { text: 'They mostly serve dental practices; named clients include Smile <b>Austin</b>.', sources: ['https://fernit.com/', 'https://fernit.com/', 'https://fernit.com/clients'] },
+    { text: 'Revenue is likely $1.7M–$3M a year; the public record shows a $90,000 PPP loan.', sources: ['Census SUSB 2022 NAICS 541512/541513, Service Leadership', 'USAspending.gov'] },
+    { text: 'Google rates them 4.8★ from 57 reviews.', sources: ['https://maps.google.com/?cid=123456'] },
+    { text: 'In the news: “Fern IT wins a Best Places to Work award”.', sources: ['https://news.google.com/rss/articles/fern-award', 'javascript:alert(9)'] },
+    { text: 'Their domain was registered in 2011.', sources: ['domain registration (RDAP)'] },
+    { text: 'Two angles for the call: they talk to clinics; a new customer is worth $5,000 or more.', sources: ['fit score'] },
+    { text: 'Nothing here has a source.', sources: [] },
+    { text: '   ', sources: ['https://fernit.com/empty'] },
+  ],
+  sources: ['https://fernit.com/services', 'https://fernit.com/', 'https://fernit.com/clients', 'Census SUSB 2022 NAICS 541512/541513, Service Leadership', 'USAspending.gov', 'https://maps.google.com/?cid=123456', 'https://news.google.com/rss/articles/fern-award', 'javascript:alert(9)', 'domain registration (RDAP)', 'fit score', 'https://web.archive.org/web/*/fernit.com'],
+};
+export const deepV4 = {
+  facts: 90, pagesRead: 20, words: 12000,
+  news: {
+    query: 'Fern IT', url: 'https://news.google.com/rss/search?q=%22Fern+IT%22+Austin',
+    items: [
+      { title: 'Fern IT wins a <Best Places> to Work award', source: 'Austin Business Journal', date: '2026-05-02', link: 'https://news.google.com/rss/articles/fern-award' },
+      { title: 'Clinics in Austin hit by ransomware', source: 'KXAN', date: null, link: 'javascript:alert(4)' },
+    ],
+    flags: [
+      { kind: 'award', level: 'info', title: 'Fern IT wins a <Best Places> to Work award', source: 'Austin Business Journal', date: '2026-05-02', link: 'https://news.google.com/rss/articles/fern-award' },
+      { kind: 'lawsuit', level: 'warn', title: 'Former client sues Fern IT over outage', source: 'Austin American-Statesman', date: '2025-11-20', link: 'https://news.google.com/rss/articles/fern-suit' },
+    ],
+    error: null,
+  },
+  topics: { pairs: [{ text: 'hipaa compliance', count: 6, posts: 4 }, { text: 'dental <practices>', count: 1, posts: 1 }], rhythm: { text: 'about 2 posts a month, last one 12 days ago', perMonth: 2.1, inLastYear: 25, last: '2026-10-05', lastDays: 12, atLeast: true } },
+  customers: {
+    segments: [{ name: 'dental practices', count: 9, pages: ['/', '/dental'] }, { name: 'medical & <clinics>', count: 1, pages: ['/'] }],
+    examples: [{ name: 'Smile Austin', page: '/clients', how: 'client list' }, { name: 'Dr. Lee <DDS>', page: '/', how: 'testimonial' }, { name: 'No Page Dental', page: null, how: null }],
+    line: 'They mostly serve dental practices; named clients include Smile Austin & Dr. Lee.',
+  },
+  competitors: {
+    query: 'Computer support and services in Austin, TX',
+    items: [
+      { name: 'Hill Country IT', rating: 4.9, reviews: 212, website: 'https://www.hillcountryit.com/', mapsUrl: 'https://maps.google.com/?cid=9001', address: '1 Main St, Austin, TX' },
+      { name: 'Tiny <Tech>', rating: 5, reviews: 1, website: 'javascript:alert(5)', mapsUrl: null, address: null },
+      { name: 'No Rating Co', rating: null, reviews: null, website: null, mapsUrl: 'https://maps.google.com/?cid=9003', address: '3 Main St' },
+    ],
+  },
+};
+
 /* shoppingView() — domains.js priceRows / pickBest / inboxPlan / totalsOf */
 const priceRow = (registrar, firstYear, renewal, url, source, promo = null) => ({ registrar, firstYear, renewal, promo, url, confirmedAt: source === 'live' ? '2026-10-16T21:00:00Z' : '2026-09-01T00:00:00.000Z', source });
 export const shoppingV2 = {
