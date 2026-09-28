@@ -589,7 +589,7 @@ test('"Needs you" first: the journey\'s rows side by side on one list — the on
   assert.deepEqual(g.done.map((x) => x.row.id), ['r33']);
   const out = renderTrialList(board, { now: new Date(byStep('33').at) });
   const at = (t) => out.indexOf(t);
-  assert.ok(at('Needs you</h3>') < at('Co 27') && at('Co 01') < at('In progress</h3>') && at('In progress</h3>') < at('Co 31') && at('Co 21') < at('Done / not taken'));
+  assert.ok(at('Needs you</h3>') < at('Co 27') && at('Co 01') < at('In progress — nothing needed from you</span>') && at('In progress — nothing needed from you</span>') < at('Co 31') && at('Co 21') < at('Done / not taken'));
   assert.equal((out.match(/class="tk-person needs"/g) || []).length, 5);
   assert.equal((out.match(/class="tk-app-row"/g) || []).length, 1, 'the application waiting for him: its own row at the top');
   assert.ok(at('New trial applications') < at('Co 01') && at('Co 01') < at('Needs you</h3>'));

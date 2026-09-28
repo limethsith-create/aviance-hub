@@ -148,7 +148,7 @@ test('Paying clients: paid-plan applications (name + match % + Word + yes/no) an
   assert.ok(paying.includes('Stone Roofing') && paying.includes('Birch Legal') && !paying.includes('Fern IT') && !paying.includes('Acme Plumbing'), 'Paying clients: paying clients only');
   const app = visibleText(between(paying, '<div class="tk-app-row">', '</div></div>'));
   assert.ok(app.includes('Stone Roofing Growth 72% match Application (Word) ↓ Say yes Say no… Details'), app);
-  assert.ok(paying.includes('New paying-client applications') && paying.includes('<h3 class="tk-group">Paying clients</h3>'));
+  assert.ok(paying.includes('New paying-client applications') && paying.includes('In progress — nothing needed from you</span>'));
   assert.ok(paying.includes("onclick=\"render('inquiries')\">Plan call requests · 1 open ›"), 'call requests without a website: one tap away');
   assert.equal(payingNavCount(), 2, 'the paid application + the new call request');
   // a paid client's page lights up Paying clients, and Back goes there
@@ -162,6 +162,37 @@ test('Paying clients: paid-plan applications (name + match % + Word + yes/no) an
   // nothing paid yet
   assert.ok(visibleText(renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({}) }), { now: NOW }, true)).includes('No paying clients yet'));
   trialsForget();
+});
+
+test('where everyone is: one tile per stage with its count on top of Trials and Paying clients; a tap shows just that stage; + Add a paying client yourself', () => {
+  asOwner(); trialsForget(); calendarForget(); asOwner();
+  const hub = Object.assign({}, simpleHub);
+  trialsIngestHub(hub);
+  const html = renderTrialList(hub, { now: NOW });
+  const tiles = between(html, '<div class="tk-stages"', '</div>');
+  for (const label of ['Applied', 'Booking the call', 'Call booked', 'Setting up', 'Warming up', 'Sending', 'Finished']) assert.ok(tiles.includes('<span>' + label + '</span>'), label);
+  assert.ok(html.indexOf('tk-stages') < html.indexOf('New trial applications'), 'the tiles sit on top of the applications');
+  const rows = tkListGroups(hub).needs.concat(tkListGroups(hub).going, tkListGroups(hub).done);
+  const sending = rows.filter((x) => tkStageOf(x.row) === 'sending').length;
+  assert.ok(sending > 0 && tiles.includes(`onclick="trialsSetStage(false,&quot;sending&quot;)" aria-pressed="false"><b>${sending}</b><span>Sending</span>`), 'the count per stage');
+  // a tap: only that stage, with a way back
+  tk.stage = { trials: 'sending' };
+  const one = renderTrialList(hub, { now: NOW });
+  assert.ok(one.includes('class="tk-stage on"') && one.includes('>All stages</button>'));
+  assert.equal(count(one, /<button type="button" class="tk-person/g), sending, 'just the clients at that stage');
+  assert.ok(!one.includes('New trial applications') && !one.includes('Needs you</h3>'));
+  tk.stage = { trials: 'call' };
+  assert.ok(renderTrialList(hub, { now: NOW }).includes('Nobody is at this stage right now.') || renderTrialList(hub, { now: NOW }).includes('tk-person'));
+  tk.stage = null;
+  // running clients are folded, not a long open list
+  assert.ok(html.includes('<details class="tk-done tk-going" id="tkGoingGroup"') && !html.includes('id="tkGoingGroup" open'));
+  // Paying clients: its own add button (with the plan)
+  const paying = renderTrialList(hub, { now: NOW }, true);
+  assert.ok(paying.includes('onclick="openNewPayingClient()">+ Add a paying client yourself</button>'));
+  openNewPayingClient();
+  const m = el('modal').innerHTML;
+  assert.ok(m.includes('Add a paying client yourself') && m.includes('<select id="ntPlan">') && m.includes('<option value="starter" selected>Starter</option>') && m.includes('<option value="scale">Scale</option>'));
+  closeModal(); trialsForget();
 });
 
 test('the application as a Word document: a real .docx (zip + WordprocessingML) with what they sent, the match and our analysis; the row downloads it', async () => {
@@ -255,7 +286,7 @@ test('"Needs you": those rows sit at the top (newest first) with a red edge and 
   assert.deepEqual(g.needs.map((x) => x.row.id), ['bright-dental', 'acme-plumbing', 'd1'], 'needs you: newest first');
   assert.deepEqual(g.going.map((x) => x.row.id), ['c1']);
   const out = renderTrialList(hub, {});
-  assert.ok(out.indexOf('Needs you</h3>') < out.indexOf('Bright Dental') && out.indexOf('Odd Co') < out.indexOf('In progress</h3>') && out.indexOf('In progress</h3>') < out.indexOf('Calm Co'));
+  assert.ok(out.indexOf('Needs you</h3>') < out.indexOf('Bright Dental') && out.indexOf('Odd Co') < out.indexOf('In progress — nothing needed from you</span>') && out.indexOf('In progress — nothing needed from you</span>') < out.indexOf('Calm Co'));
   assert.ok(out.includes('<h3 class="tk-group red">Needs you</h3>'), 'the heading is red — the one colour for "needs you"');
   assert.ok(between(out, 'Acme Plumbing', '</button>').includes('<span class="tk-person-you">You need to reply to Ann about the dispute.</span>'), 'from the next step');
   assert.ok(between(out, 'Bright Dental', '</button>').includes('<span class="tk-person-you">You need to buy bright-team.com and 2 inboxes, then paste the logins.</span>'), 'no next step: the first to-do');

@@ -283,12 +283,12 @@ test('Trials list: one row per trial client — company, person, the journey (ba
   assert.equal(count(html, /<button type="button" class="tk-person/g), 7, 'one row per trial client (the application has its own row)');
   assert.ok(!html.includes('tk-person-co">Aviance<'), "the owner's own rows are not trial clients");
   // needs you: a red heading, then the three rows with a red edge and a red "You need to…" line
-  const needs = between(html, '<h3 class="tk-group red">Needs you</h3>', '<h3 class="tk-group">In progress</h3>');
+  const needs = between(html, '<h3 class="tk-group red">Needs you</h3>', '<details class="tk-done tk-going"');
   assert.equal(count(needs, /class="tk-person needs"/g), 2); assert.equal(count(needs, /class="tk-person-you"/g), 2);
   assert.ok(needs.includes('Sam Test') && needs.includes('Raj Patel'), "the person's name on each row");
   assert.ok(needs.includes('<span class="tk-person-you">Sam wrote — answer them</span>'), 'they wrote and nobody answered: that is the red line');
   assert.ok(needs.includes('<span class="tk-person-step">Step 2 of 5 — Onboarding call</span>') && needs.includes('<span class="tk-person-step">Step 3 of 5 — Setting up</span>'));
-  const going = between(html, '<h3 class="tk-group">In progress</h3>', '<details');
+  const going = between(html, 'In progress — nothing needed from you</span>', '<details class="tk-done" id="tkDoneGroup"');
   assert.equal(count(going, /tk-person-you|tk-person needs/g), 0, 'in progress: no red');
   assert.ok(going.includes('Sending — day 12 of 30, 2 calls booked') && going.includes('<span class="tk-person-next">Nothing for you: the Friday update goes out today</span>'));
   assert.ok(going.includes('Step 4 of 5 — Sending emails</span>') && !going.includes('Day 12 of 30'), 'the plain sentence already says day 12 of 30: not said twice');
@@ -308,7 +308,7 @@ test('Trials list: one row per trial client — company, person, the journey (ba
   assert.ok(html.indexOf('onclick="openNewTrialClient()">+ Add a trial client yourself</button>') > html.indexOf('tkDoneGroup'));
   assert.ok(!html.includes('tk-more') && !html.includes('iq-strip') && !html.includes('openPhoneAlerts'), 'phone alerts, alerts and behind the scenes live in Settings now');
   const calm = renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({ live: [simpleRows.acme] }) }), {});
-  assert.ok(calm.includes("Nothing needs you right now. We'll tell you when something does.") && !calm.includes('Needs you</h3>') && !calm.includes('tk-done'));
+  assert.ok(calm.includes("Nothing needs you right now. We'll tell you when something does.") && !calm.includes('Needs you</h3>') && !calm.includes('id="tkDoneGroup"'));
 });
 
 test('Trials list: the clutter is gone — no stages board, no status strip, no counts, no to-do panel, no sparklines, no jargon', async () => {
@@ -339,10 +339,10 @@ test('Trials list: the clutter is gone — no stages board, no status strip, no 
 
 test('Trials list: an older machine without row.simple falls back to the state and the to-dos; an empty list says what to expect', () => {
   const html = renderTrialList(fullHub, { now: NOW });
-  const needs = between(html, 'Needs you</h3>', 'In progress</h3>');
+  const needs = between(html, 'Needs you</h3>', 'In progress — nothing needed from you</span>');
   assert.ok(between(html, 'New trial applications', 'Needs you</h3>').includes('Fern IT'), 'an application to review: its own row at the top');
   assert.ok(needs.includes('Bright Dental') && needs.includes('Waiting for you to buy') && needs.includes('You need to buy bright-team.com and 2 inboxes, then paste the logins.'), 'an urgent to-do needs you; the red line is that to-do');
-  const going = between(html, 'In progress</h3>', '<details');
+  const going = between(html, 'In progress — nothing needed from you</span>', '<details class="tk-done" id="tkDoneGroup"');
   assert.ok(going.includes('Acme Plumbing') && going.includes('Sending — Day 12 of 30') && going.includes('Decide the dispute on the call with bob@example.com') && going.includes('Ann Lee'));
   assert.ok(going.includes('Step 4 of 5 — Sending emails'), 'the step comes from the state');
   assert.ok(going.includes('Cobalt HVAC') && !between(html, '<details class="tk-done"').includes('Cobalt HVAC'), 'converted, invoice still to mark paid → still in view');
@@ -596,7 +596,9 @@ test('tabs: systems, inboxes, calls, replies, copy, coming up, timeline, actions
   assert.ok(!/dispute_opened|Run a job|Dispatch Lead Finder|Move to state/.test(renderTab(detail, 'timeline') + renderTab(detail, 'actions') + renderTab(detail, 'copy')), 'no system names or jargon in the tab words');
   assert.ok(renderTab(Object.assign({}, detail, { row: Object.assign({}, acme, { state: 'paused' }) }), 'actions').includes('Resume sending'));
   for (const old of ['setup', 'promises', 'upcoming', 'reports']) assert.ok(renderTab(detail, old).length > 100, 'old tab name ' + old + ' still lands somewhere');
-  assert.ok(!renderTab(detail, 'actions').includes('Client links'), 'the machine sends links: {} — no empty section');
+  { const a = renderTab(detail, 'actions'); assert.ok(a.includes('Client links') && a.includes('>Make their dashboard link</button>') && !a.includes('<input readonly'), 'no links yet: only the button to make their dashboard link'); }
+  const withDash = renderLinks({ dashboard: 'https://machine.test/c/tok9/dashboard' }, 'acme');
+  assert.ok(withDash.includes('Their dashboard') && withDash.includes('href="https://machine.test/c/tok9/dashboard"') && !withDash.includes('Make their dashboard link'), 'the dashboard link: labelled, copy + open');
   assert.ok(renderLinks({ onboarding: 'https://machine.test/c/tok1/onboard' }).includes('https://machine.test/c/tok1/onboard'), 'links still render when present');
   for (const tab of ['overview', 'growth', 'systems', 'leads', 'deliverability', 'inboxes', 'calls', 'replies', 'copy', 'comingup', 'timeline', 'actions']) assert.doesNotThrow(() => renderTab({ row: bright }, tab, {}), 'sparse detail: ' + tab);
 });
