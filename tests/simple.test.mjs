@@ -100,7 +100,7 @@ test('navigation: My stats opens your own outreach (aviance) on the trial page a
   assert.deepEqual(parseDeepLink('#stats'), { view: 'trial', id: 'aviance' });
 });
 
-test('My stats: everything you have sent (GET /api/mc/outreach) sits above your own page — totals, per day, per inbox, replies, every email', async () => {
+test('My stats: only your own outreach (GET /api/mc/outreach) — one row of four numbers, per day, per inbox, every reply, every email — and Saved history; no client page under it', async () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
   const outreach = {
     totals: { sent: 4, newSends: 3, followUps: 1, opens: 2, uniqueOpens: 2, replies: 1, bounces: 1, days: 3, firstDay: '2026-06-01', lastDay: '2026-06-04' },
@@ -117,15 +117,19 @@ test('My stats: everything you have sent (GET /api/mc/outreach) sits above your 
   try {
     openMyStats(); await tick(); await tick();
     assert.ok(calls.some((u) => u.endsWith('/api/mc/outreach')), 'asks for the sending history');
+    assert.ok(calls.some((u) => u.endsWith('/api/mc/archive')), 'and the saved history');
+    assert.ok(!calls.some((u) => u.includes('/api/mc/hub/aviance')), 'not a client page: no trial to load');
     const h = el('tkHost').innerHTML;
-    assert.ok(h.includes("Everything you've sent"));
     const txt = visibleText(h);
-    for (const w of ['Emails sent 4', 'First emails 3', 'Follow-ups 1', 'Replies 1 33.3% of people emailed', 'Bounced 1 25% of emails sent', 'me@getaviance.site 3 75%', 'Tell me more', 'Every email sent · 4', 'Day 3 follow-up', 'no such user']) assert.ok(txt.includes(w), w);
+    // one row of four: emails sent, opened, replies, bounced — no first emails / follow-ups split
+    assert.ok(h.includes('tk-keys tk-keys4'));
+    for (const w of ['Emails sent 4', 'Opened 2 50% of emails sent', 'Replies 1 25% of emails sent', 'Bounced 1 25% of emails sent', 'me@getaviance.site 3 75%', 'Tell me more', 'Every email sent · 4', 'no such user', 'Saved history']) assert.ok(txt.includes(w), w);
+    for (const w of ['First emails', 'Follow-ups', 'follow-up', 'Behind the scenes', 'Messages', 'Booking the call']) assert.ok(!txt.includes(w), 'gone: ' + w);
     assert.ok(h.includes('Hi &lt;Gamma&gt;') && !h.includes('<Gamma>'), 'escaped');
     assert.ok(h.includes('<div class="tk-reply-text">Tell me more about &lt;pricing&gt;.\n\nThanks, Bea</div>'), 'the whole reply, line breaks kept, escaped');
     assert.ok(h.includes('Emails sent per day · last 30 days'));
-    // the newest email first
     assert.ok(txt.indexOf('Re: Quick idea') < txt.indexOf('Hi'), 'newest first');
+    assert.equal(el('ptitle').textContent, 'My stats');
     // another trial never loads it
     calls.length = 0; openTrial('acme'); await tick();
     assert.ok(!calls.some((u) => u.endsWith('/api/mc/outreach')));
@@ -220,6 +224,79 @@ test('the application as a Word document: a real .docx (zip + WordprocessingML) 
     assert.equal(saved[0][0], 'Stone Roofing & Co — application.docx');
     assert.equal(saved[0][1], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   } finally { globalThis.tkSaveFile = was; offline(); trialsForget(); }
+});
+
+test('a client page: Progress | Stats — Stats is the same view as My stats from their own sending, with "Who can see this": give access by email, stop all access', async () => {
+  asOwner(); trialsForget(); calendarForget(); asOwner();
+  const d = clone(ecreekDetail); const id = d.row.id;
+  d.row.five = { sent: 120, replies: 6, positive: 2, booked: 1, qualified: 1 };
+  d.dashboardAccess = { sharedWith: [{ email: 'owner@ecreek.com', at: '2026-10-02T10:00:00Z' }] };
+  const growth = { days: ['2026-10-01', '2026-10-02'], email: { sent: [60, 60], replies: [2, 4], bounces: [1, 0], opened: [30, 20] } };
+  const calls = [];
+  globalThis.fetch = async (url, o) => { const u = String(url); calls.push([u, o && o.body ? JSON.parse(o.body) : null]);
+    if (u.includes('/growth')) return { ok: true, status: 200, text: async () => JSON.stringify(growth) };
+    if (u.includes('/api/mc/clients/')) return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, sharedWith: [] }) };
+    return { ok: true, status: 200, text: async () => JSON.stringify(d) }; };
+  try {
+    openTrial(id); await tick(); await tick();
+    let h = el('tkHost').innerHTML;
+    assert.ok(h.includes('tk-pane-switch') && h.includes('>Progress</button>') && h.includes('>Stats</button>'), 'the switch');
+    assert.ok(h.includes('id="tkSec-messages"'), 'Progress first: what needs you');
+    assert.ok(!calls.some(([u]) => u.includes('/growth')), 'no history fetched until Stats is opened');
+    setClientPane(id, 'stats'); await tick(); await tick();
+    assert.ok(calls.some(([u]) => u.includes('/growth')), 'Stats loads their history');
+    h = el('tkHost').innerHTML; const txt = visibleText(h);
+    assert.ok(!h.includes('id="tkSec-messages"'), 'only their stats');
+    for (const w of ['Emails sent 120', 'Opened 50 41.7% of emails sent', 'Replies 6 5% of emails sent', 'Bounced 1', 'Who can see this', 'owner@ecreek.com', 'Give access', 'Stop all access']) assert.ok(txt.includes(w), w);
+    assert.ok(h.includes('tk-keys tk-keys4'));
+    el('tkAccessEmail').value = 'not an email'; await clientShare(id);
+    assert.ok(!calls.some(([u, b]) => b && b.action === 'shareDashboard'), 'a bad address never goes');
+    el('tkAccessEmail').value = ' boss@ecreek.com '; await clientShare(id);
+    assert.ok(calls.some(([u, b]) => u.endsWith('/api/mc/clients/' + id) && b && b.action === 'shareDashboard' && b.email === 'boss@ecreek.com'), 'shareDashboard with the email');
+    await clientUnshare(id);
+    assert.ok(calls.some(([u, b]) => b && b.action === 'unshareDashboard'), 'unshareDashboard');
+    setClientPane(id, 'progress'); assert.ok(el('tkHost').innerHTML.includes('id="tkSec-messages"'), 'back to Progress');
+  } finally { offline(); trialsForget(); trialsStopTimer(); }
+});
+
+test('Saved history (owner only): list, download as a spreadsheet (.xlsx with Summary, Days, Emails sent, Replies, Bounces), save a copy, save and clear only after typing CLEAR', async () => {
+  asOwner(); trialsForget(); calendarForget(); asOwner();
+  const archive = { id: 'a1', createdAt: '2026-09-28T10:00:00Z', totals: { sent: 2, opened: 1, replies: 1, bounces: 0, days: 1, firstDay: '2026-06-01', lastDay: '2026-06-01' },
+    days: [{ date: '2026-06-01', sent: 2, opened: 1, replies: 1, bounces: 0 }], sent: [{ at: '2026-06-01T14:00:00Z', to: 'a@acme.com', company: 'Acme & <Co>', subject: 'Quick idea', touch: 'd0', from: 'me@getaviance.site' }],
+    replies: [{ at: '2026-06-02T10:00:00Z', from: 'a@acme.com', company: 'Acme', subject: 'Re: Quick idea', text: 'Yes please' }], bounces: [], leads: [{ email: 'a@acme.com', company: 'Acme', status: 'replied' }] };
+  const bytes = tkXlsxBytes(tkArchiveSheets(archive));
+  assert.deepEqual([...bytes.slice(0, 4)], [0x50, 0x4b, 0x03, 0x04], 'a zip');
+  const u8 = Buffer.from(bytes).toString('utf8');
+  for (const part of ['xl/workbook.xml', 'xl/worksheets/sheet1.xml', 'xl/worksheets/sheet6.xml', 'name="Summary"', 'name="Emails sent"', 'name="Replies"', 'name="Leads"', 'Acme &amp; &lt;Co&gt;', 'Yes please']) assert.ok(u8.includes(part), part);
+  assert.equal(tkXlsxCol(0), 'A'); assert.equal(tkXlsxCol(25), 'Z'); assert.equal(tkXlsxCol(26), 'AA');
+  const calls = []; const saved = []; const was = globalThis.tkSaveFile; let list = [{ id: 'a1', createdAt: archive.createdAt, totals: archive.totals }];
+  globalThis.tkSaveFile = (b, name, type) => saved.push([name, type]);
+  globalThis.fetch = async (url, o) => { const u = String(url); const b = o && o.body ? JSON.parse(o.body) : null; calls.push([u, b]);
+    const ok = (x) => ({ ok: true, status: 200, text: async () => JSON.stringify(x) });
+    if (u.endsWith('/api/mc/archive/a1') || u.endsWith('/api/mc/archive/a2')) return ok(archive);
+    if (u.endsWith('/api/mc/archive') && b && b.action === 'clear') { list = list.concat([{ id: 'a2', createdAt: '2026-09-28T11:00:00Z', totals: archive.totals }]); return ok({ ok: true, archiveId: 'a2', cleared: { leads: 1, keys: [] } }); }
+    if (u.endsWith('/api/mc/archive') && b && b.action === 'save') return ok({ ok: true, id: 'a3', totals: archive.totals });
+    if (u.endsWith('/api/mc/archive')) return ok({ archives: list });
+    if (u.endsWith('/api/mc/outreach')) return ok({ totals: { sent: 0, replies: 0, bounces: 0 }, days: [], inboxes: [] });
+    return { ok: false, status: 404, text: async () => '{}' }; };
+  try {
+    openMyStats(); await tick(); await tick();
+    let txt = visibleText(el('tkHost').innerHTML);
+    for (const w of ['Saved history', 'Download spreadsheet', 'Save a copy now', 'Save and start fresh', 'Nothing sent since your last save']) assert.ok(txt.includes(w), w);
+    await downloadArchive('a1');
+    assert.deepEqual(saved[0], ['Aviance outreach 2026-09-28.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+    await archiveSaveNow();
+    assert.ok(calls.some(([u, b]) => u.endsWith('/api/mc/archive') && b && b.action === 'save'), 'save a copy');
+    openArchiveClear(); el('arcConfirm').value = 'clear'; await archiveClearGo();
+    assert.ok(!calls.some(([u, b]) => b && b.action === 'clear'), 'nothing cleared without typing CLEAR');
+    el('arcConfirm').value = 'CLEAR'; await archiveClearGo(); await tick();
+    assert.ok(calls.some(([u, b]) => b && b.action === 'clear' && b.confirm === 'CLEAR'), 'save and clear');
+    assert.equal(saved.length, 2, 'the saved copy downloads right after');
+    // the team (read-only) can download but not save or clear
+    authUser.role = 'employee'; trialsRepaint('trial');
+    txt = visibleText(el('tkHost').innerHTML);
+    assert.ok(!txt.includes('Saved history') && !txt.includes('Save a copy now'), 'team: the saved copies are the owner\'s only');
+  } finally { globalThis.tkSaveFile = was; offline(); trialsForget(); trialsStopTimer(); }
 });
 
 test('People inside: presence goes to the machine (sign in, the page opened, sign out); the owner sees who is online, when they signed in and out, time spent and the activity; team sign-ups wait for approval', async () => {
