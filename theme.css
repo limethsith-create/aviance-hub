@@ -1,0 +1,249 @@
+/* ===================== AVIANCE HUB — theme =====================
+   The look of every screen, loaded last (after the shell styles in index.html, trials.css and calendar.css).
+   Calm and simple: a warm off-white page, white cards with soft borders and rounded corners, dark ink for
+   text and the main button, one red for "needs you". Even spacing on an 8px rhythm. One system font
+   (var(--font)), weights 400/600, nothing under 13px, every target at least 44px. */
+
+:root{
+  --bg:#F7F6F3;--surface:#FFFFFF;--surface-2:#F2F1ED;--surface-3:#E8E6E1;
+  --border:#E3E0D9;--border-soft:#ECEAE4;--field:#A9A49A;
+  --text:#1A1916;--muted:#5C5851;--muted-2:#6B675F;
+  --accent:#1A1916;--accent-d:#34322D;--accent-soft:rgba(26,25,22,.05);
+  --green:#0B6B3A;--amber:#8A4B08;--red:#B42318;--blue:#3F3D38;
+  --green-bg:#EAF6EF;--amber-bg:#FDF4E3;--red-bg:#FDEEEC;--blue-bg:#EFEEEA;--urgent-row:#FFF8F6;
+  --r:14px;--r-sm:10px;--r-xs:8px;
+  --sh:0 1px 2px rgba(26,25,22,.04),0 1px 3px rgba(26,25,22,.05);
+  --sh-lg:0 12px 32px rgba(26,25,22,.10),0 2px 6px rgba(26,25,22,.06);
+}
+body{background:var(--bg)!important}
+
+/* ---- shell: sidebar, top bar, page ---- */
+@media(min-width:861px){.app{grid-template-columns:248px 1fr}}
+.sidebar{background:var(--bg);border-right:1px solid var(--border-soft);padding:20px 14px}
+.brand{padding:6px 8px 22px}
+.logo{border:1px solid var(--border);border-radius:var(--r-sm)}
+.nav-area{gap:2px;padding-top:4px}
+.nav-item{min-height:44px;padding:10px 12px;border-radius:var(--r-sm);color:var(--muted);font-size:15px}
+.nav-item svg{width:19px;height:19px;stroke-width:1.8}
+.nav-item:hover{background:var(--surface-2)}
+.nav-item.active{background:var(--surface);color:var(--text);box-shadow:var(--sh)}
+.nav-item.active::before{display:none}
+.nav-group{font-size:13px;color:var(--muted-2);padding:18px 12px 6px}
+.sidebar-foot{border-top:1px solid var(--border-soft);padding-top:12px}
+.avatar{border-radius:999px}
+.badge{border-radius:999px;min-width:22px;height:22px;padding:0 7px}
+.badge.amber{box-shadow:none}
+
+.main{background:var(--bg)}
+.topbar{background:var(--bg);border-bottom:0;padding:24px 40px 12px;min-height:0;gap:12px}
+.page-title h2{font-size:26px;line-height:1.2}
+.page-title p{font-size:15px;margin-top:4px}
+.search{border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);padding:9px 12px;width:240px}
+.kbd{border:1px solid var(--border);border-radius:6px;background:var(--surface-2)}
+.tb-btn{border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface)}
+.tb-btn:hover{background:var(--surface-2)}
+.tb-dot{border-radius:999px;top:-4px;right:-4px}
+.back-btn{border-radius:var(--r-sm)}
+.content{padding:12px 40px 56px}
+.content>.view{max-width:1040px}
+
+/* ---- buttons ---- */
+.btn{border-radius:var(--r-sm);min-height:44px;padding:10px 18px;font-size:15px;background:var(--text);color:#fff;border:1px solid var(--text);box-shadow:var(--sh);transition:background .15s,border-color .15s,box-shadow .15s}
+.btn:hover{background:var(--accent-d);color:#fff;border-color:var(--accent-d)}
+.btn:active{transform:none;box-shadow:none}
+.btn.ghost{background:var(--surface);color:var(--text);border:1px solid var(--border);box-shadow:none}
+.btn.ghost:hover{background:var(--surface-2);color:var(--text);border-color:var(--field)}
+.btn:focus-visible,.nav-item:focus-visible,.tab:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+
+/* ---- sections, cards, pills ---- */
+.section-head{margin:36px 0 14px}
+.section-head h3{font-size:17px}
+.section-head .count{border:0;border-radius:999px;background:var(--surface-2);color:var(--muted);padding:2px 10px}
+.card{border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh)}
+.pill{border-radius:999px;padding:4px 10px}
+.seg{border:0;background:var(--surface-2);border-radius:var(--r-sm);padding:4px;gap:2px}
+.seg button{border-radius:var(--r-xs);min-height:38px;padding:8px 14px}
+.seg button.active{box-shadow:var(--sh)}
+.empty{padding:64px 28px}
+.empty-ic{border-radius:999px;border:1px solid var(--border);background:var(--surface-2)}
+
+/* ---- forms ---- */
+.field label,.field.row2>div label{font-size:14px;color:var(--muted);margin-bottom:6px}
+.field input,.field textarea,.field select,input[type=text],input[type=email],input[type=number],input[type=password],input[type=date],input[type=time],input[type=search],select,textarea{border:1px solid var(--field);border-radius:var(--r-sm);background:var(--surface);color:var(--text)}
+.field input,.field textarea,.field select{padding:11px 13px}
+.field input:focus,.field textarea:focus,.field select:focus,input:focus,select:focus,textarea:focus{border-color:var(--text);box-shadow:0 0 0 3px rgba(26,25,22,.08);outline:none}
+.li-del,.li-add{border-radius:var(--r-xs)}
+
+/* ---- modal, toast, palette, bell ---- */
+.modal-wrap{background:rgba(26,25,22,.40);backdrop-filter:blur(2px)}
+.modal{border:0;border-radius:18px;box-shadow:var(--sh-lg)}
+.modal-head{padding:24px 26px 16px}
+.modal-body{padding:20px 26px}
+.modal-foot{padding:4px 26px 24px}
+.toast{border-radius:12px;background:var(--text);border-color:var(--text);box-shadow:var(--sh-lg)}
+.toast .tdot{border-radius:999px}
+.cmdk,.notif-pop{border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-lg)}
+.cmdk-item,.cmdk-item .ci-ic{border-radius:var(--r-xs)}
+.notif-item .nd{border-radius:999px}
+
+/* ---- sign in ---- */
+.login-screen{background:var(--bg)}
+.login-wrap{border:1px solid var(--border);border-radius:20px;box-shadow:var(--sh-lg)}
+.login-aside{background:#1A1916}
+.la-point svg{border-radius:999px}
+.login-app-note{border-radius:var(--r-xs)}
+.login-ok{border-radius:var(--r-xs)}
+
+/* ---- phone ---- */
+@media(max-width:860px){
+  .topbar{padding:14px 16px 8px;padding-top:calc(14px + env(safe-area-inset-top));background:var(--bg)}
+  .page-title h2{font-size:21px}
+  .content{padding:8px 16px 32px}
+  .tabbar{background:var(--surface);border-top:1px solid var(--border)}
+  .tab.active::before{left:30%;right:30%;height:2px;border-radius:2px}
+}
+
+/* ================= the screens (trials.css, calendar.css) ================= */
+
+/* lists of clients: one calm row each */
+.tk-people{display:grid;gap:10px}
+.tk-person{border:1px solid var(--border);border-radius:var(--r);background:var(--surface);box-shadow:var(--sh);padding:18px 20px;transition:border-color .15s,box-shadow .15s}
+.tk-person:hover{border-color:var(--field);box-shadow:0 2px 8px rgba(26,25,22,.07)}
+.tk-person.needs{border-left:1px solid var(--border);box-shadow:inset 3px 0 0 var(--red),var(--sh)}
+.tk-person-co{font-size:17px}
+.tk-person-go{color:var(--muted-2)}
+.tk-b5{border-radius:6px}
+.tk-group{font-size:15px;color:var(--muted);margin:32px 0 12px}
+.tk-group.red{color:var(--red)}
+.tk-group:first-child{margin-top:0}
+
+/* where everyone is: the stage strip */
+.tk-stages{display:grid;grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:0;margin:0 0 28px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden}
+.tk-stage{min-height:76px;padding:14px 16px;border:0;border-right:1px solid var(--border-soft);border-radius:0;background:transparent;box-shadow:none;gap:4px}
+.tk-stage:last-child{border-right:0}
+.tk-stage b{font-size:24px;font-weight:600}
+.tk-stage span{font-size:13px;color:var(--muted)}
+.tk-stage:hover{background:var(--surface-2)}
+.tk-stage.on{background:var(--text);color:#fff;box-shadow:none}
+.tk-stage.on span{color:rgba(255,255,255,.8)}
+.tk-stage.zero{opacity:1}
+.tk-stage.zero b{color:var(--muted-2)}
+.tk-stage-head{margin-bottom:12px}
+.tk-stage-head .tk-group{margin:0}
+
+/* applications */
+.tk-apps{gap:10px}
+.tk-app-row{border:1px solid var(--border);border-radius:var(--r);background:var(--surface);box-shadow:var(--sh);padding:14px 16px 14px 20px}
+.tk-app-name{font-size:17px}
+.tk-app-plan{background:var(--surface-2);color:var(--muted);border-radius:999px;padding:3px 10px}
+.tk-app-match{border-radius:999px}
+.tk-app-doc{color:var(--muted);text-decoration:underline;text-underline-offset:3px}
+.tk-app-doc:hover{color:var(--text)}
+
+/* folded groups */
+.tk-done{margin-top:28px;border-top:1px solid var(--border);padding-top:16px}
+.tk-done summary{font-size:15px;color:var(--muted);min-height:44px;display:flex;align-items:center;gap:10px;cursor:pointer}
+.tk-done[open] summary{margin-bottom:12px}
+.tk-done-count{border-radius:999px;background:var(--surface-2);padding:2px 10px;font-size:13px}
+.tk-add{margin-top:28px;padding-top:0;border-top:0}
+.tk-allclear{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;color:var(--muted);box-shadow:var(--sh)}
+
+/* one client's page */
+.tk-top,section.card.tk-top{border-radius:var(--r)}
+.tk-tabs{margin:24px 0 8px}
+.tk-tabs .seg{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.tk-tabs .seg::-webkit-scrollbar{display:none}
+.tk-keys{gap:12px}
+.tk-key{border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh);padding:16px 18px}
+.tk-key b{font-size:26px}
+.tk-strip-item{border-radius:var(--r-sm)}
+.tk-card,.tk-appbox,.tk-behind,.tk-brief,.tk-chat,.tk-col,.tk-file,.tk-fit,.tk-ky-card,.tk-reply,.tk-score,.tk-score-items,.tk-set,.tk-tip,.tk-yd-field{border-color:var(--border);border-radius:var(--r)}
+.tk-cm.out,.tk-cm.in{border-radius:12px}
+.tk-j-dot,.tk-oc-tick,.tk-brief-n,.tk-brief-mark{border-radius:999px}
+.tk-switch-track{border-radius:999px}
+.tk-wu-bar{border-radius:999px;overflow:hidden}
+.tk-gm-uri{border-radius:var(--r-xs)}
+.tk-table{border-collapse:separate;border-spacing:0}
+.tk-table th{font-size:13px;color:var(--muted);font-weight:600;background:transparent;border-bottom:1px solid var(--border)}
+.tk-table td{border-bottom:1px solid var(--border-soft)}
+.tk-table tr:last-child td{border-bottom:0}
+.tk-chart-card,.tk-chart{border-radius:var(--r)}
+.tk-tip{box-shadow:var(--sh-lg)}
+.tk-link input{border-radius:var(--r-xs)}
+
+/* my stats */
+.tk-myout .tk-key{cursor:default}
+.tk-reply{border:1px solid var(--border-soft);background:var(--bg);border-radius:12px;padding:12px 14px}
+
+/* calendar */
+.cal-grid-wrap{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;box-shadow:var(--sh)}
+.cal-ev,.cal-chip,.cal-slot,.cal-aitem,.cal-rowask,.cal-sw{border-radius:var(--r-xs)}
+
+/* phone */
+@media(max-width:860px){
+  /* one row you can swipe, not a wrapped grid */
+  .tk-stages{display:flex;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .tk-stages::-webkit-scrollbar{display:none}
+  .tk-stage{flex:0 0 auto;min-width:112px;min-height:64px;padding:10px 14px}
+  .tk-person{padding:16px}
+}
+@media(max-width:560px){.tk-stage b{font-size:20px}}
+
+/* dark: keep the same shapes, the dark tokens from index.html win */
+body.dark{--sh:none;--sh-lg:0 12px 32px rgba(0,0,0,.6)}
+body.dark .btn{box-shadow:none}
+body.dark .tk-stage.on{background:#fff;color:#000}
+body.dark .tk-stage.on span{color:rgba(0,0,0,.7)}
+body.dark .login-aside{background:#000}
+.tk-done-title{font-size:15px;font-weight:600;color:var(--muted)}
+.tk-person-you{font-weight:600}
+.tk-myout>.card{padding:20px 22px}
+.tk-myout details.card summary{min-height:24px}
+.tk-card.review,.card.iq-new{border-left:1px solid var(--border);box-shadow:inset 3px 0 0 var(--red),var(--sh)}
+.tk-app.pending{border-left:1px solid var(--border-soft);box-shadow:inset 3px 0 0 var(--red)}
+/* coloured edges: an inset stripe, so rounded corners stay clean */
+.tk-top{border-left:1px solid var(--border)}
+.tk-top.needs{border-left-color:var(--border);box-shadow:inset 3px 0 0 var(--red),var(--sh)}
+.card.cal-req{border-left:1px solid var(--border);box-shadow:inset 3px 0 0 var(--amber),var(--sh)}
+.card.cal-trial-ask{border-left:1px solid var(--amber-bg);box-shadow:inset 3px 0 0 var(--amber)}
+.cal-sw.suggested{border-left:1px dashed var(--amber)}
+
+/* ---- People inside ---- */
+.pp-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden;margin-bottom:8px}
+.pp-summary>div{display:flex;flex-direction:column;gap:4px;padding:16px 20px;border-right:1px solid var(--border-soft)}
+.pp-summary>div:last-child{border-right:0}
+.pp-summary b{font-size:26px;font-weight:600;line-height:1.1}
+.pp-summary span{font-size:13px;color:var(--muted)}
+.pp-list{display:grid;gap:10px}
+.pp-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh);padding:14px 16px}
+.pp-acts{margin-left:auto;display:flex;gap:8px}
+.pp-av{flex:none;display:grid;place-items:center;width:36px;height:36px;border-radius:999px;background:var(--surface-2);color:var(--text);font-size:13px;font-weight:600}
+.pp-who{display:flex;flex-direction:column;min-width:0}
+.pp-who b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-who small{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-person{display:flex;align-items:center;gap:12px;min-width:200px}
+.pp-table-card{padding:4px 8px}
+.pp-table td,.pp-table th{padding:12px 12px;white-space:nowrap;vertical-align:middle;font-size:14px}
+.pp-tr{cursor:pointer}
+.pp-tr:hover td{background:var(--surface-2)}
+.pp-tr.on td{background:var(--surface-2)}
+.pp-dot{display:inline-block;width:8px;height:8px;border-radius:999px;background:var(--surface-3);margin-right:8px;vertical-align:middle}
+.pp-dot.on{background:#12A150;box-shadow:0 0 0 3px rgba(18,161,80,.15)}
+.pp-feed{padding:6px 20px 14px}
+.pp-day{font-size:13px;font-weight:600;color:var(--muted);padding:14px 0 6px}
+.pp-ev{display:grid;grid-template-columns:52px 14px 1fr;align-items:center;gap:10px;padding:7px 0;font-size:15px;border-bottom:1px solid var(--border-soft)}
+.pp-ev:last-child{border-bottom:0}
+.pp-ev-time{font-size:13px;color:var(--muted-2)}
+.pp-ev-dot{width:8px;height:8px;border-radius:999px;background:var(--surface-3)}
+.pp-signin .pp-ev-dot{background:#12A150}
+.pp-signout .pp-ev-dot{background:var(--muted-2)}
+@media(max-width:560px){.pp-summary>div{padding:12px 14px}.pp-summary b{font-size:22px}.pp-acts{margin-left:0;width:100%}}
+
+/* ---- a team member: sees everything, changes nothing (the machine refuses their changes too) ---- */
+body.ro .content .btn:not(.ro-ok),body.ro .tk-app-btns,body.ro .tk-add,body.ro .tk-stage-head .btn{display:none!important}
+body.ro .tk-app-row{padding-right:20px}
+
+/* sign in: the team's own way in */
+.login-link{background:none;border:0;padding:0;font:inherit;font-size:inherit;color:var(--text);text-decoration:underline;text-underline-offset:3px;cursor:pointer;min-height:0}
+/* the phone's tab bar: short names */
+@media(max-width:860px){.tab .tab-t{font-size:13px;line-height:1.2;white-space:nowrap}}

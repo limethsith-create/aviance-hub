@@ -448,7 +448,7 @@ test('shell: Calendar is the third place (after Trials and Paying clients), with
   fresh(); const mc = fakeMachine();
   try {
     assert.equal(views.calendar.title, 'Calendar');
-    assert.deepEqual(navItems().map((i) => i.view), ['trials', 'paying', 'calendar', 'mystats', 'settings']);
+    assert.deepEqual(navItems().map((i) => i.view), ['trials', 'paying', 'calendar', 'mystats', 'people', 'settings']);
     render('calendar'); await tick();
     const item = navItems()[2];
     assert.equal(item.label, 'Calendar'); assert.equal(item.icon, I.calendar); assert.equal(item.badge, 2); assert.equal(item.badgeTitle, '2 waiting for your yes'); assert.equal(item.tone, 'amber');
