@@ -302,22 +302,22 @@ function renderCalRequest(m,st,meta){
   const prop=m.proposed?calWhen(m.proposed,st,m.theirZone):null;
   const focus=meta.focus!=null&&String(meta.focus)===String(id);
   const asked=tkParseDate(m.createdAt)?'Asked '+tkRel(m.createdAt,now):'';
+  const clocks=w?[w.us,w.their,calMinutes(m)+' min',asked,m.source?calSourceText(m.source):''].filter(Boolean).join(' · '):'';
   return `<div class="card cal-req${prop?' later':''}${focus?' focus':''}" id="${esc(tkDomId('calReq-',id))}">
-    <div class="cal-req-who"><b class="cal-req-co">${esc(m.company||calTitle(m))}</b>${m.person?`<span class="cal-req-person">${esc(m.person)}</span>`:''}</div>
-    ${w?`<div class="cal-req-when">${esc(w.big)} <small>your time</small></div><div class="cal-req-us">${esc(w.us)}${w.their?' · '+esc(w.their):''} · ${calMinutes(m)} min</div>`:'<div class="cal-req-when">No time given</div>'}
-    ${past?'<p class="cal-req-late">This time has already passed. Suggest another time.</p>':''}
-    ${prop?`<p class="cal-req-prop">You suggested ${esc(prop.big)} (your time; ${esc(prop.us)}) — waiting for them to say yes.</p>`:''}
-    ${m.note?`<div class="cal-note">${esc(m.note)}</div>`:''}
-    ${asked||m.source?`<div class="cal-req-meta">${esc([asked,m.source?calSourceText(m.source):''].filter(Boolean).join(' · '))}</div>`:''}
-    <div class="cal-req-acts">${past||!w||prop?'':`<button class="btn" onclick="calConfirm(${tkAttr(id)})">Say yes and email them</button>`}<button class="btn${(past||!w)&&!prop?'':' ghost'}" onclick="calOpenSuggest(${tkAttr(id)})">${prop?'Suggest a different time':'Suggest another time'}</button><button class="btn ghost" onclick="calOpenDecline(${tkAttr(id)})">Say no…</button></div>
+    <div class="cal-req-main"><div class="cal-req-who"><b class="cal-req-co">${esc(m.company||calTitle(m))}</b>${m.person?`<span class="cal-req-person">${esc(m.person)}</span>`:''}</div>
+    ${w?`<div class="cal-req-when" title="${esc(clocks)}">${esc(w.big)}</div>`:'<div class="cal-req-when">No time given</div>'}
+    ${past?'<p class="cal-req-late">This time has passed.</p>':''}
+    ${prop?`<p class="cal-req-prop">You suggested ${esc(prop.big)} — waiting for them.</p>`:''}
+    ${m.note?`<div class="cal-note">${esc(m.note)}</div>`:''}</div>
+    <div class="cal-req-acts">${past||!w||prop?'':`<button class="btn" onclick="calConfirm(${tkAttr(id)})" title="Say yes and email them the invite">Yes</button>`}<button class="btn ghost" onclick="calOpenSuggest(${tkAttr(id)})" title="Suggest another time">Other time</button><button class="btn ghost" onclick="calOpenDecline(${tkAttr(id)})" title="Say no">No</button></div>
   </div>`;
 }
 function renderCalRequests(reqs,st,meta){
   reqs=reqs||[];const mine=reqs.filter(m=>!m.proposed),theirs=reqs.filter(m=>m.proposed);
   return `<div class="section-head tk-section cal-req-head"><h3>Waiting for your yes</h3>${mine.length?`<span class="count">${mine.length}</span>`:''}</div>`+
-    (mine.length?`<p class="cal-sub">They asked for a call time. Say yes, suggest another time, or say no.</p><div class="cal-reqs">${mine.map(m=>renderCalRequest(m,st,meta)).join('')}</div>`
+    (mine.length?`<div class="cal-reqs">${mine.map(m=>renderCalRequest(m,st,meta)).join('')}</div>`
       :'<div class="tk-allclear">Nobody is waiting for your yes.</div>')+
-    (theirs.length?`<h4 class="cal-req-sub">You suggested another time — waiting for them</h4><div class="cal-reqs">${theirs.map(m=>renderCalRequest(m,st,meta)).join('')}</div>`:'');
+    (theirs.length?`<h4 class="cal-req-sub">Waiting for them</h4><div class="cal-reqs">${theirs.map(m=>renderCalRequest(m,st,meta)).join('')}</div>`:'');
 }
 function calHoursLine(st,monday){
   if(!st.days.length)return '';
@@ -328,8 +328,7 @@ function calHoursLine(st,monday){
 }
 function renderCalIntro(st,monday){
   const link=st.meetingLink?(tkSafeUrl(st.meetingLink)?tkLink(st.meetingLink):esc(st.meetingLink)):'';
-  return `<div class="cal-intro"><p class="cal-explain">Clients pick a time on your booking page; you say yes here; they get an invite.</p>
-    <p class="cal-facts">${st.googleMeet==='connected'?'Calls happen on: Google Meet. Each call you say yes to gets its own link.':link?`Calls happen on: ${link}`:"Calls happen on: no meeting link set yet, so the email says you'll send the link before the call."}<br>${esc(calHoursLine(st,monday))}</p></div>`;
+  return `<div class="cal-intro"><p class="cal-facts">${st.googleMeet==='connected'?'Calls on Google Meet':link?`Calls on ${link}`:'No meeting link set yet'} · ${esc(calHoursLine(st,monday))}</p></div>`;
 }
 function renderCalLegend(){
   return `<div class="cal-legend" aria-label="What the colours mean"><span><i class="cal-sw confirmed"></i>Confirmed</span><span><i class="cal-sw requested"></i>Waiting for your yes</span><span><i class="cal-sw suggested"></i>Waiting for them</span><span><i class="cal-sw held"></i>Call done</span><span><i class="cal-sw blocked"></i>Busy</span><span><i class="cal-sw noshow"></i>No-show</span><span class="cal-legend-open"><i class="cal-sw open"></i>White = your call hours</span></div>`;
@@ -340,18 +339,18 @@ function renderCalendar(data,meta){
   const monday=calKeyOk(meta.week)?calMonday(meta.week):calMonday(calDayKey(now,st.ownerZone));
   const reqs=calRequestsOf(data);
   const bar=`<div class="cal-bar"><div class="cal-nav"><button class="btn ghost" onclick="calWeekMove(-1)" aria-label="Previous week" title="Previous week">◀</button><button class="btn ghost" onclick="calGoToday()">Today</button><button class="btn ghost" onclick="calWeekMove(1)" aria-label="Next week" title="Next week">▶</button><b class="cal-range">${esc(calWeekLabel(monday))}</b></div>
-    <div class="cal-tools"><button class="btn" onclick="calOpenAdd()">Add a meeting</button><button class="btn ghost" onclick="calOpenBlock()">Block time</button><label class="cal-check"><input type="checkbox"${meta.showGone?' checked':''} onchange="calToggleGone(this.checked)">Show cancelled</label></div></div>`;
+    <div class="cal-tools"><button class="btn" onclick="calOpenAdd()">Add a meeting</button><button class="btn ghost" onclick="calOpenBlock()">Block time</button></div></div>`;
   let week;
   if(meta.loading)week=renderLoading('Loading this week…');
   else{
     const model=calWeekModel(monday,data.meetings,st,{now,showGone:meta.showGone});
-    week=(model.dst?`<div class="tk-note">${esc(model.dst)}</div>`:'')+renderCalLegend()+
-      (model.empty?'<p class="cal-empty">Nothing booked this week. When a client picks a time on your booking page, it shows up here for your yes.</p>':'')+
+    week=(model.dst?`<div class="tk-note">${esc(model.dst)}</div>`:'')+
+      (model.empty?'<p class="cal-empty">Nothing booked this week.</p>':'')+
       renderCalGrid(model)+(model.empty?'':renderCalAgenda(model));   // an empty week: the line above says it once (a phone showed it twice)
   }
-  const foot=`<div class="cal-foot">${meta.at?tkUpdatedStamp(meta.at):''}<button type="button" class="tk-textbtn" onclick="calRefresh()">Refresh</button></div>`;
-  return renderCalIntro(st,monday)+renderCalRequests(reqs,st,{now,focus:meta.focus})+
-    `<div class="section-head tk-section cal-week-head"><h3>Your week</h3></div>`+bar+week+foot;
+  const foot=`<div class="cal-foot">${meta.at?tkUpdatedStamp(meta.at):''}<button type="button" class="tk-textbtn" onclick="calRefresh()">Refresh</button><label class="cal-check"><input type="checkbox"${meta.showGone?' checked':''} onchange="calToggleGone(this.checked)">Show cancelled</label></div>${renderCalIntro(st,monday)}`;
+  return renderCalRequests(reqs,st,{now,focus:meta.focus})+
+    `<div class="section-head tk-section cal-week-head"><h3>This week</h3></div>`+bar+week+foot;
 }
 function renderCalHistory(h,st){
   const ms=x=>{const d=tkParseDate(x.at);return d?d.getTime():0};

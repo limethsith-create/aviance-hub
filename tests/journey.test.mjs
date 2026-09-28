@@ -437,8 +437,8 @@ test('05 time requested: the big button opens the Calendar at her request; the l
   assert.ok(!flat(o.call).includes('No booking link'));
   assert.ok(!o.call.includes('Mark call booked') && !o.call.includes('Send the first email again') && o.call.includes('Stop the reminder emails'), 'her time waits for his yes in the Calendar: no second way to book it on the card');
   const cal0 = flat(o.calendar[0]);
-  assert.ok(cal0.includes('Waiting for your yes 1') && cal0.includes('Tue 6 Oct · 8:30 pm your time Tue 11:00 am US Eastern · 30 min') && cal0.includes('Marcus (our CEO) may join too.'));
-  assert.ok(cal0.includes('Calls happen on: Google Meet. Each call you say yes to gets its own link.'), 'Google Meet is connected: never "no meeting link set yet"');
+  assert.ok(cal0.includes('Waiting for your yes 1') && cal0.includes('Tue 6 Oct · 8:30 pm') && o.calendar[0].includes('title="Tue 11:00 am US Eastern') && cal0.includes('Marcus (our CEO) may join too.'));
+  assert.ok(cal0.includes('Calls on Google Meet') && !cal0.includes('No meeting link set yet'), 'Google Meet is connected: never "no meeting link set yet"');
   assert.ok(!cal0.includes('no meeting link set yet'));
   assert.ok(flat(o.meetings[0]).includes('Calls happen on Google Meet — the link is made when you say yes'));
   assert.ok(o.calendar.some((h) => /class="cal-ev requested"[^>]*>/.test(h)), 'on the grid: waiting for his yes');
