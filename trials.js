@@ -261,6 +261,14 @@ async function loadTrial(id,force){
   else{tk.detailErr[id]=r.error||"This trial didn't load. Try again. (For your developer: no \"row\" in the answer.)";if(r.ok)r.ok=false;}
   return r;
 }
+/* My stats: everything your own outreach has sent (the pre-trial engine's history) — GET /api/mc/outreach. */
+async function loadOutreach(force){
+  if(!force&&tk.outreach&&Date.now()-(tk.outreachAt||0)<TK_FRESH_MS)return {ok:true,data:tk.outreach};
+  const r=await machineFetch('/api/mc/outreach',{timeout:60000});
+  if(r.ok&&r.data&&r.data.totals){tk.outreach=r.data;tk.outreachAt=Date.now();tk.outreachErr=null;}
+  else{tk.outreachErr=r.error||"Your sending history didn't load. Try again.";if(r.ok)r.ok=false;}
+  return r;
+}
 async function loadAlerts(force){
   if(!force&&tk.alerts&&Date.now()-tk.alertsAt<TK_FRESH_MS)return {ok:true,data:tk.alerts};
   const r=await machineFetch('/api/mc/alerts');
@@ -1826,13 +1834,50 @@ function trialsCtx(id){
   return {spark:{g:s?s.g:null,state:sparkState},growth:{g:gc?gc.data:null,days:tk.growthDays,at:gc?gc.at:0,loading:!!tk.growthBusy[id]||(gc&&gc.days!==tk.growthDays),error:tk.growthErr[id]||null}};
 }
 function trialsSparkMap(){const out={};const all=tkSparkAll();Object.keys(all).forEach(k=>{if(all[k]&&all[k].g)out[k]=all[k].g;});return out}
+/* My stats, top of the page: every email your own outreach sent — totals, per day (last 30), per inbox,
+   every reply and bounce, and each email sent (newest first). */
+function tkShare(n,d){return d?Math.round(n/d*1000)/10+'%':'—'}
+function renderMyOutreach(o,err){
+  if(!o)return err?`<div class="section-head tk-section"><h3>Everything you've sent</h3></div><div class="card tk-muted">${esc(err)}</div>`:renderLoading('Loading everything you have sent…');
+  const t=o.totals||{},days=(o.days||[]).slice().sort((a,b)=>a.date<b.date?-1:1);
+  const tiles=[
+    ['Emails sent',tkNum(t.sent),t.firstDay?'Since '+tkDayName(t.firstDay)+' · '+tkNum(t.days)+' sending days':'Nothing sent yet'],
+    ['First emails',tkNum(t.newSends),'New people reached'],
+    ['Follow-ups',tkNum(t.followUps),'Day 3 and Day 7 emails'],
+    ['Opened',tkNum(t.uniqueOpens),tkShare(t.uniqueOpens,t.newSends)+' of first emails'],
+    ['Replies',tkNum(t.replies),tkShare(t.replies,t.newSends)+' of people emailed'],
+    ['Bounced',tkNum(t.bounces),tkShare(t.bounces,t.sent)+' of emails sent'],
+  ];
+  // the last 30 days, every day present (a day with nothing sent shows as a zero)
+  const byDate={};days.forEach(d=>{byDate[d.date]=d;});
+  const last=t.lastDay?new Date(Math.max(Date.parse(t.lastDay+'T12:00:00Z'),Date.now())):new Date();
+  const span=[];for(let i=29;i>=0;i--){const x=new Date(last.getTime()-i*86400000);span.push(x.toISOString().slice(0,10));}
+  const sm=k=>span.map(dt=>{const d=byDate[dt];return d&&d.summary?(d.summary[k]||0):0});
+  const first=sm('newSends'),follow=sm('followUps'),rep=sm('totalReplies');
+  const tips=span.map((dt,i)=>tkTip(dt,[['First emails',tkNum(first[i])],['Follow-ups',tkNum(follow[i])],['Replies',tkNum(rep[i])]]));
+  const chart=t.sent?`<div class="card tk-chart-card"><h4>Emails sent per day · last 30 days</h4>${renderChart({days:span,height:180,bars:[{label:'First emails',color:'--c1',values:first},{label:'Follow-ups',color:'--c2',values:follow}],tips,label:'Emails sent per day, last 30 days'})}${renderChartTable(span,[{label:'First emails',values:first},{label:'Follow-ups',values:follow},{label:'Replies',values:rep}])}</div>`:'';
+  const inb=(o.inboxes||[]).length?`<div class="card"><h4>By inbox</h4><div class="tk-scroll"><table class="tk-table"><tr><th>Inbox</th><th class="num">Sent</th><th class="num">Share</th></tr>${o.inboxes.map(i=>`<tr><td>${esc(i.email)}</td><td class="num">${tkNum(i.sent)}</td><td class="num">${tkShare(i.sent,t.sent)}</td></tr>`).join('')}</table></div></div>`:'';
+  const newest=days.slice().reverse();
+  const replies=[],bounces=[],sent=[];
+  newest.forEach(d=>{(d.replies||[]).forEach(r=>replies.push(r));(d.bounces||[]).forEach(b=>bounces.push(b));(d.sent||[]).slice().sort((a,b)=>String(b.timestamp).localeCompare(String(a.timestamp))).forEach(x=>sent.push(x));});
+  const when=v=>esc(tkDayName(String(v||'').slice(0,10)));
+  const repHTML=`<div class="card"><h4>Replies · ${tkNum(replies.length)}</h4>${replies.length?`<div class="tk-scroll"><table class="tk-table"><tr><th>Day</th><th>From</th><th>Company</th><th>What they said</th></tr>${replies.map(r=>`<tr><td class="num">${when(r.repliedAt)}</td><td>${esc(r.from||r.leadEmail)}</td><td>${esc(r.company)}</td><td>${esc(r.snippet||r.subject)}</td></tr>`).join('')}</table></div>`:'<div class="tk-muted">No replies yet.</div>'}</div>`;
+  const touch={d0:'First email',d3:'Day 3 follow-up',d7:'Day 7 follow-up'};
+  const SHOW=300;
+  const sentHTML=sent.length?`<details class="card"><summary><b>Every email sent · ${tkNum(sent.length)}</b> <span class="tk-muted tk-small">newest first${sent.length>SHOW?', the newest '+SHOW:''}</span></summary><div class="tk-scroll"><table class="tk-table"><tr><th>Day</th><th>To</th><th>Company</th><th>Subject</th><th>Which email</th><th>From inbox</th></tr>${sent.slice(0,SHOW).map(x=>`<tr><td class="num">${when(x.timestamp)}</td><td>${esc(x.to)}</td><td>${esc(x.company)}</td><td>${esc(x.subject)}</td><td>${esc(touch[x.touch]||x.touch||'')}</td><td>${esc(x.from)}</td></tr>`).join('')}</table></div></details>`:'';
+  const bncHTML=bounces.length?`<details class="card"><summary><b>Bounces · ${tkNum(bounces.length)}</b></summary><div class="tk-scroll"><table class="tk-table"><tr><th>Day</th><th>Address</th><th>Why</th><th>From inbox</th></tr>${bounces.map(b=>`<tr><td class="num">${when(b.bouncedAt)}</td><td>${esc(b.email)}</td><td>${esc(b.reason)}</td><td>${esc(b.account||'')}</td></tr>`).join('')}</table></div></details>`:'';
+  return `<div class="tk-myout"><div class="section-head tk-section"><h3>Everything you've sent</h3><span class="tk-muted tk-small">Your own outreach, every day so far</span></div>
+    <div class="tk-keys">${tiles.map(([l,v,sub])=>`<div class="card tk-key"><small>${esc(l)}</small><b>${v}</b><span class="tk-key-sub">${esc(sub)}</span></div>`).join('')}</div>
+    ${chart}${inb}${repHTML}${sentHTML}${bncHTML}</div>`;
+}
 function trialsHostHTML(view){
   switch(view){
     case 'trials':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderTrialList(tk.hub,{at:tk.hubAt,doneOpen:tk.doneOpen}):tk.hubErr?renderMachineError(tk.hubErr):renderLoading('Loading your trials…');
     case 'trialsBoard':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderBoard(tk.hub,{at:tk.hubAt,sparks:trialsSparkMap()}):tk.hubErr?renderMachineError(tk.hubErr):renderLoading();
     case 'settings':return renderSettings(trialsSettingsCtx());
     case 'trial':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the list.','All trials',"render('trials')");
-      const d=tk.detail[id];return d?renderStaleNote(tk.detailErr[id],tk.detailAt[id])+renderTrialDetail(d,trialTab,Object.assign({at:tk.detailAt[id],behindOpen:tk.behindOpen},trialsCtx(id))):tk.detailErr[id]?renderMachineError(tk.detailErr[id]):renderLoading('Loading this trial…');}
+      const d=tk.detail[id];if(id===MY_STATS_ID)return renderMyOutreach(tk.outreach,tk.outreachErr)+(d?renderStaleNote(tk.detailErr[id],tk.detailAt[id])+renderTrialDetail(d,trialTab,Object.assign({at:tk.detailAt[id],behindOpen:tk.behindOpen},trialsCtx(id))):tk.detailErr[id]?'':renderLoading('Loading…'));
+      return d?renderStaleNote(tk.detailErr[id],tk.detailAt[id])+renderTrialDetail(d,trialTab,Object.assign({at:tk.detailAt[id],behindOpen:tk.behindOpen},trialsCtx(id))):tk.detailErr[id]?renderMachineError(tk.detailErr[id]):renderLoading('Loading this trial…');}
     case 'trialPurchase':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the list first.','All trials',"render('trials')");
       const p=tk.purchase[id];return p?renderStaleNote(tk.purchaseErr[id],tk.purchaseAt[id])+renderPurchase(p,id,{at:tk.purchaseAt[id]}):tk.purchaseErr[id]?renderMachineError(tk.purchaseErr[id]):renderLoading();}
     case 'inquiries':case 'inquiry':return inquiriesHostHTML(view);
@@ -1871,7 +1916,7 @@ function trialsApplyScroll(){
 async function trialsKick(view,force){
   let r;
   if(view==='trials'||view==='trialsBoard')r=await loadHub(force);
-  else if(view==='trial')r=await loadTrial(currentTrialId,force);
+  else if(view==='trial'){const mine=currentTrialId===MY_STATS_ID;const [t]=await Promise.all([loadTrial(currentTrialId,force),mine?loadOutreach(force):null]);r=t;}
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
   else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
@@ -2258,7 +2303,7 @@ function trialsOnRender(v){
 /* Sign-out: drop every cached answer, including the sparkline history kept in localStorage. */
 function trialsForget(){
   trialsStopTimer();
-  Object.assign(tk,{hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{}});
+  Object.assign(tk,{outreach:null,outreachAt:0,outreachErr:null,hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{}});
   currentTrialId=null;trialTab='overview';tk.behindOpen=false;tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;
   try{inquiriesForget();}catch(e){}
   try{messagesForget();}catch(e){}
