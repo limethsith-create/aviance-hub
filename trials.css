@@ -931,3 +931,8 @@ a.tk-brief-mark:hover,a.tk-brief-mark:focus-visible{background:var(--text);color
 .tk-app-match{font-weight:600}
 .tk-app-doc{font-size:13px;color:var(--accent,#2563eb);text-decoration:underline}
 .tk-app-btns{display:flex;flex-wrap:wrap;gap:8px}
+
+.tk-replies{display:grid;gap:10px}
+.tk-reply{border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:grid;gap:6px}
+.tk-reply-head{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.tk-reply-text{white-space:pre-wrap;overflow-wrap:anywhere}
