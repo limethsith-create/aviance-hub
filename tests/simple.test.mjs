@@ -65,13 +65,13 @@ const top = (d, meta) => between(renderTrialDetail(d, 'overview', Object.assign(
 const BANNED = /\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|dns|jwt|config|payload|mission control|cron|redis|endpoint|webhook)\b/i;
 
 /* ───────────── 1. four places only ───────────── */
-test('navigation: four places only — Trials, Calendar, Inquiries, Settings — the same in the sidebar and the phone tab bar', () => {
+test('navigation: four places plus My stats — Trials, Calendar, Inquiries, My stats, Settings — the same in the sidebar and the phone tab bar', () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
-  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['calendar', 'Calendar'], ['inquiries', 'Inquiries'], ['settings', 'Settings']]);
+  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['calendar', 'Calendar'], ['inquiries', 'Inquiries'], ['mystats', 'My stats'], ['settings', 'Settings']]);
   render('trials');
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
-    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 4, id + ': four buttons');
+    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 5, id + ': five buttons');
     assert.ok(!/Machine|Behind the scenes|Phone alerts|Mission Control|Log out|alerts/i.test(visibleText(nav)), id + ': nothing else in the navigation');
     assert.ok(nav.includes(`<button class="${id === 'navArea' ? 'nav-item' : 'tab'} active" type="button" onclick="render('trials')" aria-label="Trials" aria-current="page">`), id + ': Trials is the current place');
   }
@@ -86,12 +86,58 @@ test('navigation: four places only — Trials, Calendar, Inquiries, Settings —
   assert.ok(!html.includes('hamburger"') && !html.includes('id="newClientBtn"') && !html.includes('id="themeBtn"'), 'the top bar is only the title, Find (computer) and the bell');
 });
 
+test('navigation: My stats opens your own outreach (aviance) on the trial page and lights up instead of Trials; #stats deep links there', () => {
+  asOwner(); trialsForget(); calendarForget(); asOwner();
+  const item = navItems().find((i) => i.view === 'mystats');
+  assert.equal(item.label, 'My stats'); assert.equal(item.icon, I.chart);
+  render('trials');
+  assert.ok(el('navArea').innerHTML.includes('onclick="openMyStats()" aria-label="My stats">'), 'the button opens My stats');
+  openMyStats();
+  assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'aviance');
+  assert.deepEqual(navItems().filter((i) => i.isOn ? i.isOn() : i.view === currentView).map((i) => i.view), ['mystats']);
+  openTrial('acme');
+  assert.deepEqual(navItems().filter((i) => i.isOn ? i.isOn() : i.view === currentView).map((i) => i.view), ['trials']);
+  assert.deepEqual(parseDeepLink('#stats'), { view: 'trial', id: 'aviance' });
+});
+
+test('My stats: everything you have sent (GET /api/mc/outreach) sits above your own page — totals, per day, per inbox, replies, every email', async () => {
+  asOwner(); trialsForget(); calendarForget(); asOwner();
+  const outreach = {
+    totals: { sent: 4, newSends: 3, followUps: 1, opens: 2, uniqueOpens: 2, replies: 1, bounces: 1, days: 3, firstDay: '2026-06-01', lastDay: '2026-06-04' },
+    inboxes: [{ email: 'me@getaviance.site', sent: 3 }, { email: 'you@getaviance.site', sent: 1 }],
+    byTouch: { d0: 3, d3: 1 }, byCampaign: {},
+    days: [
+      { date: '2026-06-04', summary: { totalSent: 1, newSends: 0, followUps: 1, totalReplies: 0 }, sent: [{ to: 'a@acme.com', company: 'Acme', subject: 'Re: Quick idea', touch: 'd3', from: 'me@getaviance.site', timestamp: '2026-06-04T14:00:00Z' }], replies: [], bounces: [] },
+      { date: '2026-06-02', summary: { totalSent: 1, newSends: 1, totalReplies: 1 }, sent: [{ to: 'c@gamma.com', company: 'Gamma', subject: 'Hi <Gamma>', touch: 'd0', from: 'me@getaviance.site', timestamp: '2026-06-02T15:00:00Z' }], replies: [{ from: 'b@beta.com', company: 'Beta', snippet: 'Tell me more', repliedAt: '2026-06-02T09:00:00Z' }], bounces: [{ email: 'c@gamma.com', reason: 'no such user', bouncedAt: '2026-06-02T15:05:00Z' }] },
+      { date: '2026-06-01', summary: { totalSent: 2, newSends: 2, totalReplies: 0 }, sent: [{ to: 'a@acme.com', company: 'Acme', subject: 'Quick idea', touch: 'd0', from: 'me@getaviance.site', timestamp: '2026-06-01T14:00:00Z' }, { to: 'b@beta.com', company: 'Beta', subject: 'Quick idea', touch: 'd0', from: 'you@getaviance.site', timestamp: '2026-06-01T15:00:00Z' }], replies: [], bounces: [] },
+    ],
+  };
+  const calls = [];
+  globalThis.fetch = async (url) => { calls.push(String(url)); if (String(url).endsWith('/api/mc/outreach')) return { ok: true, status: 200, text: async () => JSON.stringify(outreach) }; return { ok: false, status: 404, text: async () => JSON.stringify({ error: 'Not found' }) }; };
+  try {
+    openMyStats(); await tick(); await tick();
+    assert.ok(calls.some((u) => u.endsWith('/api/mc/outreach')), 'asks for the sending history');
+    const h = el('tkHost').innerHTML;
+    assert.ok(h.includes("Everything you've sent"));
+    const txt = visibleText(h);
+    for (const w of ['Emails sent 4', 'First emails 3', 'Follow-ups 1', 'Replies 1 33.3% of people emailed', 'Bounced 1 25% of emails sent', 'me@getaviance.site 3 75%', 'Tell me more', 'Every email sent · 4', 'Day 3 follow-up', 'no such user']) assert.ok(txt.includes(w), w);
+    assert.ok(h.includes('Hi &lt;Gamma&gt;') && !h.includes('<Gamma>'), 'escaped');
+    assert.ok(h.includes('Emails sent per day · last 30 days'));
+    // the newest email first
+    assert.ok(txt.indexOf('Re: Quick idea') < txt.indexOf('Hi'), 'newest first');
+    // another trial never loads it
+    calls.length = 0; openTrial('acme'); await tick();
+    assert.ok(!calls.some((u) => u.endsWith('/api/mc/outreach')));
+    assert.equal(renderMyOutreach(null, 'Could not reach it.').includes('Could not reach it.'), true);
+  } finally { offline(); trialsStopTimer(); }
+});
+
 test('navigation badges: Trials = how many need you (red) · Calendar = call times waiting for your yes (amber) · Inquiries = new ones (red) · Settings has none', async () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
   trialsIngestHub(Object.assign({}, simpleHub, { inquiries: inquirySummaryOf(inquiryRecords) }));
   cal.reqs = calRequestsOf(calWeek);
   const items = navItems();
-  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'amber', '2 waiting for your yes'], [2, 'red', '2 new'], ['', '', '']]);
+  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'amber', '2 waiting for your yes'], [2, 'red', '2 new'], ['', '', ''], ['', '', '']]);
   renderNav();
   const nav = el('tabBar').innerHTML;
   assert.ok(nav.includes('<span class="badge red" title="3 need you" aria-hidden="true">3</span>'));

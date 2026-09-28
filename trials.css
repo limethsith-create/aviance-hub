@@ -915,3 +915,9 @@ a.tk-brief-mark:hover,a.tk-brief-mark:focus-visible{background:var(--text);color
 .tk-yd-msg.green{color:var(--green);font-weight:600}
 .tk-yd-msg.red{color:var(--red);font-weight:600}
 @media(max-width:560px){.tk-ky-card,.tk-yd-field{padding:12px}.tk-ky-form .btn,.tk-ky-acts .btn,.btn.tk-ky-open,.tk-yd-row .btn{flex:1 1 100%;width:100%;justify-content:center}}
+
+/* My stats: everything you've sent */
+.tk-myout{display:grid;gap:12px;margin-bottom:22px}
+.tk-myout .tk-key{cursor:default}
+.tk-myout details.card summary{cursor:pointer;min-height:44px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tk-myout h4{margin:0 0 8px}
