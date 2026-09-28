@@ -155,15 +155,15 @@ test('week grid: Mon–Sun columns are Sri Lanka dates; a 9 am ET Tuesday call i
   // the call hours on each Sri Lanka day: Monday has only its evening (Sunday in the US is closed), Saturday only its small hours (Friday afternoon in the US)
   assert.deepEqual(m.days.map((d) => d.open), [[[1110, 1440]], [[0, 150], [1110, 1440]], [[0, 150], [1110, 1440]], [[0, 150], [1110, 1440]], [[0, 150], [1110, 1440]], [[0, 150]], []]);
   // rows shown: after midnight, the owner's own 11 am meeting, the evening — everything else folded
-  assert.deepEqual(m.layout.map((L) => [L.from, L.to, L.top]), [[0, 150, 0], [660, 690, 280], [1110, 1440, 368]]);
-  assert.equal(m.gaps.length, 2); assert.equal(m.height, 368 + 330 * 1.6);
+  assert.deepEqual(m.layout.map((L) => [L.from, L.to, L.top]), [[0, 150, 0], [660, 690, 144], [1110, 1440, 192]]);
+  assert.equal(m.gaps.length, 2); assert.equal(m.height, 192 + 330 * 0.8);
   // one label per hour in Sri Lanka time, on the whole US Eastern hours, "day before" after midnight
   assert.deepEqual(m.rows.map((r) => [r.owner, r.us, r.usRel]), [
     ['12:30 am', '3 pm', 'day before'], ['1:30 am', '4 pm', 'day before'], ['11:00 am', '1:30 am', ''],
     ['6:30 pm', '9 am', ''], ['7:30 pm', '10 am', ''], ['8:30 pm', '11 am', ''], ['9:30 pm', '12 pm', ''], ['10:30 pm', '1 pm', ''], ['11:30 pm', '2 pm', '']]);
   assert.equal(m.dst, '', 'no US clock change this week');
   assert.equal(m.nowY, null, '1:30 pm in Colombo is outside the rows: no "now" line');
-  assert.equal(model('2026-09-28', calWeek.meetings, { now: new Date('2026-09-29T14:15:00Z') }).nowY, 368 + 75 * 1.6, '7:45 pm → the red now line');
+  assert.equal(model('2026-09-28', calWeek.meetings, { now: new Date('2026-09-29T14:15:00Z') }).nowY, 192 + 75 * 0.8, '7:45 pm → the red now line');
 });
 
 test('week grid across US daylight saving: winter hours move one hour later in Colombo; a clock change inside the week is said in words; Friday 4 pm ET lands on Saturday', () => {
@@ -216,15 +216,15 @@ test('the grid draws each call sized by its minutes, coloured by status (green /
   const g = renderCalGrid(m);
   assert.ok(g.includes('<div class="cal-corner"><b>Sri Lanka time</b><small>US Eastern (ET) beside it</small></div>'));
   assert.ok(g.includes('<div class="cal-dayhead today">Tue 29 Sep<span class="cal-today-tag">Today</span></div>'));
-  assert.ok(g.includes('<div class="cal-hour" style="top:368px"><b>6:30 pm</b><small>9 am ET</small></div>'));
-  assert.ok(g.includes('<div class="cal-hour" style="top:48px"><b>12:30 am</b><small>3 pm ET, day before</small></div>'));
-  assert.ok(g.includes('<div class="cal-gapnote" style="top:240px;height:40px">No calls</div>'));
+  assert.ok(g.includes('<div class="cal-hour" style="top:192px" title="9 am ET"><b>6:30 pm</b><small>9 am ET</small></div>'));
+  assert.ok(g.includes('<div class="cal-hour" style="top:24px" title="3 pm ET, day before"><b>12:30 am</b><small>3 pm ET, day before</small></div>'));
+  assert.ok(g.includes('<div class="cal-gapnote" style="top:120px;height:24px">No calls</div>'));
   const block = (id) => { const i = g.indexOf(`calOpenMeeting(&quot;${id}&quot;)`); return i < 0 ? '' : g.slice(g.lastIndexOf('<button', i), g.indexOf('</button>', i)); };
-  assert.match(block('mconf'), /class="cal-ev confirmed" style="top:368px;height:46px;left:calc\(0% \+ 2px\);width:calc\(100% - 4px\)"/, '30 min = 46 px, green');
+  assert.match(block('mconf'), /class="cal-ev confirmed" style="top:192px;height:22px;left:calc\(0% \+ 2px\);width:calc\(100% - 4px\)"/, '30 min = 22 px, green');
   assert.ok(block('mconf').includes('<span class="cal-ev-t">Acme Plumbing</span><span class="cal-ev-s">6:30 pm · Confirmed</span>'), 'who first, then the time and the status in words');
-  assert.match(block('mreq2'), /class="cal-ev requested short" style="top:144px;height:22px;/, '15 min = 22 px, amber, 1:30 am');
+  assert.match(block('mreq2'), /class="cal-ev requested short" style="top:72px;height:20px;/, '15 min = 20 px (the smallest a call is drawn), amber, 1:30 am');
   assert.ok(!block('mreq2').includes('cal-ev-s') && block('mreq2').includes('<span class="cal-ev-t">Gale Roofing</span>'), 'a 15-minute block has one line: who');
-  assert.match(block('mheld'), /class="cal-ev held"/); assert.match(block('mblocked'), /class="cal-ev blocked" style="top:\d+(\.\d)?px;height:94px;/); assert.ok(block('mblocked').includes('<span class="cal-ev-t">Busy</span><span class="cal-ev-s">8:30 pm · Busy</span>'));
+  assert.match(block('mheld'), /class="cal-ev held"/); assert.match(block('mblocked'), /class="cal-ev blocked" style="top:\d+(\.\d)?px;height:46px;/); assert.ok(block('mblocked').includes('<span class="cal-ev-t">Busy</span><span class="cal-ev-s">8:30 pm · Busy</span>'));
   assert.match(block('mnoshow'), /class="cal-ev noshow short"/);
   assert.ok(block('mconf').includes('aria-label="Onboarding call — Acme Plumbing with Ann Lee. Tue 29 Sep, 6:30 pm Sri Lanka time (Tue 9:00 am US Eastern). 30 minutes. Confirmed."'));
   assert.equal(block('mcancelled'), '', 'cancelled is hidden'); assert.equal(block('mdeclined'), '');
