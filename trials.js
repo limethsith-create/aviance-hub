@@ -764,6 +764,13 @@ function tkListGroups(hub,paid){
     done:rows.filter(x=>!x.s.needsYou&&x.s.done).sort(newest),
   };
 }
+/* Who on the team looks after this client (Team tab, people.js) — a small tag on the row when someone does. */
+function tkLooksAfter(id){
+  if(typeof tm==='undefined'||!tm.data)return '';
+  const uids=(tm.data.owners||{})[id]||[];if(!uids.length)return '';
+  const names=uids.map(u=>(tm.data.team||[]).find(p=>p.uid===u)).filter(Boolean).map(p=>String(p.name||p.email||'').split(' ')[0]);
+  return names.length?`<span class="tk-person-owner" title="Looked after by ${esc(names.join(', '))}">${esc(names.join(', '))}</span>`:'';
+}
 function renderTrialRow(x){
   const r=x.row,s=x.s;const review=tkIsUnderReview(r);const j=tkStep(r);
   const go=review?`openTrial(${tkAttr(r.id)},null,'application')`:`openTrial(${tkAttr(r.id)})`;
@@ -774,7 +781,7 @@ function renderTrialRow(x){
   const say=j.notTaken&&/^declined\.?$/i.test(s.label.trim())?'':s.label;
   const step=j.notTaken?'':tkStepText(j,s.label);
   const row=`<button type="button" class="tk-person${s.needsYou?' needs':''}${s.done?' done':''}" onclick="${go}"><span class="tk-person-main">
-    <span class="tk-person-top"><span class="tk-person-co">${esc(s.company)}</span>${s.person?`<span class="tk-person-name">${esc(s.person)}</span>`:''}</span>
+    <span class="tk-person-top"><span class="tk-person-co">${esc(s.company)}</span>${s.person?`<span class="tk-person-name">${esc(s.person)}</span>`:''}${tkLooksAfter(r.id)}</span>
     <span class="tk-person-where">${renderStepBar(j)}${step?`<span class="tk-person-step">${esc(step)}</span>`:''}</span>
     ${say?`<span class="tk-person-say">${esc(say)}</span>`:''}
     ${you?`<span class="tk-person-you">${esc(you)}</span>`:s.next?`<span class="tk-person-next">${esc(s.next)}</span>`:''}
@@ -2077,7 +2084,7 @@ function trialsApplyScroll(){
 }
 async function trialsKick(view,force){
   let r;
-  if(view==='trials'||view==='trialsBoard'||view==='paying')r=await loadHub(force);
+  if(view==='trials'||view==='trialsBoard'||view==='paying'){if(typeof teamKick==='function'&&typeof tm!=='undefined'&&!tm.data)teamKick(false);r=await loadHub(force);}
   else if(view==='trial'){const mine=currentTrialId===MY_STATS_ID;const [t]=await Promise.all([loadTrial(currentTrialId,force),mine?loadOutreach(force):null]);r=t;}
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
   else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute

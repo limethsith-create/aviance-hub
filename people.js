@@ -24,6 +24,7 @@ function peopleSignedIn(){
 function peopleOnRender(v){
   if(typeof authUser==='undefined'||!authUser)return;
   if(v==='people')peopleKick(true);
+  if(v==='team')teamKick(true);
   // one "view" per page opened, a moment after it settles (tapping through pages quickly sends only the last)
   if(pp.viewTimer)clearTimeout(pp.viewTimer);
   pp.viewTimer=setTimeout(()=>{const k=ppViewKey(v);if(k===pp.lastView&&Date.now()-pp.lastViewAt<60000)return;pp.lastView=k;pp.lastViewAt=Date.now();ppPost({event:'view',view:k});},1200);
@@ -33,6 +34,7 @@ async function peopleSignOut(){
   if(pp.viewTimer){clearTimeout(pp.viewTimer);pp.viewTimer=null;}
   await Promise.race([ppPost({event:'signout',view:ppViewKey(currentView)}),new Promise(r=>setTimeout(r,2500))]);
   Object.assign(pp,{people:null,events:null,at:0,err:null,pending:[],pendingAt:0,filter:null,lastView:null});
+  if(typeof tm!=='undefined')Object.assign(tm,{data:null,at:0,err:null});
 }
 
 /* ---- accounts waiting for approval (Supabase profiles; the owner's session may read and change them) ---- */
@@ -86,7 +88,7 @@ function ppAgo(v){const d=tkParseDate(v);if(!d)return '';const s=Math.max(0,(Dat
 function ppDur(sec){sec=Number(sec)||0;if(sec<60)return sec?'<1 min':'—';const h=Math.floor(sec/3600),m=Math.round((sec%3600)/60);return h?`${h} h ${m} min`:`${m} min`}
 function ppPlace(k){
   k=String(k||'');if(!k)return '—';
-  const names={trials:'Trials',paying:'Paying clients',calendar:'Calendar',mystats:'My stats',settings:'Settings',people:'People inside',inquiries:'Plan call requests',inquiry:'A plan call request',trialsBoard:'Behind the scenes',trialPurchase:'A purchase page'};
+  const names={team:'Team',trials:'Trials',paying:'Paying clients',calendar:'Calendar',mystats:'My stats',settings:'Settings',people:'Activity',inquiries:'Plan call requests',inquiry:'A plan call request',trialsBoard:'Behind the scenes',trialPurchase:'A purchase page'};
   if(names[k])return names[k];
   if(k.indexOf('trial:')===0){const id=k.slice(6);const r=typeof tkFindRow==='function'?tkFindRow(id):null;return (r&&(r.name||(r.simple&&r.simple.company)))||('the page of '+id);}
   return k;
@@ -132,4 +134,61 @@ function renderPeople(){
   const feed=`<div class="section-head tk-section"><h3>Activity${who?' — '+esc(who.name||who.email):''}</h3>${who?`<button class="btn ghost" onclick="peopleFilter(null)">Everyone</button>`:''}</div>
     ${evs.length?`<div class="card pp-feed">${byDay.map(g=>`<div class="pp-day">${esc(g.label)}</div>${g.xs.map(e=>`<div class="pp-ev pp-${esc(e.event)}"><span class="pp-ev-time">${esc(tkParseDate(e.at)?tkParseDate(e.at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}):'')}</span><span class="pp-ev-dot"></span><span><b>${esc(e.name||e.email||'Someone')}</b> ${esc(ppEventText(e))}</span></div>`).join('')}`).join('')}</div>`:'<div class="tk-allclear">No activity yet.</div>'}`;
   return summary+wait+err+table+feed;
+}
+
+/* ===================== Team =====================
+   Everyone who uses the hub: online or not, where they are in the hub right now, what they are working on (a line
+   each person writes about themselves) and which clients they look after (the owner chooses). GET/POST /api/mc/team. */
+const tm={data:null,at:0,err:null,busy:false};
+async function teamKick(force){
+  if(!force&&tm.data&&Date.now()-tm.at<30000)return;
+  const r=await machineFetch('/api/mc/team');
+  if(r&&r.ok&&r.data&&Array.isArray(r.data.team)){tm.data=r.data;tm.at=Date.now();tm.err=null;}
+  else tm.err=(r&&r.error)||"The team didn't load. Try again.";
+  if(typeof tk!=='undefined'&&!tk.hub&&typeof loadHub==='function')await loadHub(false).catch(()=>null);
+  teamRepaint();
+}
+function teamRepaint(){if(currentView==='trials'||currentView==='paying'){try{trialsRepaint(currentView,{soft:true});}catch(e){}return;}if(currentView!=='team')return;const h=document.getElementById('tmHost');if(h)h.innerHTML=renderTeam();}
+function teamPageView(){if(!trialsIsAdmin())return trialsNotAdminHTML();teamKick(false);return `<div id="tmHost">${renderTeam()}</div>`}
+function teamMe(){return tm.data&&authUser?(tm.data.team||[]).find(p=>p.uid===authUser.uid):null}
+async function teamSaveStatus(){
+  const i=document.getElementById('tmStatus');const text=i?i.value:'';
+  const r=await machineFetch('/api/mc/team',{method:'POST',body:{action:'status',text}});
+  if(r&&r.ok){toast(text.trim()?'Your status is saved':'Your status is cleared');await teamKick(true);}else toast('Not saved: '+((r&&r.error)||'try again'));
+}
+function teamClients(){return (typeof tkListRows==='function'&&typeof tk!=='undefined'&&tk.hub?tkListRows(tk.hub):[]).map(r=>({id:r.id,name:r.name||(r.simple&&r.simple.company)||r.id,paid:typeof tkIsPaidRow==='function'&&tkIsPaidRow(r)})).sort((a,b)=>a.name.localeCompare(b.name))}
+function teamOpenAssign(uid){
+  if(!hubIsOwner()||!tm.data)return;const p=(tm.data.team||[]).find(x=>x.uid===uid);if(!p)return;
+  const owners=tm.data.owners||{};const list=teamClients();
+  openModal(`<div class="modal-head"><div><h3>Clients ${esc(p.name||p.email)} looks after</h3><p>Tick the clients they take care of. Everyone sees this on the Team page.</p></div></div>
+    <div class="modal-body tm-pick">${list.length?list.map(c=>`<label class="tm-check"><input type="checkbox" data-tm-client="${esc(c.id)}"${(owners[c.id]||[]).includes(uid)?' checked':''}><span>${esc(c.name)}</span><small>${c.paid?'Paying':'Trial'}</small></label>`).join(''):'<p class="tk-muted">No clients yet.</p>'}</div>
+    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="teamSaveAssign(${tkAttr(uid)})">Save</button></div>`);
+}
+async function teamSaveAssign(uid){
+  const owners=(tm.data&&tm.data.owners)||{};const boxes=[...(document.querySelectorAll?document.querySelectorAll('[data-tm-client]'):[])];
+  const calls=[];
+  for(const b of boxes){const id=b.getAttribute('data-tm-client');const cur=owners[id]||[];const has=cur.includes(uid);
+    if(b.checked&&!has)calls.push({clientId:id,uids:cur.concat(uid)});
+    else if(!b.checked&&has)calls.push({clientId:id,uids:cur.filter(u=>u!==uid)});}
+  for(const c of calls){const r=await machineFetch('/api/mc/team',{method:'POST',body:Object.assign({action:'assign'},c)});if(!(r&&r.ok)){toast('Not saved: '+((r&&r.error)||'try again'));break;}}
+  closeModal();toast('Saved');await teamKick(true);
+}
+function renderTeam(){
+  if(!tm.data&&!tm.err)return renderLoading('Loading the team…');
+  if(!tm.data)return `<div class="card tk-pad tk-muted">${esc(tm.err)} <button class="btn ghost" onclick="teamKick(true)">Try again</button></div>`;
+  const team=tm.data.team||[];const me=teamMe();const owner=hubIsOwner();
+  const mine=`<div class="card tm-me"><label for="tmStatus"><b>What are you working on?</b></label>
+    <div class="tm-me-row"><input id="tmStatus" maxlength="140" placeholder="e.g. Writing the emails for Birch Legal" value="${esc(me&&me.status?me.status.text:'')}" onkeydown="if(event.key==='Enter')teamSaveStatus()"><button class="btn ro-ok" onclick="teamSaveStatus()">Save</button></div></div>`;
+  const online=team.filter(p=>p.online).length;
+  const cards=team.length?`<div class="tm-grid">${team.map(p=>`<div class="card tm-card${p.online?' on':''}">
+      <div class="tm-top"><span class="pp-av">${esc(ppInitials(p.name||p.email))}</span><span class="pp-who"><b>${esc(p.name||p.email)}</b><small>${esc(p.role==='admin'?'Owner':'Team')}</small></span>
+        <span class="tm-state">${p.online?'<span class="pp-dot on"></span>In the hub':`<span class="pp-dot"></span>${esc(p.lastSeen?'Seen '+ppAgo(p.lastSeen):'Not in yet')}`}</span></div>
+      <div class="tm-line"><small>Working on</small><span>${p.status?esc(p.status.text)+`<em> · ${esc(ppAgo(p.status.at))}</em>`:'<span class="tk-muted">Nothing written yet</span>'}</span></div>
+      <div class="tm-line"><small>Where</small><span>${p.online?esc(ppPlace(p.lastView)):'<span class="tk-muted">Not in the hub</span>'}</span></div>
+      <div class="tm-line"><small>Looks after</small><span class="tm-clients">${p.clients&&p.clients.length?p.clients.map(c=>`<button type="button" class="tm-chip" onclick="openTrial(${tkAttr(c.id)})">${esc(c.name)}</button>`).join(''):'<span class="tk-muted">No clients yet</span>'}</span></div>
+      ${owner?`<div class="tm-foot"><button class="btn ghost" onclick="teamOpenAssign(${tkAttr(p.uid)})">Choose clients</button></div>`:''}
+    </div>`).join('')}</div>`:`<div class="tk-allclear">Nobody has signed in yet.</div>`;
+  const free=teamClients().filter(c=>!((tm.data.owners||{})[c.id]||[]).length);
+  const unassigned=owner&&free.length?`<div class="section-head tk-section"><h3>Nobody looks after these yet</h3><span class="count">${free.length}</span></div><div class="tm-clients tm-free">${free.map(c=>`<button type="button" class="tm-chip" onclick="openTrial(${tkAttr(c.id)})">${esc(c.name)}</button>`).join('')}</div>`:'';
+  return mine+`<div class="section-head tk-section"><h3>The team</h3><span class="count">${online} in the hub now</span></div>`+cards+unassigned;
 }

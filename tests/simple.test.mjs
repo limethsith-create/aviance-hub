@@ -65,13 +65,13 @@ const top = (d, meta) => between(renderTrialDetail(d, 'overview', Object.assign(
 const BANNED = /\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|dns|jwt|config|payload|mission control|cron|redis|endpoint|webhook)\b/i;
 
 /* ───────────── 1. four places only ───────────── */
-test('navigation: Trials, Paying clients, Calendar, My stats, People inside, Settings — the same in the sidebar and the phone tab bar', () => {
+test('navigation: Trials, Paying clients, Calendar, Team, My stats, Activity, Settings — the same in the sidebar and the phone tab bar', () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
-  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['paying', 'Paying clients'], ['calendar', 'Calendar'], ['mystats', 'My stats'], ['people', 'People inside'], ['settings', 'Settings']]);
+  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['paying', 'Paying clients'], ['calendar', 'Calendar'], ['team', 'Team'], ['mystats', 'My stats'], ['people', 'Activity'], ['settings', 'Settings']]);
   render('trials');
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
-    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 6, id + ': six buttons');
+    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 7, id + ': seven buttons');
     assert.ok(!/Machine|Behind the scenes|Phone alerts|Mission Control|Log out|alerts/i.test(visibleText(nav)), id + ': nothing else in the navigation');
     assert.ok(nav.includes(`<button class="${id === 'navArea' ? 'nav-item' : 'tab'} active" type="button" onclick="render('trials')" aria-label="Trials" aria-current="page">`), id + ': Trials is the current place');
   }
@@ -264,12 +264,42 @@ test('People inside: presence goes to the machine (sign in, the page opened, sig
   } finally { offline(); pp.pending = []; trialsForget(); }
 });
 
+test('Team: your own "working on" line, and a card per person — in the hub or not, where, what they are working on, the clients they look after; the owner chooses clients', async () => {
+  asOwner(); trialsForget(); asOwner(); trialsIngestHub(simpleHub);
+  authUser.uid = 'owner-1';
+  const posts = [];
+  const team = { team: [
+      { uid: 'emp-1', name: 'Nimal Perera', email: 'n@a.com', role: 'employee', online: true, lastSeen: new Date().toISOString(), lastView: 'paying', status: { text: 'Writing the Birch <b>emails</b>', at: new Date(Date.now() - 20 * 60e3).toISOString() }, clients: [{ id: 'acme-plumbing', name: 'Acme Plumbing', state: 'sending', plan: 'trial' }] },
+      { uid: 'owner-1', name: 'Limeth', email: 'o@a.com', role: 'admin', online: false, lastSeen: new Date(Date.now() - 3 * 3600e3).toISOString(), lastView: 'trials', status: null, clients: [] },
+    ], owners: { 'acme-plumbing': ['emp-1'] } };
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith('/api/mc/team')) { if (init && init.method === 'POST') { posts.push(JSON.parse(init.body)); return { ok: true, status: 200, text: async () => '{"ok":true}' }; } return { ok: true, status: 200, text: async () => JSON.stringify(team) }; }
+    return { ok: true, status: 200, text: async () => '{}' };
+  };
+  try {
+    await teamKick(true);
+    const h = renderTeam(); const txt = visibleText(h);
+    for (const w of ['What are you working on?', '1 in the hub now', 'Nimal Perera', 'In the hub', 'Working on Writing the Birch', 'Where Paying clients', 'Looks after Acme Plumbing', 'Limeth', 'Seen 3 h ago', 'Nothing written yet', 'Not in the hub', 'No clients yet', 'Nobody looks after these yet']) assert.ok(txt.includes(w), w);
+    assert.ok(h.includes('&lt;b&gt;emails&lt;/b&gt;') && !h.includes('<b>emails'), 'escaped');
+    assert.ok(h.includes('onclick="openTrial(&quot;acme-plumbing&quot;)">Acme Plumbing</button>'), 'a client opens its page');
+    assert.ok(h.includes('onclick="teamOpenAssign(&quot;emp-1&quot;)">Choose clients</button>'), 'the owner chooses clients');
+    // my own line
+    el('tmStatus').value = 'Calling Fern IT';
+    await teamSaveStatus();
+    assert.deepEqual(posts[0], { action: 'status', text: 'Calling Fern IT' });
+    // a team member: no "Choose clients"
+    authUser.role = 'employee';
+    assert.ok(!renderTeam().includes('Choose clients'));
+    assert.ok(navItems().some((i) => i.view === 'team') && !navItems().some((i) => i.view === 'people'), 'the team sees Team, not Activity');
+  } finally { offline(); asOwner(); trialsForget(); }
+});
+
 test('navigation badges: Trials = how many need you (red) · Paying clients = new plan requests + paid applications (red) · Calendar = call times waiting for your yes (amber) · Settings has none', async () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
   trialsIngestHub(Object.assign({}, simpleHub, { inquiries: inquirySummaryOf(inquiryRecords) }));
   cal.reqs = calRequestsOf(calWeek);
   const items = navItems();
-  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'red', '2 need you'], [2, 'amber', '2 waiting for your yes'], ['', '', ''], ['', '', ''], ['', '', '']]);
+  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'red', '2 need you'], [2, 'amber', '2 waiting for your yes'], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', '']]);
   renderNav();
   const nav = el('tabBar').innerHTML;
   assert.ok(nav.includes('<span class="badge red" title="3 need you" aria-hidden="true">3</span>'));
