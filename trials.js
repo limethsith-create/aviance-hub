@@ -1460,7 +1460,9 @@ function renderTrialDetail(d,tab,meta){
   // the purchase to-do is CheapInboxes' business once it handles this trial (never "Buy & paste" under the big button)
   const mine=t=>{const tid=String((t&&t.id)||'');return (act.todoId!=null&&tid===act.todoId)||/^(review:|onboard-|launch-|message-reply:)/.test(tid)||(act.kind==='calendar'&&tid.indexOf('meeting-request:')===0)||!!(t&&t.action&&t.action.section==='application')||!!(ab&&ab.handled&&t&&(String(t.id||'').indexOf('buy:')===0||(t.action&&(t.action.view==='purchase'||t.action.section==='autobuy'))))||(act.kind==='warmupHelpers'&&tkIsWarmupTodo(t));};
   const todos=tkTodosSorted(row).filter(t=>!mine(t));
-  return renderTrialTop(d,meta,act)+
+  const pane=tkClientPane(row.id);
+  if(row.id&&pane==='stats')return renderTrialTop(d,meta,act)+renderClientPaneSwitch(row.id,pane)+renderClientStats(d,row.id);
+  return renderTrialTop(d,meta,act)+(row.id?renderClientPaneSwitch(row.id,pane):'')+
     (typeof renderMessages==='function'?`<div id="tkMsgHost">${renderMessages(d,meta)}</div>`:'')+
     (act.kind!=='calendar'&&typeof calTrialAsk==='function'?calTrialAsk(row.id):'')+   // calendar.js: a call time waiting for the owner's yes
     (typeof renderAutobuyCard==='function'?`<div id="tkAbHost">${renderAutobuyCard(d,{primary:act.kind,now:meta.now})}</div>`:'')+   // autobuy.js: their inboxes being set up
@@ -1900,42 +1902,173 @@ function trialsCtx(id){
   return {spark:{g:s?s.g:null,state:sparkState},growth:{g:gc?gc.data:null,days:tk.growthDays,at:gc?gc.at:0,loading:!!tk.growthBusy[id]||(gc&&gc.days!==tk.growthDays),error:tk.growthErr[id]||null}};
 }
 function trialsSparkMap(){const out={};const all=tkSparkAll();Object.keys(all).forEach(k=>{if(all[k]&&all[k].g)out[k]=all[k].g;});return out}
-/* My stats, top of the page: every email your own outreach sent — totals, per day (last 30), per inbox,
-   every reply and bounce, and each email sent (newest first). */
+/* ===================== Stats: one view for My stats and every client =====================
+   Four numbers in one row (emails sent · opened · replies · bounced), emails per day for the last 30 days (a dot on
+   a day with a reply), by inbox, every reply in full, every email sent, bounces. One email per person, no follow-ups.
+   m = {totals:{sent, opened|null, replies, bounces, firstDay, days}, perDay:[{date, sent, replies}], inboxes:[{email, sent}],
+        replies:[{at, from, company, subject, text}], sent:[{at, to, company, subject, from}], bounces:[{at, email, reason, account}]} */
 function tkShare(n,d){return d?Math.round(n/d*1000)/10+'%':'—'}
-function renderMyOutreach(o,err){
-  if(!o)return err?`<div class="section-head tk-section"><h3>Everything you've sent</h3></div><div class="card tk-muted">${esc(err)}</div>`:renderLoading('Loading everything you have sent…');
-  const t=o.totals||{},days=(o.days||[]).slice().sort((a,b)=>a.date<b.date?-1:1);
+function renderStats(m,opts){
+  opts=opts||{};m=m||{};const t=m.totals||{};const days=(m.perDay||[]).slice().sort((a,b)=>a.date<b.date?-1:1);
   const tiles=[
-    ['Emails sent',tkNum(t.sent),t.firstDay?'Since '+tkDayName(t.firstDay)+' · '+tkNum(t.days)+' sending days':'Nothing sent yet'],
-    ['First emails',tkNum(t.newSends),'New people reached'],
-    ['Follow-ups',tkNum(t.followUps),'Day 3 and Day 7 emails'],
-    ['Opened',tkNum(t.uniqueOpens),tkShare(t.uniqueOpens,t.newSends)+' of first emails'],
-    ['Replies',tkNum(t.replies),tkShare(t.replies,t.newSends)+' of people emailed'],
-    ['Bounced',tkNum(t.bounces),tkShare(t.bounces,t.sent)+' of emails sent'],
+    ['Emails sent',tkNum(t.sent||0),t.firstDay?'Since '+tkDayName(t.firstDay)+(t.days?' · '+tkNum(t.days)+' sending days':''):'Nothing sent yet'],
+    ['Opened',t.opened==null?'—':tkNum(t.opened),t.opened==null?'Not tracked yet':t.opened<=t.sent?tkShare(t.opened,t.sent)+' of emails sent':'Opens counted, some more than once'],
+    ['Replies',tkNum(t.replies||0),tkShare(t.replies||0,t.sent)+' of emails sent'],
+    ['Bounced',tkNum(t.bounces||0),tkShare(t.bounces||0,t.sent)+' of emails sent'],
   ];
-  // the last 30 days, every day present (a day with nothing sent shows as a zero)
   const byDate={};days.forEach(d=>{byDate[d.date]=d;});
-  const last=t.lastDay?new Date(Math.max(Date.parse(t.lastDay+'T12:00:00Z'),Date.now())):new Date();
-  const span=[];for(let i=29;i>=0;i--){const x=new Date(last.getTime()-i*86400000);span.push(x.toISOString().slice(0,10));}
-  const sm=k=>span.map(dt=>{const d=byDate[dt];return d&&d.summary?(d.summary[k]||0):0});
-  const first=sm('newSends'),follow=sm('followUps'),rep=sm('totalReplies');
-  const tips=span.map((dt,i)=>tkTip(dt,[['First emails',tkNum(first[i])],['Follow-ups',tkNum(follow[i])],['Replies',tkNum(rep[i])]]));
-  const chart=t.sent?`<div class="card tk-chart-card"><h4>Emails sent per day · last 30 days</h4>${renderChart({days:span,height:180,bars:[{label:'First emails',color:'--c1',values:first},{label:'Follow-ups',color:'--c2',values:follow}],tips,label:'Emails sent per day, last 30 days'})}${renderChartTable(span,[{label:'First emails',values:first},{label:'Follow-ups',values:follow},{label:'Replies',values:rep}])}</div>`:'';
-  const inb=(o.inboxes||[]).length?`<div class="card"><h4>By inbox</h4><div class="tk-scroll"><table class="tk-table"><tr><th>Inbox</th><th class="num">Sent</th><th class="num">Share</th></tr>${o.inboxes.map(i=>`<tr><td>${esc(i.email)}</td><td class="num">${tkNum(i.sent)}</td><td class="num">${tkShare(i.sent,t.sent)}</td></tr>`).join('')}</table></div></div>`:'';
-  const newest=days.slice().reverse();
-  const replies=[],bounces=[],sent=[];
-  newest.forEach(d=>{(d.replies||[]).forEach(r=>replies.push(r));(d.bounces||[]).forEach(b=>bounces.push(b));(d.sent||[]).slice().sort((a,b)=>String(b.timestamp).localeCompare(String(a.timestamp))).forEach(x=>sent.push(x));});
+  const lastKey=days.length?days[days.length-1].date:null;
+  const last=lastKey?new Date(Math.max(Date.parse(lastKey+'T12:00:00Z'),Date.now())):new Date();
+  const span=[];for(let i=29;i>=0;i--){span.push(new Date(last.getTime()-i*86400000).toISOString().slice(0,10));}
+  const sentV=span.map(k=>byDate[k]?(byDate[k].sent||0):0),repV=span.map(k=>byDate[k]?(byDate[k].replies||0):0);
+  const tips=span.map((k,i)=>tkTip(k,[['Emails sent',tkNum(sentV[i])],['Replies',tkNum(repV[i])]]));
+  const chart=t.sent?`<div class="card tk-chart-card"><h4>Emails sent per day · last 30 days</h4>${renderChart({days:span,height:160,bars:[{label:'Emails sent',color:'--c1',values:sentV}],dots:[{label:'Replies',color:'--c2',values:repV.map(v=>v?v:null)}],tips,label:'Emails sent per day, last 30 days'})}${renderChartTable(span,[{label:'Emails sent',values:sentV},{label:'Replies',values:repV}])}</div>`:'';
+  const inb=(m.inboxes||[]).length?`<div class="card"><h4>By inbox</h4><div class="tk-scroll"><table class="tk-table"><tr><th>Inbox</th><th class="num">Sent</th><th class="num">Share</th></tr>${m.inboxes.map(i=>`<tr><td>${esc(i.email)}</td><td class="num">${tkNum(i.sent)}</td><td class="num">${tkShare(i.sent,t.sent)}</td></tr>`).join('')}</table></div></div>`:'';
   const when=v=>esc(tkDayName(String(v||'').slice(0,10)));
-  // every reply in full (the machine keeps up to 2,000 characters of each), newest first
-  const repHTML=`<div class="card" id="tkMyReplies"><h4>Replies · ${tkNum(replies.length)}</h4>${replies.length?`<div class="tk-replies">${replies.map(r=>`<div class="tk-reply"><div class="tk-reply-head"><b>${esc(r.company||r.from||r.leadEmail)}</b><span class="tk-muted tk-small">${esc(r.from||r.leadEmail)} · ${when(r.repliedAt)}</span></div>${r.subject?`<div class="tk-small"><b>${esc(r.subject)}</b></div>`:''}<div class="tk-reply-text">${esc(r.text||r.snippet||'(no text saved)')}</div></div>`).join('')}</div>`:'<div class="tk-muted">No replies yet.</div>'}</div>`;
-  const touch={d0:'First email',d3:'Day 3 follow-up',d7:'Day 7 follow-up'};
-  const SHOW=300;
-  const sentHTML=sent.length?`<details class="card"><summary><b>Every email sent · ${tkNum(sent.length)}</b> <span class="tk-muted tk-small">newest first${sent.length>SHOW?', the newest '+SHOW:''}</span></summary><div class="tk-scroll"><table class="tk-table"><tr><th>Day</th><th>To</th><th>Company</th><th>Subject</th><th>Which email</th><th>From inbox</th></tr>${sent.slice(0,SHOW).map(x=>`<tr><td class="num">${when(x.timestamp)}</td><td>${esc(x.to)}</td><td>${esc(x.company)}</td><td>${esc(x.subject)}</td><td>${esc(touch[x.touch]||x.touch||'')}</td><td>${esc(x.from)}</td></tr>`).join('')}</table></div></details>`:'';
-  const bncHTML=bounces.length?`<details class="card"><summary><b>Bounces · ${tkNum(bounces.length)}</b></summary><div class="tk-scroll"><table class="tk-table"><tr><th>Day</th><th>Address</th><th>Why</th><th>From inbox</th></tr>${bounces.map(b=>`<tr><td class="num">${when(b.bouncedAt)}</td><td>${esc(b.email)}</td><td>${esc(b.reason)}</td><td>${esc(b.account||'')}</td></tr>`).join('')}</table></div></details>`:'';
-  return `<div class="tk-myout"><div class="section-head tk-section"><h3>Everything you've sent</h3><span class="tk-muted tk-small">Your own outreach, every day so far</span></div>
-    <div class="tk-keys">${tiles.map(([l,v,sub])=>`<div class="card tk-key"><small>${esc(l)}</small><b>${v}</b><span class="tk-key-sub">${esc(sub)}</span></div>`).join('')}</div>
-    ${chart}${inb}${repHTML}${sentHTML}${bncHTML}</div>`;
+  const replies=(m.replies||[]).slice().sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+  const repHTML=`<div class="card" id="tkMyReplies"><h4>Replies · ${tkNum(replies.length)}</h4>${replies.length?`<div class="tk-replies">${replies.map(r=>`<div class="tk-reply"><div class="tk-reply-head"><b>${esc(r.company||r.from||'')}</b><span class="tk-muted tk-small">${r.company&&r.from?esc(r.from)+' · ':''}${when(r.at)}</span></div>${r.subject?`<div class="tk-small"><b>${esc(r.subject)}</b></div>`:''}<div class="tk-reply-text">${esc(r.text||'(no text saved)')}</div></div>`).join('')}</div>`:'<div class="tk-muted">No replies yet.</div>'}</div>`;
+  const sent=(m.sent||[]).slice().sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));const SHOW=300;
+  const sentHTML=sent.length?`<details class="card"><summary><b>Every email sent · ${tkNum(sent.length)}</b> <span class="tk-muted tk-small">newest first${sent.length>SHOW?', the newest '+SHOW:''}</span></summary><div class="tk-scroll"><table class="tk-table"><tr><th>Day</th><th>To</th><th>Company</th><th>Subject</th><th>From inbox</th></tr>${sent.slice(0,SHOW).map(x=>`<tr><td class="num">${when(x.at)}</td><td>${esc(x.to)}</td><td>${esc(x.company)}</td><td>${esc(x.subject)}</td><td>${esc(x.from)}</td></tr>`).join('')}</table></div></details>`:'';
+  const bounces=m.bounces||[];
+  const bncHTML=bounces.length?`<details class="card"><summary><b>Bounces · ${tkNum(bounces.length)}</b></summary><div class="tk-scroll"><table class="tk-table"><tr><th>Day</th><th>Address</th><th>Why</th><th>From inbox</th></tr>${bounces.map(b=>`<tr><td class="num">${when(b.at)}</td><td>${esc(b.email)}</td><td>${esc(b.reason)}</td><td>${esc(b.account||'')}</td></tr>`).join('')}</table></div></details>`:'';
+  return `<div class="tk-myout">${opts.head||''}<div class="tk-keys tk-keys4">${tiles.map(([l,v,sub])=>`<div class="card tk-key"><small>${esc(l)}</small><b>${v}</b><span class="tk-key-sub">${esc(sub)}</span></div>`).join('')}</div>
+    ${opts.extra||''}${chart}${inb}${repHTML}${sentHTML}${bncHTML}</div>`;
+}
+/* My stats: the owner's own outreach (GET /api/mc/outreach — the machine's day-by-day report). */
+function tkStatsFromOutreach(o){
+  o=o||{};const t=o.totals||{};const sent=[],replies=[],bounces=[];
+  (o.days||[]).forEach(d=>{(d.sent||[]).forEach(x=>sent.push({at:x.timestamp,to:x.to,company:x.company,subject:x.subject,from:x.from}));(d.replies||[]).forEach(r=>replies.push({at:r.repliedAt,from:r.from||r.leadEmail,company:r.company,subject:r.subject,text:r.text||r.snippet}));(d.bounces||[]).forEach(b=>bounces.push({at:b.bouncedAt,email:b.email,reason:b.reason,account:b.account}));});
+  return {totals:{sent:t.sent||0,opened:t.uniqueOpens!=null?t.uniqueOpens:null,replies:t.replies||0,bounces:t.bounces||0,firstDay:t.firstDay,days:t.days},
+    perDay:(o.days||[]).map(d=>({date:d.date,sent:(d.summary&&d.summary.totalSent)||0,replies:(d.summary&&d.summary.totalReplies)||0})),inboxes:o.inboxes||[],sent,replies,bounces};
+}
+function renderMyOutreach(o,err){
+  if(!o)return err?`<div class="card tk-pad tk-muted">${esc(err)}</div>`:renderLoading('Loading everything you have sent…');
+  return renderStats(tkStatsFromOutreach(o));
+}
+/* One client's stats (their own sending): the same view, from their growth history and their page. */
+function tkStatsFromClient(d,g){
+  d=d||{};const row=d.row||{};const five=row.five||{};const c=d.counters||{};
+  const e=(g&&g.email)||{};const days=(g&&g.days)||[];
+  const sum=xs=>(xs||[]).reduce((n,v)=>n+(Number(v)||0),0);
+  const opened=c.opened!=null?Number(c.opened):c.opens!=null?Number(c.opens):(e.opened?sum(e.opened):null);
+  const firstSent=days.find((k,i)=>Number((e.sent||[])[i])>0)||null;
+  return {totals:{sent:Math.max(Number(five.sent)||0,sum(e.sent)),opened,replies:Math.max(Number(five.replies)||0,sum(e.replies)),bounces:c.bounces!=null?Number(c.bounces):sum(e.bounces),firstDay:(d.trial&&d.trial.day1Date)||firstSent},
+    perDay:days.map((k,i)=>({date:k,sent:(e.sent||[])[i]||0,replies:(e.replies||[])[i]||0})),
+    inboxes:[],sent:[],bounces:[],
+    replies:(d.replies||[]).map(r=>({at:r.receivedAt,from:r.leadEmail,company:r.company||r.leadCompany||r.leadName||'',subject:{interested:'Interested',question:'Question',not_interested:'Not interested',referral:'Referral',not_now:'Not now',unclear:'Needs a look'}[r.kind]||'',text:r.snippet}))};
+}
+/* ---- My stats: saved history (GET/POST /api/mc/archive). A copy of everything sent so far, kept on the machine and
+   downloadable as a spreadsheet (Excel/Numbers/Google Sheets). "Save and clear" saves first, then starts My stats from zero. ---- */
+async function loadArchives(force){
+  const a=tk.arch||(tk.arch={list:null,err:null,at:0});
+  if(!force&&a.list&&Date.now()-a.at<TK_FRESH_MS)return {ok:true,data:{archives:a.list}};
+  const r=await machineFetch('/api/mc/archive');
+  if(r.ok&&r.data&&Array.isArray(r.data.archives)){a.list=r.data.archives;a.at=Date.now();a.err=null;}
+  else{a.err=r.error||"Your saved history didn't load.";if(r.ok)r.ok=false;}
+  return r;
+}
+function tkArchiveName(x){return 'Aviance outreach '+String((x&&x.createdAt)||'').slice(0,10)}
+function renderSavedHistory(){
+  const a=tk.arch||{};const list=(a.list||[]).slice().sort((x,y)=>String(y.createdAt||'').localeCompare(String(x.createdAt||'')));const owner=typeof hubIsOwner==='function'&&hubIsOwner();
+  const rows=list.length?`<div class="tk-scroll"><table class="tk-table"><tr><th>Saved</th><th class="num">Emails sent</th><th class="num">Replies</th><th>Covers</th><th></th></tr>${list.map(x=>{const t=x.totals||{};return `<tr><td>${esc(tkDate(x.createdAt))}</td><td class="num">${tkNum(t.sent||0)}</td><td class="num">${tkNum(t.replies||0)}</td><td class="tk-small">${t.firstDay?esc(tkDayName(t.firstDay))+' – '+esc(tkDayName(t.lastDay||t.firstDay)):'—'}</td><td class="num"><button class="btn ghost" onclick="downloadArchive(${tkAttr(x.id)})">Download spreadsheet</button></td></tr>`}).join('')}</table></div>`
+    :`<p class="tk-muted tk-small">${a.err?esc(a.err):a.list?'Nothing saved yet.':'Loading…'}</p>`;
+  return `<div class="card tk-pad" id="tkSaved"><div class="tk-saved-head"><div><h4>Saved history</h4><p class="tk-muted tk-small">A full copy of your outreach — every email, reply and bounce — as a spreadsheet you can open any time.</p></div>${owner?`<div class="tk-saved-btns"><button class="btn ghost" onclick="archiveSaveNow()">Save a copy now</button><button class="btn ghost danger" onclick="openArchiveClear()">Save and start fresh…</button></div>`:''}</div>${rows}</div>`;
+}
+/* A spreadsheet (.xlsx) built here, like the Word file: one sheet per list, plain cells. */
+function tkXlsxCol(i){let s='';i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26);}return s}
+function tkXlsxSheet(rows){
+  const cell=(v,r,c)=>{const ref=tkXlsxCol(c)+(r+1);if(typeof v==='number'&&isFinite(v))return `<c r="${ref}"><v>${v}</v></c>`;const s=String(v==null?'':v);return s?`<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${tkXml(s.slice(0,32000))}</t></is></c>`:''};
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows.map((row,r)=>`<row r="${r+1}">${row.map((v,c)=>cell(v,r,c)).join('')}</row>`).join('')}</sheetData></worksheet>`;
+}
+function tkXlsxBytes(sheets){ // sheets: [{name, rows:[[...]]}]
+  const enc=new TextEncoder();const x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const files=[
+    {name:'[Content_Types].xml',data:enc.encode(x+`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`)},
+    {name:'_rels/.rels',data:enc.encode(x+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')},
+    {name:'xl/workbook.xml',data:enc.encode(x+`<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s,i)=>`<sheet name="${tkXml(String(s.name).replace(/[\\/?*[\]:]/g,' ').slice(0,31))}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets></workbook>`)},
+    {name:'xl/_rels/workbook.xml.rels',data:enc.encode(x+`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')}</Relationships>`)},
+  ].concat(sheets.map((s,i)=>({name:`xl/worksheets/sheet${i+1}.xml`,data:enc.encode(tkXlsxSheet(s.rows))})));
+  return tkZip(files);
+}
+function tkArchiveSheets(a){
+  a=a||{};const t=a.totals||{};const d=v=>String(v||'').replace('T',' ').slice(0,16);
+  const sheets=[
+    {name:'Summary',rows:[['Aviance — your outreach'],['Saved',d(a.createdAt)],['First day',t.firstDay||''],['Last day',t.lastDay||''],['Sending days',t.days||0],[],['Emails sent',t.sent||0],['Opened',t.opened==null?'':t.opened],['Replies',t.replies||0],['Bounced',t.bounces||0]]},
+    {name:'Days',rows:[['Day','Emails sent','Opened','Replies','Bounced']].concat((a.days||[]).slice().sort((x,y)=>String(x.date).localeCompare(String(y.date))).map(x=>[x.date,x.sent||0,x.opened||0,x.replies||0,x.bounces||0]))},
+    {name:'Emails sent',rows:[['When','To','Company','Subject','Email','From inbox']].concat((a.sent||[]).map(x=>[d(x.at),x.to,x.company,x.subject,x.touch==null?'':String(x.touch),x.from]))},
+    {name:'Replies',rows:[['When','From','Company','Subject','What they wrote']].concat((a.replies||[]).map(x=>[d(x.at),x.from,x.company,x.subject,x.text]))},
+    {name:'Bounces',rows:[['When','Address','Why','From inbox']].concat((a.bounces||[]).map(x=>[d(x.at),x.email,x.reason,x.account]))},
+  ];
+  if((a.leads||[]).length){const keys=[];a.leads.forEach(l=>Object.keys(l||{}).forEach(k=>{if(!keys.includes(k)&&keys.length<30)keys.push(k);}));sheets.push({name:'Leads',rows:[keys].concat(a.leads.map(l=>keys.map(k=>{const v=l[k];return v==null?'':typeof v==='object'?JSON.stringify(v):v})))});}
+  return sheets;
+}
+async function downloadArchive(id){
+  toast('Getting your saved history…');
+  const r=await machineFetch('/api/mc/archive/'+encodeURIComponent(id),{timeout:60000});
+  if(!r.ok||!r.data){toast('Could not get it: '+(r.error||'no answer'));return false;}
+  try{tkSaveFile(tkXlsxBytes(tkArchiveSheets(r.data)),tkArchiveName(r.data)+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');return true;}
+  catch(e){toast('Could not make the spreadsheet: '+((e&&e.message)||e));return false;}
+}
+async function archiveSaveNow(){
+  const r=await trialPost('/api/mc/archive',{action:'save'},{done:'Saved — download it below',fail:'Could not save',reload:false});
+  if(r.ok){await loadArchives(true);trialsRepaint('trial');}
+}
+function openArchiveClear(){
+  openModal(`<div class="modal-head"><div><h3>Save and start fresh</h3><p>For the new process: one email per person, no follow-ups.</p></div></div>
+    <div class="modal-body">
+      <p>First a full copy of your outreach is saved — every email, reply and bounce. It downloads as a spreadsheet right after, and stays under Saved history. Then it's cleared from the system and My stats starts from zero.</p>
+      <p class="tk-small tk-muted">Everyone you've already emailed stays on the do-not-email list, so nobody gets a second email. People you haven't emailed yet stay in your list. Clients' stats aren't touched.</p>
+      <div class="field"><label>Type CLEAR to go ahead</label><input id="arcConfirm" autocomplete="off" placeholder="CLEAR" onkeydown="if(event.key==='Enter')archiveClearGo()"></div>
+    </div>
+    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn danger" onclick="archiveClearGo()">Save and clear</button></div>`);
+  setTimeout(()=>{const n=document.getElementById('arcConfirm');if(n)n.focus();},60);
+}
+async function archiveClearGo(){
+  const el=document.getElementById('arcConfirm');if(!el||el.value.trim()!=='CLEAR'){toast('Type CLEAR to go ahead');return;}
+  closeModal();toast('Saving everything, then clearing… this can take a minute');
+  if(tk.busy){toast('Still working on the last action…');return;}
+  tk.busy=true;let r;try{r=await machineFetch('/api/mc/archive',{method:'POST',body:{action:'clear',confirm:'CLEAR'},timeout:120000});}finally{tk.busy=false;}
+  if(!r.ok){toast('Nothing was cleared: '+(r.error||'no answer'));return;}
+  const id=r.data&&r.data.archiveId;
+  await Promise.all([loadArchives(true),loadOutreach(true)]);trialsRepaint('trial');
+  toast('Saved and cleared — your spreadsheet is downloading');
+  if(id)downloadArchive(id);
+}
+function renderMyStatsPage(){
+  const o=tk.outreach;const empty=o&&o.totals&&!o.totals.sent;
+  const head=empty&&tk.arch&&(tk.arch.list||[]).length?`<div class="card tk-pad tk-muted tk-small">Nothing sent since your last save. Your old history is under Saved history below.</div>`:'';
+  return (o?renderStats(tkStatsFromOutreach(o),{head}):renderMyOutreach(o,tk.outreachErr))+renderSavedHistory();
+}
+/* ---- One client's own stats, on their page: the same view as My stats, plus who can see their dashboard. ---- */
+function tkClientPane(id){return (tk.pane&&tk.pane[id])||'progress'}   // what needs you first; Stats is one tap away
+function setClientPane(id,p){(tk.pane||(tk.pane={}))[id]=p;if(p==='stats')tkClientStatsKick(id);trialsRepaint('trial')}
+function tkClientStatsKick(id){
+  const c=tk.growth[id];if(c&&Date.now()-c.at<TK_GROWTH_FRESH_MS)return;if(tk.growthBusy[id])return;
+  tk.growthBusy[id]=true;
+  loadGrowth(id,tk.growthDays,true).then(()=>{delete tk.growthBusy[id];if(currentView==='trial'&&currentTrialId===id)trialsRepaint('trial',{soft:true});});
+}
+function renderClientPaneSwitch(id,pane){
+  const b=(k,l)=>`<button type="button" class="${pane===k?'active':''}" aria-pressed="${pane===k}" onclick="setClientPane(${tkAttr(id)},${tkAttr(k)})">${l}</button>`;
+  return `<div class="seg tk-pane-switch" role="group" aria-label="Show">${b('progress','Progress')}${b('stats','Stats')}</div>`;
+}
+function renderClientAccess(d,id){
+  const acc=(d&&d.dashboardAccess)||{};const list=acc.sharedWith||[];const ro=typeof hubIsOwner==='function'&&!hubIsOwner()&&document.body&&document.body.classList&&document.body.classList.contains('ro');
+  return `<div class="card tk-pad tk-access" id="tkAccess"><div><h4>Who can see this</h4><p class="tk-muted tk-small">Add someone from their business by email. They get a private link to their own live page — emails sent, opened, replies and booked calls. Nothing else.</p></div>
+    ${list.length?`<ul class="tk-access-list">${list.map(x=>`<li><b>${esc(x.email)}</b> <span class="tk-muted tk-small">since ${esc(tkDate(x.at))}</span></li>`).join('')}</ul>`:'<p class="tk-small tk-muted">Nobody yet.</p>'}
+    ${ro?'':`<div class="tk-access-add"><input type="email" id="tkAccessEmail" data-tk-form placeholder="name@theirbusiness.com" onkeydown="if(event.key==='Enter')clientShare(${tkAttr(id)})"><button class="btn" onclick="clientShare(${tkAttr(id)})">Give access</button>${list.length?`<button class="btn ghost danger" onclick="clientUnshare(${tkAttr(id)})">Stop all access</button>`:''}</div>`}</div>`;
+}
+async function clientShare(id){
+  const el=document.getElementById('tkAccessEmail');const email=el?el.value.trim():'';
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Type their email address first');return;}
+  if(el)el.value='';
+  await trialPost('/api/mc/clients/'+encodeURIComponent(id),{action:'shareDashboard',email},{done:'Sent — '+email+' can see it now',fail:'Could not give access'});
+}
+async function clientUnshare(id){
+  await trialPost('/api/mc/clients/'+encodeURIComponent(id),{action:'unshareDashboard'},{confirm:'Stop everyone\'s access? Their old links stop working. You can give access again any time.',done:'Access stopped — old links no longer work',fail:'Could not stop access'});
+}
+function renderClientStats(d,id){
+  const g=tk.growth[id];const busy=!g&&(tk.growthBusy[id]||!tk.growthErr[id]);
+  return (busy?renderLoading('Loading their stats…'):renderStats(tkStatsFromClient(d,g&&g.data)))+(tk.growthErr[id]&&!g?`<div class="card tk-pad tk-muted tk-small">${esc(tk.growthErr[id])}</div>`:'')+renderClientAccess(d,id);
 }
 /* ---- The application as a Word document (.docx), built here in the browser — no library: a small store-only zip
    with the three parts Word needs. What they sent, the match (fit score), the fit check and our research. ---- */
@@ -2045,7 +2178,7 @@ function trialsHostHTML(view){
     case 'trialsBoard':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderBoard(tk.hub,{at:tk.hubAt,sparks:trialsSparkMap()}):tk.hubErr?renderMachineError(tk.hubErr):renderLoading();
     case 'settings':return renderSettings(trialsSettingsCtx());
     case 'trial':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the list.','All trials',"render('trials')");
-      const d=tk.detail[id];if(id===MY_STATS_ID)return renderMyOutreach(tk.outreach,tk.outreachErr)+(d?renderStaleNote(tk.detailErr[id],tk.detailAt[id])+renderTrialDetail(d,trialTab,Object.assign({at:tk.detailAt[id],behindOpen:tk.behindOpen},trialsCtx(id))):tk.detailErr[id]?'':renderLoading('Loading…'));
+      if(id===MY_STATS_ID)return renderMyStatsPage();const d=tk.detail[id];
       return d?renderStaleNote(tk.detailErr[id],tk.detailAt[id])+renderTrialDetail(d,trialTab,Object.assign({at:tk.detailAt[id],behindOpen:tk.behindOpen},trialsCtx(id))):tk.detailErr[id]?renderMachineError(tk.detailErr[id]):renderLoading('Loading this trial…');}
     case 'trialPurchase':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the list first.','All trials',"render('trials')");
       const p=tk.purchase[id];return p?renderStaleNote(tk.purchaseErr[id],tk.purchaseAt[id])+renderPurchase(p,id,{at:tk.purchaseAt[id]}):tk.purchaseErr[id]?renderMachineError(tk.purchaseErr[id]):renderLoading();}
@@ -2060,7 +2193,7 @@ function trialsRepaint(view,opts){
   if(opts.soft&&tkFormDirty())return;   // never wipe something the owner is typing
   h.innerHTML=trialsHostHTML(view);
   if(view==='inquiry')inquiryTitle();
-  if(view==='trial'&&currentTrialId&&tk.detail[currentTrialId])trialsTitle();
+  if(view==='trial'&&currentTrialId&&(tk.detail[currentTrialId]||currentTrialId===MY_STATS_ID))trialsTitle();
   try{renderNav();updateNotifBadge();}catch(e){}
   if(view==='trial'&&typeof msgScrollDown==='function')msgScrollDown();   // Messages: the newest email in view
   trialsApplyScroll();
@@ -2085,7 +2218,7 @@ function trialsApplyScroll(){
 async function trialsKick(view,force){
   let r;
   if(view==='trials'||view==='trialsBoard'||view==='paying'){if(typeof teamKick==='function'&&typeof tm!=='undefined'&&!tm.data)teamKick(false);r=await loadHub(force);}
-  else if(view==='trial'){const mine=currentTrialId===MY_STATS_ID;const [t]=await Promise.all([loadTrial(currentTrialId,force),mine?loadOutreach(force):null]);r=t;}
+  else if(view==='trial'){if(currentTrialId===MY_STATS_ID){const [o]=await Promise.all([loadOutreach(force),loadArchives(force)]);r=o;}else{const id=currentTrialId;r=await loadTrial(id,force);const d=tk.detail[id];if(d&&tkClientPane(id)==='stats')tkClientStatsKick(id);}}
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
   else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
@@ -2122,6 +2255,7 @@ function trialsSettingsScroll(){
 }
 /* The top bar on a trial: the company is the title; the page itself starts with the three questions. */
 function trialsTitle(){
+  if(typeof MY_STATS_ID!=='undefined'&&currentTrialId===MY_STATS_ID){const t=document.getElementById('ptitle'),p=document.getElementById('psub');if(t)t.textContent='My stats';if(p)p.textContent='Your own outreach — one email per person';return;}
   const d=currentTrialId&&tk.detail[currentTrialId];if(!d)return;const s=tkSimple(d.row||{});
   const mine=typeof MY_STATS_ID!=='undefined'&&currentTrialId===MY_STATS_ID;const t=document.getElementById('ptitle'),p=document.getElementById('psub');if(t)t.textContent=mine?'My stats':s.company;if(p)p.textContent=mine?'Your own outreach — everything you have sent':'';   // who they are is the first line of the page
 }

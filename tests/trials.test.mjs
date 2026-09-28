@@ -415,7 +415,8 @@ test('trial page: three questions on top — Where are they? What happens next? 
   // then: Messages, the onboarding call, the application (decided → one folded line), Behind the scenes (folded)
   const iTop = html.indexOf('tk-top'), iMsgs = html.indexOf('id="tkSec-messages"'), iCall = html.indexOf('id="tkSec-onboardcall"'), iApp = html.indexOf('<details class="tk-appbox" id="tkSec-application">'), iBehind = html.indexOf('<details class="tk-behind" id="tkBehind" ontoggle="trialsBehindToggle(this.open)">');
   assert.ok(iTop >= 0 && iTop < iMsgs && iMsgs < iCall && iCall < iApp && iApp < iBehind, 'top → messages → call → application → behind the scenes');
-  assert.ok(html.indexOf('</section><div id="tkMsgHost"><section class="card tk-msgs" id="tkSec-messages">') === html.indexOf('</section>', iTop), 'Messages comes right after the three questions');
+  assert.ok(html.indexOf('</section><div class="seg tk-pane-switch"') === html.indexOf('</section>', iTop), 'the Progress | Stats switch right under the three questions');
+  assert.ok(/<\/div><div id="tkMsgHost"><section class="card tk-msgs" id="tkSec-messages">/.test(html) && html.indexOf('tk-pane-switch') < iMsgs && html.slice(html.indexOf('tk-pane-switch'), iMsgs).split('<div').length <= 5, 'Messages comes right after the three questions and the switch');
   assert.ok(!html.includes('What you need to do') && !html.includes('Also on your list'), 'the reply to-do is the big button, not a second list');
   assert.ok(!/\bmachine\b|heartbeat|pipeline|\btick\b|\bstates?\b/i.test(visibleText(html.slice(0, iBehind))), 'plain words above Behind the scenes');
   const behind = html.slice(iBehind);

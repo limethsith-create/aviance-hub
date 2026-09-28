@@ -324,3 +324,25 @@ body.ro .tk-app-row{padding-right:20px}
 .tm-free{margin-bottom:8px}
 @media(max-width:560px){.tm-me-row{flex-direction:column}}
 .tk-person-owner{margin-left:auto;font-size:13px;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:2px 10px;white-space:nowrap}
+
+/* Stats: four numbers in one row (My stats and every client's Stats) */
+.tk-keys.tk-keys4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:700px){.tk-keys.tk-keys4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tk-myout{display:grid;gap:14px}
+.tk-myout>.card h4,.tk-access h4,#tkSaved h4{margin:0 0 6px}
+.tk-saved-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:8px}
+.tk-saved-btns{display:flex;gap:8px;flex-wrap:wrap}
+#tkSaved{margin-top:14px}
+.btn.danger{background:var(--red);border-color:var(--red);color:#fff}
+.btn.danger:hover{background:var(--bg);color:var(--red)}
+.btn.ghost.danger{background:var(--bg);color:var(--red);border-color:var(--red)}
+.btn.ghost.danger:hover{background:var(--red);color:#fff}
+/* A client's page: Progress | Stats */
+.tk-pane-switch{display:inline-flex;margin:16px 0 14px}
+.tk-access{display:grid;gap:10px;margin-top:14px}
+.tk-access p{margin:0}
+.tk-access-list{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.tk-access-add{display:flex;gap:8px;flex-wrap:wrap}
+.tk-access-add input{flex:1 1 240px;min-height:44px;padding:8px 12px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit}
+body.ro .tk-saved-btns,body.ro .tk-access-add{display:none}
+.modal-body>p{margin:0 0 12px}
