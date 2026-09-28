@@ -51,9 +51,9 @@ const TK_TABS=[['overview','Overview'],['growth','Growth'],['systems','Parts'],[
 const TK_TAB_ALIAS={numbers:'overview',setup:'deliverability',promises:'comingup',upcoming:'comingup',reports:'comingup'};
 const TK_TRIAL_VIEWS=['trials','paying','trialsBoard','trial','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
 /* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
-const TK_SETTINGS=['alerts','phone','details','keys','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
+const TK_SETTINGS=['alerts','phone','details','keys','google','inboxes','warmup','replybot','demo','status','behind','advanced','look','account'];
 /* A to-do that opens a Settings section ({type:'view', view:'settings', section}): the button's words. */
-const TK_SETTINGS_NAMES={alerts:'Alerts',details:'Your details',keys:'Keys',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot'};
+const TK_SETTINGS_NAMES={alerts:'Alerts',details:'Your details',keys:'Keys',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot',demo:'Test run'};
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
@@ -552,7 +552,7 @@ function renderTrialCard(row,spark){
   row=row||{};const todo=(row.todo||[])[0];const alerts=Number(row.openAlerts)||0;const urgent=Number(row.urgentAlerts)||0;const review=tkIsUnderReview(row);
   const sparkable=!TK_PRE_WARMUP.includes(row.state);
   return `<div class="tk-card${review?' review':''}" onclick="${review?`openTrial(${tkAttr(row.id)},null,'application')`:`openTrial(${tkAttr(row.id)})`}">
-    <div class="tk-card-top"><b>${esc(row.name||row.id||'—')}</b>${tkDot(tkHealthClass(row.health))}</div>
+    <div class="tk-card-top"><b>${esc(row.name||row.id||'—')}</b>${tkTestPill(row)}${tkDot(tkHealthClass(row.health))}</div>
     <span class="tk-state">${esc(tkStateLabel(row))}</span>${review?'<span class="tk-new">New application</span>':''}${review&&row.fitScore?`<div class="tk-card-meta">${tkScoreBadge(row.fitScore)}</div>`:''}
     ${renderFive(row.five)}
     ${sparkable?`<div class="tk-card-spark-host" id="${tkDomId('tkSpark-',row.id)}">${renderCardSpark(spark)}</div>`:''}
@@ -753,6 +753,66 @@ const TK_PAID_PLANS=['starter','growth','scale'];
 function tkIsPaidRow(r){return !!r&&TK_PAID_PLANS.includes(String(r.plan||'').toLowerCase())}
 function tkIsPaidId(id){if(id==null)return false;const r=tkFindRow(id);if(r)return tkIsPaidRow(r);const d=tk.detail[id];return !!(d&&d.row&&tkIsPaidRow(d.row))}
 function tkPlanName(p){p=String(p||'');return p?p[0].toUpperCase()+p.slice(1):''}
+/* The test run (Settings › Test run): made-up clients carry demo:true on their row (row.demo) — a small "Test" tag
+   next to their name everywhere it shows, so nobody mistakes them for real clients. */
+function tkIsDemo(r){return !!r&&(tkTruthy(r.demo)||!!(r.row&&tkTruthy(r.row.demo)))}
+function tkIsDemoId(id){if(id==null||id==='')return false;const r=tkFindRow(id);if(r&&tkIsDemo(r))return true;const d=tk.detail&&tk.detail[id];return !!(d&&tkIsDemo(d.row))}
+function tkTestPill(r){return tkIsDemo(r)?'<span class="pill tk-test" title="A made-up client from the test run">Test</span>':''}
+/* ---- Money (owner only): the machine keeps ONE invoice per client — the month-one invoice (HUB-API.md `invoice` on
+   GET /api/mc/hub/{id}: number, amount, issuedAt, paidAt, status sent|paid|blocked, plan). An `invoices` list is read
+   too, for when the machine keeps more than one. Board rows carry no invoice, so the Paying list's totals come from the
+   clients' pages (loaded in the background, tkMoneyKick). ---- */
+function tkDollars(n){const x=tkNorm(n);if(x==null)return '—';return (x<0?'-':'')+'$'+Math.abs(x).toLocaleString('en-US',{minimumFractionDigits:x%1?2:0,maximumFractionDigits:2})}
+function tkInvoicesOf(src){
+  if(!src||typeof src!=='object')return null;
+  const raw=Array.isArray(src.invoices)?src.invoices:src.invoice&&typeof src.invoice==='object'?[src.invoice]:'invoice' in src||'invoices' in src?[]:null;
+  if(!raw)return null;
+  return raw.filter(i=>i&&typeof i==='object').map(i=>({number:i.number||i.invoiceNo||null,plan:i.plan||null,amount:tkNorm(i.amount),issuedAt:i.issuedAt||i.sentAt||null,paidAt:i.paidAt||null,
+    paid:!!(i.paidAt||i.status==='paid'),status:i.status||null,blockedReason:i.blockedReason||null})).sort((a,b)=>String(a.issuedAt||'').localeCompare(String(b.issuedAt||'')));
+}
+function tkMonthKey(v){const d=tkParseDate(v);if(!d)return null;try{return new Intl.DateTimeFormat('en-CA',{timeZone:tkOwnerZone(),year:'numeric',month:'2-digit'}).format(d).slice(0,7)}catch(e){return d.toISOString().slice(0,7)}}
+/* Paid invoices only. {month, all, demo, count, checked, waiting, failed} — `waiting`: clients whose page is not loaded yet. */
+function tkMoneyTotals(rows,now){
+  const mk=tkMonthKey(now||new Date());const out={month:0,all:0,demo:0,count:0,checked:0,waiting:0,failed:0};
+  (rows||[]).forEach(r=>{if(!r||r.id==null)return;
+    const d=tk.detail[r.id];const inv=tkInvoicesOf(r)||tkInvoicesOf(d);
+    if(!inv){if(tk.detailErr[r.id]&&!d)out.failed++;else out.waiting++;return;}
+    out.checked++;
+    inv.filter(i=>i.paid&&i.amount!=null).forEach(i=>{out.all+=i.amount;out.count++;if(tkMonthKey(i.paidAt)===mk)out.month+=i.amount;if(tkIsDemo(r))out.demo+=i.amount;});
+  });
+  return out;
+}
+function renderMoneyTotals(rows,now){
+  if(!hubIsOwner()||!rows||!rows.length)return '';
+  const t=tkMoneyTotals(rows,now);
+  if(!t.checked)return `<div class="card tk-money-sum"><span class="tk-muted">${t.waiting?'Counting the money received…':'The money received could not be checked. Open a client to see their invoice.'}</span></div>`;
+  const note=[t.waiting?'still counting '+t.waiting+' more':'',t.failed?t.failed+' could not be checked':'',t.demo?'includes '+tkDollars(t.demo)+' from the test run':''].filter(Boolean).join(' · ');
+  return `<div class="card tk-money-sum"><div class="tk-money-fig"><small>Received this month</small><b>${tkDollars(t.month)}</b></div><div class="tk-money-fig"><small>All time</small><b>${tkDollars(t.all)}</b></div><p class="tk-muted tk-small">${esc(t.count+' paid invoice'+(t.count===1?'':'s')+(note?' · '+note:''))}</p></div>`;
+}
+/* Load the pages of paying clients the hub has not seen yet (owner only, each once) so the totals can count them. */
+function tkMoneyKick(){
+  if(!hubIsOwner()||!tk.hub)return null;
+  const tried=tk.moneyTried||(tk.moneyTried={});
+  const ids=tkListRows(tk.hub).filter(r=>tkIsPaidRow(r)&&!tkInvoicesOf(r)&&!tk.detail[r.id]&&!tried[r.id]).map(r=>r.id).slice(0,20);
+  if(!ids.length)return null;
+  ids.forEach(id=>{tried[id]=1;});
+  return Promise.all(ids.map(id=>loadTrial(id,false))).then(()=>trialsRepaint('paying',{soft:true}));
+}
+/* A client's Stats: their plan, each invoice and what they have paid in total. The owner only; never on My stats. */
+function renderMoneyCard(d){
+  if(!hubIsOwner())return '';
+  d=d||{};const row=d.row||{};
+  const inv=tkInvoicesOf(d)||[];
+  const plan=row.plan||(inv[inv.length-1]||{}).plan||'';
+  const paidPlan=TK_PAID_PLANS.includes(String(plan).toLowerCase());
+  const planText=paidPlan?tkPlanName(plan):plan?'Free trial':'—';
+  const got=inv.filter(i=>i.paid&&i.amount!=null).reduce((n,i)=>n+i.amount,0);
+  const status=i=>i.paid?`<span class="pill green">Paid${i.paidAt?' '+esc(tkDate(i.paidAt)):''}</span>`:i.status==='blocked'?'<span class="pill grey">Not sent yet</span>':'<span class="pill amber">Not paid yet</span>';
+  const table=inv.length?`<div class="tk-scroll"><table class="tk-table tk-money-table"><tr><th>Invoice</th><th class="num">Amount</th><th>Issued</th><th>Paid</th></tr>${inv.map(i=>`<tr><td data-label="Invoice">${esc(i.number||'—')}</td><td class="num" data-label="Amount">${tkDollars(i.amount)}</td><td data-label="Issued">${esc(tkDate(i.issuedAt))}</td><td data-label="Paid">${status(i)}</td></tr>`).join('')}</table></div>`
+    :`<p class="tk-muted tk-small">${paidPlan?'No invoice yet.':'No invoice — a trial is free.'}</p>`;
+  return `<div class="card tk-money" id="tkMoney"><div class="tk-money-head"><h4>Money</h4><span class="tk-muted tk-small">Plan <b>${esc(planText)}</b></span></div>
+    <div class="tk-money-total"><small>Received from them</small><b>${tkDollars(got)}</b></div>${table}</div>`;
+}
 function tkListGroups(hub,paid){
   // a trial that converted is a paying client now, and stays in the Trials history too (under Done)
   const rows=tkListRows(hub).filter(r=>paid?tkIsPaidRow(r):(!tkIsPaidRow(r)||r.state==='converted')).map(row=>({row,s:tkSimple(row)}));
@@ -781,7 +841,7 @@ function renderTrialRow(x){
   const say=j.notTaken&&/^declined\.?$/i.test(s.label.trim())?'':s.label;
   const step=j.notTaken?'':tkStepText(j,s.label);
   const row=`<button type="button" class="tk-person${s.needsYou?' needs':''}${s.done?' done':''}" onclick="${go}"><span class="tk-person-main">
-    <span class="tk-person-top"><span class="tk-person-co">${esc(s.company)}</span>${s.person?`<span class="tk-person-name">${esc(s.person)}</span>`:''}${tkLooksAfter(r.id)}</span>
+    <span class="tk-person-top"><span class="tk-person-co">${esc(s.company)}</span>${tkTestPill(r)}${s.person?`<span class="tk-person-name">${esc(s.person)}</span>`:''}${tkLooksAfter(r.id)}</span>
     <span class="tk-person-where">${renderStepBar(j)}${step?`<span class="tk-person-step">${esc(step)}</span>`:''}</span>
     ${say?`<span class="tk-person-say">${esc(say)}</span>`:''}
     ${you?`<span class="tk-person-you">${esc(you)}</span>`:s.next?`<span class="tk-person-next">${esc(s.next)}</span>`:''}
@@ -798,7 +858,7 @@ function renderApplicationRow(r){
   const fs=r.fitScore||null;const name=(r.simple&&r.simple.company)||r.name||r.id;const id=tkAttr(r.id);
   const plan=tkIsPaidRow(r)?`<span class="tk-app-plan">${esc(tkPlanName(r.plan))}</span>`:'';
   return `<div class="tk-app-row"><button type="button" class="tk-app-open" onclick="downloadApplication(${id})" title="Open the application as a Word document">
-    <span class="tk-app-name">${esc(name)}${plan}</span><span class="pill ${tkMatchClass(fs)} tk-app-match">${esc(tkMatchText(fs))}</span><span class="tk-app-doc">Application (Word) ↓</span></button>
+    <span class="tk-app-name">${esc(name)}${plan}${tkTestPill(r)}</span><span class="pill ${tkMatchClass(fs)} tk-app-match">${esc(tkMatchText(fs))}</span><span class="tk-app-doc">Application (Word) ↓</span></button>
     <div class="tk-app-btns"><button type="button" class="btn" onclick="trialApproveApplication(${id})">Say yes</button><button type="button" class="btn ghost" onclick="openDeclineApplication(${id})">Say no…</button><button type="button" class="btn ghost" onclick="openTrial(${id},null,'application')">Details</button></div></div>`;
 }
 /* Where everyone is: one tile per stage of the journey, with how many clients are in it. A tap shows just that stage's
@@ -821,7 +881,7 @@ function renderTrialList(hub,meta,paid){
     :emptyState(I.trials||'','No trials yet','When someone applies on your website, they show up here.','Add a trial client yourself','openNewTrialClient()'));
   const all=g.needs.concat(g.going,g.done);
   const active=(tk.stage&&tk.stage[paid?'paying':'trials'])||null;
-  const tiles=renderStageTiles(all,active,paid);
+  const tiles=(paid?renderMoneyTotals(all.map(x=>x.row),meta.now):'')+renderStageTiles(all,active,paid);
   const list=xs=>`<div class="tk-people">${xs.map(x=>tkIsUnderReview(x.row)?renderApplicationRow(x.row):renderTrialRow(x)).join('')}</div>`;
   const head=(t,cls,n)=>`<h3 class="tk-group${cls?' '+cls:''}">${esc(t)}${n!=null?` <span class="tk-done-count">${n}</span>`:''}</h3>`;
   if(active){
@@ -1000,6 +1060,7 @@ function renderTrialTop(d,meta,act){
   const who=[s.person?`<b>${esc(s.person)}</b>`:'',row.contactEmail?`<a href="mailto:${esc(row.contactEmail)}">${esc(row.contactEmail)}</a>`:'',row.website?tkLink(row.website):''].filter(Boolean).join(' · ');
   const say=j.notTaken&&/^declined\.?$/i.test(s.label.trim())?'':s.label;const day=tkDayText(j,s.label);
   return `<section class="card tk-top${s.needsYou&&act.kind!=='none'?' needs':''}" id="tkTop">
+    ${tkIsDemo(row)?`<p class="tk-top-test">${tkTestPill(row)}<span class="tk-muted tk-small">A made-up client from the test run. No real emails go out.</span></p>`:''}
     ${who?`<p class="tk-top-who">${who}</p>`:''}
     <div class="tk-q"><h3 class="tk-q-title">Where are they?</h3>${renderJourney(j)}${say?`<p class="tk-q-big">${esc(say)}</p>`:''}${day?`<p class="tk-q-day">${esc(day)}</p>`:''}</div>
     <div class="tk-q"><h3 class="tk-q-title">What happens next?</h3><p class="tk-q-text">${esc(tkNextText(s,j,act,d,meta.now))}</p></div>
@@ -1876,6 +1937,7 @@ function renderSettings(ctx){
     (ib?sec('inboxes','Inboxes & domains','You buy on CheapInboxes, we set up the rest.',ib.state,ib.body):'')+
     (wu?sec('warmup','Warm-up','Free helper email accounts that warm up new inboxes.',wu.state,wu.body):'')+
     (rb?sec('replybot','Reply bot','Answers the simple questions for you, with fixed answers.',rb.state,rb.body):'')+
+    sec('demo','Test run','Two made-up clients, to click through everything.',renderDemoSet(ctx.demo).state,renderDemoSet(ctx.demo).body)+
     sec('status','Is everything running?','A quick health check of the system.',st?`<span class="pill ${st[0]}">${st[0]==='green'?'Yes':st[0]==='amber'?'Mostly':'Needs a look'}</span>`:'',statusBody)+
     sec('behind','Behind the scenes','Every trial by stage, every to-do and the waiting list.','',
       `<p class="tk-set-text">The full picture: every trial by stage, every to-do in one list, the waiting list and your own sending.</p><button type="button" class="btn" onclick="render('trialsBoard')">Open behind the scenes</button>`)+
@@ -1886,6 +1948,51 @@ function renderSettings(ctx){
     sec('account','Your account','Sign out of the hub.','',
       `<p class="tk-set-text">${ctx.email?`Signed in as <b>${esc(ctx.email)}</b>.`:'Signed in.'}</p><button type="button" class="btn ghost" onclick="logout()">Log out</button>`)+
   `</div>`;
+}
+
+/* Settings › Test run (GET/POST /api/mc/demo, the owner only): two made-up clients — a trial and a paying client —
+   who went through everything, so the owner can click through a whole month. {data:{loaded, ids, at}, err, missing (404:
+   the system is not updated yet), busy}. */
+function renderDemoSet(st){
+  st=st||{};const d=st.data;const ro=typeof document!=='undefined'&&document.body&&document.body.classList&&document.body.classList.contains('ro');
+  const text=`<p class="tk-set-text">Two made-up clients — a trial and a paying client — who went through everything: applying, your yes, the calls, inbox setup, warm-up, a month of sending, replies and the reply bot, and payment. No real emails are sent.</p>`;
+  if(st.missing)return {state:'<span class="pill grey">Not available yet</span>',body:text+`<p class="tk-note">Your system hasn't been updated for the test run yet. Once it has, the button shows up here.</p>`};
+  if(!d)return {state:'',body:text+(st.err?`<p class="tk-note red">${esc(st.err)} <button type="button" class="tk-textbtn" onclick="loadDemo(true).then(()=>trialsRepaint('settings'))">Try again</button></p>`:renderLoading('Checking…'))};
+  const on=!!d.loaded;const n=Array.isArray(d.ids)?d.ids.length:0;const busy=st.busy?' disabled':'';
+  const where=on?`<p class="tk-set-text"><b>The test run is loaded</b>${d.at?' (since '+esc(tkDateTime(d.at))+')':''}: ${n===1?'one made-up client':tkNum(n)+' made-up clients'}. Look for the <span class="pill tk-test">Test</span> tag in Trials and Paying clients.</p>`:`<p class="tk-set-text">The test run is not loaded.</p>`;
+  const btns=ro?'':on?`<div class="tk-set-links"><button type="button" class="btn" onclick="render('trials')">Open Trials</button><button type="button" class="btn ghost danger"${busy} onclick="demoAction('remove')">Remove the test run</button></div>`
+    :`<div class="tk-set-links"><button type="button" class="btn"${busy} onclick="demoAction('load')">Load the test run</button></div>`;
+  return {state:on?'<span class="pill green">Loaded</span>':'<span class="pill grey">Not loaded</span>',body:text+where+(st.busy?`<p class="tk-muted tk-small">${st.busy==='load'?'Loading the test run…':'Removing the test run…'}</p>`:'')+btns};
+}
+async function loadDemo(force){
+  const st=tk.demo||(tk.demo={});
+  if(!force&&(st.missing||(st.data&&Date.now()-(st.at||0)<TK_FRESH_MS)))return {ok:true,data:st.data};
+  if(!hubIsOwner())return {ok:false,error:'Owner only'};
+  const r=await machineFetch('/api/mc/demo');
+  if(r.ok&&r.data&&typeof r.data==='object'){st.data=r.data;st.at=Date.now();st.err=null;st.missing=false;}
+  else if(r.status===404){st.missing=true;st.err=null;r.ok=true;}
+  else st.err=r.error||"Couldn't check the test run. Try again.";
+  return r;
+}
+async function demoAction(action){
+  if(!hubIsOwner())return;
+  const st=tk.demo||(tk.demo={});if(st.busy)return;
+  const ask=action==='remove'?'Remove the test run? The two made-up clients and everything about them go away. Your real clients are not touched.'
+    :'Load the test run? Two made-up clients show up in Trials and Paying clients, with a Test tag. No real emails are sent.';
+  if(typeof confirm==='function'&&!confirm(ask))return;
+  st.busy=action;trialsRepaint('settings');
+  const r=await machineFetch('/api/mc/demo',{method:'POST',body:{action}});
+  st.busy=null;
+  if(r.status===404){st.missing=true;trialsRepaint('settings');toast("The test run isn't available yet — your system needs an update first");return r;}
+  if(!r.ok){trialsRepaint('settings');toast((action==='remove'?'Not removed: ':'Not loaded: ')+(r.error||'try again'));return r;}
+  // the two clients appear (or go): drop what the hub remembers about them, then show Trials
+  const gone=action==='remove'?((r.data&&(r.data.removed||r.data.ids))||(st.data&&st.data.ids)||[]):[];
+  (Array.isArray(gone)?gone:[]).forEach(id=>{delete tk.detail[id];delete tk.detailAt[id];});
+  tk.moneyTried={};
+  toast(action==='remove'?'The test run is removed':'The test run is loaded — the two made-up clients are in Trials and Paying clients');
+  await Promise.all([loadHub(true),loadDemo(true)]);
+  render('trials');
+  return r;
 }
 
 /* ===================== 6. VIEWS (called by the shell router) ===================== */
@@ -2073,7 +2180,9 @@ async function clientUnshare(id){
 }
 function renderClientStats(d,id){
   const g=tk.growth[id];const busy=!g&&(tk.growthBusy[id]||!tk.growthErr[id]);
-  return (busy?renderLoading('Loading their stats…'):renderStats(tkStatsFromClient(d,g&&g.data)))+(tk.growthErr[id]&&!g?`<div class="card tk-pad tk-muted tk-small">${esc(tk.growthErr[id])}</div>`:'')+renderClientAccess(d,id);
+  const own=id==='aviance'||id==='_test'||(typeof MY_STATS_ID!=='undefined'&&id===MY_STATS_ID);   // the owner's own sending: no money
+  const money=own?'':renderMoneyCard(d);
+  return (busy?renderLoading('Loading their stats…')+money:renderStats(tkStatsFromClient(d,g&&g.data),{extra:money}))+(tk.growthErr[id]&&!g?`<div class="card tk-pad tk-muted tk-small">${esc(tk.growthErr[id])}</div>`:'')+renderClientAccess(d,id);
 }
 /* ---- The application as a Word document (.docx), built here in the browser — no library: a small store-only zip
    with the three parts Word needs. What they sent, the match (fit score), the fit check and our research. ---- */
@@ -2222,10 +2331,10 @@ function trialsApplyScroll(){
 }
 async function trialsKick(view,force){
   let r;
-  if(view==='trials'||view==='trialsBoard'||view==='paying'){if(typeof teamKick==='function'&&typeof tm!=='undefined'&&!tm.data)teamKick(false);r=await loadHub(force);}
+  if(view==='trials'||view==='trialsBoard'||view==='paying'){if(typeof teamKick==='function'&&typeof tm!=='undefined'&&!tm.data)teamKick(false);r=await loadHub(force);if(view==='paying')tkMoneyKick();}
   else if(view==='trial'){if(currentTrialId===MY_STATS_ID){const [o]=await Promise.all([loadOutreach(force),typeof hubIsOwner==='function'&&hubIsOwner()?loadArchives(force):null]);r=o;}else{const id=currentTrialId;r=await loadTrial(id,force);const d=tk.detail[id];if(d&&tkClientPane(id)==='stats')tkClientStatsKick(id);}}
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
-  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
+  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null,loadDemo(false)]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
   trialsRepaint(view,{soft:true});
   return r;
@@ -2244,7 +2353,7 @@ function trialsSettingsCtx(){
   return {hub:tk.hub,hubErr:tk.hubErr,at:tk.hubAt,alerts:tk.alerts,alertsErr:tk.alertsErr,alertsAt:tk.alertsAt,filter:trialsAlertFilter,open:tk.setOpen,
     phone:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():'',dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:'',
     google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,inboxes:typeof abSettingsCtx==='function'?abSettingsCtx():null,
-    warmup:typeof wuSettingsCtx==='function'?wuSettingsCtx():null,details:tk.detail,
+    warmup:typeof wuSettingsCtx==='function'?wuSettingsCtx():null,details:tk.detail,demo:tk.demo,
     keys:typeof kySettingsCtx==='function'?kySettingsCtx():null,owner:typeof ydSettingsCtx==='function'?ydSettingsCtx():null,left:typeof kyStillToDo==='function'?kyStillToDo():null};
 }
 /* #alerts, #settings/warmup, the bell and to-dos ({view:'settings', section}) open Settings with that section open and in view. */
@@ -2262,7 +2371,7 @@ function trialsSettingsScroll(){
 function trialsTitle(){
   if(typeof MY_STATS_ID!=='undefined'&&currentTrialId===MY_STATS_ID){const t=document.getElementById('ptitle'),p=document.getElementById('psub');if(t)t.textContent='My stats';if(p)p.textContent='Your own outreach — one email per person';return;}
   const d=currentTrialId&&tk.detail[currentTrialId];if(!d)return;const s=tkSimple(d.row||{});
-  const mine=typeof MY_STATS_ID!=='undefined'&&currentTrialId===MY_STATS_ID;const t=document.getElementById('ptitle'),p=document.getElementById('psub');if(t)t.textContent=mine?'My stats':s.company;if(p)p.textContent=mine?'Your own outreach — everything you have sent':'';   // who they are is the first line of the page
+  const mine=typeof MY_STATS_ID!=='undefined'&&currentTrialId===MY_STATS_ID;const t=document.getElementById('ptitle'),p=document.getElementById('psub');if(t){t.textContent=mine?'My stats':s.company;if(!mine&&tkIsDemo(d.row)&&t.insertAdjacentHTML)t.insertAdjacentHTML('beforeend',' '+tkTestPill(d.row));}if(p)p.textContent=mine?'Your own outreach — everything you have sent':'';   // who they are is the first line of the page
 }
 /* Growth fetches — only from the owner's own clicks (opening a trial or a tab), never from the timer. */
 function trialsEnsureOverview(id){
@@ -2630,7 +2739,7 @@ function trialsOnRender(v){
 /* Sign-out: drop every cached answer, including the sparkline history kept in localStorage. */
 function trialsForget(){
   trialsStopTimer();
-  Object.assign(tk,{outreach:null,outreachAt:0,outreachErr:null,hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{}});
+  Object.assign(tk,{outreach:null,outreachAt:0,outreachErr:null,hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{},demo:null,moneyTried:{}});
   currentTrialId=null;trialTab='overview';tk.behindOpen=false;tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;
   try{inquiriesForget();}catch(e){}
   try{messagesForget();}catch(e){}

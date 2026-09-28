@@ -136,6 +136,8 @@ function calIsLaunch(m){return CAL_KINDS[String((m&&m.kind)||'').toLowerCase()]=
 /* The machine's title ("Launch call — Ridgeline IT"); without one, the launch call still says what it is. */
 function calTitle(m){m=m||{};if(m.status==='blocked')return String(m.title||'Busy');if(m.title)return String(m.title);return calIsLaunch(m)&&m.company?'Launch call — '+m.company:m.company?'Call — '+m.company:'Meeting'}
 function calWhoText(m){m=m||{};return m.person&&m.company?m.person+' ('+m.company+')':String(m.person||m.company||'them')}
+/* A call with a made-up client from the test run (trials.js tkIsDemoId): the small "Test" tag beside their name. */
+function calTestTag(m){return m&&(tkTruthy(m.demo)||(m.clientId!=null&&m.clientId!==''&&typeof tkIsDemoId==='function'&&tkIsDemoId(String(m.clientId))))?' <span class="pill tk-test">Test</span>':''}
 function calName(m){return (m&&(tkFirstName(m.person)||m.company))||'They'}
 function calSourceText(s){return CAL_SOURCE[s]||String(s||'')}
 /* A confirmed call's Google Meet link — only a safe https link, never javascript: or data:. */
@@ -293,7 +295,7 @@ function renderCalAgenda(model){
   if(model.empty)return `<div class="cal-agenda"><p class="cal-anone">Nothing booked this week.</p></div>`;
   return `<div class="cal-agenda">${model.days.map(d=>`<section class="cal-aday${d.today?' today':''}"><h4>${esc(d.label)}${d.today?'<span class="cal-today-tag">Today</span>':''}</h4>${d.items.length
     ?`<ol class="cal-alist">${d.items.slice().sort((a,b)=>a.t-b.t).map(x=>{const m=x.m,S=calStatusOf(m),t=new Date(x.t);const who=m.status==='blocked'?calTitle(m):String(m.company||calTitle(m));
-      return `<li><button type="button" class="cal-aitem ${S.cls}${calIsLaunch(m)?' launch':''}" onclick="calOpenMeeting(${tkAttr(m.id)})"><span class="cal-atime"><b>${esc(calTime(t,st.ownerZone))}</b><small>${esc(calWeekdayName(t,st.usZone)+' '+calTime(t,st.usZone))} ET</small></span><span class="cal-amain"><b>${calMeetLink(m)?CAL_CAM:''}${esc(who)}</b>${m.person&&m.status!=='blocked'?`<small>${esc(m.person)}</small>`:''}<span class="cal-astatus">${calIsLaunch(m)?'Launch call · ':''}${esc(S.short)} · ${x.mins} min${calMeetLink(m)?' · Google Meet':''}</span></span></button></li>`}).join('')}</ol>`
+      return `<li><button type="button" class="cal-aitem ${S.cls}${calIsLaunch(m)?' launch':''}" onclick="calOpenMeeting(${tkAttr(m.id)})"><span class="cal-atime"><b>${esc(calTime(t,st.ownerZone))}</b><small>${esc(calWeekdayName(t,st.usZone)+' '+calTime(t,st.usZone))} ET</small></span><span class="cal-amain"><b>${calMeetLink(m)?CAL_CAM:''}${esc(who)}${m.status==='blocked'?'':calTestTag(m)}</b>${m.person&&m.status!=='blocked'?`<small>${esc(m.person)}</small>`:''}<span class="cal-astatus">${calIsLaunch(m)?'Launch call · ':''}${esc(S.short)} · ${x.mins} min${calMeetLink(m)?' · Google Meet':''}</span></span></button></li>`}).join('')}</ol>`
     :'<p class="cal-anone">Nothing booked</p>'}</section>`).join('')}</div>`;
 }
 function renderCalRequest(m,st,meta){
@@ -304,7 +306,7 @@ function renderCalRequest(m,st,meta){
   const asked=tkParseDate(m.createdAt)?'Asked '+tkRel(m.createdAt,now):'';
   const clocks=w?[w.us,w.their,calMinutes(m)+' min',asked,m.source?calSourceText(m.source):''].filter(Boolean).join(' · '):'';
   return `<div class="card cal-req${prop?' later':''}${focus?' focus':''}" id="${esc(tkDomId('calReq-',id))}">
-    <div class="cal-req-main"><div class="cal-req-who"><b class="cal-req-co">${esc(m.company||calTitle(m))}</b>${m.person?`<span class="cal-req-person">${esc(m.person)}</span>`:''}</div>
+    <div class="cal-req-main"><div class="cal-req-who"><b class="cal-req-co">${esc(m.company||calTitle(m))}</b>${calTestTag(m)}${m.person?`<span class="cal-req-person">${esc(m.person)}</span>`:''}</div>
     ${w?`<div class="cal-req-when" title="${esc(clocks)}">${esc(w.big)}</div>`:'<div class="cal-req-when">No time given</div>'}
     ${past?'<p class="cal-req-late">This time has passed.</p>':''}
     ${prop?`<p class="cal-req-prop">You suggested ${esc(prop.big)} — waiting for them.</p>`:''}
@@ -386,7 +388,7 @@ function renderCalMeeting(m,st,meta){
   const asked=status==='requested'&&m.proposed&&calHeldAt(m)!==m.start?calWhen(m.start,st,m.theirZone):null;
   const mail=calEmail(m.email);
   const kv=[];
-  if(status!=='blocked'&&(m.company||m.person))kv.push(['Who',`${m.company?`<b>${esc(m.company)}</b>`:''}${m.company&&m.person?' — ':''}${esc(m.person||'')}${m.clientId!=null&&m.clientId!==''?` <button type="button" class="tk-textbtn cal-trial-link" onclick="closeModal();openTrial(${tkAttr(m.clientId)})">Open their trial</button>`:''}`]);
+  if(status!=='blocked'&&(m.company||m.person))kv.push(['Who',`${m.company?`<b>${esc(m.company)}</b>`:''}${m.company&&m.person?' — ':''}${esc(m.person||'')}${calTestTag(m)}${m.clientId!=null&&m.clientId!==''?` <button type="button" class="tk-textbtn cal-trial-link" onclick="closeModal();openTrial(${tkAttr(m.clientId)})">Open their trial</button>`:''}`]);
   if(mail)kv.push(['Email',`<a href="mailto:${esc(mail)}">${esc(mail)}</a>`]);
   const rest=long===S.short?'':long.indexOf(S.short+' — ')===0?long.charAt(S.short.length+3).toUpperCase()+long.slice(S.short.length+4):long;   // the pill already says the first words
   kv.push(['Status',`<span class="pill ${S.pill}">${esc(S.short)}</span> ${esc(rest)}`]);
