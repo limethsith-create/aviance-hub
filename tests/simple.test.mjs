@@ -624,11 +624,11 @@ test('buttons say exactly what happens', () => {
 });
 
 /* ───────────── 7. Settings: everything else, as named sections ───────────── */
-test('Settings: Alerts, Phone alerts, Your details, Keys, Google Meet, Inboxes & domains, Warm-up, Reply bot, Is everything running?, Behind the scenes, Advanced, Light or dark, Your account — each folds open, each says its state in one word', () => {
+test('Settings: Alerts, Phone alerts, Your details, Keys, Google Meet, Inboxes & domains, Warm-up, Reply bot, Test run, Is everything running?, Behind the scenes, Advanced, Light or dark, Your account — each folds open, each says its state in one word', () => {
   const ctx = { hub: fullHub, at: Date.now(), alerts: fullHub.alerts, alertsAt: Date.now(), filter: 'open', open: {}, phone: '', dark: false, email: 'owner@example.com', now: NOW };
   const out = renderSettings(ctx);
-  assert.deepEqual([...out.matchAll(/<span class="tk-set-title">([^<]+)<\/span>/g)].map((m) => m[1]), ['Alerts', 'Phone alerts', 'Your details', 'Keys', 'Google Meet', 'Inboxes &amp; domains', 'Warm-up', 'Reply bot', 'Is everything running?', 'Behind the scenes', 'Advanced', 'Light or dark', 'Your account']);
-  assert.equal(count(out, /<details class="tk-set" id="tkSet-[a-z]+" ontoggle=/g), 13, 'all folded to begin with');
+  assert.deepEqual([...out.matchAll(/<span class="tk-set-title">([^<]+)<\/span>/g)].map((m) => m[1]), ['Alerts', 'Phone alerts', 'Your details', 'Keys', 'Google Meet', 'Inboxes &amp; domains', 'Warm-up', 'Reply bot', 'Test run', 'Is everything running?', 'Behind the scenes', 'Advanced', 'Light or dark', 'Your account']);
+  assert.equal(count(out, /<details class="tk-set" id="tkSet-[a-z]+" ontoggle=/g), 14, 'all folded to begin with');
   assert.ok(between(out, 'tkSet-alerts', 'tkSet-phone').includes('<span class="pill amber">2 not seen</span>'));
   assert.ok(between(out, 'tkSet-phone', 'tkSet-google').includes('<span class="pill grey">Off</span>') && between(renderSettings(Object.assign({}, ctx, { phone: 'On' })), 'tkSet-phone', 'tkSet-google').includes('<span class="pill green">On</span>'));
   assert.ok(between(out, 'tkSet-status', 'tkSet-behind').includes('<span class="pill green">Yes</span>'));
