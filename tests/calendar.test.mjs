@@ -444,13 +444,13 @@ test('week buttons: ◀ ▶ and Today ask the machine for that week; while a new
   } finally { offline(); calendarStopTimer(); trialsStopTimer(); }
 });
 
-test('shell: Calendar is the second of the four places, with an amber badge for the requests waiting; #calendar deep links; ⌘K; the bell', async () => {
+test('shell: Calendar is the third place (after Trials and Paying clients), with an amber badge for the requests waiting; #calendar deep links; ⌘K; the bell', async () => {
   fresh(); const mc = fakeMachine();
   try {
     assert.equal(views.calendar.title, 'Calendar');
-    assert.deepEqual(navItems().map((i) => i.view), ['trials', 'calendar', 'inquiries', 'mystats', 'settings']);
+    assert.deepEqual(navItems().map((i) => i.view), ['trials', 'paying', 'calendar', 'mystats', 'settings']);
     render('calendar'); await tick();
-    const item = navItems()[1];
+    const item = navItems()[2];
     assert.equal(item.label, 'Calendar'); assert.equal(item.icon, I.calendar); assert.equal(item.badge, 2); assert.equal(item.badgeTitle, '2 waiting for your yes'); assert.equal(item.tone, 'amber');
     for (const id of ['navArea', 'tabBar']) assert.ok(el(id).innerHTML.includes(`onclick="render('calendar')" aria-label="Calendar — 2 waiting for your yes" aria-current="page">`) && el(id).innerHTML.includes('<span class="badge amber" title="2 waiting for your yes" aria-hidden="true">2</span>'), id);
     assert.deepEqual(parseDeepLink('#calendar'), { view: 'calendar' });

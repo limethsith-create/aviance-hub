@@ -921,3 +921,13 @@ a.tk-brief-mark:hover,a.tk-brief-mark:focus-visible{background:var(--text);color
 .tk-myout .tk-key{cursor:default}
 .tk-myout details.card summary{cursor:pointer;min-height:44px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .tk-myout h4{margin:0 0 8px}
+
+/* Applications waiting for you: name, match %, Word document, yes / no */
+.tk-apps{display:grid;gap:10px;margin-bottom:18px}
+.tk-app-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.tk-app-open{flex:1 1 260px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;min-height:44px;background:none;border:0;padding:0;font:inherit;color:var(--text);text-align:left;cursor:pointer}
+.tk-app-name{font-weight:600;display:inline-flex;align-items:center;gap:8px}
+.tk-app-plan{font-size:13px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--surface-2,rgba(127,127,127,.12))}
+.tk-app-match{font-weight:600}
+.tk-app-doc{font-size:13px;color:var(--accent,#2563eb);text-decoration:underline}
+.tk-app-btns{display:flex;flex-wrap:wrap;gap:8px}

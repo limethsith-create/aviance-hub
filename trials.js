@@ -49,7 +49,7 @@ const TK_FIVE=[['sent','Sent','Emails sent'],['replies','Replies','Replies'],['p
 const TK_COUNTERS=[['sent','Sent'],['companiesContacted','Companies'],['bounces','Bounces'],['replies','Replies'],['positive','Positive'],['booked','Booked'],['held','Held'],['qualified','Qualified'],['noshows','No-shows'],['wrongfit','Wrong fit'],['warmupSent','Warm-up sent'],['warmupInbox','Warm-up inbox'],['warmupSpam','Warm-up spam'],['warmupRescued','Warm-up rescued']];
 const TK_TABS=[['overview','Overview'],['growth','Growth'],['systems','Parts'],['leads','Leads'],['deliverability','Deliverability'],['inboxes','Inboxes'],['calls','Calls'],['replies','Replies'],['copy','Copy'],['comingup','Coming up'],['timeline','History'],['actions','Actions']];
 const TK_TAB_ALIAS={numbers:'overview',setup:'deliverability',promises:'comingup',upcoming:'comingup',reports:'comingup'};
-const TK_TRIAL_VIEWS=['trials','trialsBoard','trial','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
+const TK_TRIAL_VIEWS=['trials','paying','trialsBoard','trial','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
 /* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
 const TK_SETTINGS=['alerts','phone','details','keys','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
 /* A to-do that opens a Settings section ({type:'view', view:'settings', section}): the button's words. */
@@ -747,8 +747,15 @@ function tkYouNeedTo(t){
 }
 /* The trial clients only (the stages) — not the owner's own aviance/_test rows, not the queue list. */
 function tkListRows(hub){const out=[],seen={};((hub&&hub.stages)||[]).forEach(st=>(st.clients||[]).forEach(r=>{if(r&&r.id!=null&&!seen[r.id]){seen[r.id]=1;out.push(r);}}));return out}
-function tkListGroups(hub){
-  const rows=tkListRows(hub).map(row=>({row,s:tkSimple(row)}));
+/* Trials vs paying clients: a client on Starter / Growth / Scale (a paid-plan request, or a trial that converted) is
+   a paying client and lives in the Paying clients place; everyone else is a trial. */
+const TK_PAID_PLANS=['starter','growth','scale'];
+function tkIsPaidRow(r){return !!r&&TK_PAID_PLANS.includes(String(r.plan||'').toLowerCase())}
+function tkIsPaidId(id){if(id==null)return false;const r=tkFindRow(id);if(r)return tkIsPaidRow(r);const d=tk.detail[id];return !!(d&&d.row&&tkIsPaidRow(d.row))}
+function tkPlanName(p){p=String(p||'');return p?p[0].toUpperCase()+p.slice(1):''}
+function tkListGroups(hub,paid){
+  // a trial that converted is a paying client now, and stays in the Trials history too (under Done)
+  const rows=tkListRows(hub).filter(r=>paid?tkIsPaidRow(r):(!tkIsPaidRow(r)||r.state==='converted')).map(row=>({row,s:tkSimple(row)}));
   const ms=x=>{const d=tkParseDate(x.s.since);return d?d.getTime():0};
   const newest=(a,b)=>ms(b)-ms(a);   // Array.sort is stable: rows without a time keep the machine's order
   return {
@@ -776,17 +783,37 @@ function renderTrialRow(x){
   const ask=typeof calRowAsk==='function'?calRowAsk(r.id,s):'';
   return ask?`<div class="cal-ask-wrap">${row}${ask}</div>`:row;
 }
-function renderTrialList(hub,meta){
+/* An application waiting for the owner: the business, how well they match (the fit score), and the three things to do —
+   read it (a Word document: what they sent + our analysis), say yes (emails them), say no. */
+function tkMatchText(fs){if(!fs)return 'Scoring…';if(fs.score==null)return fs.label||'Needs a look';return fs.score+'% match'}
+function tkMatchClass(fs){if(!fs||fs.score==null)return 'amber';const n=Number(fs.score);return fs.label==='Not a fit'?'red':n>=80?'green':n>=65?'blue':n>=50?'amber':'red'}
+function renderApplicationRow(r){
+  const fs=r.fitScore||null;const name=(r.simple&&r.simple.company)||r.name||r.id;const id=tkAttr(r.id);
+  const plan=tkIsPaidRow(r)?`<span class="tk-app-plan">${esc(tkPlanName(r.plan))}</span>`:'';
+  return `<div class="tk-app-row"><button type="button" class="tk-app-open" onclick="downloadApplication(${id})" title="Open the application as a Word document">
+    <span class="tk-app-name">${esc(name)}${plan}</span><span class="pill ${tkMatchClass(fs)} tk-app-match">${esc(tkMatchText(fs))}</span><span class="tk-app-doc">Application (Word) ↓</span></button>
+    <div class="tk-app-btns"><button type="button" class="btn" onclick="trialApproveApplication(${id})">Say yes</button><button type="button" class="btn ghost" onclick="openDeclineApplication(${id})">Say no…</button><button type="button" class="btn ghost" onclick="openTrial(${id},null,'application')">Details</button></div></div>`;
+}
+function renderTrialList(hub,meta,paid){
   hub=hub||{};meta=meta||{};
-  const g=tkListGroups(hub);const total=g.needs.length+g.going.length+g.done.length;
-  const add=`<div class="tk-add"><button type="button" class="btn ghost" onclick="openNewTrialClient()">+ Add a trial client yourself</button></div>`;
-  if(!total)return emptyState(I.trials||'','No trials yet','When someone applies on your website, they show up here.','Add a trial client yourself','openNewTrialClient()');
+  const g=tkListGroups(hub,paid);const total=g.needs.length+g.going.length+g.done.length;
+  const add=paid?'':`<div class="tk-add"><button type="button" class="btn ghost" onclick="openNewTrialClient()">+ Add a trial client yourself</button></div>`;
+  const extra=paid?renderPaidCallRequests(hub):'';
+  if(!total)return paid?emptyState(I.money||I.trials||'','No paying clients yet','When someone asks for a paid plan on your website, their application shows up here with how well they match.','','')+extra
+    :emptyState(I.trials||'','No trials yet','When someone applies on your website, they show up here.','Add a trial client yourself','openNewTrialClient()');
+  const apps=g.needs.filter(x=>tkIsUnderReview(x.row));const needsRest=g.needs.filter(x=>!tkIsUnderReview(x.row));
   const list=xs=>`<div class="tk-people">${xs.map(renderTrialRow).join('')}</div>`;
-  const head=(t,cls)=>`<h3 class="tk-group${cls?' '+cls:''}">${esc(t)}</h3>`;
-  const needs=g.needs.length?head('Needs you','red')+list(g.needs):`<p class="tk-allclear">Nothing needs you right now. We'll tell you when something does.</p>`;
-  const going=g.going.length?head('In progress')+list(g.going):'';
+  const head=(t,cls,n)=>`<h3 class="tk-group${cls?' '+cls:''}">${esc(t)}${n!=null?` <span class="tk-done-count">${n}</span>`:''}</h3>`;
+  const appsHTML=apps.length?head(paid?'New paying-client applications':'New trial applications','red',apps.length)+`<div class="tk-apps">${apps.map(x=>renderApplicationRow(x.row)).join('')}</div>`:'';
+  const needs=needsRest.length?head('Needs you','red')+list(needsRest):apps.length?'':`<p class="tk-allclear">Nothing needs you right now. We'll tell you when something does.</p>`;
+  const going=g.going.length?head(paid?'Paying clients':'In progress')+list(g.going):'';
   const done=g.done.length?`<details class="tk-done" id="tkDoneGroup"${meta.doneOpen?' open':''} ontoggle="trialsDoneToggle(this.open)"><summary><span class="tk-done-title">Done / not taken</span><span class="tk-done-count">${g.done.length}</span></summary>${list(g.done)}</details>`:'';
-  return needs+going+done+add;
+  return appsHTML+needs+going+done+extra+add;
+}
+/* Paid-plan call requests that came in without a website (so no application could be made): the old Inquiries list. */
+function renderPaidCallRequests(hub){
+  const q=hub&&hub.inquiries;const open=q&&q.open||0;
+  return `<div class="tk-add"><button type="button" class="btn ghost" onclick="render('inquiries')">Plan call requests${open?` · ${open} open`:''} ›</button></div>`;
 }
 
 /* -- one trial: three plain questions at the top --
@@ -1870,9 +1897,111 @@ function renderMyOutreach(o,err){
     <div class="tk-keys">${tiles.map(([l,v,sub])=>`<div class="card tk-key"><small>${esc(l)}</small><b>${v}</b><span class="tk-key-sub">${esc(sub)}</span></div>`).join('')}</div>
     ${chart}${inb}${repHTML}${sentHTML}${bncHTML}</div>`;
 }
+/* ---- The application as a Word document (.docx), built here in the browser — no library: a small store-only zip
+   with the three parts Word needs. What they sent, the match (fit score), the fit check and our research. ---- */
+const TK_CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t})();
+function tkCrc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=TK_CRC[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0}
+function tkZip(files){ // files: [{name, data:Uint8Array}] → Uint8Array (zip, stored)
+  const enc=new TextEncoder();const parts=[],central=[];let off=0;
+  for(const f of files){
+    const name=enc.encode(f.name),d=f.data,crc=tkCrc32(d);
+    const h=new DataView(new ArrayBuffer(30));h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(8,0,true);h.setUint16(10,0,true);h.setUint16(12,0x21,true);h.setUint32(14,crc,true);h.setUint32(18,d.length,true);h.setUint32(22,d.length,true);h.setUint16(26,name.length,true);h.setUint16(28,0,true);
+    parts.push(new Uint8Array(h.buffer),name,d);
+    const c=new DataView(new ArrayBuffer(46));c.setUint32(0,0x02014b50,true);c.setUint16(4,20,true);c.setUint16(6,20,true);c.setUint16(8,0x0800,true);c.setUint16(10,0,true);c.setUint16(12,0,true);c.setUint16(14,0x21,true);c.setUint32(16,crc,true);c.setUint32(20,d.length,true);c.setUint32(24,d.length,true);c.setUint16(28,name.length,true);c.setUint32(42,off,true);
+    central.push(new Uint8Array(c.buffer),name);off+=30+name.length+d.length;
+  }
+  const size=central.reduce((n,p)=>n+p.length,0);
+  const e=new DataView(new ArrayBuffer(22));e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,size,true);e.setUint32(16,off,true);
+  const all=parts.concat(central,[new Uint8Array(e.buffer)]);const out=new Uint8Array(all.reduce((n,p)=>n+p.length,0));let at=0;all.forEach(p=>{out.set(p,at);at+=p.length;});return out;
+}
+function tkXml(v){return String(v==null?'':v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+/* blocks: {h:1|2|3,t} · {p:t} · {kv:[label,value]} · {li:t} · {gap:true} */
+function tkDocxXml(blocks){
+  const run=(t,o)=>{o=o||{};return `<w:r><w:rPr>${o.b?'<w:b/>':''}${o.i?'<w:i/>':''}${o.color?`<w:color w:val="${o.color}"/>`:''}<w:sz w:val="${o.sz||22}"/></w:rPr><w:t xml:space="preserve">${tkXml(t)}</w:t></w:r>`};
+  const para=(runs,o)=>{o=o||{};return `<w:p><w:pPr><w:spacing w:before="${o.before||0}" w:after="${o.after==null?100:o.after}"/>${o.ind?`<w:ind w:left="${o.ind}" w:hanging="220"/>`:''}</w:pPr>${runs}</w:p>`};
+  const body=blocks.map(b=>{
+    if(b.h===1)return para(run(b.t,{b:true,sz:40}),{after:80});
+    if(b.h===2)return para(run(b.t,{b:true,sz:28,color:'1F3A5F'}),{before:280,after:100});
+    if(b.h===3)return para(run(b.t,{b:true,sz:23}),{before:160,after:60});
+    if(b.kv)return para(run(b.kv[0]+': ',{b:true})+run(b.kv[1]));
+    if(b.li)return para(run('•  '+b.li),{ind:440,after:60});
+    if(b.muted)return para(run(b.muted,{i:true,color:'666666'}));
+    if(b.gap)return para('',{after:0});
+    return para(run(b.p));
+  }).join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1200" w:right="1200" w:bottom="1200" w:left="1200" w:header="600" w:footer="600" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+}
+function tkDocxBytes(blocks){
+  const enc=new TextEncoder();
+  return tkZip([
+    {name:'[Content_Types].xml',data:enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')},
+    {name:'_rels/.rels',data:enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')},
+    {name:'word/document.xml',data:enc.encode(tkDocxXml(blocks))},
+  ]);
+}
+/* Everything in the application and the research, as document blocks. Missing parts are simply left out. */
+function tkApplicationBlocks(d,now){
+  d=d||{};const row=d.row||{};const app=d.application||{};const r=app.research||{};const sc=r.score||null;const fs=row.fitScore||sc;
+  const paid=tkIsPaidRow(row);const str=v=>v==null?'':String(v);const B=[];const add=b=>B.push(b);
+  const list=(title,xs,fmt)=>{xs=(xs||[]).map(fmt).filter(Boolean);if(!xs.length)return;add({h:3,t:title});xs.forEach(t=>add({li:t}));};
+  const sim=row.simple||{};const name=row.name||sim.company||(d.profile&&d.profile.companyName)||row.id||'Application';
+  add({h:1,t:name});
+  add({muted:(paid?`Paying-client application · ${tkPlanName(row.plan)} plan`:'Trial application')+(app.receivedAt?` · received ${tkDayName(str(app.receivedAt).slice(0,10))}`:'')+` · written ${tkDayName((now||new Date()).toISOString().slice(0,10))}`});
+  add({h:2,t:'How well they match'});
+  if(fs&&fs.score!=null)add({kv:['Match',`${fs.score}% (${fs.label||''}${fs.grade?', grade '+fs.grade:''})`]});else add({kv:['Match',fs&&fs.label?fs.label:'Still being scored — open it again in a minute']});
+  if(sc&&sc.confidence!=null)add({kv:['How sure we are',`${sc.confidence}% of the points could be checked`]});
+  if(sc&&sc.summary)add({p:sc.summary});
+  (sc&&sc.parts||[]).forEach(pt=>{add({h:3,t:`${pt.label}: ${pt.points!=null?pt.points:'?'} of ${pt.max!=null?pt.max:'?'} points`});(pt.items||[]).forEach(it=>add({li:`${{good:'✓',bad:'✗',warn:'!',unknown:'?'}[String(it.status)]||'·'} ${str(it.text)}${it.max!=null?` (${it.points!=null?it.points:0}/${it.max})`:''}${it.evidence&&it.evidence.quote?` — “${it.evidence.quote}”${it.evidence.page?` (${it.evidence.page})`:''}`:''}`}));});
+  list('Dealbreakers',sc&&sc.dealbreakers,x=>typeof x==='string'?x:str(x&&x.text));
+  list('Worth a look',sc&&sc.warnings,x=>typeof x==='string'?x:str(x&&x.text));
+  list('Questions to ask them',sc&&sc.questions,x=>typeof x==='string'?x:str(x&&x.text));
+  add({h:2,t:'What they sent'});
+  const contact=[row.contactName||sim.person,row.contactEmail].filter(Boolean).join(' · ');if(contact)add({kv:['Contact',contact]});
+  if(row.website)add({kv:['Website',row.website]});
+  add({kv:['Came from',tkSourceText(app.source)]});
+  (app.answers||[]).forEach(a=>add({kv:[str(a.q),str(a.a)||'—']}));
+  if(app.fit&&(app.fit.lines||[]).length){add({h:3,t:'Basic requirements'+(app.fit.summary?` — ${app.fit.summary}`:'')});app.fit.lines.forEach(l=>add({li:`${{pass:'✓ Pass',fail:'✗ Fail',unknown:'? Unknown'}[String(l.status).toLowerCase()]||str(l.status)} — ${str(l.label)}${l.note?`: ${l.note}`:''}`}));}
+  add({h:2,t:'Our analysis of the business'});
+  if(r.status==='pending')add({muted:'Research is still running — open the document again in a minute for the full analysis.'});
+  if(r.status==='failed')add({muted:'Research could not finish'+(r.error?`: ${r.error}`:'.')});
+  const br=r.brief;if(br){const ss=(br.sentences||[]).map(x=>str(x&&x.text)).filter(Boolean);if(ss.length)add({p:ss.join(' ')});else if(br.text)add({p:br.text});}
+  else if(r.summary)add({p:r.summary});
+  const w=r.website||{};
+  if(w.headline||w.description){add({h:3,t:'Their website'});if(w.headline)add({kv:['Headline',w.headline]});if(w.description)add({kv:['Description',w.description]});}
+  list('What they sell',w.services,str);
+  list('Where they are',w.locations,str);
+  const bz=r.business;if(bz&&(bz.name||bz.address)){add({h:3,t:'On Google'});if(bz.category)add({kv:['Category',bz.category]});if(bz.rating!=null)add({kv:['Rating',`${bz.rating}★ from ${bz.reviews||0} reviews`]});if(bz.address)add({kv:['Address',bz.address]});if(bz.phone)add({kv:['Phone',bz.phone]});}
+  const m=r.market;if(m&&m.estimate!=null){add({h:3,t:'Market'});add({kv:['Companies we could email',`about ${m.estimate}${m.capped?'+':''}${m.query?` (${m.query})`:''}`]});}
+  const dp=r.deep||{};
+  if(dp.customers&&dp.customers.line){add({h:3,t:'Who buys from them'});add({p:dp.customers.line});}
+  list('Named clients',dp.clients,x=>str(x&&x.name));
+  list('People',dp.people,x=>x&&x.name?`${x.name}${x.title?` — ${x.title}`:''}`:'');
+  list('In the news',dp.news&&dp.news.items,x=>x&&x.title?`${x.title}${x.source?` (${x.source}${x.date?', '+x.date:''})`:''}`:'');
+  list('Competitors nearby',dp.competitors&&dp.competitors.items,x=>x&&x.name?`${x.name}${x.rating!=null?` — ${x.rating}★ (${x.reviews||0})`:''}${x.website?` · ${x.website}`:''}`:'');
+  list('What they write about',dp.topics&&dp.topics.pairs,x=>x&&x.text?`${x.text}${x.count?` (${x.count}×)`:''}`:'');
+  if(dp.topics&&dp.topics.rhythm&&dp.topics.rhythm.text)add({kv:['How often they post',dp.topics.rhythm.text]});
+  list('Things to know',r.flags,x=>x&&x.text?x.text:'');
+  return B;
+}
+function tkFileName(s){return String(s||'application').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim().slice(0,80)||'application'}
+function tkSaveFile(bytes,name,type){
+  const blob=new Blob([bytes],{type});
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;
+  (document.body.appendChild?document.body.appendChild(a):null);if(a.click)a.click();if(a.remove)a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+}
+/* The row's "Application (Word)": fetch the full application (fresh, so a finished score is in), then save the .docx. */
+async function downloadApplication(id){
+  if(!id)return;toast('Getting the application…');
+  const r=await loadTrial(id,true);const d=tk.detail[id];
+  if(!d){toast('The application did not load: '+((r&&r.error)||'try again'));return;}
+  const name=tkFileName((d.row&&d.row.name)||id)+' — application.docx';
+  try{tkSaveFile(tkDocxBytes(tkApplicationBlocks(d)),name,'application/vnd.openxmlformats-officedocument.wordprocessingml.document');}
+  catch(e){toast('Could not make the document: '+((e&&e.message)||e));}
+}
 function trialsHostHTML(view){
   switch(view){
     case 'trials':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderTrialList(tk.hub,{at:tk.hubAt,doneOpen:tk.doneOpen}):tk.hubErr?renderMachineError(tk.hubErr):renderLoading('Loading your trials…');
+    case 'paying':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderTrialList(tk.hub,{at:tk.hubAt,doneOpen:tk.doneOpen},true):tk.hubErr?renderMachineError(tk.hubErr):renderLoading('Loading your paying clients…');
     case 'trialsBoard':return tk.hub?renderStaleNote(tk.hubErr,tk.hubAt)+renderBoard(tk.hub,{at:tk.hubAt,sparks:trialsSparkMap()}):tk.hubErr?renderMachineError(tk.hubErr):renderLoading();
     case 'settings':return renderSettings(trialsSettingsCtx());
     case 'trial':{const id=currentTrialId;if(!id)return emptyState(I.trials||'','Pick a trial','Open one from the list.','All trials',"render('trials')");
@@ -1915,7 +2044,7 @@ function trialsApplyScroll(){
 }
 async function trialsKick(view,force){
   let r;
-  if(view==='trials'||view==='trialsBoard')r=await loadHub(force);
+  if(view==='trials'||view==='trialsBoard'||view==='paying')r=await loadHub(force);
   else if(view==='trial'){const mine=currentTrialId===MY_STATS_ID;const [t]=await Promise.all([loadTrial(currentTrialId,force),mine?loadOutreach(force):null]);r=t;}
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
   else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
@@ -1924,6 +2053,7 @@ async function trialsKick(view,force){
   return r;
 }
 /* The Trials list costs one board call (no growth history) plus the onboarding-call check. */
+function viewPaying(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('paying');return `<div id="tkHost">${trialsHostHTML('paying')}</div>`}
 function viewTrials(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trials');trialsOcCheck();return `<div id="tkHost">${trialsHostHTML('trials')}</div>`}
 /* "Behind the scenes": the old board — status strip, every to-do, stage columns, queue, the owner's own rows, sparklines. */
 function viewTrialsBoard(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trialsBoard').then(()=>trialsSparkBoot());return `<div id="tkHost">${trialsHostHTML('trialsBoard')}</div>`}
@@ -2002,7 +2132,7 @@ function tkFocusReply(){
 }
 function openTrialPurchase(id){if(!id)return;currentTrialId=String(id);render('trialPurchase')}
 function trialsRetry(){const h=document.getElementById('tkHost');if(h&&!trialsHasData(currentView))h.innerHTML=renderLoading('Trying again…');trialsKick(currentView,true).then(()=>trialsRepaint(currentView))}
-function trialsHasData(v){if(v==='trials'||v==='trialsBoard')return !!tk.hub;if(v==='trial')return !!tk.detail[currentTrialId];if(v==='trialPurchase')return !!tk.purchase[currentTrialId];if(v==='settings')return true;if(v==='inquiries')return !!iq.list;if(v==='inquiry')return !!iqFind(currentInquiryId);return false}
+function trialsHasData(v){if(v==='trials'||v==='trialsBoard'||v==='paying')return !!tk.hub;if(v==='trial')return !!tk.detail[currentTrialId];if(v==='trialPurchase')return !!tk.purchase[currentTrialId];if(v==='settings')return true;if(v==='inquiries')return !!iq.list;if(v==='inquiry')return !!iqFind(currentInquiryId);return false}
 async function trialsRefresh(){
   const v=currentView;const r=await trialsKick(v,true);trialsRepaint(v);
   if(v==='trial'&&currentTrialId&&tk.behindOpen){const t=tkTabKey(trialTab);if(t==='growth')trialsEnsureGrowth(currentTrialId,true);else if(t==='overview'){loadSpark(currentTrialId,0).then(()=>trialsRepaintTab('overview'));}}
@@ -2261,6 +2391,7 @@ async function submitNewTrialClient(){
 /* ===================== 8. SHELL INTEGRATION ===================== */
 /* The sidebar badge beside Trials: how many trial clients need you (the red "Needs you" rows). */
 function trialsNavCount(){if(!tk.hub)return '';const n=tkListGroups(tk.hub).needs.length;return n>0?n:''}
+function payingNavCount(){if(!tk.hub)return '';const q=tk.hub.inquiries;const n=tkListGroups(tk.hub,true).needs.length+((q&&q.counts&&q.counts.new)||0);return n>0?n:''}
 function trialsNotifs(){
   const n=[];if(!trialsIsAdmin()||!tk.hub)return n;
   // a call time they asked for is listed once, by the Calendar (calendarNotifs), when the Calendar already knows it
