@@ -65,13 +65,13 @@ const top = (d, meta) => between(renderTrialDetail(d, 'overview', Object.assign(
 const BANNED = /\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|dns|jwt|config|payload|mission control|cron|redis|endpoint|webhook)\b/i;
 
 /* ───────────── 1. four places only ───────────── */
-test('navigation: four places only — Trials, Calendar, Inquiries, Settings — the same in the sidebar and the phone tab bar', () => {
+test('navigation: four places plus My stats — Trials, Calendar, Inquiries, My stats, Settings — the same in the sidebar and the phone tab bar', () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
-  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['calendar', 'Calendar'], ['inquiries', 'Inquiries'], ['settings', 'Settings']]);
+  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['calendar', 'Calendar'], ['inquiries', 'Inquiries'], ['mystats', 'My stats'], ['settings', 'Settings']]);
   render('trials');
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
-    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 4, id + ': four buttons');
+    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 5, id + ': five buttons');
     assert.ok(!/Machine|Behind the scenes|Phone alerts|Mission Control|Log out|alerts/i.test(visibleText(nav)), id + ': nothing else in the navigation');
     assert.ok(nav.includes(`<button class="${id === 'navArea' ? 'nav-item' : 'tab'} active" type="button" onclick="render('trials')" aria-label="Trials" aria-current="page">`), id + ': Trials is the current place');
   }
@@ -86,12 +86,26 @@ test('navigation: four places only — Trials, Calendar, Inquiries, Settings —
   assert.ok(!html.includes('hamburger"') && !html.includes('id="newClientBtn"') && !html.includes('id="themeBtn"'), 'the top bar is only the title, Find (computer) and the bell');
 });
 
+test('navigation: My stats opens your own outreach (aviance) on the trial page and lights up instead of Trials; #stats deep links there', () => {
+  asOwner(); trialsForget(); calendarForget(); asOwner();
+  const item = navItems().find((i) => i.view === 'mystats');
+  assert.equal(item.label, 'My stats'); assert.equal(item.icon, I.chart);
+  render('trials');
+  assert.ok(el('navArea').innerHTML.includes('onclick="openMyStats()" aria-label="My stats">'), 'the button opens My stats');
+  openMyStats();
+  assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'aviance');
+  assert.deepEqual(navItems().filter((i) => i.isOn ? i.isOn() : i.view === currentView).map((i) => i.view), ['mystats']);
+  openTrial('acme');
+  assert.deepEqual(navItems().filter((i) => i.isOn ? i.isOn() : i.view === currentView).map((i) => i.view), ['trials']);
+  assert.deepEqual(parseDeepLink('#stats'), { view: 'trial', id: 'aviance' });
+});
+
 test('navigation badges: Trials = how many need you (red) · Calendar = call times waiting for your yes (amber) · Inquiries = new ones (red) · Settings has none', async () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
   trialsIngestHub(Object.assign({}, simpleHub, { inquiries: inquirySummaryOf(inquiryRecords) }));
   cal.reqs = calRequestsOf(calWeek);
   const items = navItems();
-  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'amber', '2 waiting for your yes'], [2, 'red', '2 new'], ['', '', '']]);
+  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'amber', '2 waiting for your yes'], [2, 'red', '2 new'], ['', '', ''], ['', '', '']]);
   renderNav();
   const nav = el('tabBar').innerHTML;
   assert.ok(nav.includes('<span class="badge red" title="3 need you" aria-hidden="true">3</span>'));

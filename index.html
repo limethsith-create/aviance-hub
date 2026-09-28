@@ -379,6 +379,8 @@ const I={
 };
 
 /* ---- Config ---- */
+/* Your own outreach is the machine's client `aviance`; My stats opens it. */
+const MY_STATS_ID='aviance';
 const SUPA_URL='https://zjbxnkpktbghhudjbxhk.supabase.co';
 const SUPA_KEY='sb_publishable_WV4FANV2hNsmbzK3DbiLFg_9bjiB8Z1';
 /* The system behind the hub (email-distributor). Override for testing: localStorage.setItem('avianceMachineUrl','http://localhost:3000') */
@@ -436,6 +438,7 @@ function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('
 function parseDeepLink(h){
   h=String(h||'');const at=h.indexOf('#');if(at<0)return null;h=h.slice(at+1).replace(/^\/+/,'').replace(/\/+$/,'');
   if(h==='trials')return {view:'trials'};
+  if(h==='stats')return {view:'trial',id:MY_STATS_ID};
   if(h==='alerts')return {view:'settings',section:'alerts'};
   if(h==='settings')return {view:'settings'};
   const s=h.match(/^settings\/(warmup|keys|details)$/);if(s)return {view:'settings',section:s[1]};
@@ -469,21 +472,26 @@ if(typeof window.addEventListener==='function')window.addEventListener('hashchan
 /* The home-screen app (iPhone "Add to Home Screen", or an installed desktop app) */
 function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.standalone===true)||(typeof window.matchMedia==='function'&&window.matchMedia('(display-mode: standalone)').matches);}catch(e){return false}}
 
-/* ---- Navigation: four places only. Badges: Trials = how many need you (red), Calendar = call times waiting
+/* ---- My stats: your own outreach (the machine's `aviance` client) — inboxes, sending volume, replies, the copy —
+   on the same page a trial opens (Overview, Growth, Inboxes, Copy, …), one tap from the menu. #stats deep links here. ---- */
+function openMyStats(){openTrial(MY_STATS_ID)}
+
+/* ---- Navigation: four places plus My stats. Badges: Trials = how many need you (red), Calendar = call times waiting
    for your yes (amber), Inquiries = new ones (red). The same items fill the sidebar and the phone's tab bar. ---- */
 function navItems(){
   const n=typeof trialsNavCount==='function'?trialsNavCount():'',q=typeof inquiriesNavCount==='function'?inquiriesNavCount():'',c=typeof calNavCount==='function'?calNavCount():'';
   return [
-    {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','trialPurchase']},
+    {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','trialPurchase'],isOn:()=>currentView==='trials'||currentView==='trialPurchase'||(currentView==='trial'&&currentTrialId!==MY_STATS_ID)},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:c,tone:'amber',badgeTitle:c?c+' waiting for your yes':''},
     {view:'inquiries',icon:I.inquiry,label:'Inquiries',badge:q,tone:'red',badgeTitle:q?q+' new':'',also:['inquiry']},
+    {view:'mystats',icon:I.chart,label:'My stats',badge:'',go:'openMyStats()',isOn:()=>currentView==='trial'&&currentTrialId===MY_STATS_ID},
     {view:'settings',icon:I.gear,label:'Settings',badge:'',also:['trialsBoard']},
   ];
 }
 function renderNav(){
-  const items=navItems();const on=it=>it.view===currentView||(it.also||[]).includes(currentView);
+  const items=navItems();const on=it=>it.isOn?it.isOn():it.view===currentView||(it.also||[]).includes(currentView);
   const badge=it=>it.badge?`<span class="badge ${it.tone}" title="${esc(it.badgeTitle)}" aria-hidden="true">${esc(it.badge)}</span>`:'';
-  const attrs=it=>`type="button" onclick="render('${it.view}')" aria-label="${esc(it.label+(it.badge?' — '+it.badgeTitle:''))}"${on(it)?' aria-current="page"':''}`;
+  const attrs=it=>`type="button" onclick="${it.go||`render('${it.view}')`}" aria-label="${esc(it.label+(it.badge?' — '+it.badgeTitle:''))}"${on(it)?' aria-current="page"':''}`;
   const side=document.getElementById('navArea'),tab=document.getElementById('tabBar');
   if(side)side.innerHTML=items.map(it=>`<button class="nav-item${on(it)?' active':''}" ${attrs(it)}>${it.icon}<span>${esc(it.label)}</span>${badge(it)}</button>`).join('');
   if(tab)tab.innerHTML=items.map(it=>`<button class="tab${on(it)?' active':''}" ${attrs(it)}><span class="tab-ic">${it.icon}${badge(it)}</span><span class="tab-t">${esc(it.label)}</span></button>`).join('');
