@@ -396,7 +396,7 @@ test('trial page: waiting for helpers → the big button is "Add 2 warm-up helpe
   assert.ok(!top(started).includes('tk-top needs') && bigButtons(top(started)).length === 0 && top(started).includes("Nothing — we'll tell you when something needs you"));
   // the Trials list: under Needs you, the system's next step in red
   const list = renderTrialList(hubWith(d.row), { now: NOW });
-  assert.ok(between(list, 'Needs you</h3>', 'In progress</h3>').includes('Gale Roofing'));
+  assert.ok(between(list, 'Needs you</h3>', 'In progress — nothing needed from you</span>').includes('Gale Roofing'));
   assert.ok(between(list, 'Gale Roofing', '</button>').includes('<span class="tk-person-you">You need to add 2 warm-up helpers — Settings › Warm-up.</span>'));
   // pressing it: Settings, with Warm-up open and in view
   fresh(); const st = machine(d);

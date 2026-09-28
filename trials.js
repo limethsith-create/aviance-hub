@@ -794,21 +794,40 @@ function renderApplicationRow(r){
     <span class="tk-app-name">${esc(name)}${plan}</span><span class="pill ${tkMatchClass(fs)} tk-app-match">${esc(tkMatchText(fs))}</span><span class="tk-app-doc">Application (Word) ↓</span></button>
     <div class="tk-app-btns"><button type="button" class="btn" onclick="trialApproveApplication(${id})">Say yes</button><button type="button" class="btn ghost" onclick="openDeclineApplication(${id})">Say no…</button><button type="button" class="btn ghost" onclick="openTrial(${id},null,'application')">Details</button></div></div>`;
 }
+/* Where everyone is: one tile per stage of the journey, with how many clients are in it. A tap shows just that stage's
+   clients (tap again, or "All stages", to go back) — so a long list never grows under "In progress". */
+const TK_STAGE_TILES=[['applied','Applied',['new','queued']],['booking','Booking the call',['accepted']],['call','Call booked',['call_booked']],['setup','Setting up',['setting_up']],['warming','Warming up',['warming_up']],['sending','Sending',['sending']],['finished','Finished',['deciding','finished']]];
+function tkStageOf(row){const st=tkSimple(row).step;const t=TK_STAGE_TILES.find(x=>x[2].includes(st));return t?t[0]:null}
+function trialsSetStage(paid,key){if(!tk.stage)tk.stage={};const k=paid?'paying':'trials';tk.stage[k]=tk.stage[k]===key?null:(key||null);trialsRepaint(currentView)}
+function renderStageTiles(rows,active,paid){
+  const counts={};rows.forEach(x=>{const k=tkStageOf(x.row);if(k)counts[k]=(counts[k]||0)+1;});
+  const tiles=TK_STAGE_TILES.filter(t=>!(paid&&t[0]==='finished'&&!counts.finished));
+  return `<div class="tk-stages" role="group" aria-label="Where everyone is">${tiles.map(([k,label])=>{const n=counts[k]||0;return `<button type="button" class="tk-stage${active===k?' on':''}${n?'':' zero'}" onclick="trialsSetStage(${paid?'true':'false'},${tkAttr(k)})" aria-pressed="${active===k}"><b>${n}</b><span>${esc(label)}</span></button>`}).join('')}</div>`;
+}
 function renderTrialList(hub,meta,paid){
   hub=hub||{};meta=meta||{};
   const g=tkListGroups(hub,paid);const total=g.needs.length+g.going.length+g.done.length;
-  const add=paid?'':`<div class="tk-add"><button type="button" class="btn ghost" onclick="openNewTrialClient()">+ Add a trial client yourself</button></div>`;
+  const add=paid?`<div class="tk-add"><button type="button" class="btn ghost" onclick="openNewPayingClient()">+ Add a paying client yourself</button></div>`:`<div class="tk-add"><button type="button" class="btn ghost" onclick="openNewTrialClient()">+ Add a trial client yourself</button></div>`;
   const extra=paid?renderPaidCallRequests(hub):'';
-  if(!total)return paid?emptyState(I.money||I.trials||'','No paying clients yet','When someone asks for a paid plan on your website, their application shows up here with how well they match.','','')+extra
+  if(!total)return paid?emptyState(I.money||I.trials||'','No paying clients yet','When someone asks for a paid plan on your website, their application shows up here with how well they match. You can also add one yourself.','Add a paying client yourself','openNewPayingClient()')+extra
     :emptyState(I.trials||'','No trials yet','When someone applies on your website, they show up here.','Add a trial client yourself','openNewTrialClient()');
-  const apps=g.needs.filter(x=>tkIsUnderReview(x.row));const needsRest=g.needs.filter(x=>!tkIsUnderReview(x.row));
-  const list=xs=>`<div class="tk-people">${xs.map(renderTrialRow).join('')}</div>`;
+  const all=g.needs.concat(g.going,g.done);
+  const active=(tk.stage&&tk.stage[paid?'paying':'trials'])||null;
+  const tiles=renderStageTiles(all,active,paid);
+  const list=xs=>`<div class="tk-people">${xs.map(x=>tkIsUnderReview(x.row)?renderApplicationRow(x.row):renderTrialRow(x)).join('')}</div>`;
   const head=(t,cls,n)=>`<h3 class="tk-group${cls?' '+cls:''}">${esc(t)}${n!=null?` <span class="tk-done-count">${n}</span>`:''}</h3>`;
+  if(active){
+    const t=TK_STAGE_TILES.find(x=>x[0]===active)||[active,active];
+    const xs=all.filter(x=>tkStageOf(x.row)===active);
+    return tiles+`<div class="tk-stage-head">${head(t[1],'',xs.length)}<button type="button" class="btn ghost" onclick="trialsSetStage(${paid?'true':'false'},null)">All stages</button></div>`+(xs.length?list(xs):`<p class="tk-allclear">Nobody is at this stage right now.</p>`)+extra+add;
+  }
+  const apps=g.needs.filter(x=>tkIsUnderReview(x.row));const needsRest=g.needs.filter(x=>!tkIsUnderReview(x.row));
   const appsHTML=apps.length?head(paid?'New paying-client applications':'New trial applications','red',apps.length)+`<div class="tk-apps">${apps.map(x=>renderApplicationRow(x.row)).join('')}</div>`:'';
-  const needs=needsRest.length?head('Needs you','red')+list(needsRest):apps.length?'':`<p class="tk-allclear">Nothing needs you right now. We'll tell you when something does.</p>`;
-  const going=g.going.length?head(paid?'Paying clients':'In progress')+list(g.going):'';
-  const done=g.done.length?`<details class="tk-done" id="tkDoneGroup"${meta.doneOpen?' open':''} ontoggle="trialsDoneToggle(this.open)"><summary><span class="tk-done-title">Done / not taken</span><span class="tk-done-count">${g.done.length}</span></summary>${list(g.done)}</details>`:'';
-  return appsHTML+needs+going+done+extra+add;
+  const needs=needsRest.length?head('Needs you','red')+`<div class="tk-people">${needsRest.map(renderTrialRow).join('')}</div>`:apps.length?'':`<p class="tk-allclear">Nothing needs you right now. We'll tell you when something does.</p>`;
+  // everyone running with nothing needed from him: folded (the stage tiles above say how many are where)
+  const going=g.going.length?`<details class="tk-done tk-going" id="tkGoingGroup"${meta.goingOpen||tk.goingOpen?' open':''} ontoggle="tk.goingOpen=this.open"><summary><span class="tk-done-title">In progress — nothing needed from you</span><span class="tk-done-count">${g.going.length}</span></summary><div class="tk-people">${g.going.map(renderTrialRow).join('')}</div></details>`:'';
+  const done=g.done.length?`<details class="tk-done" id="tkDoneGroup"${meta.doneOpen?' open':''} ontoggle="trialsDoneToggle(this.open)"><summary><span class="tk-done-title">Done / not taken</span><span class="tk-done-count">${g.done.length}</span></summary><div class="tk-people">${g.done.map(renderTrialRow).join('')}</div></details>`:'';
+  return tiles+appsHTML+needs+going+done+extra+add;
 }
 /* Paid-plan call requests that came in without a website (so no application could be made): the old Inquiries list. */
 function renderPaidCallRequests(hub){
@@ -1362,9 +1381,18 @@ function renderTimeline(events){
   if(!list.length)return '<div class="card"><div class="tk-todo-empty">Nothing has happened yet.</div></div>';
   return `<div class="card tk-timeline">${list.map(e=>`<div class="tk-ev"><span class="t" title="${esc(tkFull(e.at))}">${esc(tkDateTime(e.at))}</span><span class="s">${esc(tkHuman(e.system))}</span><span class="e"><b>${esc(tkHuman(e.event))}</b>${e.detail!=null&&e.detail!==''?` <span>${esc(tkDetailText(e.detail))}</span>`:''}</span></div>`).join('')}</div>`;
 }
-function renderLinks(links){
-  const keys=Object.keys(links||{}).filter(k=>links[k]);if(!keys.length)return '';
-  return `<div class="section-head tk-section"><h3>Client links</h3></div><div class="card tk-links">${keys.map(k=>`<div class="tk-link"><small>${esc(k)}</small><input readonly value="${esc(links[k])}" onclick="this.select()"><button class="btn ghost" onclick="trialCopyLink(${tkAttr(links[k])})">Copy</button></div>`).join('')}</div>`;
+/* The client's pages. Their dashboard (the sending as it happens, read-only) is emailed on Day 1; before that, or to
+   send it again, make it here. */
+const TK_LINK_LABEL={onboarding:'Onboarding page',approval:'Approval page',decision:'Decision page',dashboard:'Their dashboard'};
+function renderLinks(links,id){
+  links=links||{};const keys=Object.keys(links).filter(k=>links[k]);
+  const make=id&&!links.dashboard?`<div class="tk-link"><small>Their dashboard</small><span class="tk-muted tk-small">Their own page with emails sent, replies and booked calls. It's emailed to them on Day 1.</span><button class="btn ghost" onclick="trialDashboardLink(${tkAttr(id)})">Make their dashboard link</button></div>`:'';
+  if(!keys.length&&!make)return '';
+  return `<div class="section-head tk-section"><h3>Client links</h3></div><div class="card tk-links">${keys.map(k=>`<div class="tk-link"><small>${esc(TK_LINK_LABEL[k]||k)}</small><input readonly value="${esc(links[k])}" onclick="this.select()"><button class="btn ghost" onclick="trialCopyLink(${tkAttr(links[k])})">Copy</button>${k==='dashboard'?`<a class="btn ghost" href="${esc(links[k])}" target="_blank" rel="noopener">Open</a>`:''}</div>`).join('')}${make}</div>`;
+}
+async function trialDashboardLink(id){
+  const r=await trialPost('/api/mc/clients/'+encodeURIComponent(id),{action:'dashboardLink'},{done:'Their dashboard link is ready — copy it below',fail:'Could not make the link'});
+  if(r&&r.ok&&r.data&&r.data.url)trialCopyLink(r.data.url);
 }
 function renderActionsTab(d){
   const row=d.row||{};const id=row.id;const st=row.state;const holds=d.holds||{};const jobs=d.jobs||{};const jobNames=Object.keys(jobs);const inv=d.invoice||null;
@@ -1392,7 +1420,7 @@ function renderActionsTab(d){
   <div class="section-head tk-section"><h3>Re-run a step</h3></div>
   <div class="card tk-pad"><div class="tk-inline"><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunSetup')">Re-run setup check</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunMarket')">Re-run market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'marketOverride')">Override market count</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'rerunBookingTest')">Re-test booking link</button><button class="btn ghost" onclick="trialIntakeAction(${tkAttr(id)},'resendWelcome')">Send the “we start on” email again</button></div></div>
   ${inv?`<div class="section-head tk-section"><h3>Invoice</h3></div><div class="card tk-pad"><div class="tk-kv"><small>Number</small><span>${esc(inv.number||inv.invoiceNo||'—')}</span>${inv.plan?`<small>Plan</small><span>${esc(tkHuman(inv.plan))}</span>`:''}<small>Amount</small><span>${tkMoney(inv.amount)}</span><small>Issued</small><span>${esc(tkDate(inv.issuedAt||inv.sentAt))}</span>${inv.dueDate?`<small>Due</small><span>${esc(tkDate(inv.dueDate))}</span>`:''}<small>Paid</small><span>${inv.paidAt||inv.status==='paid'?'<span class="pill green">Paid'+(inv.paidAt?' '+esc(tkDate(inv.paidAt)):'')+'</span>':'<span class="pill amber">Not paid yet</span>'}</span></div></div>`:''}
-  ${renderLinks(d.links)}
+  ${renderLinks(d.links,id)}
   ${jobNames.length?`<div class="section-head tk-section"><h3>Automatic tasks</h3><span class="count">${jobNames.length}</span></div><div class="card tk-scroll"><table class="tk-table"><tr><th>Task</th><th>Last run</th><th>Took</th><th>Result</th></tr>${jobNames.map(j=>{const r=jobs[j]||{};return `<tr><td>${esc(j)}</td><td class="num" title="${esc(tkFull(r.at))}">${esc(r.at?tkRel(r.at):'never')}</td><td class="num">${r.ms!=null?tkNum(r.ms)+' ms':'—'}</td><td class="wrap">${r.at==null?'—':r.ok===false||r.error?`<span class="pill red">Error</span> <span class="tk-small">${esc(r.error||'')}</span>`:'<span class="pill green">OK</span>'}</td></tr>`}).join('')}</table></div>`:''}`;
 }
 /* ctx = {now, spark:{g,state}, growth:{g,days,loading,error,at}} */
@@ -2370,11 +2398,28 @@ function openNewTrialClient(prefill){
     <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="ntSubmit" onclick="submitNewTrialClient()">Add them and send the email</button></div>`);
   setTimeout(()=>{const n=document.getElementById(prefill.companyName?'ntWebsite':'ntCompany');if(n)n.focus();},60);
 }
+/* A paying client you already said yes to (Starter / Growth / Scale): the same one-page onboarding email, without the
+   trial wording, and their own system from there — no trial waiting list. */
+function openNewPayingClient(prefill){
+  if(!trialsIsAdmin())return;prefill=prefill||{};
+  const plan=String(prefill.plan||'starter');
+  openModal(`<div class="modal-head"><div><h3>Add a paying client yourself</h3><p>For someone who is paying for a plan. They get the onboarding email now, and their own system is set up from there.</p></div></div>
+    <div class="modal-body">
+      <div class="field"><label>Company name</label><input id="ntCompany" value="${esc(prefill.companyName||'')}" placeholder="Acme Plumbing"></div>
+      <div class="field row2"><div><label>Contact name</label><input id="ntContact" value="${esc(prefill.contactName||'')}" placeholder="Ann Lee"></div><div><label>Contact email</label><input id="ntEmail" type="email" value="${esc(prefill.contactEmail||'')}" placeholder="ann@acme.com"></div></div>
+      <div class="field"><label>Website</label><input id="ntWebsite" value="${esc(prefill.website||'')}" placeholder="https://acme.com"></div>
+      <div class="field"><label>Plan</label><select id="ntPlan">${TK_PAID_PLANS.map(p=>`<option value="${p}"${p===plan?' selected':''}>${esc(tkPlanName(p))}</option>`).join('')}</select></div>
+      <div id="ntErr" class="tk-modal-errs"></div>
+    </div>
+    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="ntSubmit" onclick="submitNewTrialClient()">Add them and send the email</button></div>`);
+  setTimeout(()=>{const n=document.getElementById('ntCompany');if(n)n.focus();},60);
+}
 async function submitNewTrialClient(){
   const g=x=>{const e=document.getElementById(x);return e?e.value.trim():''};
   const errEl=document.getElementById('ntErr');const show=list=>{if(errEl)errEl.innerHTML=list.map(e=>esc(e)).join('<br>');};
   const body={companyName:g('ntCompany'),contactName:g('ntContact'),contactEmail:g('ntEmail'),website:g('ntWebsite')};
   const ov=document.getElementById('ntOverride');if(ov&&ov.checked)body.override=true;
+  const pl=document.getElementById('ntPlan');if(pl&&pl.value)body.plan=pl.value;   // a paying client (openNewPayingClient)
   const errs=[];if(!body.companyName)errs.push('Write the company name.');if(!body.contactName)errs.push("Write the person's name.");if(!/.+@.+\..+/.test(body.contactEmail))errs.push('Write a working email address.');if(!body.website)errs.push('Write their website.');
   if(errs.length)return show(errs);
   const btn=document.getElementById('ntSubmit');if(btn)btn.disabled=true;

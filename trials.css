@@ -936,3 +936,14 @@ a.tk-brief-mark:hover,a.tk-brief-mark:focus-visible{background:var(--text);color
 .tk-reply{border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:grid;gap:6px}
 .tk-reply-head{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
 .tk-reply-text{white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Where everyone is: one tile per stage */
+.tk-stages{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;margin:0 0 18px}
+.tk-stage{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:2px;height:auto;min-height:60px;padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.tk-stage b{font-size:22px;font-weight:600;line-height:1.1}
+.tk-stage span{font-size:13px;line-height:1.25}
+.tk-stage.zero{opacity:.55}
+@media(max-width:560px){.tk-stages{grid-template-columns:repeat(3,1fr);gap:6px}.tk-stage{min-height:52px;padding:6px 8px}.tk-stage b{font-size:18px}}
+.tk-stage.on{border-color:var(--text);box-shadow:inset 0 0 0 1px var(--text)}
+.tk-stage-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.tk-going-note{margin:14px 0;color:var(--muted,#555)}

@@ -112,7 +112,7 @@ test('ready to buy: the big button is "Buy their domain and 2 inboxes on CheapIn
   assert.equal(bigButtons(top(one))[0][0], 'Buy their domain and 1 inbox on CheapInboxes');
   // the Trials list: under "Needs you", the machine's next step as "You need to…"
   const list = renderTrialList(hubWith(d.row), { now: NOW });
-  assert.ok(between(list, 'Needs you</h3>', 'In progress</h3>').includes('Bright Dental'));
+  assert.ok(between(list, 'Needs you</h3>', 'In progress — nothing needed from you</span>').includes('Bright Dental'));
   assert.ok(between(list, 'Bright Dental', '</button>').includes('<span class="tk-person-you">You need to buy their domain and 2 inboxes on CheapInboxes.</span>'));
   // an order answer without a shopping list: the Buy & paste page as before
   const bare = clone(d); bare.autobuy.buy = null;
