@@ -1969,7 +1969,7 @@ async function loadArchives(force){
 }
 function tkArchiveName(x){return 'Aviance outreach '+String((x&&x.createdAt)||'').slice(0,10)}
 function renderSavedHistory(){
-  const a=tk.arch||{};const list=(a.list||[]).slice().sort((x,y)=>String(y.createdAt||'').localeCompare(String(x.createdAt||'')));const owner=typeof hubIsOwner==='function'&&hubIsOwner();
+  const a=tk.arch||{};const list=(a.list||[]).slice().sort((x,y)=>String(y.createdAt||'').localeCompare(String(x.createdAt||'')));const owner=true;
   const rows=list.length?`<div class="tk-scroll"><table class="tk-table"><tr><th>Saved</th><th class="num">Emails sent</th><th class="num">Replies</th><th>Covers</th><th></th></tr>${list.map(x=>{const t=x.totals||{};return `<tr><td>${esc(tkDate(x.createdAt))}</td><td class="num">${tkNum(t.sent||0)}</td><td class="num">${tkNum(t.replies||0)}</td><td class="tk-small">${t.firstDay?esc(tkDayName(t.firstDay))+' – '+esc(tkDayName(t.lastDay||t.firstDay)):'—'}</td><td class="num"><button class="btn ghost" onclick="downloadArchive(${tkAttr(x.id)})">Download spreadsheet</button></td></tr>`}).join('')}</table></div>`
     :`<p class="tk-muted tk-small">${a.err?esc(a.err):a.list?'Nothing saved yet.':'Loading…'}</p>`;
   return `<div class="card tk-pad" id="tkSaved"><div class="tk-saved-head"><div><h4>Saved history</h4><p class="tk-muted tk-small">A full copy of your outreach — every email, reply and bounce — as a spreadsheet you can open any time.</p></div>${owner?`<div class="tk-saved-btns"><button class="btn ghost" onclick="archiveSaveNow()">Save a copy now</button><button class="btn ghost danger" onclick="openArchiveClear()">Save and start fresh…</button></div>`:''}</div>${rows}</div>`;
@@ -2004,7 +2004,12 @@ function tkArchiveSheets(a){
 }
 async function downloadArchive(id){
   toast('Getting your saved history…');
-  const r=await machineFetch('/api/mc/archive/'+encodeURIComponent(id),{timeout:60000});
+  const base='/api/mc/archive/'+encodeURIComponent(id);
+  let r=await machineFetch(base,{timeout:60000});
+  if(!r.ok&&r.status!==404){   // a very big copy is over the machine's answer limit: fetch it in parts
+    const parts=await Promise.all(['days','sent','replies','bounces','leads'].map(k=>machineFetch(base+'?section='+k,{timeout:60000})));
+    const bad=parts.find(x=>!x.ok||!x.data);if(!bad){const a={};parts.forEach(x=>Object.assign(a,x.data));r={ok:true,data:a};}
+  }
   if(!r.ok||!r.data){toast('Could not get it: '+(r.error||'no answer'));return false;}
   try{tkSaveFile(tkXlsxBytes(tkArchiveSheets(r.data)),tkArchiveName(r.data)+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');return true;}
   catch(e){toast('Could not make the spreadsheet: '+((e&&e.message)||e));return false;}
@@ -2036,8 +2041,8 @@ async function archiveClearGo(){
 }
 function renderMyStatsPage(){
   const o=tk.outreach;const empty=o&&o.totals&&!o.totals.sent;
-  const head=empty&&tk.arch&&(tk.arch.list||[]).length?`<div class="card tk-pad tk-muted tk-small">Nothing sent since your last save. Your old history is under Saved history below.</div>`:'';
-  return (o?renderStats(tkStatsFromOutreach(o),{head}):renderMyOutreach(o,tk.outreachErr))+renderSavedHistory();
+  const head=empty&&hubIsOwner()&&tk.arch&&(tk.arch.list||[]).length?`<div class="card tk-pad tk-muted tk-small">Nothing sent since your last save. Your old history is under Saved history below.</div>`:'';
+  return (o?renderStats(tkStatsFromOutreach(o),{head}):renderMyOutreach(o,tk.outreachErr))+(typeof hubIsOwner==='function'&&hubIsOwner()?renderSavedHistory():'');   // the saved copies are the owner's only
 }
 /* ---- One client's own stats, on their page: the same view as My stats, plus who can see their dashboard. ---- */
 function tkClientPane(id){return (tk.pane&&tk.pane[id])||'progress'}   // what needs you first; Stats is one tap away
@@ -2053,7 +2058,7 @@ function renderClientPaneSwitch(id,pane){
 }
 function renderClientAccess(d,id){
   const acc=(d&&d.dashboardAccess)||{};const list=acc.sharedWith||[];const ro=typeof hubIsOwner==='function'&&!hubIsOwner()&&document.body&&document.body.classList&&document.body.classList.contains('ro');
-  return `<div class="card tk-pad tk-access" id="tkAccess"><div><h4>Who can see this</h4><p class="tk-muted tk-small">Add someone from their business by email. They get a private link to their own live page — emails sent, opened, replies and booked calls. Nothing else.</p></div>
+  return `<div class="card tk-pad tk-access" id="tkAccess"><div><h4>Who can see this</h4><p class="tk-muted tk-small">Add someone from their business by email. They get a private link to their own live page — emails sent, replies and booked calls. Nothing else.</p></div>
     ${list.length?`<ul class="tk-access-list">${list.map(x=>`<li><b>${esc(x.email)}</b> <span class="tk-muted tk-small">since ${esc(tkDate(x.at))}</span></li>`).join('')}</ul>`:'<p class="tk-small tk-muted">Nobody yet.</p>'}
     ${ro?'':`<div class="tk-access-add"><input type="email" id="tkAccessEmail" data-tk-form placeholder="name@theirbusiness.com" onkeydown="if(event.key==='Enter')clientShare(${tkAttr(id)})"><button class="btn" onclick="clientShare(${tkAttr(id)})">Give access</button>${list.length?`<button class="btn ghost danger" onclick="clientUnshare(${tkAttr(id)})">Stop all access</button>`:''}</div>`}</div>`;
 }
@@ -2218,7 +2223,7 @@ function trialsApplyScroll(){
 async function trialsKick(view,force){
   let r;
   if(view==='trials'||view==='trialsBoard'||view==='paying'){if(typeof teamKick==='function'&&typeof tm!=='undefined'&&!tm.data)teamKick(false);r=await loadHub(force);}
-  else if(view==='trial'){if(currentTrialId===MY_STATS_ID){const [o]=await Promise.all([loadOutreach(force),loadArchives(force)]);r=o;}else{const id=currentTrialId;r=await loadTrial(id,force);const d=tk.detail[id];if(d&&tkClientPane(id)==='stats')tkClientStatsKick(id);}}
+  else if(view==='trial'){if(currentTrialId===MY_STATS_ID){const [o]=await Promise.all([loadOutreach(force),typeof hubIsOwner==='function'&&hubIsOwner()?loadArchives(force):null]);r=o;}else{const id=currentTrialId;r=await loadTrial(id,force);const d=tk.detail[id];if(d&&tkClientPane(id)==='stats')tkClientStatsKick(id);}}
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
   else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);

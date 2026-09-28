@@ -259,7 +259,7 @@ test('a client page: Progress | Stats — Stats is the same view as My stats fro
   } finally { offline(); trialsForget(); trialsStopTimer(); }
 });
 
-test('Saved history: list, download as a spreadsheet (.xlsx with Summary, Days, Emails sent, Replies, Bounces), save a copy, save and clear only after typing CLEAR', async () => {
+test('Saved history (owner only): list, download as a spreadsheet (.xlsx with Summary, Days, Emails sent, Replies, Bounces), save a copy, save and clear only after typing CLEAR', async () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
   const archive = { id: 'a1', createdAt: '2026-09-28T10:00:00Z', totals: { sent: 2, opened: 1, replies: 1, bounces: 0, days: 1, firstDay: '2026-06-01', lastDay: '2026-06-01' },
     days: [{ date: '2026-06-01', sent: 2, opened: 1, replies: 1, bounces: 0 }], sent: [{ at: '2026-06-01T14:00:00Z', to: 'a@acme.com', company: 'Acme & <Co>', subject: 'Quick idea', touch: 'd0', from: 'me@getaviance.site' }],
@@ -295,7 +295,7 @@ test('Saved history: list, download as a spreadsheet (.xlsx with Summary, Days, 
     // the team (read-only) can download but not save or clear
     authUser.role = 'employee'; trialsRepaint('trial');
     txt = visibleText(el('tkHost').innerHTML);
-    assert.ok(txt.includes('Download spreadsheet') && !txt.includes('Save a copy now') && !txt.includes('Save and start fresh'), 'team: download only');
+    assert.ok(!txt.includes('Saved history') && !txt.includes('Save a copy now'), 'team: the saved copies are the owner\'s only');
   } finally { globalThis.tkSaveFile = was; offline(); trialsForget(); trialsStopTimer(); }
 });
 
