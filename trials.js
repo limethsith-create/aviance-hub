@@ -801,7 +801,7 @@ function tkStageOf(row){const st=tkSimple(row).step;const t=TK_STAGE_TILES.find(
 function trialsSetStage(paid,key){if(!tk.stage)tk.stage={};const k=paid?'paying':'trials';tk.stage[k]=tk.stage[k]===key?null:(key||null);trialsRepaint(currentView)}
 function renderStageTiles(rows,active,paid){
   const counts={};rows.forEach(x=>{const k=tkStageOf(x.row);if(k)counts[k]=(counts[k]||0)+1;});
-  const tiles=TK_STAGE_TILES.filter(t=>!(paid&&t[0]==='finished'&&!counts.finished));
+  const tiles=TK_STAGE_TILES;   // the same seven stages in Trials and Paying clients, always
   return `<div class="tk-stages" role="group" aria-label="Where everyone is">${tiles.map(([k,label])=>{const n=counts[k]||0;return `<button type="button" class="tk-stage${active===k?' on':''}${n?'':' zero'}" onclick="trialsSetStage(${paid?'true':'false'},${tkAttr(k)})" aria-pressed="${active===k}"><b>${n}</b><span>${esc(label)}</span></button>`}).join('')}</div>`;
 }
 function renderTrialList(hub,meta,paid){
@@ -809,8 +809,9 @@ function renderTrialList(hub,meta,paid){
   const g=tkListGroups(hub,paid);const total=g.needs.length+g.going.length+g.done.length;
   const add=paid?`<div class="tk-add"><button type="button" class="btn ghost" onclick="openNewPayingClient()">+ Add a paying client yourself</button></div>`:`<div class="tk-add"><button type="button" class="btn ghost" onclick="openNewTrialClient()">+ Add a trial client yourself</button></div>`;
   const extra=paid?renderPaidCallRequests(hub):'';
-  if(!total)return paid?emptyState(I.money||I.trials||'','No paying clients yet','When someone asks for a paid plan on your website, their application shows up here with how well they match. You can also add one yourself.','Add a paying client yourself','openNewPayingClient()')+extra
-    :emptyState(I.trials||'','No trials yet','When someone applies on your website, they show up here.','Add a trial client yourself','openNewTrialClient()');
+  // nobody yet: the same stage strip (all zero), then one line saying what to expect
+  if(!total)return renderStageTiles([],null,paid)+(paid?emptyState(I.money||I.trials||'','No paying clients yet','When someone asks for a paid plan on your website, their application shows up here with how well they match. You can also add one yourself.','Add a paying client yourself','openNewPayingClient()')+extra
+    :emptyState(I.trials||'','No trials yet','When someone applies on your website, they show up here.','Add a trial client yourself','openNewTrialClient()'));
   const all=g.needs.concat(g.going,g.done);
   const active=(tk.stage&&tk.stage[paid?'paying':'trials'])||null;
   const tiles=renderStageTiles(all,active,paid);

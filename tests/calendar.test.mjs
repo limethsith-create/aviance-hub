@@ -182,33 +182,33 @@ test('week grid across US daylight saving: winter hours move one hour later in C
   assert.deepEqual(every.days[6].open, [[0, 150], [1170, 1440]], 'Sunday: Saturday afternoon on summer time, Sunday morning on winter time');
 });
 
-test('the Calendar screen: explainer, meeting link, call hours, "Waiting for your yes" (Sri Lanka time big, US Eastern and their zone small, the note, Yes / Suggest / Decline)', () => {
+test('the Calendar screen, short: who is waiting for your yes (your time big, the other clocks on hover, their note, Yes / Other time / No), this week, and one line with the call link and hours at the bottom', () => {
   const out = renderCalendar(calWeek, { week: '2026-09-28', now: CAL_NOW });
-  assert.ok(out.includes('Clients pick a time on your booking page; you say yes here; they get an invite.'));
-  assert.ok(out.includes('Calls happen on: <a href="https://meet.google.com/abc-defg-hij" target="_blank" rel="noopener noreferrer">meet.google.com/abc-defg-hij</a>'));
+  assert.ok(!out.includes('Clients pick a time on your booking page') && !out.includes('cal-legend'), 'no explainer, no colour legend');
+  assert.ok(out.includes('Calls on <a href="https://meet.google.com/abc-defg-hij" target="_blank" rel="noopener noreferrer">meet.google.com/abc-defg-hij</a>'));
   assert.ok(out.includes('Your call hours: Mon–Fri, 9:00 am – 5:00 pm US Eastern = 6:30 pm – 2:30 am the next morning in Sri Lanka.'));
+  assert.ok(out.indexOf('Your call hours') > out.indexOf('This week'), 'the call facts sit at the bottom');
   assert.ok(renderCalendar(calWinterWeek, { week: '2026-11-02', now: CAL_NOW }).includes('= 7:30 pm – 3:30 am the next morning in Sri Lanka.'), 'US winter');
-  assert.ok(renderCalendar(Object.assign({}, calWeek, { settings: Object.assign({}, calSettingsFixture, { meetingLink: null }) }), { week: '2026-09-28', now: CAL_NOW }).includes("no meeting link set yet, so the email says you'll send the link before the call"));
+  assert.ok(renderCalendar(Object.assign({}, calWeek, { settings: Object.assign({}, calSettingsFixture, { meetingLink: null }) }), { week: '2026-09-28', now: CAL_NOW }).includes('No meeting link set yet'));
   // requests: waiting for the owner first (oldest first), then the one where he suggested a time
   assert.ok(out.includes('<h3>Waiting for your yes</h3><span class="count">2</span>'));
   const a = out.indexOf('eCreek IT</b>'), b = out.indexOf('Gale Roofing</b>'), c = out.indexOf('Delta Roofing</b>');
   assert.ok(a > 0 && a < b && b < c, 'eCreek, Gale, then Delta (already suggested)');
-  assert.ok(out.includes('<div class="cal-req-when">Wed 30 Sep · 11:30 pm <small>your time</small></div><div class="cal-req-us">Wed 2:00 pm US Eastern · Wed 12:00 pm their time (US Mountain) · 30 min</div>'));
-  assert.ok(out.includes('<div class="cal-req-when">Fri 2 Oct · 1:30 am <small>your time</small></div><div class="cal-req-us">Thu 4:00 pm US Eastern · Thu 1:00 pm their time (US Pacific) · 15 min</div>'), 'the midnight crossover, said plainly');
-  assert.ok(out.includes('<h4 class="cal-req-sub">You suggested another time — waiting for them</h4>') && out.indexOf('cal-req-sub') < out.indexOf('Delta Roofing</b>'), 'the ones waiting for them sit apart, under their own heading');
-  assert.ok(out.includes('You suggested Mon 5 Oct · 7:00 pm (your time; Mon 9:30 am US Eastern) — waiting for them to say yes.'));
-  const delta = out.slice(out.indexOf('Delta Roofing</b>'), out.indexOf('Your week'));
-  assert.ok(!delta.includes('calConfirm(') && delta.includes('>Suggest a different time</button>') && delta.includes('>Say no…</button>'), 'waiting for them: no "Say yes" button to press by mistake');
-  assert.ok(out.includes('<div class="cal-note">Can we do a bit earlier?\nThanks! &lt;b&gt;really&lt;/b&gt;</div>'), 'the note: escaped, line breaks kept');
-  assert.ok(out.includes('Asked 5 h ago · They picked it on your booking page'));
-  assert.ok(out.includes('<button class="btn" onclick="calConfirm(&quot;mreq1&quot;)">Say yes and email them</button><button class="btn ghost" onclick="calOpenSuggest(&quot;mreq1&quot;)">Suggest another time</button><button class="btn ghost" onclick="calOpenDecline(&quot;mreq1&quot;)">Say no…</button>'));
-  // a request whose time has passed: no Yes, "Suggest another time" becomes the main button
+  assert.ok(out.includes('<div class="cal-req-when" title="Wed 2:00 pm US Eastern · Wed 12:00 pm their time (US Mountain) · 30 min · Asked 5 h ago · They picked it on your booking page">Wed 30 Sep · 11:30 pm</div>'));
+  assert.ok(out.includes('<div class="cal-req-when" title="Thu 4:00 pm US Eastern · Thu 1:00 pm their time (US Pacific) · 15 min'), 'the midnight crossover: the other clocks on hover');
+  assert.ok(out.includes('<h4 class="cal-req-sub">Waiting for them</h4>') && out.indexOf('cal-req-sub') < out.indexOf('Delta Roofing</b>'), 'the ones waiting for them sit apart, under their own heading');
+  assert.ok(out.includes('You suggested Mon 5 Oct · 7:00 pm — waiting for them.'));
+  const delta = out.slice(out.indexOf('Delta Roofing</b>'), out.indexOf('This week'));
+  assert.ok(!delta.includes('calConfirm(') && delta.includes('>Other time</button>') && delta.includes('>No</button>'), 'waiting for them: no Yes button to press by mistake');
+  assert.ok(out.includes('<div class="cal-note">Can we do a bit earlier?\nThanks! &lt;b&gt;really&lt;/b&gt;</div>'), 'the note: escaped');
+  assert.ok(out.includes('<button class="btn" onclick="calConfirm(&quot;mreq1&quot;)" title="Say yes and email them the invite">Yes</button><button class="btn ghost" onclick="calOpenSuggest(&quot;mreq1&quot;)" title="Suggest another time">Other time</button><button class="btn ghost" onclick="calOpenDecline(&quot;mreq1&quot;)" title="Say no">No</button>'));
+  // a request whose time has passed: no Yes
   const late = renderCalRequest(Object.assign({}, calMeetings.req1, { start: '2026-09-28T13:00:00Z' }), ST, { now: CAL_NOW });
-  assert.ok(late.includes('This time has already passed. Suggest another time.') && !late.includes('calConfirm(') && late.includes('<button class="btn" onclick="calOpenSuggest('));
-  // the week: toolbar, legend in words, the grid and the phone list are both there (CSS shows one)
-  for (const s of ['<b class="cal-range">28 Sep – 4 Oct 2026</b>', 'onclick="calWeekMove(-1)"', 'onclick="calGoToday()">Today</button>', 'onclick="calWeekMove(1)"', '>Add a meeting</button>', '>Block time</button>', 'onchange="calToggleGone(this.checked)">Show cancelled',
-    '<i class="cal-sw confirmed"></i>Confirmed', '<i class="cal-sw requested"></i>Waiting for your yes', '<i class="cal-sw suggested"></i>Waiting for them', '<i class="cal-sw held"></i>Call done', '<i class="cal-sw blocked"></i>Busy', '<i class="cal-sw noshow"></i>No-show', 'class="cal-grid-wrap"', 'class="cal-agenda"'])
-    assert.ok(out.includes(s), s);
+  assert.ok(late.includes('This time has passed.') && !late.includes('calConfirm(') && late.includes('onclick="calOpenSuggest('));
+  // the week: toolbar, the grid and the phone list (CSS shows one), "show cancelled" at the bottom
+  for (const x of ['<b class="cal-range">28 Sep – 4 Oct 2026</b>', 'onclick="calWeekMove(-1)"', 'onclick="calGoToday()">Today</button>', 'onclick="calWeekMove(1)"', '>Add a meeting</button>', '>Block time</button>', 'onchange="calToggleGone(this.checked)">Show cancelled', 'class="cal-grid-wrap"', 'class="cal-agenda"'])
+    assert.ok(out.includes(x), x);
+  assert.ok(out.indexOf('Show cancelled') > out.indexOf('class="cal-grid-wrap"'));
 });
 
 test('the grid draws each call sized by its minutes, coloured by status (green / amber / grey / red), in its Sri Lanka column; hours in Sri Lanka time with ET beside them', () => {
@@ -258,7 +258,7 @@ test('phone: a day-by-day list instead of the grid — every day, calls in time 
 test('empty states: nobody waiting, nothing booked, and the machine not answering', async () => {
   const out = renderCalendar({ meetings: [], requests: [], settings: calSettingsFixture, free: [] }, { week: '2026-09-28', now: CAL_NOW });
   assert.ok(out.includes('<div class="tk-allclear">Nobody is waiting for your yes.</div>'));
-  assert.ok(out.includes('Nothing booked this week. When a client picks a time on your booking page, it shows up here for your yes.'));
+  assert.ok(out.includes('Nothing booked this week.'));
   assert.ok(out.includes('class="cal-grid-wrap"'), 'the empty week still shows the call hours');
   fresh(); offline();
   render('calendar'); await tick();
@@ -274,11 +274,11 @@ test('escaping: every machine value is escaped, links only when safe, ids reach 
     for (const bad of ['<img', '<script', '<svg onload', '<i>odd', '<u>who', '<b>src', 'href="javascript']) assert.ok(!o.includes(bad), bad);
   }
   assert.ok(outs[0].includes('&lt;img src=x onerror=alert(1)&gt;') && outs[0].includes('&lt;/div&gt;&lt;script&gt;alert(6)&lt;/script&gt;'));
-  assert.ok(outs[0].includes('Calls happen on: javascript:alert(5)'), 'an unsafe link is plain text');
+  assert.ok(outs[0].includes('Calls on javascript:alert(5)'), 'an unsafe link is plain text');
   assert.ok(outs[0].includes('onclick="calConfirm(&quot;x\\&quot;\');alert(4);//&quot;)"'), 'the id is a JSON string inside the handler');
   assert.ok(outs[1].includes('openTrial(&quot;ev\\&quot;il&quot;)'));
   assert.ok(!outs[1].includes('mailto:'), 'a broken email is not a link');
-  assert.ok(outs[0].includes('<div class="cal-req-us">Wed 9:00 am US Eastern · 30 min</div>'), 'an unknown zone is left out, nothing breaks');
+  assert.ok(outs[0].includes('title="Wed 9:00 am US Eastern · 30 min'), 'an unknown zone is left out, nothing breaks');
 });
 
 test('the panel: who (with a link to their trial), when in Sri Lanka · Eastern · their zone, status in words, the note, history, and the buttons its status allows', () => {

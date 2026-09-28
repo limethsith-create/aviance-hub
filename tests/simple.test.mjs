@@ -510,7 +510,7 @@ test('buttons say exactly what happens', () => {
   assert.ok(renderDeclineModal(fernDetail).includes('>Say no and email them</button>'));
   assert.ok(renderMessages(ecreekConvDetail).includes('>Send to Sam</button>') && renderMessages(ecreekConvDetail).includes('Reply bot for Sam: <b>On</b>'));
   cal.settings = calSettingsFixture;
-  assert.ok(renderCalRequest(calWeek.requests[1], calSettings(calSettingsFixture), { now: CAL_NOW }).includes('>Say yes and email them</button>'));
+  assert.ok(renderCalRequest(calWeek.requests[1], calSettings(calSettingsFixture), { now: CAL_NOW }).includes('title="Say yes and email them the invite">Yes</button>'), 'short, and the hover says exactly what happens');
   assert.ok(renderInquiry(clone(inquiryRecords[0]), { now: NOW }).includes('>Start a free trial and email them</button>'));
   asOwner(); openNewTrialClient(); assert.ok(el('modal').innerHTML.includes('>Add them and send the email</button>')); closeModal();
   calendarForget();

@@ -247,3 +247,21 @@ body.ro .tk-app-row{padding-right:20px}
 .login-link{background:none;border:0;padding:0;font:inherit;font-size:inherit;color:var(--text);text-decoration:underline;text-underline-offset:3px;cursor:pointer;min-height:0}
 /* the phone's tab bar: short names */
 @media(max-width:860px){.tab .tab-t{font-size:13px;line-height:1.2;white-space:nowrap}}
+
+/* ---- calendar: short ---- */
+.cal-reqs{display:grid;gap:10px}
+.card.cal-req{flex-direction:row;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 16px 14px 20px}
+.cal-req-main{flex:1 1 260px;min-width:0;display:grid;gap:4px}
+.cal-req-when{font-size:17px;font-weight:600}
+.cal-req .cal-note{font-size:14px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-left:0;padding:0;margin:0}
+.cal-req-acts{display:flex;gap:8px;flex-wrap:wrap}
+.cal-req-acts .btn{min-width:64px;justify-content:center}
+.cal-intro{margin-top:12px}
+.cal-facts{font-size:13px;color:var(--muted)}
+.cal-foot{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:14px;font-size:13px;color:var(--muted)}
+.cal-foot .cal-check{margin-left:auto}
+.cal-reqs{grid-template-columns:1fr!important}
+.card.cal-req{border-left:1px solid var(--border)!important;box-shadow:inset 3px 0 0 var(--amber),var(--sh)}
+.card.cal-req.later{box-shadow:inset 3px 0 0 var(--border),var(--sh)}
+.cal-req .cal-req-prop{background:none;padding:0;font-size:14px;color:var(--muted)}
+@media(max-width:860px){.cal-req-acts{width:100%;flex-direction:row!important;flex-wrap:nowrap}.cal-req-acts .btn{flex:1 1 0;width:auto!important;min-width:0}}
