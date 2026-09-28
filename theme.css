@@ -265,3 +265,39 @@ body.ro .tk-app-row{padding-right:20px}
 .card.cal-req.later{box-shadow:inset 3px 0 0 var(--border),var(--sh)}
 .cal-req .cal-req-prop{background:none;padding:0;font-size:14px;color:var(--muted)}
 @media(max-width:860px){.cal-req-acts{width:100%;flex-direction:row!important;flex-wrap:nowrap}.cal-req-acts .btn{flex:1 1 0;width:auto!important;min-width:0}}
+
+/* ---- calendar: one screen ---- */
+.content>.view:has(#calHost){max-width:1440px}
+.cal-layout{display:grid;gap:24px;align-items:start}
+@media(min-width:1100px){
+  .cal-layout{grid-template-columns:minmax(0,1fr) 300px;grid-template-areas:"main side"}
+  .cal-main{grid-area:main}.cal-side{grid-area:side;position:sticky;top:0}
+  .cal-side .section-head{margin-top:0}
+  .cal-side .card.cal-req{flex-direction:column;align-items:stretch;gap:10px;padding:12px 14px 12px 16px}
+  .cal-side .cal-req-main{flex:none}
+  .cal-side .cal-req-acts .btn{flex:1 1 0;padding:8px 6px;font-size:14px}
+  .cal-side .cal-req-sub{margin-top:14px}
+}
+.cal-week-head{margin:0 0 10px}
+.cal-bar{margin-bottom:10px;gap:8px}
+.cal-bar .btn{min-height:40px;padding:8px 12px}
+.cal-dayhead{min-height:40px;padding:6px 8px;font-size:14px}
+.cal-corner{padding:6px 8px;font-size:13px}
+.cal-corner small{display:none}
+.cal-hour{padding:2px 8px 0;font-size:13px;line-height:1.2}
+.cal-hour b{font-size:13px}
+.cal-hour small{font-size:13px;color:var(--muted-2)}
+.cal-grid{grid-template-columns:96px repeat(7,minmax(84px,1fr));min-width:700px}
+.cal-ev{padding:1px 6px;line-height:1.25;justify-content:center}
+.cal-gapnote{font-size:13px;display:flex;align-items:center;padding-left:8px}
+.cal-foot{margin-top:10px}
+/* one clean line per call and per hour (the full details are in the hover text and in the call's panel) */
+.cal-ev{flex-direction:row;align-items:center;padding:0 6px;font-size:13px}
+.cal-ev .cal-ev-s{display:none}
+.cal-ev .cal-ev-t{font-size:13px}
+.cal-hour small{display:none}
+.cal-hour{justify-content:flex-start}
+.cal-gapnote{color:var(--muted-2)}
+.cal-ev{justify-content:flex-start}
+.cal-grid{grid-template-columns:84px repeat(7,minmax(70px,1fr));min-width:600px}
+@media(min-width:1100px) and (max-width:1360px){.cal-layout{grid-template-columns:minmax(0,1fr) 260px}.content{padding-left:28px;padding-right:28px}}

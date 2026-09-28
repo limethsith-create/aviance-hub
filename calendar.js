@@ -22,8 +22,8 @@
 /* ===================== 0. CONSTANTS + CACHE ===================== */
 const CAL_API='/api/mc/calendar';
 const CAL_DEFAULTS={hours:['09:00','17:00'],days:[1,2,3,4,5],slotMinutes:30,ownerZone:'Asia/Colombo',usZone:'America/New_York',meetingLink:null};
-const CAL_PX=1.6;              // week grid: pixels per minute — a 30-minute call is 48 px tall, a 15-minute one 24 px
-const CAL_GAP_PX=40;           // the folded band for the hours with no calls (Sri Lanka daytime)
+const CAL_PX=0.8;              // week grid: pixels per minute — an hour is 48 px, so your call hours fit on one screen
+const CAL_GAP_PX=24;           // the folded band for the hours with no calls (Sri Lanka daytime)
 const CAL_FRESH_MS=15000;      // a week answer younger than this is not fetched again on navigation
 const CAL_PEEK_MS=60000;       // other screens ask for the requests waiting (sidebar badge, trial rows) at most once a minute
 const CAL_REFRESH_MS=60000;    // auto-refresh while the Calendar is open
@@ -277,7 +277,7 @@ function renderCalGrid(model){
   const st=model.st,H=model.height;
   const head=`<div class="cal-corner"><b>${esc(calOwnerName(st))} time</b><small>${esc(calZoneName(st.usZone))} (ET) beside it</small></div>`+
     model.days.map(d=>`<div class="cal-dayhead${d.today?' today':''}${d.past?' past':''}">${esc(d.label)}${d.today?'<span class="cal-today-tag">Today</span>':''}</div>`).join('');
-  const gutter=`<div class="cal-gutter" style="height:${H}px">${model.rows.map(r=>`<div class="cal-hour" style="top:${r.top}px"><b>${esc(r.owner)}</b><small>${esc(r.us)} ET${r.usRel?', '+esc(r.usRel):''}</small></div>`).join('')}${model.gaps.map(g=>`<div class="cal-gapnote" style="top:${g.top}px;height:${CAL_GAP_PX}px">No calls</div>`).join('')}</div>`;
+  const gutter=`<div class="cal-gutter" style="height:${H}px">${model.rows.map(r=>`<div class="cal-hour" style="top:${r.top}px" title="${esc(r.us)} ET${r.usRel?', '+esc(r.usRel):''}"><b>${esc(r.owner)}</b><small>${esc(r.us)} ET${r.usRel?', '+esc(r.usRel):''}</small></div>`).join('')}${model.gaps.map(g=>`<div class="cal-gapnote" style="top:${g.top}px;height:${CAL_GAP_PX}px">No calls</div>`).join('')}</div>`;
   const cols=model.days.map(d=>{
     const lines=model.layout.map(L=>`<div class="cal-lines" style="top:${L.top}px;height:${Math.round((L.to-L.from)*CAL_PX*10)/10}px"></div>`).join('');
     const open=d.open.map(([a,b])=>{const y=model.yOf(a);return y==null?'':`<div class="cal-open" style="top:${y}px;height:${Math.round((b-a)*CAL_PX*10)/10}px"></div>`}).join('');
@@ -349,8 +349,9 @@ function renderCalendar(data,meta){
       renderCalGrid(model)+(model.empty?'':renderCalAgenda(model));   // an empty week: the line above says it once (a phone showed it twice)
   }
   const foot=`<div class="cal-foot">${meta.at?tkUpdatedStamp(meta.at):''}<button type="button" class="tk-textbtn" onclick="calRefresh()">Refresh</button><label class="cal-check"><input type="checkbox"${meta.showGone?' checked':''} onchange="calToggleGone(this.checked)">Show cancelled</label></div>${renderCalIntro(st,monday)}`;
-  return renderCalRequests(reqs,st,{now,focus:meta.focus})+
-    `<div class="section-head tk-section cal-week-head"><h3>This week</h3></div>`+bar+week+foot;
+  // a computer: the week on the left, who is waiting for your yes in a narrow column on the right — one screen
+  return `<div class="cal-layout"><aside class="cal-side">${renderCalRequests(reqs,st,{now,focus:meta.focus})}</aside>`+
+    `<div class="cal-main"><div class="section-head tk-section cal-week-head"><h3>This week</h3></div>${bar}${week}${foot}</div></div>`;
 }
 function renderCalHistory(h,st){
   const ms=x=>{const d=tkParseDate(x.at);return d?d.getTime():0};
