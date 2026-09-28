@@ -65,9 +65,9 @@ const top = (d, meta) => between(renderTrialDetail(d, 'overview', Object.assign(
 const BANNED = /\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|dns|jwt|config|payload|mission control|cron|redis|endpoint|webhook)\b/i;
 
 /* ───────────── 1. four places only ───────────── */
-test('navigation: four places plus My stats — Trials, Calendar, Inquiries, My stats, Settings — the same in the sidebar and the phone tab bar', () => {
+test('navigation: Trials, Paying clients, Calendar, My stats, Settings — the same in the sidebar and the phone tab bar', () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
-  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['calendar', 'Calendar'], ['inquiries', 'Inquiries'], ['mystats', 'My stats'], ['settings', 'Settings']]);
+  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['paying', 'Paying clients'], ['calendar', 'Calendar'], ['mystats', 'My stats'], ['settings', 'Settings']]);
   render('trials');
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
@@ -76,7 +76,7 @@ test('navigation: four places plus My stats — Trials, Calendar, Inquiries, My 
     assert.ok(nav.includes(`<button class="${id === 'navArea' ? 'nav-item' : 'tab'} active" type="button" onclick="render('trials')" aria-label="Trials" aria-current="page">`), id + ': Trials is the current place');
   }
   // pages inside a place light up their place
-  for (const [view, place] of [['trial', 'trials'], ['trialPurchase', 'trials'], ['inquiry', 'inquiries'], ['trialsBoard', 'settings']]) assert.ok(navItems().find((i) => i.view === place && (i.also || []).includes(view)), view + ' belongs to ' + place);
+  for (const [view, place] of [['trial', 'trials'], ['trialPurchase', 'trials'], ['inquiries', 'paying'], ['inquiry', 'paying'], ['trialsBoard', 'settings']]) assert.ok(navItems().find((i) => i.view === place && (i.also || []).includes(view)), view + ' belongs to ' + place);
   // the phone: a tab bar at the bottom, no sidebar, no hamburger; every tab at least 44 px tall
   const shellCss = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
   const phone = between(shellCss, '@media(max-width:860px){', '@media(max-width:560px)');
@@ -132,17 +132,75 @@ test('My stats: everything you have sent (GET /api/mc/outreach) sits above your 
   } finally { offline(); trialsStopTimer(); }
 });
 
-test('navigation badges: Trials = how many need you (red) · Calendar = call times waiting for your yes (amber) · Inquiries = new ones (red) · Settings has none', async () => {
+test('Paying clients: paid-plan applications (name + match % + Word + yes/no) and paying clients live here, not under Trials; a converted trial shows in both', async () => {
+  asOwner(); trialsForget(); calendarForget(); asOwner();
+  const clone2 = (o) => JSON.parse(JSON.stringify(o));
+  const paidApp = Object.assign(clone2(simpleRows.fern), { id: 'stone-roofing', name: 'Stone Roofing', plan: 'growth', fitScore: { score: 72, grade: 'B', label: 'Good fit', confidence: 60 } });
+  paidApp.simple.company = 'Stone Roofing'; paidApp.todo = (paidApp.todo || []).map((t) => Object.assign({}, t, { id: String(t.id).replace('fern-it', 'stone-roofing'), clientId: 'stone-roofing' }));
+  const paidLive = Object.assign(clone2(simpleRows.acme), { id: 'birch-legal', name: 'Birch Legal', plan: 'scale' });
+  paidLive.simple.company = 'Birch Legal';
+  const hub = Object.assign({}, simpleHub, { stages: stagesWith({ intake: [simpleRows.fern, paidApp], live: [simpleRows.acme, paidLive] }), inquiries: { counts: { new: 1, contacted: 0, won: 0, lost: 0 }, open: 1, latest: [] } });
+  trialsIngestHub(hub);
+  const trials = renderTrialList(hub, { now: NOW });
+  const paying = renderTrialList(hub, { now: NOW }, true);
+  assert.ok(trials.includes('Fern IT') && !trials.includes('Stone Roofing') && !trials.includes('Birch Legal'), 'Trials: trial clients only');
+  assert.ok(paying.includes('Stone Roofing') && paying.includes('Birch Legal') && !paying.includes('Fern IT') && !paying.includes('Acme Plumbing'), 'Paying clients: paying clients only');
+  const app = visibleText(between(paying, '<div class="tk-app-row">', '</div></div>'));
+  assert.ok(app.includes('Stone Roofing Growth 72% match Application (Word) ↓ Say yes Say no… Details'), app);
+  assert.ok(paying.includes('New paying-client applications') && paying.includes('<h3 class="tk-group">Paying clients</h3>'));
+  assert.ok(paying.includes("onclick=\"render('inquiries')\">Plan call requests · 1 open ›"), 'call requests without a website: one tap away');
+  assert.equal(payingNavCount(), 2, 'the paid application + the new call request');
+  // a paid client's page lights up Paying clients, and Back goes there
+  openTrial('birch-legal');
+  assert.deepEqual(navItems().filter((i) => i.isOn ? i.isOn() : i.view === currentView).map((i) => i.view), ['paying']);
+  views.trial.back(); assert.equal(currentView, 'paying');
+  // a converted trial: a paying client, and still in the Trials history
+  const conv = Object.assign(clone2(simpleRows.acme), { id: 'cobalt', name: 'Cobalt HVAC', plan: 'starter', state: 'converted' }); conv.simple.company = 'Cobalt HVAC';
+  const h2 = Object.assign({}, simpleHub, { stages: stagesWith({ won: [conv] }) });
+  assert.ok(renderTrialList(h2, { now: NOW }).includes('Cobalt HVAC') && renderTrialList(h2, { now: NOW }, true).includes('Cobalt HVAC'));
+  // nothing paid yet
+  assert.ok(visibleText(renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({}) }), { now: NOW }, true)).includes('No paying clients yet'));
+  trialsForget();
+});
+
+test('the application as a Word document: a real .docx (zip + WordprocessingML) with what they sent, the match and our analysis; the row downloads it', async () => {
+  asOwner(); trialsForget(); asOwner();
+  const d = { row: { id: 'stone-roofing', name: 'Stone <Roofing> & Co', plan: 'growth', contactName: 'Bob Stone', contactEmail: 'bob@stoneroofing.com', website: 'stoneroofing.com', fitScore: { score: 72, grade: 'B', label: 'Good fit' } },
+    application: { receivedAt: '2026-10-01T14:00:00Z', source: 'inquiry', answers: [{ q: 'Plan they asked for', a: 'Growth' }, { q: 'What they sell', a: 'Commercial roofing' }],
+      research: { status: 'done', score: { score: 72, grade: 'B', label: 'Good fit', confidence: 60, summary: '72/100 — good fit', parts: [{ label: 'Deal size', points: 12, max: 20, items: [{ status: 'good', text: 'Big roofs', points: 12, max: 12 }] }], questions: ['Who is your dream customer?'] },
+        brief: { sentences: [{ text: 'Stone Roofing fixes commercial roofs in Texas.' }] }, business: { name: 'Stone Roofing', rating: 4.6, reviews: 40, address: 'Austin, TX' }, deep: { competitors: { items: [{ name: 'Top Roof', rating: 4.9, reviews: 12 }] } } } } };
+  const blocks = tkApplicationBlocks(d, new Date('2026-10-02T10:00:00Z'));
+  const text = blocks.map((b) => b.t || b.p || b.li || b.muted || (b.kv ? b.kv.join(': ') : '')).join('\n');
+  for (const w of ['Stone <Roofing> & Co', 'Paying-client application · Growth plan', 'Match: 72% (Good fit, grade B)', 'Deal size: 12 of 20 points', 'Plan they asked for: Growth', 'Contact: Bob Stone · bob@stoneroofing.com', 'Stone Roofing fixes commercial roofs in Texas.', 'Rating: 4.6★ from 40 reviews', 'Top Roof — 4.9★ (12)', 'Who is your dream customer?']) assert.ok(text.includes(w), w);
+  const bytes = tkDocxBytes(blocks);
+  assert.deepEqual([...bytes.slice(0, 4)], [0x50, 0x4b, 0x03, 0x04], 'a zip');
+  const s = Buffer.from(bytes).toString('latin1');
+  for (const part of ['[Content_Types].xml', '_rels/.rels', 'word/document.xml']) assert.ok(s.includes(part), part);
+  assert.ok(Buffer.from(bytes).toString('utf8').includes('Stone &lt;Roofing&gt; &amp; Co'), 'escaped for XML');
+  assert.equal(tkCrc32(new TextEncoder().encode('123456789')), 0xCBF43926, 'CRC-32 check value');
+  // the row's button: loads the application fresh, then saves "<name> — application.docx"
+  const saved = []; const was = globalThis.tkSaveFile;
+  globalThis.fetch = async (url) => ({ ok: true, status: 200, text: async () => JSON.stringify(d) });
+  globalThis.tkSaveFile = (b, name, type) => saved.push([name, type, b.length]);
+  try {
+    await downloadApplication('stone-roofing');
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0][0], 'Stone Roofing & Co — application.docx');
+    assert.equal(saved[0][1], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  } finally { globalThis.tkSaveFile = was; offline(); trialsForget(); }
+});
+
+test('navigation badges: Trials = how many need you (red) · Paying clients = new plan requests + paid applications (red) · Calendar = call times waiting for your yes (amber) · Settings has none', async () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
   trialsIngestHub(Object.assign({}, simpleHub, { inquiries: inquirySummaryOf(inquiryRecords) }));
   cal.reqs = calRequestsOf(calWeek);
   const items = navItems();
-  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'amber', '2 waiting for your yes'], [2, 'red', '2 new'], ['', '', ''], ['', '', '']]);
+  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'red', '2 need you'], [2, 'amber', '2 waiting for your yes'], ['', '', ''], ['', '', '']]);
   renderNav();
   const nav = el('tabBar').innerHTML;
   assert.ok(nav.includes('<span class="badge red" title="3 need you" aria-hidden="true">3</span>'));
   assert.ok(nav.includes('<span class="badge amber" title="2 waiting for your yes" aria-hidden="true">2</span>'));
-  assert.ok(nav.includes('<span class="badge red" title="2 new" aria-hidden="true">2</span>'));
+  assert.ok(nav.includes('<span class="badge red" title="2 need you" aria-hidden="true">2</span>'));
   assert.ok(nav.includes('aria-label="Calendar — 2 waiting for your yes"'), 'a screen reader hears the badge in words');
   assert.ok(!between(nav, "render('settings')").includes('class="badge'), 'Settings: no badge');
   // nothing waiting → no badge at all (never a "0")

@@ -212,10 +212,18 @@ for (const s of J) {
     const sim = s.detail.row.simple;
     const n = TK_STEP_OF[sim.step];
     assert.ok(n >= 1 && n <= 5, s.step + ': a known step (' + sim.step + ')');
+    let rowHtml = '';
+    if (tkIsUnderReview(s.detail.row)) {
+      // an application waiting for him: just the business, the match, the Word document, Say yes / Say no
+      const at = o.list.lastIndexOf('<div class="tk-app-row">', o.list.indexOf('Ridgeline IT'));
+      const app = flat(o.list.slice(at, o.list.indexOf('</div></div>', at)));
+      assert.ok(at >= 0 && app.includes('Ridgeline IT') && app.includes('94% match') && app.includes('Application (Word)') && app.includes('Say yes') && app.includes('Say no'), s.step + ': the application row: ' + app);
+    } else {
     const rowAt = o.list.lastIndexOf('<button type="button" class="tk-person', o.list.indexOf('Ridgeline IT'));
-    const rowHtml = o.list.slice(rowAt, o.list.indexOf('</button>', rowAt));
+    rowHtml = o.list.slice(rowAt, o.list.indexOf('</button>', rowAt));
     assert.ok(rowHtml.includes('<span class="tk-person-step">Step ' + n + ' of 5 — ' + TK_STEPS[n - 1]), s.step + ': the list says step ' + n + ' — ' + TK_STEPS[n - 1]);
     assert.equal([...rowHtml.matchAll(/<span class="tk-b5 (\w+)">/g)].map((m) => m[1]).join(','), TK_STEPS.map((_, i) => (i + 1 < n ? 'done' : i + 1 === n ? 'now' : 'todo')).join(','), s.step + ': the small bar');
+    }
     assert.ok(new RegExp('<li class="now" aria-current="step"><span class="tk-j-dot" aria-hidden="true">' + n + '</span><span class="tk-j-name">' + TK_STEPS[n - 1] + '</span>').test(o.top), s.step + ': the trial page is at step ' + n);
     if (sim.dayOf30 != null) assert.ok(new RegExp('\\b[Dd]ay ' + sim.dayOf30 + ' of 30\\b').test(flat(o.top)), s.step + ': Day ' + sim.dayOf30 + ' of 30');
     assert.ok(flat(o.top).includes(sim.label), s.step + ': the machine\'s sentence is the big one: ' + sim.label);
@@ -237,9 +245,9 @@ for (const s of J) {
     const needs = sim.needsYou || o.act.kind === 'reply' || o.act.kind === 'warmupHelpers';
     const g = tkListGroups(tk.hub);
     assert.equal(g.needs.some((x) => x.row.id === ID), !!sim.needsYou, s.step + ': under "Needs you" exactly when the machine says so');
-    assert.equal(o.list.includes('<h3 class="tk-group red">Needs you</h3>'), !!sim.needsYou, s.step + ': the red heading');
-    assert.equal(rowHtml.includes('tk-person needs') && rowHtml.includes('class="tk-person-you"'), !!sim.needsYou, s.step + ': the red edge and the red line');
-    if (sim.needsYou) assert.match(decode((rowHtml.match(/<span class="tk-person-you">([^<]*)<\/span>/) || [])[1] || ''), sim.needsReply ? /^Dana wrote — answer them$/ : /^You need to [a-z].*\.$/, s.step + ': the red line is an instruction (never "You need to: …")');
+    assert.equal(o.list.includes('<h3 class="tk-group red">'), !!sim.needsYou, s.step + ': the red heading');
+    if (!tkIsUnderReview(s.detail.row)) assert.equal(rowHtml.includes('tk-person needs') && rowHtml.includes('class="tk-person-you"'), !!sim.needsYou, s.step + ': the red edge and the red line');
+    if (sim.needsYou && !tkIsUnderReview(s.detail.row)) assert.match(decode((rowHtml.match(/<span class="tk-person-you">([^<]*)<\/span>/) || [])[1] || ''), sim.needsReply ? /^Dana wrote — answer them$/ : /^You need to [a-z].*\.$/, s.step + ': the red line is an instruction (never "You need to: …")');
     assert.equal(o.top.includes('<section class="card tk-top needs"'), needs, s.step + ': the red edge on the page');
     const reds = [...o.front.matchAll(/class="([^"]*\b(red|late|urgent)\b[^"]*)"/g)].map((m) => m[1]);
     if (!needs) assert.deepEqual(reds, [], s.step + ': no red on a page that needs nothing from him');
@@ -407,7 +415,8 @@ test('times: Sri Lanka time everywhere whatever the device is set to (here US Pa
 
 test('01 applied: on the list under "Needs you"; the page asks him to read it in its own words (not "open it"), scrolls to the application, which is open with Say yes / Say no', () => {
   const o = drawStep(byStep('01'));
-  assert.ok(flat(o.list).includes('Needs you Ridgeline IT Dana Whitfield Step 1 of 5 — Applied New application — read it and say yes or no You need to open it and press “Say yes” or “Say no”.'));
+  // the list: the business, how well they match, the application as a Word document, Say yes / Say no
+  assert.ok(flat(o.list).includes('New trial applications 1 Ridgeline IT 94% match Application (Word) ↓ Say yes Say no… Details'), flat(o.list));
   assert.equal(o.act.say, 'Dana applied for a trial. Read what they sent and what we found, then say yes or no.', 'on the page itself, never "open it"');
   assert.ok(o.page.includes('<div class="section-head tk-section" id="tkSec-application"><h3>Their application</h3>') && o.page.includes('>Say yes and email them</button>') && o.page.includes('>Say no…</button>'));
   assert.ok(flat(o.page).includes('94 /100') && flat(o.page).includes('Strong fit'), 'the fit score');
@@ -581,7 +590,9 @@ test('"Needs you" first: the journey\'s rows side by side on one list — the on
   const out = renderTrialList(board, { now: new Date(byStep('33').at) });
   const at = (t) => out.indexOf(t);
   assert.ok(at('Needs you</h3>') < at('Co 27') && at('Co 01') < at('In progress</h3>') && at('In progress</h3>') < at('Co 31') && at('Co 21') < at('Done / not taken'));
-  assert.equal((out.match(/class="tk-person needs"/g) || []).length, 6);
+  assert.equal((out.match(/class="tk-person needs"/g) || []).length, 5);
+  assert.equal((out.match(/class="tk-app-row"/g) || []).length, 1, 'the application waiting for him: its own row at the top');
+  assert.ok(at('New trial applications') < at('Co 01') && at('Co 01') < at('Needs you</h3>'));
   assert.equal(trialsNavCount(), 6, 'the Trials badge counts them');
   trialsForget();
 });

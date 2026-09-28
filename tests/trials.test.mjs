@@ -67,8 +67,8 @@ const ok = (body) => async () => ({ ok: true, status: 200, text: async () => JSO
 /* ───────────── shell ───────────── */
 test('shell: title, router knows the four places (and the pages inside them), nothing from the old workspace remains', () => {
   assert.ok(html.includes('<title>Aviance Hub — Trials</title>'));
-  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'trialPurchase', 'calendar', 'inquiries', 'inquiry', 'settings', 'trialsBoard']);
-  assert.deepEqual(Object.keys(views).filter((v) => !views[v].back), ['trials', 'calendar', 'inquiries', 'settings'], 'the four places have no Back button; every page inside one has');
+  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'paying', 'trialPurchase', 'calendar', 'inquiries', 'inquiry', 'settings', 'trialsBoard']);
+  assert.deepEqual(Object.keys(views).filter((v) => !views[v].back), ['trials', 'paying', 'calendar', 'settings'], 'the places have no Back button; every page inside one has (plan call requests sit inside Paying clients)');
   for (const gone of ['viewDashboard', 'viewProjects', 'viewTeam', 'viewClients', 'viewCRM', 'viewProposals', 'viewInvoices', 'viewMyDay', 'viewDirectory', 'workspace_shared', 'workspace_admin', 'loadData', 'saveDB', 'openNewProject', 'composeGmail', 'submitJoin', 'approveJoin', 'applyRole', 'employeePersona', 'printDoc', 'crmStages', 'phases', 'Request to join', 'joinPane', 'roleMenu']) {
     assert.ok(!html.includes(gone), gone + ' is gone');
   }
@@ -275,17 +275,19 @@ const visibleText = (html) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ')
 
 test('Trials list: one row per trial client — company, person, the journey (bar + "Step 2 of 5 — …"), the plain sentence and what is next; Needs you, In progress, then a folded Done / not taken', () => {
   const html = renderTrialList(simpleHub, { now: NOW });
-  const order = ['Fern IT', 'Bright Dental', 'eCreek IT', 'Delta Roofing', 'Gale Roofing', 'Acme Plumbing', 'Cobalt HVAC', 'Iris Dental'];
+  // an application waiting for him: its own compact row at the top — the business, the match, the Word document, yes / no
+  const apps = between(html, '<h3 class="tk-group red">New trial applications', '<h3 class="tk-group red">Needs you</h3>');
+  assert.ok(apps.includes('Fern IT') && apps.includes('Application (Word)') && apps.includes('>Say yes</button>') && apps.includes('>Say no…</button>') && apps.includes('onclick="downloadApplication(&quot;fern-it&quot;)"'), 'the application row');
+  const order = ['Bright Dental', 'eCreek IT', 'Delta Roofing', 'Gale Roofing', 'Acme Plumbing', 'Cobalt HVAC', 'Iris Dental'];
   let last = -1; for (const name of order) { const i = html.indexOf('<span class="tk-person-co">' + name + '</span>'); assert.ok(i > last, 'row order: ' + name); last = i; }
-  assert.equal(count(html, /<button type="button" class="tk-person/g), 8, 'one row per trial client');
+  assert.equal(count(html, /<button type="button" class="tk-person/g), 7, 'one row per trial client (the application has its own row)');
   assert.ok(!html.includes('tk-person-co">Aviance<'), "the owner's own rows are not trial clients");
   // needs you: a red heading, then the three rows with a red edge and a red "You need to…" line
   const needs = between(html, '<h3 class="tk-group red">Needs you</h3>', '<h3 class="tk-group">In progress</h3>');
-  assert.equal(count(needs, /class="tk-person needs"/g), 3); assert.equal(count(needs, /class="tk-person-you"/g), 3);
-  assert.ok(needs.includes('<span class="tk-person-name">Lee Park</span>') && needs.includes('Sam Test') && needs.includes('Raj Patel'), "the person's name on each row");
-  assert.ok(needs.includes('<span class="tk-person-say">New application — read it and say yes or no</span>'));
+  assert.equal(count(needs, /class="tk-person needs"/g), 2); assert.equal(count(needs, /class="tk-person-you"/g), 2);
+  assert.ok(needs.includes('Sam Test') && needs.includes('Raj Patel'), "the person's name on each row");
   assert.ok(needs.includes('<span class="tk-person-you">Sam wrote — answer them</span>'), 'they wrote and nobody answered: that is the red line');
-  assert.ok(needs.includes('<span class="tk-person-step">Step 2 of 5 — Onboarding call</span>') && needs.includes('<span class="tk-person-step">Step 1 of 5 — Applied</span>') && needs.includes('<span class="tk-person-step">Step 3 of 5 — Setting up</span>'));
+  assert.ok(needs.includes('<span class="tk-person-step">Step 2 of 5 — Onboarding call</span>') && needs.includes('<span class="tk-person-step">Step 3 of 5 — Setting up</span>'));
   const going = between(html, '<h3 class="tk-group">In progress</h3>', '<details');
   assert.equal(count(going, /tk-person-you|tk-person needs/g), 0, 'in progress: no red');
   assert.ok(going.includes('Sending — day 12 of 30, 2 calls booked') && going.includes('<span class="tk-person-next">Nothing for you: the Friday update goes out today</span>'));
@@ -338,7 +340,7 @@ test('Trials list: the clutter is gone — no stages board, no status strip, no 
 test('Trials list: an older machine without row.simple falls back to the state and the to-dos; an empty list says what to expect', () => {
   const html = renderTrialList(fullHub, { now: NOW });
   const needs = between(html, 'Needs you</h3>', 'In progress</h3>');
-  assert.ok(needs.includes('Fern IT') && needs.includes('Applied — waiting for your review') && needs.includes("You need to review Fern IT's trial application."), 'an application to review needs you');
+  assert.ok(between(html, 'New trial applications', 'Needs you</h3>').includes('Fern IT'), 'an application to review: its own row at the top');
   assert.ok(needs.includes('Bright Dental') && needs.includes('Waiting for you to buy') && needs.includes('You need to buy bright-team.com and 2 inboxes, then paste the logins.'), 'an urgent to-do needs you; the red line is that to-do');
   const going = between(html, 'In progress</h3>', '<details');
   assert.ok(going.includes('Acme Plumbing') && going.includes('Sending — Day 12 of 30') && going.includes('Decide the dispute on the call with bob@example.com') && going.includes('Ann Lee'));
@@ -1212,7 +1214,8 @@ test('inquiries on the board: a strip ("2 new inquiries — Birch Legal, call Sa
   const contactedOnly = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'contacted'));
   assert.ok(renderInquiryStrip(contactedOnly, { now: NOW }).includes('2 open inquiries'));
   assert.equal(inquiriesNavCount(), 2); renderNav();
-  assert.ok(el('navArea').innerHTML.includes('aria-label="Inquiries — 2 new"') && el('navArea').innerHTML.includes('<span class="badge red" title="2 new" aria-hidden="true">2</span>'));
+  // the menu: new call requests count on Paying clients (they live inside it now)
+  assert.ok(el('navArea').innerHTML.includes('aria-label="Paying clients — 2 need you"') && el('navArea').innerHTML.includes('<span class="badge red" title="2 need you" aria-hidden="true">2</span>'));
   const bell = trialsNotifs().filter((n) => /plan inquiry/.test(n.t));
   assert.equal(bell.length, 2); bell[0].go();
   assert.equal(currentView, 'inquiry'); assert.ok(['qmgv1stone', 'qmgu9birch'].includes(currentInquiryId));
