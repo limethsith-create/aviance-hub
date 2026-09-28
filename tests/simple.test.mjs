@@ -108,7 +108,7 @@ test('My stats: everything you have sent (GET /api/mc/outreach) sits above your 
     byTouch: { d0: 3, d3: 1 }, byCampaign: {},
     days: [
       { date: '2026-06-04', summary: { totalSent: 1, newSends: 0, followUps: 1, totalReplies: 0 }, sent: [{ to: 'a@acme.com', company: 'Acme', subject: 'Re: Quick idea', touch: 'd3', from: 'me@getaviance.site', timestamp: '2026-06-04T14:00:00Z' }], replies: [], bounces: [] },
-      { date: '2026-06-02', summary: { totalSent: 1, newSends: 1, totalReplies: 1 }, sent: [{ to: 'c@gamma.com', company: 'Gamma', subject: 'Hi <Gamma>', touch: 'd0', from: 'me@getaviance.site', timestamp: '2026-06-02T15:00:00Z' }], replies: [{ from: 'b@beta.com', company: 'Beta', snippet: 'Tell me more', repliedAt: '2026-06-02T09:00:00Z' }], bounces: [{ email: 'c@gamma.com', reason: 'no such user', bouncedAt: '2026-06-02T15:05:00Z' }] },
+      { date: '2026-06-02', summary: { totalSent: 1, newSends: 1, totalReplies: 1 }, sent: [{ to: 'c@gamma.com', company: 'Gamma', subject: 'Hi <Gamma>', touch: 'd0', from: 'me@getaviance.site', timestamp: '2026-06-02T15:00:00Z' }], replies: [{ from: 'b@beta.com', company: 'Beta', subject: 'Re: Quick idea', snippet: 'Tell me more', text: 'Tell me more about <pricing>.\n\nThanks, Bea', repliedAt: '2026-06-02T09:00:00Z' }], bounces: [{ email: 'c@gamma.com', reason: 'no such user', bouncedAt: '2026-06-02T15:05:00Z' }] },
       { date: '2026-06-01', summary: { totalSent: 2, newSends: 2, totalReplies: 0 }, sent: [{ to: 'a@acme.com', company: 'Acme', subject: 'Quick idea', touch: 'd0', from: 'me@getaviance.site', timestamp: '2026-06-01T14:00:00Z' }, { to: 'b@beta.com', company: 'Beta', subject: 'Quick idea', touch: 'd0', from: 'you@getaviance.site', timestamp: '2026-06-01T15:00:00Z' }], replies: [], bounces: [] },
     ],
   };
@@ -122,6 +122,7 @@ test('My stats: everything you have sent (GET /api/mc/outreach) sits above your 
     const txt = visibleText(h);
     for (const w of ['Emails sent 4', 'First emails 3', 'Follow-ups 1', 'Replies 1 33.3% of people emailed', 'Bounced 1 25% of emails sent', 'me@getaviance.site 3 75%', 'Tell me more', 'Every email sent · 4', 'Day 3 follow-up', 'no such user']) assert.ok(txt.includes(w), w);
     assert.ok(h.includes('Hi &lt;Gamma&gt;') && !h.includes('<Gamma>'), 'escaped');
+    assert.ok(h.includes('<div class="tk-reply-text">Tell me more about &lt;pricing&gt;.\n\nThanks, Bea</div>'), 'the whole reply, line breaks kept, escaped');
     assert.ok(h.includes('Emails sent per day · last 30 days'));
     // the newest email first
     assert.ok(txt.indexOf('Re: Quick idea') < txt.indexOf('Hi'), 'newest first');
