@@ -385,6 +385,7 @@ const I={
   bellRing:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/><path d="M2.5 6.5A9 9 0 0 1 5 3M21.5 6.5A9 9 0 0 0 19 3"/></svg>',
   logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
   money:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
+  activity:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
   people:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.9-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.6"/><path d="M16.2 14.2c2.3.2 3.9 1.8 4.3 4.3"/></svg>',
   calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16v15H4zM4 10.5h16M8.5 3v5M15.5 3v5"/><path d="M8 14.5h3M8 17.5h6"/></svg>',
 };
@@ -425,7 +426,8 @@ const views={
   inquiries:{fn:()=>viewInquiries(),title:'Plan call requests',sub:'People who booked a call about a paid plan',back:()=>render('paying')},
   inquiry:{fn:()=>viewInquiry(),title:'Inquiry',sub:'',back:()=>render('inquiries')},
   settings:{fn:()=>viewSettings(),title:'Settings',sub:'Your details, keys, alerts, Google Meet, warm-up helpers, the reply bot, and how everything is running'},
-  people:{fn:()=>viewPeople(),title:'People inside',sub:'Who is in the hub, when they signed in and out, and what they looked at'},
+  people:{fn:()=>viewPeople(),title:'Activity',sub:'Who signed in and out, for how long, and what they opened'},
+  team:{fn:()=>teamPageView(),title:'Team',sub:'Who is working on what, and which clients each person looks after'},
   trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every trial by stage, every to-do, the waiting list',back:()=>render('settings')},
 };
 function render(v){
@@ -501,8 +503,9 @@ function navItems(){
     {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','trialPurchase'],isOn:()=>currentView==='trials'||(currentView==='trialPurchase'&&!isPaid())||(currentView==='trial'&&currentTrialId!==MY_STATS_ID&&!isPaid())},
     {view:'paying',icon:I.money,label:'Paying clients',short:'Paying',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry'],isOn:()=>['paying','inquiries','inquiry'].includes(currentView)||((currentView==='trial'||currentView==='trialPurchase')&&isPaid())},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:c,tone:'amber',badgeTitle:c?c+' waiting for your yes':''},
+    {view:'team',icon:I.people,label:'Team',badge:''},
     {view:'mystats',icon:I.chart,label:'My stats',short:'Stats',badge:'',go:'openMyStats()',isOn:()=>currentView==='trial'&&currentTrialId===MY_STATS_ID},
-    {view:'people',icon:I.people,label:'People inside',short:'People',badge:pn,tone:pn?'red':'',badgeTitle:pn?pn+' waiting for your approval':'',owner:true},
+    {view:'people',icon:I.activity,label:'Activity',short:'Activity',badge:pn,tone:pn?'red':'',badgeTitle:pn?pn+' waiting for your approval':'',owner:true},
     {view:'settings',icon:I.gear,label:'Settings',badge:'',also:['trialsBoard'],owner:true},
   ].filter(it=>!it.owner||!authUser||authUser.role==='admin');
 }

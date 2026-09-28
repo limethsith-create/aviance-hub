@@ -301,3 +301,26 @@ body.ro .tk-app-row{padding-right:20px}
 .cal-ev{justify-content:flex-start}
 .cal-grid{grid-template-columns:84px repeat(7,minmax(70px,1fr));min-width:600px}
 @media(min-width:1100px) and (max-width:1360px){.cal-layout{grid-template-columns:minmax(0,1fr) 260px}.content{padding-left:28px;padding-right:28px}}
+
+/* ---- Team ---- */
+.tm-me{padding:16px 18px;display:grid;gap:10px}
+.tm-me-row{display:flex;gap:10px}
+.tm-me-row input{flex:1;min-width:0;padding:11px 13px;font-size:15px}
+.tm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.tm-card{padding:16px 18px;display:grid;gap:10px;align-content:start}
+.tm-card.on{box-shadow:inset 3px 0 0 #12A150,var(--sh)}
+.tm-top{display:flex;align-items:center;gap:12px}
+.tm-state{margin-left:auto;font-size:13px;color:var(--muted);white-space:nowrap}
+.tm-line{display:grid;grid-template-columns:92px 1fr;gap:10px;font-size:15px;align-items:baseline}
+.tm-line small{font-size:13px;color:var(--muted)}
+.tm-line em{font-style:normal;font-size:13px;color:var(--muted-2)}
+.tm-clients{display:flex;flex-wrap:wrap;gap:6px}
+.tm-chip{border:1px solid var(--border);background:var(--surface-2);border-radius:999px;padding:4px 10px;font:inherit;font-size:13px;color:var(--text);cursor:pointer;min-height:30px}
+.tm-chip:hover{border-color:var(--field)}
+.tm-foot{border-top:1px solid var(--border-soft);padding-top:10px}
+.tm-pick{display:grid;gap:6px;max-height:55vh;overflow-y:auto}
+.tm-check{display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 10px;border:1px solid var(--border-soft);border-radius:var(--r-xs);cursor:pointer}
+.tm-check small{margin-left:auto;color:var(--muted);font-size:13px}
+.tm-free{margin-bottom:8px}
+@media(max-width:560px){.tm-me-row{flex-direction:column}}
+.tk-person-owner{margin-left:auto;font-size:13px;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:2px 10px;white-space:nowrap}
