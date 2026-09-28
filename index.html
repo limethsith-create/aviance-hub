@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Aviance Hub — Trials</title>
+<title>Aviance Hub</title>
 <link rel="stylesheet" href="trials.css">
 <link rel="stylesheet" href="calendar.css">
 <!-- Installable app (Add to Home Screen) — needed for phone alerts on iPhone -->
@@ -42,7 +42,7 @@
   /* type scale — readability floor: nothing below --fs-min (13px); body text 16px. See README. */
   --fs-min:13px;--fs-small:15px;--fs-base:16px;--fs-strong:17px;--fs-h3:19px;--fs-h2:24px;--fs-num:19px;--fs-num-lg:26px;
 }
-*{box-sizing:border-box;margin:0;padding:0;border-radius:0!important}
+*{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{font-family:var(--font);font-size:var(--fs-base);line-height:1.5;background:var(--bg)!important;color:var(--text);-webkit-font-smoothing:antialiased;overflow:hidden}
 ::placeholder{color:var(--muted-2);opacity:1}
@@ -270,6 +270,7 @@ body.dark [style*="color:#000000"]{color:#fff!important}
 body.dark [style*="background:#0000001f"]{background:rgba(255,255,255,.12)!important}
 body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!important}
 </style>
+<link rel="stylesheet" href="theme.css">
 </head>
 <body>
 
@@ -278,13 +279,13 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
   <div class="login-wrap">
     <div class="login-aside">
       <div class="la-top"><div class="logo" style="width:40px;height:40px">A</div>
-        <div><div class="la-name">Aviance Hub</div><div class="la-sub">For the owner</div></div></div>
+        <div><div class="la-name">Aviance Hub</div><div class="la-sub">For the Aviance team</div></div></div>
       <div class="la-hero">
         <h2>We don't sell emails. We sell <span class="accent">booked calls</span>.</h2>
-        <p>Every 30-day trial runs by itself. This is where you see who is where, and do the few things only you can do.</p>
+        <p>Every client runs by itself — trials and paying. This is where you see who is where, and do the few things only people can do.</p>
       </div>
       <div class="la-points">
-        <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>Every trial on one line: where they are</div>
+        <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>Every client on one line: where they are</div>
         <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>What you need to do, at the top</div>
         <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>Every call in one calendar</div>
       </div>
@@ -301,7 +302,15 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
       <div id="loginErr" class="login-err"></div>
       <div id="resetOk" class="login-ok" style="display:none">Recovery link sent — check your inbox.</div>
       <button class="btn" style="width:100%;justify-content:center;padding:11px" onclick="doLogin()">Sign in</button>
-      <div class="login-hint">This hub is for the Aviance owner.</div>
+      <div class="login-hint">This hub is for the Aviance team. New here? <button type="button" class="login-link" onclick="openSignUp()">Create an account</button> — the owner approves it.</div>
+      <div id="signUpBox" style="display:none;margin-top:16px">
+        <div class="field"><label>Your name</label><input id="suName" placeholder="Your full name" autocomplete="name"></div>
+        <div class="field"><label>Email</label><input id="suEmail" type="email" placeholder="you@email.com" autocomplete="email"></div>
+        <div class="field"><label>Password</label><input id="suPass" type="password" placeholder="At least 8 characters" autocomplete="new-password"></div>
+        <div id="suErr" class="login-err"></div>
+        <div id="suOk" class="login-ok" style="display:none"></div>
+        <button class="btn ghost" style="width:100%;justify-content:center" onclick="doSignUp()">Create my account</button>
+      </div>
     </div>
   </div>
 </div>
@@ -322,7 +331,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
   <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="logo">A</div>
-      <div><h1>Aviance Hub</h1><span>For the owner</span></div>
+      <div><h1>Aviance Hub</h1><span>For the Aviance team</span></div>
     </div>
     <nav class="nav-area" id="navArea" aria-label="Main"></nav>
     <div class="sidebar-foot">
@@ -376,6 +385,7 @@ const I={
   bellRing:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/><path d="M2.5 6.5A9 9 0 0 1 5 3M21.5 6.5A9 9 0 0 0 19 3"/></svg>',
   logout:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
   money:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/></svg>',
+  people:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.9-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.6"/><path d="M16.2 14.2c2.3.2 3.9 1.8 4.3 4.3"/></svg>',
   calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16v15H4zM4 10.5h16M8.5 3v5M15.5 3v5"/><path d="M8 14.5h3M8 17.5h6"/></svg>',
 };
 
@@ -415,6 +425,7 @@ const views={
   inquiries:{fn:()=>viewInquiries(),title:'Plan call requests',sub:'People who booked a call about a paid plan',back:()=>render('paying')},
   inquiry:{fn:()=>viewInquiry(),title:'Inquiry',sub:'',back:()=>render('inquiries')},
   settings:{fn:()=>viewSettings(),title:'Settings',sub:'Your details, keys, alerts, Google Meet, warm-up helpers, the reply bot, and how everything is running'},
+  people:{fn:()=>viewPeople(),title:'People inside',sub:'Who is in the hub, when they signed in and out, and what they looked at'},
   trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every trial by stage, every to-do, the waiting list',back:()=>render('settings')},
 };
 function render(v){
@@ -428,6 +439,7 @@ function render(v){
   try{updateNotifBadge();}catch(e){}
   try{trialsOnRender(v);}catch(e){}
   try{calendarOnRender(v);}catch(e){}
+  try{if(typeof peopleOnRender==='function')peopleOnRender(v);}catch(e){}
 }
 
 /* The Back button in the top bar (pages inside one of the four places). */
@@ -483,14 +495,16 @@ function openMyStats(){openTrial(MY_STATS_ID)}
    for your yes (amber), Inquiries = new ones (red). The same items fill the sidebar and the phone's tab bar. ---- */
 function navItems(){
   const isPaid=()=>typeof tkIsPaidId==='function'&&tkIsPaidId(currentTrialId);
+  const pn=typeof peopleNavCount==='function'?peopleNavCount():'';
   const n=typeof trialsNavCount==='function'?trialsNavCount():'',q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'';
   return [
     {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','trialPurchase'],isOn:()=>currentView==='trials'||(currentView==='trialPurchase'&&!isPaid())||(currentView==='trial'&&currentTrialId!==MY_STATS_ID&&!isPaid())},
-    {view:'paying',icon:I.money,label:'Paying clients',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry'],isOn:()=>['paying','inquiries','inquiry'].includes(currentView)||((currentView==='trial'||currentView==='trialPurchase')&&isPaid())},
+    {view:'paying',icon:I.money,label:'Paying clients',short:'Paying',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry'],isOn:()=>['paying','inquiries','inquiry'].includes(currentView)||((currentView==='trial'||currentView==='trialPurchase')&&isPaid())},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:c,tone:'amber',badgeTitle:c?c+' waiting for your yes':''},
-    {view:'mystats',icon:I.chart,label:'My stats',badge:'',go:'openMyStats()',isOn:()=>currentView==='trial'&&currentTrialId===MY_STATS_ID},
-    {view:'settings',icon:I.gear,label:'Settings',badge:'',also:['trialsBoard']},
-  ];
+    {view:'mystats',icon:I.chart,label:'My stats',short:'Stats',badge:'',go:'openMyStats()',isOn:()=>currentView==='trial'&&currentTrialId===MY_STATS_ID},
+    {view:'people',icon:I.people,label:'People inside',short:'People',badge:pn,tone:pn?'red':'',badgeTitle:pn?pn+' waiting for your approval':'',owner:true},
+    {view:'settings',icon:I.gear,label:'Settings',badge:'',also:['trialsBoard'],owner:true},
+  ].filter(it=>!it.owner||!authUser||authUser.role==='admin');
 }
 function renderNav(){
   const items=navItems();const on=it=>it.isOn?it.isOn():it.view===currentView||(it.also||[]).includes(currentView);
@@ -498,7 +512,7 @@ function renderNav(){
   const attrs=it=>`type="button" onclick="${it.go||`render('${it.view}')`}" aria-label="${esc(it.label+(it.badge?' — '+it.badgeTitle:''))}"${on(it)?' aria-current="page"':''}`;
   const side=document.getElementById('navArea'),tab=document.getElementById('tabBar');
   if(side)side.innerHTML=items.map(it=>`<button class="nav-item${on(it)?' active':''}" ${attrs(it)}>${it.icon}<span>${esc(it.label)}</span>${badge(it)}</button>`).join('');
-  if(tab)tab.innerHTML=items.map(it=>`<button class="tab${on(it)?' active':''}" ${attrs(it)}><span class="tab-ic">${it.icon}${badge(it)}</span><span class="tab-t">${esc(it.label)}</span></button>`).join('');
+  if(tab)tab.innerHTML=items.map(it=>`<button class="tab${on(it)?' active':''}" ${attrs(it)}><span class="tab-ic">${it.icon}${badge(it)}</span><span class="tab-t">${esc(it.short||it.label)}</span></button>`).join('');
 }
 /* The sidebar is always on screen on a computer and hidden on a phone (the tab bar takes over), so there is
    nothing to close; kept because render() and push.js call it. */
@@ -514,17 +528,31 @@ async function doLogin(){
   if(error)return errEl('loginErr','Incorrect email or password.');
   await routeUser('loginErr');
 }
+/* A team member makes their own account; it waits (approved = false) until the owner approves it in People inside. */
+function openSignUp(){const b=document.getElementById('signUpBox');if(b){b.style.display='block';const n=document.getElementById('suName');if(n&&n.focus)n.focus();}}
+async function doSignUp(){
+  const name=val('suName'),email=val('suEmail').toLowerCase(),pass=(document.getElementById('suPass')||{}).value||'';
+  errEl('suErr','');const ok=document.getElementById('suOk');if(ok)ok.style.display='none';
+  if(!name||!/.+@.+\..+/.test(email))return errEl('suErr','Write your name and a working email address.');
+  if(pass.length<8)return errEl('suErr','Use a password of at least 8 characters.');
+  const {error}=await sb.auth.signUp({email,password:pass,options:{data:{name}}});
+  if(error)return errEl('suErr',error.message||'That did not go through. Try again.');
+  try{await sb.auth.signOut();}catch(e){}
+  if(ok){ok.textContent='Account made. The owner has to approve it — then sign in above with this email and password.';ok.style.display='block';}
+}
 async function routeUser(errId){
   const {data:{user}}=await sb.auth.getUser();
   if(!user){showLogin();return;}
   let prof=await getProfile(user.id);
   if(!prof){await new Promise(r=>setTimeout(r,800));prof=await getProfile(user.id);}
-  if(!prof||!prof.approved||prof.role!=='admin'){
+  // the owner (role admin) or an approved team member (role employee: sees everything, changes nothing)
+  if(!prof||!prof.approved||(prof.role!=='admin'&&prof.role!=='employee')){
     try{await sb.auth.signOut();}catch(e){}
     authUser=null;showLogin();
-    return errEl(errId,'This hub is for the Aviance owner.');
+    return errEl(errId,prof&&!prof.approved?'Your account is waiting for the owner to approve it. Try again once they have.':'This hub is for the Aviance team.');
   }
-  authUser={uid:prof.id,name:prof.name||'Owner',role:'admin',email:prof.email||user.email||''};
+  authUser={uid:prof.id,name:prof.name||(prof.role==='admin'?'Owner':'Team member'),role:prof.role==='admin'?'admin':'employee',email:prof.email||user.email||''};
+  try{document.body.classList.toggle('ro',authUser.role!=='admin');}catch(e){}
   document.getElementById('loginPass').value='';
   enterApp();
 }
@@ -534,6 +562,7 @@ function enterApp(){
   document.getElementById('whoName').textContent=authUser.name;
   document.getElementById('whoEmail').textContent=authUser.email;
   if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('trials');
+  try{if(typeof peopleSignedIn==='function')peopleSignedIn();}catch(e){}
   try{phoneAlertsBoot();}catch(e){}
 }
 function showLogin(){
@@ -543,7 +572,7 @@ function showLogin(){
   try{trialsStopTimer();}catch(e){}
   try{calendarStopTimer();}catch(e){}
 }
-async function logout(){try{await sb.auth.signOut();}catch(e){}authUser=null;try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}errEl('loginErr','');showLogin();}
+async function logout(){try{if(typeof peopleSignOut==='function')await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}errEl('loginErr','');showLogin();}
 /* ---- Password recovery ---- */
 async function forgotPassword(){
   const email=val('loginEmail').toLowerCase();
@@ -655,5 +684,6 @@ boot();
 <script src="warmup.js"></script>
 <script src="keys.js"></script>
 <script src="push.js"></script>
+<script src="people.js"></script>
 </body>
 </html>

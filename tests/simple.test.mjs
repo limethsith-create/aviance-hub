@@ -44,7 +44,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 /* ───────────── load the shell, then the section scripts ───────────── */
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
-const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'push.js'];
+const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'push.js', 'people.js'];
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 for (const f of FILES) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
@@ -65,13 +65,13 @@ const top = (d, meta) => between(renderTrialDetail(d, 'overview', Object.assign(
 const BANNED = /\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|dns|jwt|config|payload|mission control|cron|redis|endpoint|webhook)\b/i;
 
 /* ───────────── 1. four places only ───────────── */
-test('navigation: Trials, Paying clients, Calendar, My stats, Settings — the same in the sidebar and the phone tab bar', () => {
+test('navigation: Trials, Paying clients, Calendar, My stats, People inside, Settings — the same in the sidebar and the phone tab bar', () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
-  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['paying', 'Paying clients'], ['calendar', 'Calendar'], ['mystats', 'My stats'], ['settings', 'Settings']]);
+  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['paying', 'Paying clients'], ['calendar', 'Calendar'], ['mystats', 'My stats'], ['people', 'People inside'], ['settings', 'Settings']]);
   render('trials');
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
-    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 5, id + ': five buttons');
+    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 6, id + ': six buttons');
     assert.ok(!/Machine|Behind the scenes|Phone alerts|Mission Control|Log out|alerts/i.test(visibleText(nav)), id + ': nothing else in the navigation');
     assert.ok(nav.includes(`<button class="${id === 'navArea' ? 'nav-item' : 'tab'} active" type="button" onclick="render('trials')" aria-label="Trials" aria-current="page">`), id + ': Trials is the current place');
   }
@@ -222,12 +222,54 @@ test('the application as a Word document: a real .docx (zip + WordprocessingML) 
   } finally { globalThis.tkSaveFile = was; offline(); trialsForget(); }
 });
 
+test('People inside: presence goes to the machine (sign in, the page opened, sign out); the owner sees who is online, when they signed in and out, time spent and the activity; team sign-ups wait for approval', async () => {
+  asOwner(); trialsForget(); asOwner();
+  const posts = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.endsWith('/api/mc/presence')) { posts.push(JSON.parse(init.body)); return { ok: true, status: 200, text: async () => '{"ok":true}' }; }
+    if (u.endsWith('/api/mc/people')) return { ok: true, status: 200, text: async () => JSON.stringify({
+      people: [
+        { uid: 'u9', email: 'nim@aviance.online', name: 'Nimal Perera', role: 'employee', online: true, lastSignIn: new Date(Date.now() - 3600e3).toISOString(), lastSignOut: null, lastSeen: new Date().toISOString(), lastView: 'paying', sessions: 3, activeSecondsToday: 2520, activeSecondsTotal: 30000 },
+        { uid: 'u1', email: 'owner@example.com', name: 'Owner', role: 'admin', online: false, lastSignIn: '2026-09-27T08:00:00Z', lastSignOut: '2026-09-27T10:00:00Z', lastSeen: '2026-09-27T10:00:00Z', lastView: 'trials', sessions: 9, activeSecondsToday: 0, activeSecondsTotal: 7200 },
+      ],
+      events: [
+        { at: new Date().toISOString(), uid: 'u9', name: 'Nimal Perera', event: 'view', view: 'paying' },
+        { at: new Date(Date.now() - 3600e3).toISOString(), uid: 'u9', name: 'Nimal Perera', event: 'signin' },
+        { at: '2026-09-27T10:00:00Z', uid: 'u1', name: 'Owner', event: 'signout' },
+      ] }) };
+    return { ok: true, status: 200, text: async () => '{}' };
+  };
+  try {
+    peopleSignedIn(); await tick();
+    assert.equal(posts[0].event, 'signin');
+    peopleOnRender('paying'); await new Promise((r) => setTimeout(r, 1300));
+    assert.deepEqual(posts[posts.length - 1], { event: 'view', view: 'paying' });
+    await peopleKick(true);
+    const h = renderPeople(); const txt = visibleText(h);
+    for (const w of ['1 Online now', '2 People with access', 'Nimal Perera', 'Online now', 'Team · nim@aviance.online', '42 min', '8 h 20 min', 'Paying clients', 'Still in', 'Owner · owner@example.com', 'opened Paying clients', 'signed in', 'signed out']) assert.ok(txt.includes(w), w);
+    // tap a person: only their activity
+    peopleFilter('u1'); const one = visibleText(renderPeople());
+    assert.ok(one.includes('Activity — Owner') && one.includes('signed out') && !one.includes('opened Paying clients'));
+    peopleFilter(null);
+    // a sign-up waiting for approval: counted on the menu, with Approve / Remove
+    pp.pending = [{ id: 'p7', name: 'Kasun Silva', email: 'kasun@aviance.online', approved: false, role: 'employee', created_at: new Date().toISOString() }];
+    assert.equal(peopleNavCount(), 1);
+    const w = renderPeople();
+    assert.ok(w.includes('Waiting for your approval') && w.includes('Kasun Silva') && w.includes('onclick="peopleApprove(&quot;p7&quot;)">Approve</button>'));
+    assert.ok(navItems().some((i) => i.view === 'people' && i.badge === 1 && i.badgeTitle === '1 waiting for your approval'));
+    await peopleSignOut();
+    assert.equal(posts[posts.length - 1].event, 'signout');
+    assert.equal(pp.people, null, 'signing out forgets the list');
+  } finally { offline(); pp.pending = []; trialsForget(); }
+});
+
 test('navigation badges: Trials = how many need you (red) · Paying clients = new plan requests + paid applications (red) · Calendar = call times waiting for your yes (amber) · Settings has none', async () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
   trialsIngestHub(Object.assign({}, simpleHub, { inquiries: inquirySummaryOf(inquiryRecords) }));
   cal.reqs = calRequestsOf(calWeek);
   const items = navItems();
-  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'red', '2 need you'], [2, 'amber', '2 waiting for your yes'], ['', '', ''], ['', '', '']]);
+  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'red', '2 need you'], [2, 'amber', '2 waiting for your yes'], ['', '', ''], ['', '', ''], ['', '', '']]);
   renderNav();
   const nav = el('tabBar').innerHTML;
   assert.ok(nav.includes('<span class="badge red" title="3 need you" aria-hidden="true">3</span>'));

@@ -1879,8 +1879,11 @@ function renderSettings(ctx){
 }
 
 /* ===================== 6. VIEWS (called by the shell router) ===================== */
-function trialsIsAdmin(){return !!(typeof authUser!=='undefined'&&authUser&&authUser.role==='admin')}
-function trialsNotAdminHTML(){return emptyState(I.trials||'','Owner only','This hub is for the Aviance owner.','',null)}
+/* Who may see the screens: the owner, and approved team members (read-only: the machine refuses their changes and
+   the buttons that change things are hidden for them, body.ro). hubIsOwner(): the owner only (Settings, People inside). */
+function trialsIsAdmin(){return !!(typeof authUser!=='undefined'&&authUser&&(authUser.role==='admin'||authUser.role==='employee'))}
+function hubIsOwner(){return !!(typeof authUser!=='undefined'&&authUser&&authUser.role==='admin')}
+function trialsNotAdminHTML(){return emptyState(I.trials||'','Owner only','Only the owner can open this.','',null)}
 /* Everything a trial's tabs need besides the detail itself (read from the caches; never fetches). */
 function trialsCtx(id){
   const row=tkFindRow(id)||{};const s=tkSparkGet(id);
@@ -2089,7 +2092,7 @@ function viewTrialsBoard(){if(!trialsIsAdmin())return trialsNotAdminHTML();trial
 function viewTrial(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trial');trialsOcCheck();loadHub(false).then(()=>{try{renderNav();}catch(e){}});return `<div id="tkHost">${trialsHostHTML('trial')}</div>`}
 function viewTrialPurchase(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trialPurchase');return `<div id="tkHost">${trialsHostHTML('trialPurchase')}</div>`}
 /* Settings: always drawn at once (theme, phone alerts, account need no data); alerts + status fill in. */
-function viewSettings(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('settings');return `<div id="tkHost">${trialsHostHTML('settings')}</div>`}
+function viewSettings(){if(!hubIsOwner())return trialsNotAdminHTML();trialsKick('settings');return `<div id="tkHost">${trialsHostHTML('settings')}</div>`}
 function trialsSettingsCtx(){
   let dark=false;try{dark=!!(document.body&&document.body.classList&&document.body.classList.contains('dark'));}catch(e){dark=false;}
   return {hub:tk.hub,hubErr:tk.hubErr,at:tk.hubAt,alerts:tk.alerts,alertsErr:tk.alertsErr,alertsAt:tk.alertsAt,filter:trialsAlertFilter,open:tk.setOpen,
@@ -2112,7 +2115,7 @@ function trialsSettingsScroll(){
 /* The top bar on a trial: the company is the title; the page itself starts with the three questions. */
 function trialsTitle(){
   const d=currentTrialId&&tk.detail[currentTrialId];if(!d)return;const s=tkSimple(d.row||{});
-  const t=document.getElementById('ptitle'),p=document.getElementById('psub');if(t)t.textContent=s.company;if(p)p.textContent='';   // who they are is the first line of the page
+  const mine=typeof MY_STATS_ID!=='undefined'&&currentTrialId===MY_STATS_ID;const t=document.getElementById('ptitle'),p=document.getElementById('psub');if(t)t.textContent=mine?'My stats':s.company;if(p)p.textContent=mine?'Your own outreach — everything you have sent':'';   // who they are is the first line of the page
 }
 /* Growth fetches — only from the owner's own clicks (opening a trial or a tab), never from the timer. */
 function trialsEnsureOverview(id){

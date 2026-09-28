@@ -66,9 +66,9 @@ const ok = (body) => async () => ({ ok: true, status: 200, text: async () => JSO
 
 /* ───────────── shell ───────────── */
 test('shell: title, router knows the four places (and the pages inside them), nothing from the old workspace remains', () => {
-  assert.ok(html.includes('<title>Aviance Hub — Trials</title>'));
-  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'paying', 'trialPurchase', 'calendar', 'inquiries', 'inquiry', 'settings', 'trialsBoard']);
-  assert.deepEqual(Object.keys(views).filter((v) => !views[v].back), ['trials', 'paying', 'calendar', 'settings'], 'the places have no Back button; every page inside one has (plan call requests sit inside Paying clients)');
+  assert.ok(html.includes('<title>Aviance Hub</title>'));
+  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'paying', 'trialPurchase', 'calendar', 'inquiries', 'inquiry', 'settings', 'people', 'trialsBoard']);
+  assert.deepEqual(Object.keys(views).filter((v) => !views[v].back), ['trials', 'paying', 'calendar', 'settings', 'people'], 'the places have no Back button; every page inside one has (plan call requests sit inside Paying clients)');
   for (const gone of ['viewDashboard', 'viewProjects', 'viewTeam', 'viewClients', 'viewCRM', 'viewProposals', 'viewInvoices', 'viewMyDay', 'viewDirectory', 'workspace_shared', 'workspace_admin', 'loadData', 'saveDB', 'openNewProject', 'composeGmail', 'submitJoin', 'approveJoin', 'applyRole', 'employeePersona', 'printDoc', 'crmStages', 'phases', 'Request to join', 'joinPane', 'roleMenu']) {
     assert.ok(!html.includes(gone), gone + ' is gone');
   }
@@ -89,20 +89,36 @@ test('shell: the full control panel pages (Mission Control) are signed-in links 
   assert.ok(adv.includes('Full control panel ↗') && adv.includes('Advanced settings ↗'));
 });
 
-test('shell: only an approved admin profile gets in; anyone else is signed out with one line', async () => {
+test('shell: the owner and approved team members get in (a team member read-only, no Settings / People inside); anyone else is signed out with one line', async () => {
   authUser = null;
   supa.user = { id: 'u1', email: 'emp@example.com' };
-  supa.profile = { id: 'u1', name: 'Emp', approved: true, role: 'employee', email: 'emp@example.com' };
+  // an account still waiting for the owner's approval
+  supa.profile = { id: 'u1', name: 'Emp', approved: false, role: 'employee', email: 'emp@example.com' };
   let before = supa.signOuts;
   await routeUser('loginErr');
   assert.equal(authUser, null);
-  assert.equal(supa.signOuts, before + 1, 'employee is signed out');
-  assert.equal(el('loginErr').textContent, 'This hub is for the Aviance owner.');
+  assert.equal(supa.signOuts, before + 1, 'not approved yet: signed out');
+  assert.equal(el('loginErr').textContent, 'Your account is waiting for the owner to approve it. Try again once they have.');
   assert.equal(el('login').style.display, 'flex');
+  // an unknown role
+  supa.profile = { id: 'u1', name: 'Nope', approved: true, role: 'client' };
+  before = supa.signOuts;
+  await routeUser('loginErr');
+  assert.equal(authUser, null); assert.equal(supa.signOuts, before + 1); assert.equal(el('loginErr').textContent, 'This hub is for the Aviance team.');
   supa.profile = { id: 'u1', name: 'Nope', approved: false, role: 'admin' };
   before = supa.signOuts;
   await routeUser('loginErr');
   assert.equal(authUser, null); assert.equal(supa.signOuts, before + 1, 'unapproved admin is signed out');
+  // an approved team member: in, read-only
+  supa.session = { access_token: 'test-token' };
+  supa.profile = { id: 'u2', name: 'Emp', approved: true, role: 'employee', email: 'emp@example.com' };
+  await routeUser('loginErr');
+  assert.equal(authUser.role, 'employee'); assert.equal(el('app').style.display, 'grid');
+  assert.ok(document.body._classes.has('ro'), 'read-only');
+  assert.ok(trialsIsAdmin() && !hubIsOwner());
+  assert.deepEqual(navItems().map((i) => i.view), ['trials', 'paying', 'calendar', 'mystats'], 'no Settings, no People inside');
+  assert.ok(viewSettings().includes('Only the owner can open this.'));
+  authUser = null;
   supa.session = { access_token: 'test-token' };
   supa.profile = { id: 'u1', name: 'Limethsith', approved: true, role: 'admin', email: 'owner@example.com' };
   await routeUser('loginErr');
@@ -110,6 +126,7 @@ test('shell: only an approved admin profile gets in; anyone else is signed out w
   assert.equal(el('app').style.display, 'grid');
   assert.equal(currentView, 'trials', 'lands on the Trials board');
   assert.equal(el('whoName').textContent, 'Limethsith');
+  assert.ok(!document.body._classes.has('ro'), 'the owner is not read-only');
 });
 
 test('shell: render() ignores unknown views and needs a signed-in owner', () => {
