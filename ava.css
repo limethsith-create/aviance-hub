@@ -1,0 +1,82 @@
+/* ===================== Ava — the hub's helper (ava.js) =====================
+   A round mic button bottom-right (above the phone tab bar), and a small panel above it.
+   Built on the shell's colour variables, so light and dark both work. */
+#avaRoot[hidden]{display:none!important}
+.ava-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.ava-fab{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:max(20px,env(safe-area-inset-bottom));z-index:250;width:56px;height:56px;border-radius:999px;border:0;
+  display:grid;place-items:center;cursor:pointer;background:var(--text);color:var(--bg);box-shadow:0 6px 18px rgba(0,0,0,.18),0 1px 3px rgba(0,0,0,.12);transition:transform .15s,box-shadow .15s,background .15s}
+.ava-fab svg{width:26px;height:26px;position:relative;z-index:1}
+.ava-fab:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(0,0,0,.22)}
+.ava-fab:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.ava-fab.on{background:var(--surface);color:var(--text);box-shadow:0 0 0 1px var(--border),0 6px 18px rgba(0,0,0,.12)}
+.ava-fab-ring{position:absolute;inset:0;border-radius:999px;pointer-events:none}
+.ava-fab.listening{background:var(--red);color:#fff}
+.ava-fab.listening .ava-fab-ring{animation:avaPulse 1.3s ease-out infinite;box-shadow:0 0 0 0 var(--red)}
+@keyframes avaPulse{0%{box-shadow:0 0 0 0 rgba(180,35,24,.45)}100%{box-shadow:0 0 0 16px rgba(180,35,24,0)}}
+body.dark .ava-fab{background:var(--accent);color:#000}
+body.dark .ava-fab.on{background:var(--surface-2);color:var(--text)}
+
+.ava-panel{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:calc(max(20px,env(safe-area-inset-bottom)) + 68px);z-index:250;width:380px;max-width:calc(100vw - 32px);
+  max-height:min(560px,calc(100vh - 120px));display:flex;flex-direction:column;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--r,14px);
+  box-shadow:var(--sh-lg,0 12px 32px rgba(0,0,0,.14));overflow:hidden;animation:avaIn .16s ease}
+.ava-panel[hidden]{display:none}
+@keyframes avaIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.ava-head{display:flex;align-items:center;gap:10px;padding:12px 10px 12px 14px;border-bottom:1px solid var(--border-soft)}
+.ava-av{width:34px;height:34px;border-radius:999px;display:grid;place-items:center;font-weight:600;font-size:15px;background:var(--text);color:var(--bg);flex:none}
+body.dark .ava-av{background:var(--accent);color:#000}
+.ava-name{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
+.ava-name b{font-size:16px;font-weight:600}
+.ava-name small{font-size:13px;color:var(--muted)}
+.ava-ib{width:44px;height:44px;border-radius:var(--r-sm,10px);border:0;background:none;color:var(--muted);display:grid;place-items:center;cursor:pointer;flex:none}
+.ava-ib svg{width:20px;height:20px}
+.ava-ib:hover{background:var(--surface-2);color:var(--text)}
+.ava-ib:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+
+.ava-log{flex:1;min-height:120px;overflow-y:auto;overscroll-behavior:contain;padding:14px;display:flex;flex-direction:column;gap:10px}
+.ava-msg{max-width:92%;display:flex;flex-direction:column;gap:8px}
+.ava-msg p{margin:0;font-size:15px;line-height:1.45;padding:10px 12px;border-radius:14px;overflow-wrap:anywhere}
+.ava-msg.ava{align-self:flex-start}
+.ava-msg.ava p{background:var(--surface-2);border-top-left-radius:4px}
+.ava-msg.you{align-self:flex-end}
+.ava-msg.you p{background:var(--text);color:var(--bg);border-top-right-radius:4px}
+body.dark .ava-msg.you p{background:var(--surface-3);color:var(--text)}
+.ava-acts,.ava-chips{display:flex;flex-wrap:wrap;gap:6px}
+.ava-act{min-height:40px;padding:8px 14px;border-radius:999px;border:1px solid var(--text);background:var(--text);color:var(--bg);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.ava-act:hover{opacity:.88}
+.ava-act+.ava-act{background:var(--surface);color:var(--text);border-color:var(--border)}
+.ava-act.yes{background:var(--text);color:var(--bg);border-color:var(--text)}
+body.dark .ava-act{background:var(--accent);border-color:var(--accent);color:#000}
+body.dark .ava-act+.ava-act{background:transparent;color:var(--text);border-color:var(--border)}
+.ava-chip{min-height:36px;padding:7px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:14px;cursor:pointer;text-align:left}
+.ava-chip:hover{background:var(--surface-2);border-color:var(--field)}
+.ava-act:focus-visible,.ava-chip:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.ava-dots{display:inline-flex;gap:4px;padding:2px 0}
+.ava-dots i{width:6px;height:6px;border-radius:999px;background:var(--muted);animation:avaDot 1s infinite ease-in-out}
+.ava-dots i:nth-child(2){animation-delay:.15s}.ava-dots i:nth-child(3){animation-delay:.3s}
+@keyframes avaDot{0%,80%,100%{opacity:.3}40%{opacity:1}}
+
+.ava-heard{display:none;padding:8px 14px;font-size:14px;color:var(--muted);font-style:italic;border-top:1px solid var(--border-soft)}
+.ava-heard.show{display:block}
+.ava-in{display:flex;gap:6px;align-items:center;padding:10px;border-top:1px solid var(--border-soft)}
+.ava-in input{flex:1;min-width:0;min-height:44px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm,10px);background:var(--surface);color:var(--text);font:inherit;font-size:16px}
+.ava-in input:focus{outline:2px solid var(--text);outline-offset:-1px;border-color:transparent}
+.ava-mic,.ava-send{width:44px;height:44px;flex:none;border-radius:var(--r-sm,10px);display:grid;place-items:center;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text)}
+.ava-send{background:var(--text);color:var(--bg);border-color:var(--text)}
+body.dark .ava-send{background:var(--accent);border-color:var(--accent);color:#000}
+.ava-mic svg,.ava-send svg{width:20px;height:20px}
+.ava-mic.on{background:var(--red);border-color:var(--red);color:#fff}
+.ava-mic.off{opacity:.45}
+.ava-mic:focus-visible,.ava-send:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.ava-note{margin:0;padding:0 14px 10px;font-size:13px;color:var(--muted);line-height:1.4}
+.ava-note:empty{display:none}
+
+/* Room at the bottom of every page so the button never hides the last row's end. */
+body.ava-on .content{padding-bottom:96px}
+
+/* Phone: above the tab bar, the panel as a sheet across the width. */
+@media(max-width:860px){
+  .ava-fab{right:16px;bottom:calc(58px + env(safe-area-inset-bottom) + 14px);width:56px;height:56px}
+  .ava-panel{left:8px;right:8px;width:auto;max-width:none;bottom:calc(58px + env(safe-area-inset-bottom) + 80px);max-height:calc(100dvh - 58px - env(safe-area-inset-bottom) - 150px)}
+}
+@media(prefers-reduced-motion:reduce){.ava-panel,.ava-fab,.ava-fab-ring,.ava-dots i{animation:none!important;transition:none!important}}
