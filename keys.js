@@ -88,7 +88,7 @@ function kyOf(k){
   const tail=String(k.label||'');const why=c.why||(tail.indexOf(' — ')>0?tail.slice(tail.indexOf(' — ')+3):'');
   return {name,label,provider:c.provider||label,why:kyPlain(why),set:tkTruthy(k.set),env:String(k.from||'')==='env',ok:k.ok===true?true:k.ok===false?false:null,
     problem:kyPlain(kyClean(k.problem)),testedAt:k.testedAt||null,steps:(Array.isArray(k.steps)?k.steps:[]).map(s=>kyPlain(String(s==null?'':s))).filter(Boolean),
-    url:tkSafeUrl(k.url),free:kyPlain(String(k.free||'').trim()),note:kyPlain(String(k.note||'').trim()),optional:!!(c.optional||tkTruthy(k.optional)),plain,login:!!(c.login||(Array.isArray(k.parts)&&k.parts.length===2)),
+    url:tkSafeUrl(k.url),free:kyPlain(String(k.free||'').trim()),note:kyPlain(String(k.note||'').trim()),optional:!!(c.optional||tkTruthy(k.optional)),plain,login:!!(c.login||(Array.isArray(k.parts)&&k.parts.length===2)||(k.parts&&typeof k.parts==='object'&&Object.keys(k.parts).length===2)),parts:(()=>{const pl=k.partLabels;const a=Array.isArray(pl)?pl:pl&&typeof pl==='object'?Object.values(pl):null;return (a&&a.length===2?a:['User name','Password']).map(x=>kyPlain(String(x||'')))})(),
     value:plain?String(k.value==null?'':k.value):'',def:plain?String(k.default||c.def||''):''};
 }
 /* The keys in the order the owner meets them: the hub's order first, unknown ones after, optional ones last. */
@@ -190,7 +190,7 @@ function renderKeyCard(k,b,m,opts){
   if(!k.env){
     const label=busy&&b.kind==='save'?'Testing…':k.plain?'Save':'Test and save';
     const box=(sid,lab,type,ph,extra)=>`<div class="field"><label for="${esc(sid)}">${esc(lab)}</label><input id="${esc(sid)}" data-tk-form type="${type}" autocomplete="off" autocapitalize="off" spellcheck="false"${ph?` placeholder="${esc(ph)}"`:''}${extra||''}${dis}></div>`;
-    const fields=k.login?box('kyUser-'+id,'User name','text','')+box('kyIn-'+id,'Password','password','')
+    const fields=k.login?box('kyUser-'+id,k.parts[0],'text','')+box('kyIn-'+id,k.parts[1],'password','')
       :k.plain?box('kyIn-'+id,k.set&&k.value?'Repository name (now '+k.value+')':'Repository name','text',k.def||'owner/repository')
       :box('kyIn-'+id,k.set?'Paste a new key only to replace the saved one':'Paste the key','password','');
     form=`<div class="tk-ky-form">${fields}<button type="button" class="btn" id="${esc('kySave-'+id)}" onclick="kySave(${tkAttr(k.name)},this)"${dis}>${esc(label)}</button></div>`;
@@ -344,8 +344,8 @@ async function kySave(name){
   if(!k.plain&&kyState.s&&kyState.s.encKey===false){kySay(name,{ok:false,text:"Keys can't be stored yet (server encryption key missing). Ask your developer to set it."});return {ok:false};}
   let body;
   if(k.login){
-    if(!username){kySay(name,{ok:false,text:'Type the user name first.'});return {ok:false};}
-    if(!value){kySay(name,{ok:false,text:'Paste the password first.'});return {ok:false};}
+    if(!username){kySay(name,{ok:false,text:'Type the '+String(k.parts[0]).toLowerCase()+' first.'});return {ok:false};}
+    if(!value){kySay(name,{ok:false,text:'Paste the '+String(k.parts[1]).toLowerCase()+' first.'});return {ok:false};}
     body={action:'save',name,username,password:value};
   }else{
     if(!value){kySay(name,{ok:false,text:k.plain?'Type the repository name first, like owner/repository.':'Paste the key first.'});return {ok:false};}
