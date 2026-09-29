@@ -113,20 +113,24 @@ function drawStep(s) {
   if (s.detail) {
     const d = tk.detail[ID];
     out.act = tkPrimaryAction(d, { now });
-    out.page = renderTrialDetail(d, 'overview', { now });
+    out.page = renderTrialDetail(d, 'overview', { now });   // the client page: the top card, then one big button (or the application)
     out.top = between(out.page, '<section class="card tk-top', '</section>');
-    // each part of the page, up to whatever comes after it (a part that is not there is '')
-    const ENDS = ['<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkLcHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<details class="tk-behind"'];
-    const part = (a) => { const i = out.page.indexOf(a); if (i < 0) return ''; const js = ENDS.map((e) => out.page.indexOf(e, i + a.length)).filter((j) => j > 0); return out.page.slice(i, js.length ? Math.min(...js) : out.page.length); };
+    // their email system: the tabs that used to be under the top card (Messages, Calls, Setup, Also on your list), one after the other
+    out.sys = Object.fromEntries(tkSysTabs(d).map(([tab]) => [tab, renderSysTab(d, tab, { now })]));
+    out.system = ['messages', 'calls', 'setup', 'actions'].map((t) => out.sys[t] + '<!--tab-->').join('');
+    const all = out.page + '<!--tab-->' + out.system;
+    // each part, up to whatever comes after it (a part that is not there is '')
+    const ENDS = ['<!--tab-->', '<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkLcHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<div class="section-head tk-section" id="tkSec-calls">', '<div class="card tk-pad tk-access"', '<div class="section-head tk-section"><h3>Client links</h3>'];
+    const part = (a) => { const i = all.indexOf(a); if (i < 0) return ''; const js = ENDS.map((e) => all.indexOf(e, i + a.length)).filter((j) => j > 0); return all.slice(i, js.length ? Math.min(...js) : all.length); };
     out.messages = part('<div id="tkMsgHost">');
     out.autobuy = part('<div id="tkAbHost">');
     out.warmup = part('<div id="tkWuHost">');
     out.call = part('<div id="tkOcHost">');
     out.launch = part('<div id="tkLcHost">');   // the launch call's card (docs/LAUNCH-CALL.md) — '' until the machine's snapshots carry launchCall
     out.also = part('<h3>Also on your list</h3>');
-    out.found = between(out.page, '<h4>What we found</h4>', '<h4>Their answers</h4>');   // the application's research: the brief, the company file
-    out.front = out.page.slice(0, out.page.indexOf('<details class="tk-behind"'));
-    out.tabs = TK_TABS.map(([tab]) => [tab, renderTrialDetail(d, tab, { now, behindOpen: true })]);
+    out.found = between(all, '<h4>What we found</h4>', '<h4>Their answers</h4>');   // the application's research: the brief, the company file
+    out.front = all;   // what he reads: the page and the everyday tabs of the system (not Behind the scenes)
+    out.tabs = TK_SYS_BEHIND.map(([tab]) => [tab, out.sys[tab]]);
     out.buy = renderAutobuyBuy(d);
   }
   const c = s.extra && s.extra.calendar;
@@ -342,7 +346,8 @@ test('15–20 the launch call, from the machine\'s snapshots: the card from the 
   for (const p of ['18', '19']) {
     o = drawStep(byStep(p));
     assert.equal(o.act.label, 'Nothing until the launch call. Join it on Tue 20 Oct, 8:30 pm your time.', p);
-    assert.ok(flat(o.top).includes('What happens next? The launch call: Tue 20 Oct, 8:30 pm your time (Tue 11:00 am US Eastern).'), p);
+    assert.ok(!flat(o.top).includes('What happens next?') && !flat(o.top).includes('What do you need to do?'), p + ': nothing to do — the top card is only where they are');
+    assert.ok(flat(o.launch).includes('Tue 20 Oct, 8:30 pm your time'), p + ': the call time is on the launch-call card (Calls, in their email system)');
     assert.ok(o.launch.includes('<a class="btn" href="https://meet.google.com/rdg-002-avc" target="_blank" rel="noopener noreferrer">Join Google Meet</a>'), p + ': the launch call\'s own Meet link');
     assert.ok(flat(o.launch).includes('On the call, share the approval page with Dana and go through the list and the emails. When Dana says yes, press Approved on the call.'), p);
     assert.deepEqual(lcBtns(o.launch), ['Approved on the call', 'Call done', "They didn't show", 'Stop the reminder emails'], p);
@@ -352,7 +357,7 @@ test('15–20 the launch call, from the machine\'s snapshots: the card from the 
   const atCall = clone(byStep('19')); atCall.at = '2026-10-20T15:10:00Z';
   o = drawStep(atCall);
   assert.deepEqual(buttons(o.top), [['Hold the launch call, then press Approved on the call', 'tkGoTo(&quot;launchcall&quot;)']]);
-  assert.ok(flat(o.top).includes("What happens next? Once you've done the step below, we carry on."), 'never "Nothing for now" beside it');
+  assert.ok(!flat(o.top).includes('Nothing for now') && flat(o.top).includes('What do you need to do?'), 'never "Nothing for now" beside it');
   for (const r of [atCall.detail.row, ...atCall.board.stages.flatMap((st) => st.clients).filter((x) => x.id === ID)]) {
     Object.assign(r.simple, { label: 'Warming up — day 14 of about 14 · 96% reach the inbox · launch call was Tue 20 Oct, 8:30 pm (your time)', next: 'Hold the launch call, then press Approved on the call', needsYou: true });
     r.todo = [{ id: 'launch-mark:' + ID, clientId: ID, text: 'Hold the launch call with Dana Whitfield, then press Approved on the call', urgent: true, since: '2026-10-20T15:00:00Z', action: { type: 'view', view: 'detail', clientId: ID, section: 'launchCall' } }];
@@ -403,7 +408,7 @@ test('times: Sri Lanka time everywhere whatever the device is set to (here US Pa
   assert.ok(flat(o.top).includes('Dana asked for a call on Tue 6 Oct · 8:30 pm your time (Tue 11:00 am US Eastern). Say yes, or suggest another time.'));
   o = drawStep(byStep('06'));
   assert.ok(o.call.includes('The call is on <b>Tue 6 Oct, 8:30 pm your time</b> <span class="tk-oc-us">(Tue 11:00 am US Eastern)</span> — booked through your Calendar'));
-  assert.ok(flat(o.top).includes('What happens next? The onboarding call: Tue 6 Oct, 8:30 pm your time (Tue 11:00 am US Eastern).'), '"Nothing for you until the call" → the call itself');
+  assert.ok(!flat(o.top).includes('What happens next?') && o.act.label === 'Nothing until the call. Join it on Tue 6 Oct, 8:30 pm your time.', '"Nothing for you until the call": nothing asked on the top card; the call is on its card');
   assert.ok(flat(o.messages).includes('Fri 2 Oct, 8:00 pm (US Eastern Fri 10:30 am)'), 'Messages: both clocks');
   o = drawStep(byStep('03'));
   assert.ok(flat(o.call).includes('Book by Wed 7 Oct') && flat(o.call).includes('First reminder Mon 5 Oct, 6:30 pm if they haven\'t booked.'));
@@ -423,7 +428,10 @@ test('01 applied: on the list under "Needs you"; the page asks him to read it in
   assert.ok(flat(o.messages).includes('The reply bot only answers while they are onboarding. You answer Dana yourself now.'), 'before the acceptance email: the bot is on but not answering');
   assert.ok(o.messages.includes('<summary><span class="tk-msgs-foldt">Messages</span><span class="tk-msgs-sub">No emails with Dana yet</span></summary>'), 'no emails yet: one folded line above the application, not an empty box and a reply form');
   const box = { open: false }; const ta = el('tkMsgReply'); const was = ta.closest; ta.closest = () => box; ta._focused = 0;
+  asOwner(); currentTrialId = ID; render('trial');
   tkFocusReply(); assert.ok(box.open && ta._focused === 1, 'writing to them opens it'); ta.closest = was;
+  assert.equal(currentView, 'clientSystem', 'in their email system'); assert.equal(trialTab, 'messages', 'at Messages');
+  trialsStopTimer();
 });
 
 test('05 time requested: the big button opens the Calendar at her request; the list links there; the Calendar shows it waiting for his yes in both clocks, with Google Meet', () => {
@@ -454,7 +462,8 @@ test('06–08 the call: Google Meet on the page before the call ("Join Google Me
   let o = drawStep(byStep('07'));
   assert.ok(o.call.includes('<a class="btn" href="https://meet.google.com/rdg-001-avc" target="_blank" rel="noopener noreferrer">Join Google Meet</a>'), 'the Calendar knows the Meet link: join from the trial');
   assert.ok(o.call.includes(`onclick="openCalendar(&quot;${byStep('07').detail.onboardCall.meetingId}&quot;)">See it in the Calendar</button>`));
-  assert.ok(flat(o.top).includes('Nothing until the call. Join it on Tue 6 Oct, 8:30 pm your time.'));
+  assert.equal(o.act.label, 'Nothing until the call. Join it on Tue 6 Oct, 8:30 pm your time.');
+  assert.ok(!flat(o.top).includes('Nothing until the call') && !flat(o.top).includes('What do you need to do?'), 'nothing asked: the top card says only where they are');
   o = drawStep(byStep('08'));
   assert.ok(!o.call.includes('Join Google Meet') && flat(o.call).includes('Call done') && flat(o.call).includes('The call was on Tue 6 Oct, 8:30 pm your time'));
   assert.ok(o.call.includes('<section class="card tk-oc"'), 'still onboarding: the card stays open');
@@ -565,16 +574,16 @@ test('31 Day 30: "Trial finished — waiting for their decision" (the machine\'s
   const g = tkListGroups(tk.hub);
   assert.deepEqual([g.needs.length, g.going.length, g.done.length], [0, 1, 0], 'in progress until they decide');
   assert.ok(!o.list.includes('tk-done') || !between(o.list, 'tkDoneGroup').includes('Ridgeline IT'));
-  assert.ok(flat(o.top).includes('Trial finished — waiting for their decision') && flat(o.top).includes('What happens next? Dana chooses on the decision page.'), 'the machine\'s "Nothing. Dana chooses…" — never "This trial is finished"');
+  assert.ok(flat(o.top).includes('Trial finished — waiting for their decision') && !flat(o.top).includes('This trial is finished') && /Dana chooses on the decision page/.test(o.act.label), 'the machine\'s "Nothing. Dana chooses…" — never "This trial is finished"');
   assert.ok(!flat(o.top).includes('This trial is finished'));
   o = drawStep(byStep('32'));
   assert.ok(flat(o.top).includes('Their first invoice (Starter, $2,497) went out Fri 20 Nov. When the money lands, mark it paid.'));
   assert.deepEqual(tkListGroups(tk.hub).going.map((x) => x.row.id), [ID], 'the invoice is still to mark paid: in view, not folded under Done');
-  assert.ok(flat(o.top).includes("What happens next? Once you've done the step below, we carry on."), 'his step is not repeated as "what happens next"');
+  assert.ok(!flat(o.top).includes('What happens next?'), 'his step is said once, under "What do you need to do?"');
   const actions = flat(o.tabs.find(([t]) => t === 'actions')[1]);
   assert.ok(actions.includes('Number AV-202611-ridgelineit Plan Starter Amount $2497.00') && actions.includes('Not paid yet'), 'the invoice as the machine sends it (invoiceNo, plan)');
   o = drawStep(byStep('33'));
-  assert.ok(flat(o.list).includes('Done / not taken 1') && flat(o.top).includes('Nothing. This trial is finished.'));
+  assert.ok(flat(o.list).includes('Done / not taken 1') && !flat(o.top).includes('What do you need to do?') && o.top.includes('<li class="now" aria-current="step"><span class="tk-j-dot" aria-hidden="true">5</span>'));
   assert.ok(flat(o.tabs.find(([t]) => t === 'actions')[1]).includes('Paid 24 Nov'));
 });
 
@@ -809,7 +818,7 @@ function stepReport(s) {
     out.push('', 'TRIAL PAGE — ' + row.name);
     out.push('  Where are they?      ' + journeyLine(row));
     out.push('                       ' + flat(between(o.top, '<p class="tk-q-big">', '</p>')) + (o.top.includes('tk-q-day') ? ' · ' + flat(between(o.top, '<p class="tk-q-day">', '</p>')) : ''));
-    out.push('  What happens next?   ' + flat(between(o.top, '<p class="tk-q-text">', '</p>')));
+
     const you = between(o.top, '<div class="tk-q tk-q-you">', '</section>');
     const btn = buttons(o.top)[0];
     out.push('  What do you need to do? ' + (o.act.kind === 'none' ? o.act.label : o.act.say));

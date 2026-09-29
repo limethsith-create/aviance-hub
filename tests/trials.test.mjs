@@ -67,7 +67,7 @@ const ok = (body) => async () => ({ ok: true, status: 200, text: async () => JSO
 /* ───────────── shell ───────────── */
 test('shell: title, router knows the four places (and the pages inside them), nothing from the old workspace remains', () => {
   assert.ok(html.includes('<title>Aviance Hub</title>'));
-  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'paying', 'trialPurchase', 'calendar', 'inquiries', 'inquiry', 'settings', 'people', 'team', 'trialsBoard']);
+  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'clientSystem', 'paying', 'trialPurchase', 'calendar', 'inquiries', 'inquiry', 'settings', 'people', 'team', 'trialsBoard']);
   assert.deepEqual(Object.keys(views).filter((v) => !views[v].back), ['trials', 'paying', 'calendar', 'settings', 'people', 'team'], 'the places have no Back button; every page inside one has (plan call requests sit inside Paying clients)');
   for (const gone of ['viewDashboard', 'viewProjects', 'viewTeam', 'viewClients', 'viewCRM', 'viewProposals', 'viewInvoices', 'viewMyDay', 'viewDirectory', 'workspace_shared', 'workspace_admin', 'loadData', 'saveDB', 'openNewProject', 'composeGmail', 'submitJoin', 'approveJoin', 'applyRole', 'employeePersona', 'printDoc', 'crmStages', 'phases', 'Request to join', 'joinPane', 'roleMenu']) {
     assert.ok(!html.includes(gone), gone + ' is gone');
@@ -394,39 +394,43 @@ test('the Trials badge counts the trial clients who need you (red), in the sideb
 });
 
 /* ───────────── a trial: plain header, journey, onboarding call, behind the scenes ───────────── */
-test('trial page: three questions on top — Where are they? What happens next? What do you need to do? (one big button) — then the call, the application and Behind the scenes, folded', () => {
+test('client page: only the top card — the journey, the one-line status, "What do you need to do?" with one big button — then one big button into their email system; everything else moved there', () => {
   const html = renderTrialDetail(ecreekDetail, 'overview', { now: NOW });
   const top = between(html, '<section class="card tk-top', '</section>');
-  assert.ok(top.includes('<b>Sam Test</b>') && top.includes('href="mailto:sam@ecreek.io"') && top.includes('href="https://ecreek.io"'));
-  assert.deepEqual([...top.matchAll(/<h3 class="tk-q-title">([^<]+)<\/h3>/g)].map((m) => m[1]), ['Where are they?', 'What happens next?', 'What do you need to do?']);
-  // Where are they? — the one journey, big, with every step's name; then the plain sentence
+  assert.deepEqual([...top.matchAll(/<h3 class="tk-q-title">([^<]+)<\/h3>/g)].map((m) => m[1]), ['What do you need to do?'], 'one question, only because something needs him');
+  // the one journey, big, with every step's name; then the plain sentence
   const steps = [...top.matchAll(/<li class="(done|now|todo)"[^>]*><span class="tk-j-dot" aria-hidden="true">[^<]*<\/span><span class="tk-j-name">([^<]+)<\/span>/g)].map((m) => m[1] + ':' + m[2]);
   assert.deepEqual(steps, ['done:Applied', 'now:Onboarding call', 'todo:Setting up', 'todo:Sending emails', 'todo:Done']);
   assert.ok(top.includes('<li class="now" aria-current="step">') && top.includes('aria-label="The trial journey, step 2 of 5"'));
   assert.ok(top.includes('<p class="tk-jcap" aria-hidden="true">Step 2 of 5 — Onboarding call</p>'), 'a phone shows the step in words above the bar');
   assert.ok(top.includes('<p class="tk-q-big">Accepted — they replied about the call, answer them</p>'));
-  // What happens next? — never the same words as the other two answers
-  assert.ok(top.includes("<p class=\"tk-q-text\">It's your turn. Once you've done the step below, we carry on.</p>"));
   // What do you need to do? — ONE big button
   assert.equal(count(top, /class="btn tk-primary"/g), 1);
-  assert.ok(top.includes('<p class="tk-q-say">Sam wrote to you. Read it under Messages below and write back there.</p><button type="button" class="btn tk-primary" onclick="tkFocusReply()">Answer Sam\'s message</button>'));
+  assert.ok(top.includes('<p class="tk-q-say">Sam wrote to you. Read it and write back under Messages.</p><button type="button" class="btn tk-primary" onclick="tkFocusReply()">Answer Sam\'s message</button>'));
   assert.ok(top.includes('class="card tk-top needs"'), 'a red edge: this trial needs you');
-  for (const gone of ['Mission Control', 'Day 1', 'Day 30', 'tk-pills', 'reply waiting 3 h', '← All trials', 'Refresh', 'Needs you']) assert.ok(!top.includes(gone), 'not at the top: ' + gone);
-  // then: Messages, the onboarding call, the application (decided → one folded line), Behind the scenes (folded)
-  const iTop = html.indexOf('tk-top'), iMsgs = html.indexOf('id="tkSec-messages"'), iCall = html.indexOf('id="tkSec-onboardcall"'), iApp = html.indexOf('<details class="tk-appbox" id="tkSec-application">'), iBehind = html.indexOf('<details class="tk-behind" id="tkBehind" ontoggle="trialsBehindToggle(this.open)">');
-  assert.ok(iTop >= 0 && iTop < iMsgs && iMsgs < iCall && iCall < iApp && iApp < iBehind, 'top → messages → call → application → behind the scenes');
-  assert.ok(html.indexOf('</section><div class="seg tk-pane-switch"') === html.indexOf('</section>', iTop), 'the Progress | Stats switch right under the three questions');
-  assert.ok(/<\/div><div id="tkMsgHost"><section class="card tk-msgs" id="tkSec-messages">/.test(html) && html.indexOf('tk-pane-switch') < iMsgs && html.slice(html.indexOf('tk-pane-switch'), iMsgs).split('<div').length <= 5, 'Messages comes right after the three questions and the switch');
-  assert.ok(!html.includes('What you need to do') && !html.includes('Also on your list'), 'the reply to-do is the big button, not a second list');
-  assert.ok(!/\bmachine\b|heartbeat|pipeline|\btick\b|\bstates?\b/i.test(visibleText(html.slice(0, iBehind))), 'plain words above Behind the scenes');
-  const behind = html.slice(iBehind);
-  for (const inside of ['id="tkTabBar"', 'class="tk-strip-item', 'Full control panel ↗', 'Day 1', 'reply waiting 3 h', 'Onboarding</span>', '>Refresh</button>']) assert.ok(behind.includes(inside), 'behind the scenes has ' + inside);
-  assert.ok(renderTrialDetail(ecreekDetail, 'overview', { behindOpen: true }).includes('id="tkBehind" open'), 'stays open once opened');
-  assert.ok(!renderTrialDetail(detail, 'overview', {}).includes('<h3>Onboarding call</h3>'), 'no acceptance email yet: no card');
-  // another to-do (not the one at the top) is listed under "Also on your list"
+  for (const gone of ['Where are they?', 'What happens next?', 'Mission Control', 'Day 1', 'Day 30', 'tk-pills', 'reply waiting 3 h', '← All trials', 'Refresh', 'Needs you', 'Sam Test', 'mailto:']) assert.ok(!top.includes(gone), 'not at the top: ' + gone);
+  // then ONE big button into their email system — and nothing else
+  const after = html.slice(html.indexOf('</section>', html.indexOf('tk-top')) + '</section>'.length);
+  assert.ok(after.startsWith('<button type="button" class="tk-sysbtn" id="tkSysBtn" onclick="tkOpenSystem(&quot;ecreek-it&quot;)">'), 'the big button right under the card');
+  assert.ok(visibleText(after).includes("Open eCreek IT's email system →"), visibleText(after));
+  for (const gone of ['tk-pane-switch', 'id="tkSec-messages"', 'id="tkOcHost"', 'id="tkLcHost"', 'id="tkAbHost"', 'id="tkWuHost"', 'tkBehind', 'Behind the scenes', 'Also on your list', 'id="tkSec-application"', 'id="tkTabBar"', 'cal-trial-ask']) assert.ok(!html.includes(gone), 'not on the client page: ' + gone);
+  assert.ok(!/\bmachine\b|heartbeat|pipeline|\btick\b|\bstates?\b/i.test(visibleText(html)), 'plain words');
+  // …all of it is in their email system: Messages, the call, the application (decided → one folded line), who they are, the facts, the parts
+  const sys = (tab) => renderSysTab(ecreekDetail, tab, { now: NOW });
+  assert.ok(sys('messages').includes('<div id="tkMsgHost"><section class="card tk-msgs" id="tkSec-messages">'), 'Messages');
+  assert.ok(sys('calls').includes('<div id="tkOcHost">') && sys('calls').includes('id="tkSec-onboardcall"'), 'the onboarding call, under Calls');
+  const setup = sys('setup');
+  assert.ok(setup.includes('<b>Sam Test</b>') && setup.includes('href="mailto:sam@ecreek.io"') && setup.includes('href="https://ecreek.io"'), 'who they are, under Setup');
+  assert.ok(setup.includes('<details class="tk-appbox" id="tkSec-application">'), 'the decided application: one folded line, under Setup');
+  for (const inside of ['Full control panel ↗', 'Day 1', 'reply waiting 3 h', 'Onboarding</span>', '>Refresh</button>', 'id="tkAccess"']) assert.ok(setup.includes(inside), 'Setup has ' + inside);
+  assert.ok(sys('systems').includes('class="tk-sys"'), 'Behind the scenes › Parts: every part');
+  assert.ok(!renderSysTab(detail, 'calls', {}).includes('<h3>Onboarding call</h3>'), 'no acceptance email yet: no card');
+  assert.ok(!sys('actions').includes('Also on your list'), 'the reply to-do is the big button, not a second list');
+  // another to-do (not the one at the top) is listed under "Also on your list" — on top of Actions in their system
   const two = Object.assign({}, ecreekDetail, { row: Object.assign({}, simpleRows.ecreek, { todo: simpleRows.ecreek.todo.concat([{ id: 'paid:ecreek-it', text: 'Mark the invoice paid', urgent: false, action: { type: 'api', method: 'POST', path: '/api/mc/clients/ecreek-it', body: { action: 'markPaid' } } }]) }) });
-  const t2 = renderTrialDetail(two, 'overview', { now: NOW });
-  assert.ok(t2.includes('<h3>Also on your list</h3>') && t2.includes('Mark the invoice paid') && !between(t2, 'Also on your list', 'tkBehind').includes('Answer Sam about the onboarding call'));
+  assert.ok(!renderTrialDetail(two, 'overview', { now: NOW }).includes('Also on your list'));
+  const acts = renderSysTab(two, 'actions', { now: NOW });
+  assert.ok(acts.startsWith('<div class="section-head tk-section"><h3>Also on your list</h3>') && acts.includes('Mark the invoice paid') && !acts.includes('Answer Sam about the onboarding call'));
 });
 
 test('onboarding call card: label, five steps with times, Book by, buttons by status — and no copy of the emails (they live under Messages: "See the messages")', () => {
@@ -487,10 +491,17 @@ test('onboarding call: every button posts the contract body, toasts plain words 
   try {
     tk.detail['ecreek-it'] = JSON.parse(JSON.stringify(ecreekDetail)); tk.detailAt['ecreek-it'] = Date.now();
     openTrial('ecreek-it'); await new Promise((r) => setTimeout(r, 5));
-    assert.equal(currentView, 'trial'); assert.ok(el('content').innerHTML.includes('id="tkOcHost"'));
+    assert.equal(currentView, 'trial'); assert.ok(el('content').innerHTML.includes('id="tkSysBtn"') && !el('content').innerHTML.includes('id="tkOcHost"'), 'the client page: the top card and the big button');
     assert.equal(el('ptitle').textContent, 'eCreek IT', 'the top bar says whose trial it is'); assert.equal(el('psub').textContent, '', 'and nothing the page repeats');
     assert.equal(el('backBtn').style.display, 'grid', 'a Back button to the list');
     assert.equal(calls.filter((c) => c[1] === '/api/mc/onboard-calls/check').length, 1, 'opening a trial asks for the check once');
+    // their email system, at Calls: the call card; at Messages: the reply box
+    tkOpenSystem('ecreek-it', 'calls'); await new Promise((r) => setTimeout(r, 5));
+    assert.equal(currentView, 'clientSystem'); assert.ok(el('content').innerHTML.includes('id="tkOcHost"'));
+    assert.ok(el('content').innerHTML.includes('<div class="view wide">'), 'the whole width');
+    assert.ok(el('ptitle').textContent.startsWith('eCreek IT — email system'), el('ptitle').textContent);
+    views.clientSystem.back(); assert.equal(currentView, 'trial', 'Back → the client page'); assert.equal(currentTrialId, 'ecreek-it');
+    trialsSetTab('messages'); assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'messages');
     // the reply box under Messages (no `conversation` from this older system → the call's own reply, same thread):
     // empty and too long are stopped here; a real one is sent as plain text with its line breaks
     el('tkMsgReply').value = '   '; await msgSend('ecreek-it');
@@ -556,13 +567,16 @@ test('the onboarding-call check: fire-and-forget on opening the list or a trial,
 });
 
 /* ───────────── trial detail: Overview + tabs ───────────── */
-test('Overview (behind the scenes): the 13-part strip, four growth numbers with sparklines; the to-do is the big button at the top', () => {
+test('Parts (behind the scenes, in their email system): the 13-part strip, four growth numbers with sparklines; the to-do is the big button on the client page', () => {
   const g14 = tkSliceGrowth(makeGrowth(45), 14);
-  const html = renderTrialDetail(detail, 'overview', { now: NOW, spark: { g: g14, state: null } });
-  assert.ok(html.includes('Sending — Day 12 of 30'));
-  const iTodo = html.indexOf('decide the dispute on the call'), iBehind = html.indexOf('id="tkBehind"'), iSys = html.indexOf('<h3>Parts</h3>'), iGrow = html.indexOf('<h3>Growth</h3>');
-  assert.ok(iTodo > 0 && iTodo < iBehind && iBehind < iSys && iSys < iGrow, 'order: the to-do at the top, then behind the scenes: parts, growth');
-  assert.ok(html.includes('>Decide the dispute</button>') && html.includes('When you have a minute: decide the dispute on the call with bob@example.com.'), 'not urgent: "when you have a minute"');
+  const page = renderTrialDetail(detail, 'overview', { now: NOW, spark: { g: g14, state: null } });
+  assert.ok(page.includes('Sending — Day 12 of 30'));
+  assert.ok(page.includes('>Decide the dispute</button>') && page.includes('When you have a minute: decide the dispute on the call with bob@example.com.'), 'not urgent: "when you have a minute"');
+  assert.ok(page.includes('onclick="tkOpenSystem(&quot;acme-plumbing&quot;,&quot;calls&quot;)">Decide the dispute</button>'), 'the dispute is decided under Calls, in their email system');
+  // their email system › Behind the scenes › Parts: the strip, the last 14 days, then each part in full
+  const html = renderSysTab(detail, 'systems', { now: NOW, spark: { g: g14, state: null } }) + renderTabBar('systems', detail);
+  const iSys = html.indexOf('<h3>Parts</h3>'), iGrow = html.indexOf('<h3>Growth</h3>'), iAll = html.indexOf('<h3>Every part</h3>');
+  assert.ok(iSys >= 0 && iSys < iGrow && iGrow < iAll, 'order: parts, growth, every part');
   assert.equal(count(html, /class="tk-strip-item /g), 13, '13 systems in the strip');
   const labels = ['Intake', 'Market count', 'Purchase', 'Setup check', 'Warm-up', 'Lead list', 'Copy', 'Canary test', 'Sending', 'Replies', 'Calls', 'Reports', 'Closing'];
   let last = -1; for (const l of labels) { const i = html.indexOf('<b>' + l + '</b>', iSys); assert.ok(i > last, 'strip order ' + l); last = i; }
@@ -573,9 +587,10 @@ test('Overview (behind the scenes): the 13-part strip, four growth numbers with 
   assert.ok(count(html, /class="tk-spark"/g) >= 4, 'a sparkline per key number');
   assert.ok(html.includes('in the last 7 days'));
   assert.ok(!html.includes('<h4>Emails sent per day</h4>'), 'the big charts live in the Growth tab');
-  assert.ok(renderTrialDetail(detail, 'overview', { spark: { g: null, state: 'loading' } }).includes('Loading the last 14 days…'));
-  assert.ok(renderTrialDetail({ row: bright }, 'overview', { spark: { g: null, state: 'pre' } }).includes('Starts once warm-up begins'));
-  assert.ok(renderTrialDetail(detail, 'numbers', {}).includes('tk-strip'), 'old "numbers" tab name opens the Overview');
+  assert.ok(renderSysTab(detail, 'systems', { spark: { g: null, state: 'loading' } }).includes('Loading the last 14 days…'));
+  assert.ok(renderSysTab({ row: bright }, 'systems', { spark: { g: null, state: 'pre' } }).includes('Starts once warm-up begins'));
+  assert.ok(renderTab(detail, 'numbers', {}).includes('tk-strip'), 'old "numbers" tab name still draws the strip');
+  assert.equal(tkSysValid('numbers', detail), 'overview', 'and opens the system at its Overview');
 });
 
 test('Growth tab: sending, warm-up, each inbox and placement charts, with a range selector', () => {
@@ -614,7 +629,7 @@ test('tabs: systems, inboxes, calls, replies, copy, coming up, timeline, actions
   assert.ok(!/dispute_opened|Run a job|Dispatch Lead Finder|Move to state/.test(renderTab(detail, 'timeline') + renderTab(detail, 'actions') + renderTab(detail, 'copy')), 'no system names or jargon in the tab words');
   assert.ok(renderTab(Object.assign({}, detail, { row: Object.assign({}, acme, { state: 'paused' }) }), 'actions').includes('Resume sending'));
   for (const old of ['setup', 'promises', 'upcoming', 'reports']) assert.ok(renderTab(detail, old).length > 100, 'old tab name ' + old + ' still lands somewhere');
-  { const a = renderTab(detail, 'actions'); assert.ok(a.includes('Client links') && a.includes('>Make their dashboard link</button>') && !a.includes('<input readonly'), 'no links yet: only the button to make their dashboard link'); }
+  { const a = renderSysTab(detail, 'setup'); assert.ok(a.includes('Client links') && a.includes('>Make their dashboard link</button>') && !a.includes('<input readonly'), 'no links yet (under Setup): only the button to make their dashboard link'); }
   const withDash = renderLinks({ dashboard: 'https://machine.test/c/tok9/dashboard' }, 'acme');
   assert.ok(withDash.includes('Their dashboard') && withDash.includes('href="https://machine.test/c/tok9/dashboard"') && !withDash.includes('Make their dashboard link'), 'the dashboard link: labelled, copy + open');
   assert.ok(renderLinks({ onboarding: 'https://machine.test/c/tok1/onboard' }).includes('https://machine.test/c/tok1/onboard'), 'links still render when present');
@@ -665,10 +680,13 @@ test('Deliverability tab: bounce (sent, measured, half speed), blacklists (could
 });
 
 /* ───────────── application review ───────────── */
-test('application pending: open on the page (above Behind the scenes) with the fit check, the research, every answer and the two buttons; the big button at the top scrolls to it', () => {
+test('application pending: open on the client page (in place of the email-system button — no yes yet) with the fit check, the research, every answer, the two buttons and the Word download; the big button at the top scrolls to it', () => {
   const html = renderTrialDetail(fernDetail, 'overview', { now: NOW });
-  const iApp = html.indexOf('id="tkSec-application"'), iBehind = html.indexOf('id="tkBehind"'), iTabs = html.indexOf('id="tkTabBar"');
-  assert.ok(iApp > 0 && iApp < iBehind && iBehind < iTabs, 'application sits above "Behind the scenes" (where the tabs are)');
+  const iTop = html.indexOf('id="tkTop"'), iApp = html.indexOf('id="tkSec-application"');
+  assert.ok(iTop >= 0 && iTop < iApp, 'the application right under the top card');
+  assert.ok(!html.includes('id="tkSysBtn"') && !html.includes('id="tkBehind"') && !html.includes('id="tkTabBar"'), 'before the yes: no email system to open');
+  assert.ok(html.includes('onclick="downloadApplication(&quot;fern-it&quot;)"') && html.includes('>Download as Word (.docx)</button>'), 'the application as a Word document');
+  assert.equal(tkSectionPlace('fern-it', 'application').view, 'trial', 'the application section is on the client page while it waits');
   assert.ok(!html.includes('What you need to do') && !html.includes('Also on your list'), 'the review to-do is not repeated');
   assert.ok(html.includes('onclick="tkGoTo(&quot;application&quot;)">Read the application and say yes or no</button>'));
   assert.ok(html.includes('<h3>Their application</h3>') && html.includes('Looks like a fit — 3 checks unknown') && !html.includes('Waiting for your review'), 'the top already says it waits for him: no second status');
@@ -708,9 +726,11 @@ test('Research again posts rerunResearch and says what happened', async () => {
   globalThis.fetch = answer('failed'); await trialResearchAgain('fern-it'); assert.ok(el('toast').innerHTML.includes('could not finish'));
 });
 
-test('application decided: one folded line on the trial page ("Their application · You said yes"), no buttons, the decision in words', () => {
-  const html = renderTrialDetail(detail, 'overview', { now: NOW });
-  const box = between(html, '<details class="tk-appbox" id="tkSec-application">', '<details class="tk-behind"');
+test('application decided: one folded line in their email system › Setup ("Their application · You said yes"), no buttons, the decision in words, the Word download', () => {
+  assert.ok(!renderTrialDetail(detail, 'overview', { now: NOW }).includes('tkSec-application'), 'not on the client page any more');
+  const html = renderSysTab(detail, 'setup', { now: NOW });
+  const box = between(html, '<details class="tk-appbox" id="tkSec-application">', '</details>');
+  assert.ok(box.includes('>Download as Word (.docx)</button>'), 'the Word download');
   assert.ok(box.includes('<span class="tk-appbox-title">Their application</span><span class="pill green">You said yes</span>'));
   assert.ok(box.includes('You said yes') && box.includes('They were emailed.') && !box.includes('Say no…') && !box.includes('Say yes and email them'));
   assert.ok(!html.includes("trialsSetTab(&quot;application&quot;)"), 'no Application tab any more');
@@ -797,18 +817,18 @@ test('"Use this domain" fills the paste form and marks the row', () => {
 });
 
 /* ───────────── fetch discipline: growth only on request ───────────── */
-test('growth is fetched when the owner opens it (Behind the scenes), never by the 60-second refresh or the Trials list; board sparklines skip pre-warm-up clients', async () => {
+test('growth is fetched when the owner opens it (a tab of their email system), never by the 60-second refresh or the Trials list; board sparklines skip pre-warm-up clients', async () => {
   asOwner(); trialsIngestHub(fullHub); trialsForget(); asOwner(); trialsIngestHub(fullHub);
   const urls = [];
   globalThis.fetch = async (url) => { urls.push(url); const u = new URL(url); if (u.pathname.endsWith('/growth')) return ok(makeGrowth(Number(u.searchParams.get('days'))))(); if (u.pathname === '/api/mc/hub') return ok(fullHub)(); return ok(detail)(); };
   tk.detail['acme-plumbing'] = detail; tk.detailAt['acme-plumbing'] = Date.now();
   openTrial('acme-plumbing');
   await new Promise((r) => setTimeout(r, 0));
-  assert.ok(!urls.some((u) => u.includes('/growth')), 'opening a trial: "Behind the scenes" is closed, so no growth history');
-  trialsBehindToggle(true); await new Promise((r) => setTimeout(r, 0));
-  assert.ok(urls.some((u) => u.endsWith('/api/mc/hub/acme-plumbing/growth?days=14')), 'opening Behind the scenes: the Overview asks for 14 days');
-  urls.length = 0; delete tk.spark['acme-plumbing']; trialsBehindToggle(true); await new Promise((r) => setTimeout(r, 0));
-  assert.ok(!urls.some((u) => u.includes('/growth')), 'a repaint re-inserting <details open> fires "toggle" again — that fetches nothing');
+  assert.ok(!urls.some((u) => u.includes('/growth')), 'opening the client page: no growth history');
+  tkOpenSystem('acme-plumbing', 'systems'); await new Promise((r) => setTimeout(r, 0));
+  assert.ok(urls.some((u) => u.endsWith('/api/mc/hub/acme-plumbing/growth?days=14')), 'Behind the scenes › Parts asks for 14 days (its sparklines)');
+  urls.length = 0; delete tk.spark['acme-plumbing']; trialsRepaint('clientSystem'); await new Promise((r) => setTimeout(r, 0));
+  assert.ok(!urls.some((u) => u.includes('/growth')), 'a repaint (not a click) fetches nothing');
   trialsSetTab('growth'); await new Promise((r) => setTimeout(r, 0));
   assert.ok(urls.some((u) => u.endsWith('/growth?days=45')), 'Growth tab asks for 45 days');
   assert.ok(tk.growth['acme-plumbing'] && tk.growth['acme-plumbing'].days === 45);
@@ -1481,4 +1501,122 @@ test('the company file (research v4): "Who buys from them", "In the news", "Comp
   assert.ok(!NOT_DRAWN.test(plainText(odd)), plainText(odd));
   assert.ok(odd.includes('<span class="pill blue">law firms</span>') && odd.includes('<b>a b</b></li>') && odd.includes('<li><b>B</b></li>'));
   assert.ok(!JARGON.test(plainText(h)) && !NOT_DRAWN.test(plainText(h)) && !h.includes('javascript:'), 'plain words: ' + (plainText(h).match(JARGON) || [])[0]);
+});
+
+/* ───────────── a client's email system (view 'clientSystem') ───────────── */
+test('their email system: every tab draws — Overview (My stats with their numbers), Conversations, Emails sent, Messages with <first name>, Calls, Setup, then every Behind-the-scenes tab full width; unknown tabs land on the Overview', () => {
+  const sys = renderClientSystem(ecreekDetail, 'overview', { now: NOW });
+  const labels = [...sys.matchAll(/<button type="button" role="tab" class="tk-systab[^"]*" aria-selected="(?:true|false)" onclick="trialsSetTab\(&quot;(\w+)&quot;\)">([^<]+)<\/button>/g)].map((m) => m[1] + ':' + m[2]);
+  assert.deepEqual(labels, ['overview:Overview', 'conversations:Conversations', 'sent:Emails sent', 'messages:Messages with Sam', 'calls:Calls', 'setup:Setup',
+    'growth:Growth', 'systems:Parts', 'leads:Leads', 'deliverability:Deliverability', 'inboxes:Inboxes', 'replies:Replies', 'copy:Copy', 'comingup:Coming up', 'timeline:History', 'actions:Actions']);
+  assert.ok(sys.includes('<span class="tk-systabs-sep">Behind the scenes</span>'), 'the Behind-the-scenes tabs are named as such');
+  assert.ok(sys.includes('aria-selected="true" onclick="trialsSetTab(&quot;overview&quot;)"'), 'Overview first');
+  assert.ok(sys.includes('<div id="tkTabHost" class="tk-sys-body" role="tabpanel">') && !sys.includes('<details class="tk-behind"'), 'full width, never folded');
+  asOwner();
+  const want = { overview: ['id="tkMoney"', 'Plan <b>Free trial</b>'], conversations: ['id="tkConvos"', 'Conversations', '→ Messages'], sent: ['id="tkSentMail"', 'Every email sent'], messages: ['id="tkSec-messages"'],
+    calls: ['id="tkSec-onboardcall"', 'Calls prospects booked'], setup: ['id="tkSec-about"', 'id="tkAccess"', 'id="tkSec-application"', 'Full control panel ↗'],
+    growth: ['Loading the growth history'], systems: ['class="tk-strip"', 'class="tk-sys"'], leads: ['Ready to send'], deliverability: ['Domain setup'], inboxes: ['Add inbox'], replies: ['Newest replies'],
+    copy: ['Edit the email wording'], comingup: ['Friday update'], timeline: ['tk-'], actions: ['Pause sending'] };
+  const full = Object.assign({}, detail, { row: Object.assign({}, acme), onboardCall: ecreekDetail.onboardCall, application: ecreekDetail.application });
+  for (const [tab, needles] of Object.entries(want)) {
+    const h = renderSysTab(tab === 'messages' || tab === 'calls' || tab === 'setup' ? ecreekDetail : full, tab, { now: NOW, growth: { loading: true, days: 45 } });
+    for (const n of needles) assert.ok(h.includes(n), tab + ' has ' + n);
+  }
+  for (const [tab] of tkSysTabs(detail)) assert.doesNotThrow(() => renderSysTab({ row: bright }, tab, {}), 'sparse detail: ' + tab);
+  assert.equal(tkSysValid('nope', detail), 'overview'); assert.equal(tkSysValid('stats', detail), 'overview'); assert.equal(tkSysValid('history', detail), 'timeline');
+  assert.ok(renderClientSystem(ecreekDetail, 'nope', {}).includes('aria-selected="true" onclick="trialsSetTab(&quot;overview&quot;)"'));
+  // the title: "<Business> — email system", the plan and the day under it (the Test tag on a made-up client)
+  assert.equal(tkSysSub(Object.assign({}, acme, { simple: { step: 'sending', dayOf30: 12 } })), 'Free trial · Day 12 of 30');
+  assert.equal(tkSysSub(Object.assign({}, acme, { plan: 'growth' })), 'Growth plan');
+  assert.ok(renderClientSystem({ row: Object.assign({}, acme, { demo: true }) }, 'overview', {}).includes('A made-up client from the test run'));
+});
+
+test('their email system: the client page\'s big button and #system/<id> open it (wide, Back → the client page); the tab is remembered per client; paying clients the same', async () => {
+  asOwner(); trialsForget(); asOwner(); trialsIngestHub(fullHub);
+  globalThis.fetch = async (url) => { const u = new URL(url); if (u.pathname === '/api/mc/hub') return ok(fullHub)(); if (u.pathname.endsWith('/growth')) return ok(makeGrowth(45))(); if (u.pathname.includes('/hub/cobalt-hvac')) return ok({ row: fullHub.stages.flatMap((s) => s.clients).find((r) => r.id === 'cobalt-hvac') })(); if (u.pathname.startsWith('/api/mc/hub/')) return ok(detail)(); return ok({ ok: true })(); };
+  try {
+    tk.detail['acme-plumbing'] = detail; tk.detailAt['acme-plumbing'] = Date.now();
+    openTrial('acme-plumbing');
+    const page = el('content').innerHTML;
+    assert.ok(page.includes('onclick="tkOpenSystem(&quot;acme-plumbing&quot;)"') && page.includes("Open Acme Plumbing's email system"), 'the big button');
+    tkOpenSystem('acme-plumbing'); await new Promise((r) => setTimeout(r, 0));
+    assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'overview');
+    assert.ok(el('content').innerHTML.startsWith('<div class="view wide">'), 'the whole width');
+    assert.ok(el('ptitle').textContent.startsWith('Acme Plumbing — email system'));
+    assert.equal(el('backBtn').style.display, 'grid');
+    assert.ok(navItems().find((i) => i.view === 'trials').isOn(), 'still under Trials in the menu');
+    trialsSetTab('leads'); assert.equal(trialTab, 'leads');
+    goBack(); assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'acme-plumbing', 'Back: the client page');
+    tkOpenSystem('acme-plumbing'); assert.equal(trialTab, 'leads', 'the tab last open for them');
+    // a deep link
+    assert.deepEqual(parseDeepLink('#system/acme-plumbing'), { view: 'clientSystem', id: 'acme-plumbing' });
+    assert.equal(parseDeepLink('#system/bad id'), null);
+    render('trials'); goDeepLink(parseDeepLink('#system/acme-plumbing'));
+    assert.equal(currentView, 'clientSystem'); assert.equal(currentTrialId, 'acme-plumbing');
+    // a paying client: the same page and the same system, under Paying clients
+    tk.detail['cobalt-hvac'] = { row: fullHub.stages.flatMap((s) => s.clients).find((r) => r.id === 'cobalt-hvac') }; tk.detailAt['cobalt-hvac'] = Date.now();
+    openTrial('cobalt-hvac'); assert.ok(el('content').innerHTML.includes('id="tkSysBtn"'));
+    tkOpenSystem('cobalt-hvac', 'overview'); assert.equal(currentView, 'clientSystem');
+    assert.ok(navItems().find((i) => i.view === 'paying').isOn(), 'under Paying clients');
+    assert.equal(el('psub').textContent, 'Starter plan');
+    // My stats is never an email system of its own
+    tkOpenSystem(MY_STATS_ID); assert.equal(currentView, 'trial'); assert.equal(currentTrialId, MY_STATS_ID);
+  } finally { globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); }; trialsStopTimer(); await new Promise((r) => setTimeout(r, 5)); }
+});
+
+test('everything that used to scroll the client page lands in their email system: sections, to-dos, the bell, openTrial(id, tab), "Answer …", "See the messages"', () => {
+  asOwner(); trialsForget(); asOwner();
+  const hub = Object.assign({}, fullHub, { todos: [
+    { id: 'reply:acme-plumbing', clientId: 'acme-plumbing', text: 'Ann wrote', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'conversation' } },
+    { id: 'call:acme-plumbing', clientId: 'acme-plumbing', text: 'Mark the call', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'onboardCall' } },
+    { id: 'launch:acme-plumbing', clientId: 'acme-plumbing', text: 'Launch call', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'launchCall' } },
+    { id: 'buy:acme-plumbing', clientId: 'acme-plumbing', text: 'Their inboxes', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'autobuy' } },
+    { id: 'wu:acme-plumbing', clientId: 'acme-plumbing', text: 'Their warm-up', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'warmup' } },
+    { id: 'app:acme-plumbing', clientId: 'acme-plumbing', text: 'Their application', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'application' } },
+    { id: 'seq:acme-plumbing', clientId: 'acme-plumbing', text: 'The wording', urgent: true, action: { type: 'view', view: 'sequence', clientId: 'acme-plumbing' } },
+    { id: 'look:acme-plumbing', clientId: 'acme-plumbing', text: 'Look', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing' } },
+  ] });
+  trialsIngestHub(hub); tk.detail['acme-plumbing'] = detail; tk.detailAt['acme-plumbing'] = Date.now(); tk.detail['fern-it'] = fernDetail; tk.detailAt['fern-it'] = Date.now();
+  const where = () => currentView + (currentView === 'clientSystem' ? ':' + trialTab : '');
+  const cases = [['reply:', 'clientSystem:messages', 'tkSec-messages'], ['call:', 'clientSystem:calls', 'tkSec-onboardcall'], ['launch:', 'clientSystem:calls', 'tkSec-launchcall'], ['buy:', 'clientSystem:setup', 'tkSec-autobuy'],
+    ['wu:', 'clientSystem:setup', 'tkSec-warmup'], ['app:', 'clientSystem:setup', 'tkSec-application'], ['seq:', 'clientSystem:copy', null], ['look:', 'trial', null]];
+  for (const [id, to, sec] of cases) {
+    render('trials'); if (sec) el(sec).scrollIntoView = () => { el(sec)._hit = (el(sec)._hit || 0) + 1; }; if (sec) el(sec)._hit = 0;
+    trialsTodoAction(id + 'acme-plumbing');
+    assert.equal(where(), to, id + ' → ' + to);
+    if (sec) assert.equal(el(sec)._hit, 1, id + ' scrolls to ' + sec);
+  }
+  // the bell: the same to-dos, the same places
+  const bell = trialsNotifs().find((n) => n.t === 'Ann wrote'); render('trials'); bell.go(); assert.equal(where(), 'clientSystem:messages');
+  // an application still waiting for the owner's yes stays on the client page
+  render('trials'); openTrial('fern-it', null, 'application'); assert.equal(where(), 'trial');
+  // openTrial(id, tab): a tab of their system
+  openTrial('acme-plumbing', 'deliverability'); assert.equal(where(), 'clientSystem:deliverability');
+  openTrial('acme-plumbing', 'setup'); assert.equal(where(), 'clientSystem:setup', '"setup" is the Setup tab now');
+  // from the client page: the big button's helpers
+  openTrial('acme-plumbing'); tkGoTo('launchcall'); assert.equal(where(), 'clientSystem:calls');
+  openTrial('acme-plumbing'); trialsSetTab('growth'); assert.equal(where(), 'clientSystem:growth', 'a tab from the client page opens the system');
+  openTrial('acme-plumbing'); el('tkMsgReply')._f = 0; el('tkMsgReply').focus = () => { el('tkMsgReply')._f++; }; tkFocusReply(); assert.equal(where(), 'clientSystem:messages'); assert.equal(el('tkMsgReply')._f, 1, 'the cursor in the reply box');
+  tkMailToMessages('acme-plumbing'); assert.equal(where(), 'clientSystem:messages');
+  // ⌘K: a client opens their page; nothing points at the old page parts
+  const hit = trialsCmdkEntities().find((e) => e.label === 'Acme Plumbing'); render('trials'); hit.run(); assert.equal(where(), 'trial');
+  const src = fs.readFileSync(path.join(root, 'trials.js'), 'utf8') + ['messages.js', 'autobuy.js', 'warmup.js', 'calendar.js', 'index.html'].map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('');
+  for (const gone of ['tkBehind', 'setClientPane', 'tkClientPane', 'trialsBehindToggle', 'behindOpen', 'tk-pane-switch']) assert.ok(!src.includes(gone), 'nothing points at ' + gone);
+  trialsStopTimer();
+});
+
+test('an employee (read-only) opens a client\'s email system too — no money, no owner-only actions', () => {
+  authUser = { uid: 'u2', name: 'Emp', role: 'employee', email: 'emp@example.com' }; document.body.classList.add('ro');
+  try {
+    trialsIngestHub(fullHub); tk.detail['cobalt-hvac'] = { row: fullHub.stages.flatMap((s) => s.clients).find((r) => r.id === 'cobalt-hvac'), invoice: { number: 'INV-1', amount: 1500, paidAt: '2026-10-05T00:00:00Z', plan: 'starter' } }; tk.detailAt['cobalt-hvac'] = Date.now();
+    tkOpenSystem('cobalt-hvac', 'overview');
+    assert.equal(currentView, 'clientSystem', 'employees can open it');
+    trialsRepaint('clientSystem'); const h = el('tkHost').innerHTML;
+    assert.ok(h.includes('id="tkTabBar"') && !h.includes('id="tkMoney"') && !h.includes('Received from them'), 'no Money card');
+    const setup = renderSysTab(tk.detail['cobalt-hvac'], 'setup', {});
+    assert.ok(setup.includes('Who can see this') && !setup.includes('tk-access-add'), 'who can see it, but not the way to change it');
+    const css = fs.readFileSync(path.join(root, 'theme.css'), 'utf8');
+    assert.ok(css.includes('body.ro .content .btn:not(.ro-ok)'), 'every button that changes something is hidden for them');
+    assert.ok(!/class="[^"]*\bbtn\b[^"]*"[^>]*id="tkSysBtn"/.test(renderTrialDetail(tk.detail['cobalt-hvac'], 'overview', {})) && renderTrialDetail(tk.detail['cobalt-hvac'], 'overview', {}).includes('class="tk-sysbtn"'), 'the big system button is not a hidden .btn: they can open it');
+  } finally { document.body.classList.remove('ro'); asOwner(); trialsStopTimer(); }
 });

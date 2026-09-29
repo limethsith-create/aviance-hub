@@ -228,12 +228,12 @@ test('the application as a Word document: a real .docx (zip + WordprocessingML) 
   } finally { globalThis.tkSaveFile = was; offline(); trialsForget(); }
 });
 
-test('a client page: Progress | Stats — Stats is the same view as My stats from their own sending, with "Who can see this": give access by email, stop all access', async () => {
+test('a client page: the top card and ONE big button into their email system — its Overview is the same view as My stats from their own sending; Setup has "Who can see this": give access by email, stop all access; the tab is remembered', async () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
   const d = clone(ecreekDetail); const id = d.row.id;
   d.row.five = { sent: 120, replies: 6, positive: 2, booked: 1, qualified: 1 };
   d.dashboardAccess = { sharedWith: [{ email: 'owner@ecreek.com', at: '2026-10-02T10:00:00Z' }] };
-  const growth = { days: ['2026-10-01', '2026-10-02'], email: { sent: [60, 60], replies: [2, 4], bounces: [1, 0], opened: [30, 20] } };
+  const growth = { days: ['2026-10-01', '2026-10-02'], email: { sent: [60, 60], replies: [2, 4], bounces: [1, 0], opened: [30, 20] }, inboxes: [{ email: 'sam@ecreek-mail.com', sent: [40, 30] }, { email: 'hi@ecreek-mail.com', sent: [20, 30] }] };
   const calls = [];
   globalThis.fetch = async (url, o) => { const u = String(url); calls.push([u, o && o.body ? JSON.parse(o.body) : null]);
     if (u.includes('/growth')) return { ok: true, status: 200, text: async () => JSON.stringify(growth) };
@@ -242,22 +242,29 @@ test('a client page: Progress | Stats — Stats is the same view as My stats fro
   try {
     openTrial(id); await tick(); await tick();
     let h = el('tkHost').innerHTML;
-    assert.ok(h.includes('tk-pane-switch') && h.includes('>Progress</button>') && h.includes('>Stats</button>'), 'the switch');
-    assert.ok(h.includes('id="tkSec-messages"'), 'Progress first: what needs you');
-    assert.ok(!calls.some(([u]) => u.includes('/growth')), 'no history fetched until Stats is opened');
-    setClientPane(id, 'stats'); await tick(); await tick();
-    assert.ok(calls.some(([u]) => u.includes('/growth')), 'Stats loads their history');
-    h = el('tkHost').innerHTML; const txt = visibleText(h);
+    assert.ok(h.includes('id="tkTop"') && h.includes('id="tkSysBtn"') && visibleText(h).includes("Open eCreek IT's email system"), 'the top card and the big button');
+    assert.ok(!h.includes('tk-pane-switch') && !h.includes('id="tkSec-messages"'), 'nothing else');
+    assert.ok(!calls.some(([u]) => u.includes('/growth')), 'no history fetched until the system is opened');
+    tkOpenSystem(id); await tick(); await tick();
+    assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'overview', 'Overview first');
+    assert.ok(calls.some(([u]) => u.includes('/growth')), 'the Overview loads their history');
+    const screen = () => { trialsRepaint('clientSystem'); return el('tkHost').innerHTML; };   // the fake DOM keeps a tab's own repaint apart: draw the whole screen
+    h = screen(); let txt = visibleText(h);
     assert.ok(!h.includes('id="tkSec-messages"'), 'only their stats');
-    for (const w of ['Emails sent 120', 'Opened 50 41.7% of emails sent', 'Replies 6 5% of emails sent', 'Bounced 1', 'Who can see this', 'owner@ecreek.com', 'Give access', 'Stop all access']) assert.ok(txt.includes(w), w);
+    for (const w of ['Emails sent 120', 'Opened 50 41.7% of emails sent', 'Replies 6 5% of emails sent', 'Bounced 1', 'By inbox', 'sam@ecreek-mail.com 70', 'hi@ecreek-mail.com 50']) assert.ok(txt.includes(w), w);
     assert.ok(h.includes('tk-keys tk-keys4'));
+    trialsSetTab('setup'); txt = visibleText(screen());
+    for (const w of ['Who can see this', 'owner@ecreek.com', 'Give access', 'Stop all access']) assert.ok(txt.includes(w), w);
     el('tkAccessEmail').value = 'not an email'; await clientShare(id);
     assert.ok(!calls.some(([u, b]) => b && b.action === 'shareDashboard'), 'a bad address never goes');
     el('tkAccessEmail').value = ' boss@ecreek.com '; await clientShare(id);
     assert.ok(calls.some(([u, b]) => u.endsWith('/api/mc/clients/' + id) && b && b.action === 'shareDashboard' && b.email === 'boss@ecreek.com'), 'shareDashboard with the email');
     await clientUnshare(id);
     assert.ok(calls.some(([u, b]) => b && b.action === 'unshareDashboard'), 'unshareDashboard');
-    setClientPane(id, 'progress'); assert.ok(el('tkHost').innerHTML.includes('id="tkSec-messages"'), 'back to Progress');
+    trialsSetTab('messages'); assert.ok(screen().includes('id="tkSec-messages"'), 'Messages');
+    goBack(); assert.equal(currentView, 'trial', 'Back: the client page');
+    tkOpenSystem(id); assert.equal(trialTab, 'messages', 'the tab last open for them');
+    assert.equal(JSON.parse(localStorage.getItem(TK_SYS_TAB_KEY))[id], 'messages', 'kept in this browser');
   } finally { offline(); trialsForget(); trialsStopTimer(); }
 });
 
@@ -456,15 +463,18 @@ test('"Needs you": those rows sit at the top (newest first) with a red edge and 
 const sit = (patch) => { const d = clone(ecreekDetail); d.onboardCall = Object.assign(clone(onboardCall), { needsReply: false, status: 'opened' }); d.row = row(simpleRows.ecreek, { step: 'accepted', needsYou: false, next: 'Nothing for you: we remind them tomorrow', label: 'Accepted — waiting for them to book the call' }); d.row.todo = []; return patch(d) || d; };
 const buttons = (h) => [...h.matchAll(/<button type="button" class="btn tk-primary" onclick="([^"]*)">([^<]*)<\/button>/g)].map((m) => [m[2], m[1]]);
 
-test('three questions: every trial page asks the same three, in the same order, with the same journey', () => {
+test('the top card: every client page shows the same journey and the one-line status — and "What do you need to do?" only when something needs him', () => {
   for (const d of [ecreekDetail, fernDetail, detail, { row: simpleRows.cobalt }, { row: simpleRows.iris }, { row: simpleRows.gale }]) {
-    const t = top(d);
-    assert.deepEqual([...t.matchAll(/<h3 class="tk-q-title">([^<]+)<\/h3>/g)].map((m) => m[1]), ['Where are they?', 'What happens next?', 'What do you need to do?'], d.row.id);
+    const t = top(d); const act = tkPrimaryAction(d, { now: NOW });
+    assert.deepEqual([...t.matchAll(/<h3 class="tk-q-title">([^<]+)<\/h3>/g)].map((m) => m[1]), act.kind === 'none' ? [] : ['What do you need to do?'], d.row.id);
     assert.ok(count(t, /class="btn tk-primary"/g) <= 1, d.row.id + ': one big button at most');
+    assert.ok(!t.includes('What happens next?') && !t.includes('Where are they?') && !t.includes('tk-q-none'), d.row.id + ': nothing else');
   }
-  assert.ok(top({ row: simpleRows.gale }).includes('The first emails go out on Mon 26 Oct.'), 'What happens next: the next step without "Nothing for you:"');
-  assert.ok(top({ row: simpleRows.cobalt }).includes('Nothing. This trial is finished.'));
-  assert.ok(top({ row: simpleRows.iris }).includes("Nothing. We didn't take this one.") && top({ row: simpleRows.iris }).includes('<span class="pill grey">Not taken</span>'));
+  assert.ok(!top({ row: simpleRows.gale }).includes('tk-q-title'), 'nothing for him: no question at all');
+  assert.ok(top({ row: simpleRows.cobalt }).includes('<li class="now" aria-current="step"><span class="tk-j-dot" aria-hidden="true">5</span>'), 'finished: step 5');
+  assert.ok(top({ row: simpleRows.iris }).includes('<span class="pill grey">Not taken</span>'));
+  assert.ok(!renderTrialDetail({ row: simpleRows.iris }, 'overview', { now: NOW }).includes('tkSysBtn'), 'not taken: no email system to open');
+  assert.ok(renderTrialDetail({ row: simpleRows.gale }, 'overview', { now: NOW }).includes('id="tkSysBtn"'), 'said yes: the email system');
   const sending = top({ row: row(acme, { step: 'sending', dayOf30: 12, label: 'Sending — 2 calls booked', next: 'Nothing for you: the Friday update goes out today' }) });
   assert.ok(sending.includes('<p class="tk-q-day">Day 12 of 30</p>'), 'while sending: Day 12 of 30');
 });
@@ -486,7 +496,7 @@ test('the one big button, for each situation (and the order when several apply)'
   // a booked call whose time has passed → mark it done (asks first)
   const past = sit((d) => { Object.assign(d.onboardCall, { status: 'booked', bookedFor: '2026-10-16T15:00:00Z', bookedBy: 'calendar' }); });
   assert.deepEqual(buttons(top(past)), [['Mark the call done', 'trialOcTopHeld(&quot;ecreek-it&quot;)']]);
-  assert.ok(top(past).includes("If it happened, mark it done. If they didn't show, say so in the call box below."));
+  assert.ok(top(past).includes("If it happened, mark it done. If they didn't show, say so in the call box under Calls."));
   assert.deepEqual(buttons(top(sit((d) => { d.row.todo = [{ id: 'onboard-mark:ecreek-it', text: 'Mark the call', urgent: true, action: { type: 'view', view: 'detail' } }]; }))), [['Mark the call done', 'trialOcTopHeld(&quot;ecreek-it&quot;)']]);
   assert.deepEqual(buttons(top(sit((d) => { Object.assign(d.onboardCall, { status: 'booked', bookedFor: '2026-10-20T15:00:00Z' }); }))), [], 'booked and still ahead: nothing to do');
   // not booked in time → write to them
@@ -497,7 +507,7 @@ test('the one big button, for each situation (and the order when several apply)'
   assert.ok(top(buy).includes('<p class="tk-q-say">You need to buy the domain and 2 inboxes, then paste the logins.</p>'), 'the machine\'s own next step, as "You need to…"');
   // anything else on the to-do list: urgent says it plainly; not urgent says "when you have a minute"
   const dispute = { row: row(acme, { step: 'sending', needsYou: false, next: 'Nothing for you: the Friday update goes out today', label: 'Sending' }) };
-  assert.deepEqual(buttons(top(dispute)), [['Decide the dispute', 'trialsSetTab(&quot;calls&quot;);tkGoTo(&quot;behind&quot;)']]);
+  assert.deepEqual(buttons(top(dispute)), [['Decide the dispute', 'tkOpenSystem(&quot;acme-plumbing&quot;,&quot;calls&quot;)']]);
   assert.ok(top(dispute).includes('When you have a minute: decide the dispute on the call with bob@example.com.'));
   const paid = { row: row(simpleRows.cobalt, { step: 'finished', needsYou: true, next: '' }) };
   paid.row.todo = [Object.assign({}, simpleRows.cobalt.todo[0], { urgent: true })];
@@ -506,10 +516,11 @@ test('the one big button, for each situation (and the order when several apply)'
   assert.deepEqual(buttons(top({ row: row(acme, { step: 'sending', needsYou: true, next: '' , label: 'Sending' }), })).length, 1);
   const look = { row: Object.assign(row(acme, { step: 'sending', needsYou: true, next: '', label: 'Sending' }), { todo: [] }) };
   assert.deepEqual(buttons(top(look)), [['See what needs you', 'tkGoTo(&quot;behind&quot;)']]);
-  // nothing → a calm sentence, no button
+  // nothing → no button, no question (the act still says so in words)
   const none = top(sit(() => {}));
   assert.deepEqual(buttons(none), []);
-  assert.ok(none.includes("<p class=\"tk-q-none\">Nothing — we'll tell you when something needs you</p>"));
+  assert.ok(!none.includes('tk-q-title') && !none.includes('tk-q-none'));
+  assert.equal(tkPrimaryAction(sit(() => {}), { now: NOW }).label, "Nothing — we'll tell you when something needs you");
   // the order when several apply: application > call time > reply > call to mark > late > buy > other to-dos
   cal.reqs = calRequestsOf(calWeek);
   const many = sit((d) => { d.application = Object.assign({}, d.application, { review: 'pending' }); d.onboardCall.needsReply = true; d.row.state = 'awaiting_purchase'; });
@@ -533,9 +544,11 @@ test('the big buttons do what they say: scroll to the application, into the repl
   try {
     tk.detail['fern-it'] = fernDetail; tk.detailAt['fern-it'] = Date.now(); openTrial('fern-it'); await tick();
     el('tkSec-application')._scrolled = 0; tkGoTo('application'); assert.equal(el('tkSec-application')._scrolled, 1, 'the application scrolls into view');
-    el('tkBehind')._scrolled = 0; tkGoTo('behind'); assert.equal(el('tkBehind')._scrolled, 1, 'behind the scenes too');
+    assert.equal(currentView, 'trial', 'the application waits on the client page');
+    el('tkTabBar')._scrolled = 0; tkGoTo('behind'); assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'systems', 'behind the scenes: their email system, at Parts');
     tk.detail['ecreek-it'] = clone(ecreekDetail); tk.detailAt['ecreek-it'] = Date.now(); openTrial('ecreek-it'); await tick();
     el('tkMsgReply')._focused = 0; tkFocusReply(); assert.equal(el('tkMsgReply')._focused, 1, 'the cursor goes into the reply box under Messages');
+    assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'messages', 'in their email system, at Messages');
     asked = null; await trialOcTopHeld('ecreek-it');
     assert.equal(asked, 'Mark the call with Sam Test as done?'); assert.deepEqual(calls.filter((c) => c[1].endsWith('/onboard-call')).pop()[2], { action: 'markHeld' });
     const posts = () => calls.filter((c) => c[1].endsWith('/onboard-call')).length;

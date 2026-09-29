@@ -21,7 +21,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | File | What it is |
 | --- | --- |
 | `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, the four-place navigation (sidebar on a computer, tab bar on a phone), ⌘K, notifications, theme. |
-| `trials.js` | Trials (the list, one trial, Buy & paste, Behind the scenes) and Settings. Talks to the machine. |
+| `trials.js` | Trials (the list, one client's page and their email system, Buy & paste, Behind the scenes) and Settings. Talks to the machine. |
 | `calendar.js`, `calendar.css` | The Calendar: requests waiting for your yes, the week, meetings, each confirmed call's Google Meet (see `email-distributor/docs/CALENDAR.md`). |
 | `messages.js` | Messages on every trial page (the whole conversation, how each email we sent went, the reply box, the reply-bot switch), Settings › Google Meet and Settings › Reply bot (see `email-distributor/docs/REPLYBOT-MEET.md` and HUB-API "Delivery monitoring"). Styles in `trials.css`. |
 | `autobuy.js` | Their domain and inboxes through CheapInboxes: the "what to buy" panel behind the big button, the "Inboxes & domain" card on a trial while it sets itself up, and Settings › Inboxes & domains (see `email-distributor/docs/AUTO-BUY.md`). Styles in `trials.css`. |
@@ -78,9 +78,10 @@ sentence already does).
   onboarding-call replies and bookings (`POST /api/mc/onboard-calls/check`,
   fire-and-forget) and refreshes if something new came in. Refreshes itself
   every 60 s while open (never the check, never growth history).
-- **Trial** (one client) — three questions at the top, big and plain:
-  **Where are they?** (the journey, bigger, + the plain sentence), **What
-  happens next?** and **What do you need to do?** with ONE big button for the
+- **Trial** (one client, trial or paying) — one card, big and plain: the
+  journey (Applied · Onboarding call · Setting up · Sending emails · Done), the
+  one-line status ("Sending — day 13 of 30, 1 call booked") and — only when
+  something needs you — **What do you need to do?** with ONE big button for the
   single most important thing, in this order: a new application ("Read the
   application and say yes or no" → scrolls to it) · a call time they asked for
   ("Say yes to their call time" → the Calendar at that meeting) · their message
@@ -93,9 +94,21 @@ sentence already does).
   sets itself up; without it, "Buy the domain and inboxes" (the Buy & paste
   page) with "Set up CheapInboxes in Settings" under it · anything else on the to-do list (not urgent:
   "When you have a minute: …") · otherwise "Nothing — we'll tell you when
-  something needs you". Right under the questions: **Messages**. Below: the **Inboxes & domain** card (once bought), the **Warm-up** card (once `warmup` is set), the onboarding call card, the application (open
-  while it waits; once decided, one folded line), any other to-dos under "Also
-  on your list", and **Behind the scenes**, folded, with everything technical.
+  something needs you" (then no question at all). Under the card: ONE big
+  button, **Open <Business>'s email system →** — or, before you said yes, the
+  application itself (Say yes / Say no / Download as Word). Nothing else.
+- **Their email system** (`clientSystem`, `#system/{id}`, Back → the client
+  page) — a copy of My stats and the rest of the machine for that one business,
+  the whole width of the screen, tabs across the top (the last one open is
+  remembered per client): **Overview** (the four numbers, Money, emails per day,
+  by inbox), **Conversations**, **Emails sent**, **Messages with Sam**, **Calls**
+  (a call time waiting for your yes, the launch call, the onboarding call, the
+  calls prospects booked), **Setup** (who they are, the facts, the **Inboxes &
+  domain** card, the **Warm-up** card, who can see their dashboard, the
+  application, links), then every **Behind the scenes** tab (Growth, Parts,
+  Leads, Deliverability, Inboxes, Replies, Copy, Coming up, History, Actions —
+  "Also on your list" on top of Actions). Every to-do, the bell, ⌘K, the
+  Calendar and `openTrial(id, tab, section)` land on the right tab.
 - **What we found** (inside the application; `application.research`,
   `email-distributor/docs/HUB-API.md` "Applicant research"). At the top,
   **Before the call** (`renderBrief`): the machine's brief (`research.brief`, up
@@ -275,11 +288,11 @@ sentence already does).
   Google Meet" as a button when the Google status in `settings.googleMeet`
   is not connected) + either "The email had your usual link instead" or
   "Send them a link yourself".
-- **Behind the scenes on a trial** — tabs. **Overview**: the 13 parts as one
+- **Behind the scenes in a client's email system** — tabs. **Parts**: the 13 parts as one
   strip (each says OK / Working / Waiting / Blocked / Off in words), and four
   growth numbers — emails sent, replies, calls booked, warm-up inbox rate —
-  each with a 14-day sparkline (fetched only once you open Behind the
-  scenes). Everything else lives in tabs: **Growth**,
+  each with a 14-day sparkline (fetched only once you open Parts), then each
+  part in full. Everything else lives in tabs: **Growth**,
   Parts, **Leads**, **Deliverability**, Inboxes, Calls, Replies, Copy,
   Coming up (dates, your promises and notes, reports), History, Actions
   (move to another step, automatic tasks, re-run a step, invoice, client links).
@@ -465,7 +478,8 @@ The growth history is the expensive call (about days × (2 + inboxes) Redis
 reads), so the hub only fetches it when you open something that shows it:
 
 - **Growth tab** — the chosen range, reused for 5 minutes.
-- **Overview** (inside a trial's Behind the scenes, only once it is opened) — 14 days, reused for 15 minutes.
+- **Parts** (a client's email system › Behind the scenes) — 14 days, reused for 15 minutes.
+- **Overview** (a client's email system) — their growth history for the chart and by inbox, reused for 5 minutes.
 - **Board cards** (Behind the scenes only — the Trials list asks for none) — 14 days per warming/sending client (never for clients
   still applying, onboarding or buying), reused for **6 hours** and kept in
   the browser (`localStorage`) so reloading the page costs nothing. Signing

@@ -698,7 +698,7 @@ function calPeek(){
   return calLoad(calMonday(calDayKey(calNow(),calSettingsNow().ownerZone))).then(r=>{
     if(r&&r.ok&&calReqSig()!==before){
       try{renderNav();updateNotifBadge();}catch(e){}
-      if(currentView==='trials'||currentView==='trial')trialsRepaint(currentView,{soft:true});
+      if(currentView==='trials'||currentView==='trial'||currentView==='clientSystem')trialsRepaint(currentView,{soft:true});
     }
     return r;
   },()=>null);
