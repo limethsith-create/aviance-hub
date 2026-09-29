@@ -418,19 +418,18 @@ test('client page: only the top card — the journey, the one-line status, "What
   // …all of it is in their email system: Messages, the call, the application (decided → one folded line), who they are, the facts, the parts
   const sys = (tab) => renderSysTab(ecreekDetail, tab, { now: NOW });
   assert.ok(sys('messages').includes('<div id="tkMsgHost"><section class="card tk-msgs" id="tkSec-messages">'), 'Messages');
-  assert.ok(sys('calls').includes('<div id="tkOcHost">') && sys('calls').includes('id="tkSec-onboardcall"'), 'the onboarding call, under Calls');
   const setup = sys('setup');
-  assert.ok(setup.includes('<b>Sam Test</b>') && setup.includes('href="mailto:sam@ecreek.io"') && setup.includes('href="https://ecreek.io"'), 'who they are, under Setup');
-  assert.ok(setup.includes('<details class="tk-appbox" id="tkSec-application">'), 'the decided application: one folded line, under Setup');
-  for (const inside of ['Full control panel ↗', 'Day 1', 'reply waiting 3 h', 'Onboarding</span>', '>Refresh</button>', 'id="tkAccess"']) assert.ok(setup.includes(inside), 'Setup has ' + inside);
-  assert.ok(sys('systems').includes('class="tk-sys"'), 'Behind the scenes › Parts: every part');
-  assert.ok(!renderSysTab(detail, 'calls', {}).includes('<h3>Onboarding call</h3>'), 'no acceptance email yet: no card');
-  assert.ok(!sys('actions').includes('Also on your list'), 'the reply to-do is the big button, not a second list');
+  assert.ok(setup.includes('<div id="tkOcHost">') && setup.includes('id="tkSec-onboardcall"') && !sys('calls').includes('tkOcHost'), 'the onboarding call box, under Only you › Setup & history (never on the shared Calls)');
+  assert.ok(setup.includes('<b>Sam Test</b>') && setup.includes('href="mailto:sam@ecreek.io"') && setup.includes('href="https://ecreek.io"'), 'who they are, under Setup & history');
+  assert.ok(setup.includes('<details class="tk-appbox" id="tkSec-application">'), 'the decided application: one folded line, under Setup & history');
+  for (const inside of ['Full control panel ↗', 'Day 1', 'reply waiting 3 h', 'Onboarding</span>', '>Refresh</button>', 'id="tkAccess"', 'class="tk-sys"', 'class="tk-strip"']) assert.ok(setup.includes(inside), 'Setup & history has ' + inside);
+  assert.ok(!renderSysTab(detail, 'setup', {}).includes('<h3>Onboarding call</h3>'), 'no acceptance email yet: no card');
+  assert.ok(!setup.includes('Also on your list'), 'the reply to-do is the big button, not a second list');
   // another to-do (not the one at the top) is listed under "Also on your list" — on top of Actions in their system
   const two = Object.assign({}, ecreekDetail, { row: Object.assign({}, simpleRows.ecreek, { todo: simpleRows.ecreek.todo.concat([{ id: 'paid:ecreek-it', text: 'Mark the invoice paid', urgent: false, action: { type: 'api', method: 'POST', path: '/api/mc/clients/ecreek-it', body: { action: 'markPaid' } } }]) }) });
   assert.ok(!renderTrialDetail(two, 'overview', { now: NOW }).includes('Also on your list'));
-  const acts = renderSysTab(two, 'actions', { now: NOW });
-  assert.ok(acts.startsWith('<div class="section-head tk-section"><h3>Also on your list</h3>') && acts.includes('Mark the invoice paid') && !acts.includes('Answer Sam about the onboarding call'));
+  const acts = between(renderSysTab(two, 'setup', { now: NOW }), '<section class="tk-part" id="tkSec-actions">', '</section>');
+  assert.ok(acts.includes('<h2>Actions</h2></div><div class="section-head tk-section"><h3>Also on your list</h3>') && acts.includes('Mark the invoice paid') && !acts.includes('Answer Sam about the onboarding call'));
 });
 
 test('onboarding call card: label, five steps with times, Book by, buttons by status — and no copy of the emails (they live under Messages: "See the messages")', () => {
@@ -495,8 +494,8 @@ test('onboarding call: every button posts the contract body, toasts plain words 
     assert.equal(el('ptitle').textContent, 'eCreek IT', 'the top bar says whose trial it is'); assert.equal(el('psub').textContent, '', 'and nothing the page repeats');
     assert.equal(el('backBtn').style.display, 'grid', 'a Back button to the list');
     assert.equal(calls.filter((c) => c[1] === '/api/mc/onboard-calls/check').length, 1, 'opening a trial asks for the check once');
-    // their email system, at Calls: the call card; at Messages: the reply box
-    tkOpenSystem('ecreek-it', 'calls'); await new Promise((r) => setTimeout(r, 5));
+    // their email system, at Only you › Setup & history: the call card; at Messages: the reply box
+    tkOpenSystem('ecreek-it', 'setup'); await new Promise((r) => setTimeout(r, 5));
     assert.equal(currentView, 'clientSystem'); assert.ok(el('content').innerHTML.includes('id="tkOcHost"'));
     assert.ok(el('content').innerHTML.includes('<div class="view wide">'), 'the whole width');
     assert.ok(el('ptitle').textContent.startsWith('eCreek IT — email system'), el('ptitle').textContent);
@@ -567,30 +566,32 @@ test('the onboarding-call check: fire-and-forget on opening the list or a trial,
 });
 
 /* ───────────── trial detail: Overview + tabs ───────────── */
-test('Parts (behind the scenes, in their email system): the 13-part strip, four growth numbers with sparklines; the to-do is the big button on the client page', () => {
+test('Parts (Only you › Setup & history): the 13-part strip, then every part in full; the dispute is decided there too; the to-do is the big button on the client page', () => {
   const g14 = tkSliceGrowth(makeGrowth(45), 14);
   const page = renderTrialDetail(detail, 'overview', { now: NOW, spark: { g: g14, state: null } });
   assert.ok(page.includes('Sending — Day 12 of 30'));
   assert.ok(page.includes('>Decide the dispute</button>') && page.includes('When you have a minute: decide the dispute on the call with bob@example.com.'), 'not urgent: "when you have a minute"');
-  assert.ok(page.includes('onclick="tkOpenSystem(&quot;acme-plumbing&quot;,&quot;calls&quot;)">Decide the dispute</button>'), 'the dispute is decided under Calls, in their email system');
-  // their email system › Behind the scenes › Parts: the strip, the last 14 days, then each part in full
-  const html = renderSysTab(detail, 'systems', { now: NOW, spark: { g: g14, state: null } }) + renderTabBar('systems', detail);
-  const iSys = html.indexOf('<h3>Parts</h3>'), iGrow = html.indexOf('<h3>Growth</h3>'), iAll = html.indexOf('<h3>Every part</h3>');
-  assert.ok(iSys >= 0 && iSys < iGrow && iGrow < iAll, 'order: parts, growth, every part');
-  assert.equal(count(html, /class="tk-strip-item /g), 13, '13 systems in the strip');
+  assert.ok(page.includes('onclick="tkOpenSystem(&quot;acme-plumbing&quot;,&quot;setup&quot;,&quot;disputes&quot;)">Decide the dispute</button>'), 'the dispute is decided under Only you › Setup & history');
+  const html = renderSysTab(detail, 'setup', { now: NOW }) + renderTabBar('setup', detail);
+  assert.ok(html.includes('id="tkSec-disputes"') && html.includes('>Uphold</button>') && html.includes('>Overturn</button>'), 'the dispute buttons');
+  const parts = between(html, '<section class="tk-part" id="tkSec-parts">', '</section>');
+  const iAll = parts.indexOf('<details class="tk-everypart" id="tkSec-everypart"><summary><b>Every part in full</b>');
+  assert.ok(parts.indexOf('class="tk-strip"') < iAll && iAll > 0 && parts.indexOf('class="tk-sys"') > iAll, 'order: the strip, then every part (folded)');
+  assert.equal(count(parts, /class="tk-strip-item /g), 13, '13 systems in the strip');
+  assert.ok(parts.includes('onclick="tkGoTo(\'everypart\')"'), 'a part in the strip goes to its card below');
   const labels = ['Intake', 'Market count', 'Purchase', 'Setup check', 'Warm-up', 'Lead list', 'Copy', 'Canary test', 'Sending', 'Replies', 'Calls', 'Reports', 'Closing'];
-  let last = -1; for (const l of labels) { const i = html.indexOf('<b>' + l + '</b>', iSys); assert.ok(i > last, 'strip order ' + l); last = i; }
-  assert.ok(html.includes('1 blocked') && html.includes('1 waiting'), 'strip summary in words');
-  assert.ok(html.includes('>Parts</button>') && !html.includes('>Systems</button>'), 'the tab is "Parts"');
-  for (const k of ['Emails sent', 'Replies', 'Calls booked', 'Warm-up inbox rate']) assert.ok(html.includes('<small>' + k + '</small>'), 'key number ' + k);
-  assert.ok(html.includes('>230<') && html.includes('4 positive') && html.includes('1 qualified') && html.includes('>91%<'));
-  assert.ok(count(html, /class="tk-spark"/g) >= 4, 'a sparkline per key number');
-  assert.ok(html.includes('in the last 7 days'));
-  assert.ok(!html.includes('<h4>Emails sent per day</h4>'), 'the big charts live in the Growth tab');
-  assert.ok(renderSysTab(detail, 'systems', { spark: { g: null, state: 'loading' } }).includes('Loading the last 14 days…'));
-  assert.ok(renderSysTab({ row: bright }, 'systems', { spark: { g: null, state: 'pre' } }).includes('Starts once warm-up begins'));
+  let last = -1; for (const l of labels) { const i = parts.indexOf('<b>' + l + '</b>'); assert.ok(i > last, 'strip order ' + l); last = i; }
+  assert.ok(parts.includes('1 blocked') && parts.includes('1 waiting'), 'strip summary in words');
+  assert.ok(html.includes('>Setup &amp; history</button>') && html.includes('<h2>Parts</h2>'), 'the part is "Parts", under Setup & history');
+  // the old overview of the parts (renderTab 'overview'): four key numbers with sparklines
+  const ov = renderTab(detail, 'overview', { spark: { g: g14, state: null } });
+  for (const k of ['Emails sent', 'Replies', 'Calls booked', 'Warm-up inbox rate']) assert.ok(ov.includes('<small>' + k + '</small>'), 'key number ' + k);
+  assert.ok(ov.includes('>230<') && ov.includes('4 positive') && ov.includes('1 qualified') && ov.includes('>91%<') && count(ov, /class="tk-spark"/g) >= 4 && ov.includes('in the last 7 days'));
+  assert.ok(ov.includes('onclick="trialsSetTab(\'health\')"') && !ov.includes("trialsSetTab('growth')"), 'its links go to Health');
+  assert.ok(renderTab(detail, 'overview', { spark: { g: null, state: 'loading' } }).includes('Loading the last 14 days…'));
+  assert.ok(renderTab({ row: bright }, 'overview', { spark: { g: null, state: 'pre' } }).includes('Starts once warm-up begins'));
   assert.ok(renderTab(detail, 'numbers', {}).includes('tk-strip'), 'old "numbers" tab name still draws the strip');
-  assert.equal(tkSysValid('numbers', detail), 'overview', 'and opens the system at its Overview');
+  assert.equal(tkSysValid('numbers'), 'overview', 'and opens the system at its Overview');
 });
 
 test('Growth tab: sending, warm-up, each inbox and placement charts, with a range selector', () => {
@@ -825,12 +826,12 @@ test('growth is fetched when the owner opens it (a tab of their email system), n
   openTrial('acme-plumbing');
   await new Promise((r) => setTimeout(r, 0));
   assert.ok(!urls.some((u) => u.includes('/growth')), 'opening the client page: no growth history');
-  tkOpenSystem('acme-plumbing', 'systems'); await new Promise((r) => setTimeout(r, 0));
-  assert.ok(urls.some((u) => u.endsWith('/api/mc/hub/acme-plumbing/growth?days=14')), 'Behind the scenes › Parts asks for 14 days (its sparklines)');
-  urls.length = 0; delete tk.spark['acme-plumbing']; trialsRepaint('clientSystem'); await new Promise((r) => setTimeout(r, 0));
+  tkOpenSystem('acme-plumbing', 'setup'); await new Promise((r) => setTimeout(r, 0));
+  assert.ok(!urls.some((u) => u.includes('/growth')), 'Only you › Setup & history: no growth history');
+  urls.length = 0; trialsRepaint('clientSystem'); await new Promise((r) => setTimeout(r, 0));
   assert.ok(!urls.some((u) => u.includes('/growth')), 'a repaint (not a click) fetches nothing');
-  trialsSetTab('growth'); await new Promise((r) => setTimeout(r, 0));
-  assert.ok(urls.some((u) => u.endsWith('/growth?days=45')), 'Growth tab asks for 45 days');
+  trialsSetTab('health'); await new Promise((r) => setTimeout(r, 0));
+  assert.ok(urls.some((u) => u.endsWith('/growth?days=45')), 'Only you › Health asks for 45 days');
   assert.ok(tk.growth['acme-plumbing'] && tk.growth['acme-plumbing'].days === 45);
   urls.length = 0; await trialsTick();
   assert.ok(urls.length > 0 && !urls.some((u) => u.includes('/growth')), 'auto-refresh: no growth call');
@@ -1504,26 +1505,47 @@ test('the company file (research v4): "Who buys from them", "In the news", "Comp
 });
 
 /* ───────────── a client's email system (view 'clientSystem') ───────────── */
-test('their email system: every tab draws — Overview (My stats with their numbers), Conversations, Emails sent, Messages with <first name>, Calls, Setup, then every Behind-the-scenes tab full width; unknown tabs land on the Overview', () => {
-  const sys = renderClientSystem(ecreekDetail, 'overview', { now: NOW });
-  const labels = [...sys.matchAll(/<button type="button" role="tab" class="tk-systab[^"]*" aria-selected="(?:true|false)" onclick="trialsSetTab\(&quot;(\w+)&quot;\)">([^<]+)<\/button>/g)].map((m) => m[1] + ':' + m[2]);
-  assert.deepEqual(labels, ['overview:Overview', 'conversations:Conversations', 'sent:Emails sent', 'messages:Messages with Sam', 'calls:Calls', 'setup:Setup',
-    'growth:Growth', 'systems:Parts', 'leads:Leads', 'deliverability:Deliverability', 'inboxes:Inboxes', 'replies:Replies', 'copy:Copy', 'comingup:Coming up', 'timeline:History', 'actions:Actions']);
-  assert.ok(sys.includes('<span class="tk-systabs-sep">Behind the scenes</span>'), 'the Behind-the-scenes tabs are named as such');
-  assert.ok(sys.includes('aria-selected="true" onclick="trialsSetTab(&quot;overview&quot;)"'), 'Overview first');
-  assert.ok(sys.includes('<div id="tkTabHost" class="tk-sys-body" role="tabpanel">') && !sys.includes('<details class="tk-behind"'), 'full width, never folded');
+const sysTabs = (h) => [...h.matchAll(/<button type="button" role="tab" class="tk-systab[^"]*" aria-selected="(?:true|false)" onclick="trialsSetTab\(&quot;(\w+)&quot;\)">([^<]+)<\/button>/g)].map((m) => m[1] + ':' + m[2]);
+test('their email system: one switch — "Shared with <Business>" (five tabs, the default) | "Only you" (a lock, four tabs, its own tint); one row of tabs at a time; unknown and old tab names land in the right place', () => {
   asOwner();
-  const want = { overview: ['id="tkMoney"', 'Plan <b>Free trial</b>'], conversations: ['id="tkConvos"', 'Conversations', '→ Messages'], sent: ['id="tkSentMail"', 'Every email sent'], messages: ['id="tkSec-messages"'],
-    calls: ['id="tkSec-onboardcall"', 'Calls prospects booked'], setup: ['id="tkSec-about"', 'id="tkAccess"', 'id="tkSec-application"', 'Full control panel ↗'],
-    growth: ['Loading the growth history'], systems: ['class="tk-strip"', 'class="tk-sys"'], leads: ['Ready to send'], deliverability: ['Domain setup'], inboxes: ['Add inbox'], replies: ['Newest replies'],
-    copy: ['Edit the email wording'], comingup: ['Friday update'], timeline: ['tk-'], actions: ['Pause sending'] };
+  const sys = renderClientSystem(ecreekDetail, 'overview', { now: NOW });
+  assert.deepEqual(sysTabs(sys), ['overview:Overview', 'conversations:Conversations', 'sent:Emails sent', 'calls:Calls', 'messages:Messages'], 'Shared: exactly five tabs');
+  assert.ok(sys.includes('<div class="tk-sys-screen tk-sys-shared" id="tkSysHost">'), 'the shared side');
+  assert.ok(sys.includes('<button type="button" class="tk-sysmode-b on" aria-pressed="true" onclick="trialsSetMode(&quot;shared&quot;)"><span class="tk-sysmode-k">Shared with</span> <b>eCreek IT</b></button>'), 'the switch: Shared with eCreek IT, on');
+  assert.ok(sys.includes('onclick="trialsSetMode(&quot;only&quot;)"><svg class="tk-lock"') && sys.includes('<b>Only you</b>'), 'Only you, with a lock');
+  assert.ok(visibleText(sys).includes('This is exactly what Sam sees on their own page.'), 'what the client sees');
+  assert.ok(sys.includes('aria-selected="true" onclick="trialsSetTab(&quot;overview&quot;)"'), 'Overview first');
+  assert.equal(count(sys, /class="tk-systabs-row"/g), 1, 'one row of tabs');
+  const only = renderClientSystem(ecreekDetail, 'money', { now: NOW });
+  assert.deepEqual(sysTabs(only), ['money:Money &amp; plan', 'health:Health', 'leads:Leads &amp; emails', 'setup:Setup &amp; history'], 'Only you: four tabs');
+  assert.ok(only.includes('<div class="tk-sys-screen tk-sys-only" id="tkSysHost">') && only.includes('class="tk-sysmode-b on only" aria-pressed="true"'), 'its own tint, its side on');
+  assert.ok(visibleText(only).includes('Only you and your team see this side. Sam never does.'));
+  assert.equal(count(only, /class="tk-systabs-row"/g), 1, 'one row of tabs');
+  // who can see their page: nobody yet → "Not shared yet — Give access"; else the first address and how many
+  assert.ok(visibleText(sys).includes('Not shared yet — Give access') && sys.includes('onclick="tkGoTo(&quot;access&quot;)">Give access</button>'));
+  const shared = Object.assign({}, ecreekDetail, { dashboardAccess: { sharedWith: [{ email: 'sam@ecreek.io', at: '2026-10-01T00:00:00Z' }, { email: 'boss@ecreek.io', at: '2026-10-02T00:00:00Z' }] } });
+  const sh = renderClientSystem(shared, 'overview', { now: NOW });
+  assert.ok(visibleText(sh).includes('Shared with sam@ecreek.io · 2 people Manage') && sh.includes('onclick="tkGoTo(&quot;access&quot;)">Manage</button>'));
+  assert.equal(tkSectionPlace('ecreek-it', 'access').tab, 'setup', 'Give access / Manage → Only you › Setup & history (Who can see this)');
+  // every tab draws what it holds
+  const want = {
+    overview: ['id="tkSec-where"', 'Where they are', 'tk-keys tk-keys4'], conversations: ['id="tkConvos"', 'Conversations'], sent: ['id="tkSentMail"', 'Every email sent'],
+    calls: ['id="tkSec-calls"', 'Calls prospects booked · 1', '<th>When</th><th>Who</th><th>Status</th>', 'Being checked'], messages: ['id="tkSec-messages"'],
+    money: ['id="tkMoney"', 'Plan <b>Free trial</b>', 'id="tkSec-plan"', 'Day 12 of 30', 'Their decision'],
+    health: ['<h2>Inboxes &amp; warm-up</h2>', 'Add inbox', '<h2>Landing in the inbox</h2>', 'Domain setup', '<h2>Growth over time</h2>', 'id="tkGrowthHost"', 'Loading the growth history'],
+    leads: ['<h2>Leads</h2>', 'Ready to send', '<h2>The emails</h2>', 'Edit the email wording', '<h2>Replies</h2>', 'Newest replies', '<h2>Coming up</h2>', 'Friday update'],
+    setup: ['id="tkSec-about"', 'Full control panel ↗', 'id="tkAccess"', 'Who can see this', 'id="tkSec-disputes"', '>Uphold</button>', '<h2>Parts</h2>', 'class="tk-strip"', 'class="tk-sys"', '<h2>History</h2>', 'tk-timeline', '<h2>Actions</h2>', 'Pause sending'] };
   const full = Object.assign({}, detail, { row: Object.assign({}, acme), onboardCall: ecreekDetail.onboardCall, application: ecreekDetail.application });
   for (const [tab, needles] of Object.entries(want)) {
-    const h = renderSysTab(tab === 'messages' || tab === 'calls' || tab === 'setup' ? ecreekDetail : full, tab, { now: NOW, growth: { loading: true, days: 45 } });
+    const h = renderSysTab(tab === 'messages' ? ecreekDetail : full, tab, { now: NOW, growth: { loading: true, days: 45 } });
     for (const n of needles) assert.ok(h.includes(n), tab + ' has ' + n);
   }
-  for (const [tab] of tkSysTabs(detail)) assert.doesNotThrow(() => renderSysTab({ row: bright }, tab, {}), 'sparse detail: ' + tab);
-  assert.equal(tkSysValid('nope', detail), 'overview'); assert.equal(tkSysValid('stats', detail), 'overview'); assert.equal(tkSysValid('history', detail), 'timeline');
+  assert.ok(renderSysTab(Object.assign({}, full, { application: ecreekDetail.application }), 'setup', { now: NOW }).includes('id="tkSec-application"'), 'the application: Setup & history');
+  assert.ok(renderSysTab(full, 'setup', { now: NOW }).includes('id="tkOcHost"'), 'the onboarding call box: Setup & history');
+  for (const [tab] of tkSysTabs()) assert.doesNotThrow(() => renderSysTab({ row: bright }, tab, {}), 'sparse detail: ' + tab);
+  assert.equal(tkSysValid('nope'), 'overview'); assert.equal(tkSysValid('stats'), 'overview');
+  for (const [old, now] of [['growth', 'health'], ['deliverability', 'health'], ['inboxes', 'health'], ['systems', 'setup'], ['timeline', 'setup'], ['history', 'setup'], ['actions', 'setup'], ['replies', 'leads'], ['copy', 'leads'], ['comingup', 'leads']]) assert.equal(tkSysValid(old), now, old + ' → ' + now);
+  assert.equal(tkSysMode('money'), 'only'); assert.equal(tkSysMode('messages'), 'shared'); assert.equal(tkSysMode('growth'), 'only');
   assert.ok(renderClientSystem(ecreekDetail, 'nope', {}).includes('aria-selected="true" onclick="trialsSetTab(&quot;overview&quot;)"'));
   // the title: "<Business> — email system", the plan and the day under it (the Test tag on a made-up client)
   assert.equal(tkSysSub(Object.assign({}, acme, { simple: { step: 'sending', dayOf30: 12 } })), 'Free trial · Day 12 of 30');
@@ -1531,7 +1553,35 @@ test('their email system: every tab draws — Overview (My stats with their numb
   assert.ok(renderClientSystem({ row: Object.assign({}, acme, { demo: true }) }, 'overview', {}).includes('A made-up client from the test run'));
 });
 
-test('their email system: the client page\'s big button and #system/<id> open it (wide, Back → the client page); the tab is remembered per client; paying clients the same', async () => {
+test('Shared never shows money, costs, the fit score, internal to-dos, rule names or dispute buttons — a paying test client with a paid invoice, a dispute and a to-do', () => {
+  asOwner(); trialsForget(); asOwner();
+  const id = 'acme-plumbing';
+  const row = Object.assign({}, acme, { plan: 'growth', demo: true, fitScore: { score: 82, grade: 'A', label: 'Good fit', confidence: 70 },
+    todo: acme.todo.concat([{ id: 'paid:acme-plumbing', text: 'Mark the month-one invoice paid once the money lands', detail: 'INV-0007 · $1,500', urgent: true, since: '2026-10-05T00:00:00Z', action: { type: 'api', method: 'POST', path: '/api/mc/clients/acme-plumbing', body: { action: 'markPaid' } } }]) });
+  const d = Object.assign({}, detail, { row, invoice: { number: 'AV-202610-acme', amount: 2497, issuedAt: '2026-10-02T10:00:00Z', paidAt: '2026-10-04T09:00:00Z', plan: 'growth', status: 'paid' },
+    application: Object.assign({}, ecreekDetail.application, { fitScore: row.fitScore }), onboardCall: Object.assign({}, ecreekDetail.onboardCall, { status: 'held', bookedFor: '2026-10-01T15:00:00Z', heldAt: '2026-10-01T15:40:00Z' }), conversation: ecreekDetail.conversation,
+    bookings: detail.bookings.concat([{ id: 'b2', leadEmail: 'cy@example.com', leadName: 'Cy Diaz', scheduledAt: '2026-10-16T15:00:00Z', status: 'held' }, { id: 'b3', leadEmail: 'di@example.com', scheduledAt: '2026-10-17T15:00:00Z', status: 'noshow' }, { id: 'b4', leadEmail: 'ed@example.com', scheduledAt: '2026-10-20T15:00:00Z', status: 'booked' }]) });
+  tk.detail[id] = d; tk.detailAt[id] = Date.now();
+  tk.growth[id] = { days: 45, at: Date.now(), data: makeGrowth(45) };
+  tk.mail = { [id]: { emails: { ok: true, list: [{ id: 'e1', at: '2026-10-15T14:00:00Z', to: 'bob@example.com', toName: 'Bob', company: 'Bob Co', subject: 'Quick idea', from: 'ann@acme-team.com', kind: 'first', status: 'replied' }], total: 1, next: null, pages: 1, at: Date.now() },
+    threads: { ok: true, list: [{ threadId: 't1', lead: { email: 'bob@example.com', name: 'Bob', company: 'Bob Co' }, lastAt: '2026-10-15T14:00:00Z', count: 2, kind: 'interested', handledBy: 'bot', snippet: 'Sure, tell me more' }], at: Date.now() } } };
+  const shared = TK_SYS_SHARED.map(([t]) => renderSysTab(d, t, trialsSysMeta(id))).join('') + renderTabBar('overview', d);
+  const words = visibleText(shared);
+  assert.ok(words.includes('Emails sent') && words.includes('Interested') && words.includes('Calls booked') && shared.includes('Emails sent per day'), 'the numbers and the chart are there');
+  assert.ok(words.includes('Cy Diaz') && words.includes('Showed') && words.includes('No-show') && words.includes('Booked'), 'the calls prospects booked: booked / showed / no-show');
+  assert.ok(words.includes('Setup calls') && /Onboarding call \w{3} 1 Oct, [\d:]+ [ap]m Done/.test(words), 'the onboarding call time: ' + between(words, 'Setup calls', 'Messages'));
+  assert.ok(words.includes('On the Growth plan.') || words.includes('Sending emails.'), 'where they are, in plain words: ' + between(words, 'Where they are', 'Emails sent'));
+  for (const bad of ['$', 'tkMoney', 'Received from them', 'Invoice', 'AV-202610', '2,497', '2497', 'Fit score', 'fit score', 'Good fit', '>82<', '82/100', '/100', 'Grade A', '% match', 'Uphold', 'Overturn', 'trialDispute', 'Decide the dispute', 'Mark the month-one invoice',
+    'Also on your list', 'tkSec-disputes', 'tk-strip', 'Porkbun', 'Premium Inboxes', 'Full control panel', 'Pause sending', 'Run this task', 'tkAccess"', 'Stop all access', 'wrong fit', 'Client said', 'Qualified</th>', 'health', 'Warm-up inbox rate', 'By inbox'])
+    assert.ok(!shared.includes(bad), 'Shared never shows: ' + bad + ' — ' + shared.slice(Math.max(0, shared.indexOf(bad) - 150), shared.indexOf(bad) + 60));
+  assert.ok(!/\b[a-z]+_[a-z_]+\b/.test(words.replace(/[\w.-]+@[\w.-]+/g, '')), 'no code names: ' + (words.match(/\b[a-z]+_[a-z_]+\b/) || [])[0]);
+  // …and all of it is still on the Only you side
+  const only = TK_SYS_PRIVATE.map(([t]) => renderSysTab(d, t, trialsSysMeta(id))).join('');
+  for (const good of ['id="tkMoney"', 'Received from them', 'AV-202610-acme', '>Uphold</button>', 'Also on your list', 'Decide the dispute on the call with bob@example.com', 'class="tk-strip"', 'Full control panel ↗']) assert.ok(only.includes(good), 'Only you has ' + good);
+  trialsForget(); asOwner();
+});
+
+test('their email system: the client page\'s big button and #system/<id> (Shared › Overview) or #system/<id>/<tab> open it (wide, Back → the client page); the side and tab are remembered per client; paying clients the same', async () => {
   asOwner(); trialsForget(); asOwner(); trialsIngestHub(fullHub);
   globalThis.fetch = async (url) => { const u = new URL(url); if (u.pathname === '/api/mc/hub') return ok(fullHub)(); if (u.pathname.endsWith('/growth')) return ok(makeGrowth(45))(); if (u.pathname.includes('/hub/cobalt-hvac')) return ok({ row: fullHub.stages.flatMap((s) => s.clients).find((r) => r.id === 'cobalt-hvac') })(); if (u.pathname.startsWith('/api/mc/hub/')) return ok(detail)(); return ok({ ok: true })(); };
   try {
@@ -1540,19 +1590,35 @@ test('their email system: the client page\'s big button and #system/<id> open it
     const page = el('content').innerHTML;
     assert.ok(page.includes('onclick="tkOpenSystem(&quot;acme-plumbing&quot;)"') && page.includes("Open Acme Plumbing's email system"), 'the big button');
     tkOpenSystem('acme-plumbing'); await new Promise((r) => setTimeout(r, 0));
-    assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'overview');
+    assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'overview', 'Shared › Overview first');
     assert.ok(el('content').innerHTML.startsWith('<div class="view wide">'), 'the whole width');
     assert.ok(el('ptitle').textContent.startsWith('Acme Plumbing — email system'));
     assert.equal(el('backBtn').style.display, 'grid');
     assert.ok(navItems().find((i) => i.view === 'trials').isOn(), 'still under Trials in the menu');
+    trialsSetTab('calls'); trialsSetMode('only'); assert.equal(trialTab, 'money', 'Only you opens at Money & plan');
     trialsSetTab('leads'); assert.equal(trialTab, 'leads');
+    trialsSetMode('shared'); assert.equal(trialTab, 'calls', 'back on Shared: the tab last open there');
+    trialsSetMode('only'); assert.equal(trialTab, 'leads', 'and on Only you: its own');
     goBack(); assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'acme-plumbing', 'Back: the client page');
-    tkOpenSystem('acme-plumbing'); assert.equal(trialTab, 'leads', 'the tab last open for them');
-    // a deep link
+    tkOpenSystem('acme-plumbing'); assert.equal(trialTab, 'leads', 'the side and tab last open for them');
+    assert.deepEqual(JSON.parse(localStorage.getItem(TK_SYS_TAB_KEY))['acme-plumbing'], { mode: 'only', shared: 'calls', only: 'leads' }, 'kept in this browser');
+    // the memory survives a reload (read back from this browser); a broken or blocked storage just forgets
+    tk.sysTab = null; assert.equal(tkSysTabGet('acme-plumbing'), 'leads');
+    localStorage.setItem(TK_SYS_TAB_KEY, '{not json'); tk.sysTab = null; assert.equal(tkSysTabGet('acme-plumbing'), 'overview');
+    localStorage.setItem(TK_SYS_TAB_KEY, JSON.stringify({ 'acme-plumbing': { mode: 'only', shared: 'money', only: 'overview' } })); tk.sysTab = null;
+    assert.equal(tkSysTabGet('acme-plumbing'), 'money', 'a tab on the wrong side is never used'); assert.equal(tkSysTabGet('acme-plumbing', 'shared'), 'overview');
+    const gi = localStorage.getItem; localStorage.getItem = () => { throw new Error('blocked'); }; tk.sysTab = null;
+    try { assert.equal(tkSysTabGet('acme-plumbing'), 'overview'); } finally { localStorage.getItem = gi; }
+    // deep links: #system/<id> is Shared › Overview, whatever was open; #system/<id>/<tab> that tab
     assert.deepEqual(parseDeepLink('#system/acme-plumbing'), { view: 'clientSystem', id: 'acme-plumbing' });
-    assert.equal(parseDeepLink('#system/bad id'), null);
+    assert.deepEqual(parseDeepLink('#system/acme-plumbing/health'), { view: 'clientSystem', id: 'acme-plumbing', tab: 'health' });
+    assert.equal(parseDeepLink('#system/bad id'), null); assert.equal(parseDeepLink('#system/acme-plumbing/<b>'), null);
+    tkOpenSystem('acme-plumbing', 'setup');
     render('trials'); goDeepLink(parseDeepLink('#system/acme-plumbing'));
-    assert.equal(currentView, 'clientSystem'); assert.equal(currentTrialId, 'acme-plumbing');
+    assert.equal(currentView, 'clientSystem'); assert.equal(currentTrialId, 'acme-plumbing'); assert.equal(trialTab, 'overview', '#system/<id>: Shared › Overview');
+    render('trials'); goDeepLink(parseDeepLink('#system/acme-plumbing/health')); assert.equal(trialTab, 'health');
+    render('trials'); goDeepLink(parseDeepLink('#system/acme-plumbing/growth')); assert.equal(trialTab, 'health', 'an old tab name: where it lives now');
+    render('trials'); goDeepLink(parseDeepLink('#system/acme-plumbing/nope')); assert.equal(trialTab, 'overview');
     // a paying client: the same page and the same system, under Paying clients
     tk.detail['cobalt-hvac'] = { row: fullHub.stages.flatMap((s) => s.clients).find((r) => r.id === 'cobalt-hvac') }; tk.detailAt['cobalt-hvac'] = Date.now();
     openTrial('cobalt-hvac'); assert.ok(el('content').innerHTML.includes('id="tkSysBtn"'));
@@ -1564,7 +1630,7 @@ test('their email system: the client page\'s big button and #system/<id> open it
   } finally { globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); }; trialsStopTimer(); await new Promise((r) => setTimeout(r, 5)); }
 });
 
-test('everything that used to scroll the client page lands in their email system: sections, to-dos, the bell, openTrial(id, tab), "Answer …", "See the messages"', () => {
+test('everything that used to scroll the client page lands on the right side and tab: sections, to-dos, the bell, openTrial(id, tab), "Answer …", the call boxes, the dispute', () => {
   asOwner(); trialsForget(); asOwner();
   const hub = Object.assign({}, fullHub, { todos: [
     { id: 'reply:acme-plumbing', clientId: 'acme-plumbing', text: 'Ann wrote', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'conversation' } },
@@ -1573,13 +1639,15 @@ test('everything that used to scroll the client page lands in their email system
     { id: 'buy:acme-plumbing', clientId: 'acme-plumbing', text: 'Their inboxes', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'autobuy' } },
     { id: 'wu:acme-plumbing', clientId: 'acme-plumbing', text: 'Their warm-up', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'warmup' } },
     { id: 'app:acme-plumbing', clientId: 'acme-plumbing', text: 'Their application', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'application' } },
+    { id: 'acc:acme-plumbing', clientId: 'acme-plumbing', text: 'Who sees it', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'dashboardAccess' } },
+    { id: 'bk:acme-plumbing', clientId: 'acme-plumbing', text: 'Their calls', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing', section: 'bookings' } },
     { id: 'seq:acme-plumbing', clientId: 'acme-plumbing', text: 'The wording', urgent: true, action: { type: 'view', view: 'sequence', clientId: 'acme-plumbing' } },
     { id: 'look:acme-plumbing', clientId: 'acme-plumbing', text: 'Look', urgent: true, action: { type: 'view', view: 'detail', clientId: 'acme-plumbing' } },
   ] });
   trialsIngestHub(hub); tk.detail['acme-plumbing'] = detail; tk.detailAt['acme-plumbing'] = Date.now(); tk.detail['fern-it'] = fernDetail; tk.detailAt['fern-it'] = Date.now();
-  const where = () => currentView + (currentView === 'clientSystem' ? ':' + trialTab : '');
-  const cases = [['reply:', 'clientSystem:messages', 'tkSec-messages'], ['call:', 'clientSystem:calls', 'tkSec-onboardcall'], ['launch:', 'clientSystem:calls', 'tkSec-launchcall'], ['buy:', 'clientSystem:setup', 'tkSec-autobuy'],
-    ['wu:', 'clientSystem:setup', 'tkSec-warmup'], ['app:', 'clientSystem:setup', 'tkSec-application'], ['seq:', 'clientSystem:copy', null], ['look:', 'trial', null]];
+  const where = () => currentView + (currentView === 'clientSystem' ? ':' + tkSysMode(trialTab) + ':' + trialTab : '');
+  const cases = [['reply:', 'clientSystem:shared:messages', 'tkSec-messages'], ['call:', 'clientSystem:only:setup', 'tkSec-onboardcall'], ['launch:', 'clientSystem:only:setup', 'tkSec-launchcall'], ['buy:', 'clientSystem:only:health', 'tkSec-autobuy'],
+    ['wu:', 'clientSystem:only:health', 'tkSec-warmup'], ['app:', 'clientSystem:only:setup', 'tkSec-application'], ['acc:', 'clientSystem:only:setup', 'tkAccess'], ['bk:', 'clientSystem:shared:calls', 'tkSec-calls'], ['seq:', 'clientSystem:only:leads', 'tkSec-copy'], ['look:', 'trial', null]];
   for (const [id, to, sec] of cases) {
     render('trials'); if (sec) el(sec).scrollIntoView = () => { el(sec)._hit = (el(sec)._hit || 0) + 1; }; if (sec) el(sec)._hit = 0;
     trialsTodoAction(id + 'acme-plumbing');
@@ -1587,25 +1655,52 @@ test('everything that used to scroll the client page lands in their email system
     if (sec) assert.equal(el(sec)._hit, 1, id + ' scrolls to ' + sec);
   }
   // the bell: the same to-dos, the same places
-  const bell = trialsNotifs().find((n) => n.t === 'Ann wrote'); render('trials'); bell.go(); assert.equal(where(), 'clientSystem:messages');
+  const bell = trialsNotifs().find((n) => n.t === 'Ann wrote'); render('trials'); bell.go(); assert.equal(where(), 'clientSystem:shared:messages');
   // an application still waiting for the owner's yes stays on the client page
   render('trials'); openTrial('fern-it', null, 'application'); assert.equal(where(), 'trial');
-  // openTrial(id, tab): a tab of their system
-  openTrial('acme-plumbing', 'deliverability'); assert.equal(where(), 'clientSystem:deliverability');
-  openTrial('acme-plumbing', 'setup'); assert.equal(where(), 'clientSystem:setup', '"setup" is the Setup tab now');
+  // openTrial(id, tab): a tab of their system (an old tab name: where it lives now)
+  openTrial('acme-plumbing', 'deliverability'); assert.equal(where(), 'clientSystem:only:health');
+  openTrial('acme-plumbing', 'setup'); assert.equal(where(), 'clientSystem:only:setup');
+  openTrial('acme-plumbing', 'calls'); assert.equal(where(), 'clientSystem:shared:calls');
   // from the client page: the big button's helpers
-  openTrial('acme-plumbing'); tkGoTo('launchcall'); assert.equal(where(), 'clientSystem:calls');
-  openTrial('acme-plumbing'); trialsSetTab('growth'); assert.equal(where(), 'clientSystem:growth', 'a tab from the client page opens the system');
-  openTrial('acme-plumbing'); el('tkMsgReply')._f = 0; el('tkMsgReply').focus = () => { el('tkMsgReply')._f++; }; tkFocusReply(); assert.equal(where(), 'clientSystem:messages'); assert.equal(el('tkMsgReply')._f, 1, 'the cursor in the reply box');
-  tkMailToMessages('acme-plumbing'); assert.equal(where(), 'clientSystem:messages');
+  openTrial('acme-plumbing'); tkGoTo('launchcall'); assert.equal(where(), 'clientSystem:only:setup');
+  openTrial('acme-plumbing'); el('tkSec-disputes')._hit = 0; el('tkSec-disputes').scrollIntoView = () => { el('tkSec-disputes')._hit++; };
+  const dispute = tkTodoPrimary(acme.todo[0], 'acme-plumbing', detail); assert.equal(dispute.label, 'Decide the dispute');
+  vm.runInThisContext(dispute.run.replace(/&quot;/g, '"')); assert.equal(where(), 'clientSystem:only:setup'); assert.equal(el('tkSec-disputes')._hit, 1, 'the dispute: at the call boxes');
+  openTrial('acme-plumbing'); trialsSetTab('health'); assert.equal(where(), 'clientSystem:only:health', 'a tab from the client page opens the system');
+  openTrial('acme-plumbing'); el('tkMsgReply')._f = 0; el('tkMsgReply').focus = () => { el('tkMsgReply')._f++; }; tkFocusReply(); assert.equal(where(), 'clientSystem:shared:messages'); assert.equal(el('tkMsgReply')._f, 1, 'the cursor in the reply box');
+  tkOpenSystem('acme-plumbing', 'money'); el('tkMsgReply')._f = 0; tkFocusReply(); assert.equal(where(), 'clientSystem:shared:messages', '"Answer …" from Only you: Shared › Messages'); assert.equal(el('tkMsgReply')._f, 1);
+  tkMailToMessages('acme-plumbing'); assert.equal(where(), 'clientSystem:shared:messages');
   // ⌘K: a client opens their page; nothing points at the old page parts
   const hit = trialsCmdkEntities().find((e) => e.label === 'Acme Plumbing'); render('trials'); hit.run(); assert.equal(where(), 'trial');
   const src = fs.readFileSync(path.join(root, 'trials.js'), 'utf8') + ['messages.js', 'autobuy.js', 'warmup.js', 'calendar.js', 'index.html'].map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('');
-  for (const gone of ['tkBehind', 'setClientPane', 'tkClientPane', 'trialsBehindToggle', 'behindOpen', 'tk-pane-switch']) assert.ok(!src.includes(gone), 'nothing points at ' + gone);
+  for (const gone of ['tkBehind', 'setClientPane', 'tkClientPane', 'trialsBehindToggle', 'behindOpen', 'tk-pane-switch', 'TK_SYS_BEHIND', 'TK_SYS_MAIN', 'tk-systabs-behind', 'tk-systabs-main']) assert.ok(!src.includes(gone), 'nothing points at ' + gone);
   trialsStopTimer();
 });
 
-test('an employee (read-only) opens a client\'s email system too — no money, no owner-only actions', () => {
+test('no code opens a tab that is gone: every tab key the hub passes (trialsSetTab, tkOpenSystem, openTrial, the repaints) is one of the nine', () => {
+  const keys = new Set(tkSysTabs().map(([k]) => k));
+  assert.deepEqual([...keys], ['overview', 'conversations', 'sent', 'calls', 'messages', 'money', 'health', 'leads', 'setup']);
+  const files = ['trials.js', 'messages.js', 'autobuy.js', 'warmup.js', 'calendar.js', 'inquiries.js', 'keys.js', 'people.js', 'push.js', 'index.html'];
+  const lit = `(?:'(\\w+)'|"(\\w+)"|\\$\\{tkAttr\\('(\\w+)'\\)\\}|&quot;(\\w+)&quot;)`;
+  const pats = [new RegExp(`trialsSetTab\\(${lit}`, 'g'), new RegExp(`trialsRepaintTab\\(${lit}`, 'g'), new RegExp(`tkOpenSystem\\([^,()]+(?:\\([^()]*\\))?\\s*,\\s*${lit}`, 'g'),
+    new RegExp(`openTrial\\([^,()]+(?:\\([^()]*\\))?\\s*,\\s*${lit}`, 'g'), new RegExp(`trialTab\\)?\\s*===?\\s*${lit}`, 'g'), new RegExp(`\\bt===${lit}(?:\\|\\|t===${lit})?\\)(?:trials|tk)`, 'g')];
+  const seen = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(root, f), 'utf8');
+    for (const re of pats) for (const m of src.matchAll(re)) { const k = m[1] || m[2] || m[3] || m[4]; seen.push(k); if (m[5] || m[6] || m[7] || m[8]) seen.push(m[5] || m[6] || m[7] || m[8]); assert.ok(keys.has(k), f + ': ' + m[0] + ' — "' + k + '" is not a tab any more'); }
+    for (const m of src.matchAll(/tkSysRepaintIf\([^,]+,\s*\[([^\]]*)\]/g)) for (const k of m[1].match(/\w+/g) || []) { seen.push(k); assert.ok(keys.has(k), f + ': tkSysRepaintIf "' + k + '"'); }
+  }
+  assert.ok(seen.length >= 10, 'the check found the callers (' + seen.length + ')');
+  for (const k of ['health', 'setup', 'leads', 'messages']) assert.ok(seen.includes(k), 'callers of ' + k);
+  // the removed ones: never passed as a tab
+  for (const gone of ['growth', 'systems', 'deliverability', 'inboxes', 'replies', 'copy', 'comingup', 'timeline', 'actions']) assert.ok(!seen.includes(gone), gone);
+  // the sections the hub scrolls to live on a tab that exists
+  for (const [sec, tab] of Object.entries(TK_SECTION_TAB)) assert.ok(keys.has(tab), sec + ' → ' + tab);
+  for (const tab of Object.values(TK_TAB_ALIAS)) assert.ok(keys.has(tab), tab);
+});
+
+test('an employee (read-only) opens a client\'s email system too — both sides, but no money anywhere and no owner-only actions', () => {
   authUser = { uid: 'u2', name: 'Emp', role: 'employee', email: 'emp@example.com' }; document.body.classList.add('ro');
   try {
     trialsIngestHub(fullHub); tk.detail['cobalt-hvac'] = { row: fullHub.stages.flatMap((s) => s.clients).find((r) => r.id === 'cobalt-hvac'), invoice: { number: 'INV-1', amount: 1500, paidAt: '2026-10-05T00:00:00Z', plan: 'starter' } }; tk.detailAt['cobalt-hvac'] = Date.now();
@@ -1613,6 +1708,10 @@ test('an employee (read-only) opens a client\'s email system too — no money, n
     assert.equal(currentView, 'clientSystem', 'employees can open it');
     trialsRepaint('clientSystem'); const h = el('tkHost').innerHTML;
     assert.ok(h.includes('id="tkTabBar"') && !h.includes('id="tkMoney"') && !h.includes('Received from them'), 'no Money card');
+    trialsSetMode('only'); assert.equal(trialTab, 'money', 'the team sees Only you too');
+    trialsRepaint('clientSystem'); const m = el('tkHost').innerHTML;
+    assert.ok(m.includes('tk-sys-only') && visibleText(m).includes('Only the owner sees money.') && !m.includes('id="tkMoney"') && !m.includes('$') && !m.includes('INV-1'), 'Money & plan: no money for them, one line saying why');
+    for (const [t] of TK_SYS_PRIVATE) { const h = renderSysTab(tk.detail['cobalt-hvac'], t, {}); assert.ok(!h.includes('$') && !h.includes('Received from them') && !h.includes('INV-1'), 'no money under ' + t); }
     const setup = renderSysTab(tk.detail['cobalt-hvac'], 'setup', {});
     assert.ok(setup.includes('Who can see this') && !setup.includes('tk-access-add'), 'who can see it, but not the way to change it');
     const css = fs.readFileSync(path.join(root, 'theme.css'), 'utf8');

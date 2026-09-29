@@ -97,18 +97,29 @@ sentence already does).
   something needs you" (then no question at all). Under the card: ONE big
   button, **Open <Business>'s email system →** — or, before you said yes, the
   application itself (Say yes / Say no / Download as Word). Nothing else.
-- **Their email system** (`clientSystem`, `#system/{id}`, Back → the client
-  page) — a copy of My stats and the rest of the machine for that one business,
-  the whole width of the screen, tabs across the top (the last one open is
-  remembered per client): **Overview** (the four numbers, Money, emails per day,
-  by inbox), **Conversations**, **Emails sent**, **Messages with Sam**, **Calls**
-  (a call time waiting for your yes, the launch call, the onboarding call, the
-  calls prospects booked), **Setup** (who they are, the facts, the **Inboxes &
-  domain** card, the **Warm-up** card, who can see their dashboard, the
-  application, links), then every **Behind the scenes** tab (Growth, Parts,
-  Leads, Deliverability, Inboxes, Replies, Copy, Coming up, History, Actions —
-  "Also on your list" on top of Actions). Every to-do, the bell, ⌘K, the
-  Calendar and `openTrial(id, tab, section)` land on the right tab.
+- **Their email system** (`clientSystem`, `#system/{id}` = Shared › Overview,
+  `#system/{id}/{tab}`, Back → the client page) — the whole width of the screen.
+  At the top one switch with two sides (the side and tab last open are
+  remembered per client):
+  - **Shared with <Business>** (the default) — exactly what the client sees on
+    their own page, so you can show it to them: "This is exactly what Dana sees
+    on their own page", who has access ("Shared with dana@… · 2 people" →
+    Manage, or "Not shared yet — Give access"). Five tabs: **Overview** (where
+    they are on the journey in plain words, Emails sent · Opened · Replies ·
+    Bounced, Interested · Calls booked, emails sent per day), **Conversations**,
+    **Emails sent**, **Calls** (the calls prospects booked: when, who, booked /
+    showed / no-show; the onboarding and launch call times — nothing to press),
+    **Messages** (your emails with them, the reply box). Never money, costs,
+    the fit score, internal to-dos, rule names or dispute buttons.
+  - **Only you** (a lock, a tinted screen; you and your team) — **Money & plan**
+    (the Money card — the owner only —, the plan, the trial day, their
+    decision), **Health** (Inboxes & warm-up · Landing in the inbox · Growth
+    over time), **Leads & emails** (Leads · The emails · Replies · Coming up),
+    **Setup & history** (who they are, who can see their page, the application,
+    the call boxes and disputes, Parts, History, Actions with "Also on your
+    list").
+  Every to-do, the bell, ⌘K, the Calendar and `openTrial(id, tab, section)` land
+  on the right side and tab.
 - **What we found** (inside the application; `application.research`,
   `email-distributor/docs/HUB-API.md` "Applicant research"). At the top,
   **Before the call** (`renderBrief`): the machine's brief (`research.brief`, up

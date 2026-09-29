@@ -115,12 +115,12 @@ function drawStep(s) {
     out.act = tkPrimaryAction(d, { now });
     out.page = renderTrialDetail(d, 'overview', { now });   // the client page: the top card, then one big button (or the application)
     out.top = between(out.page, '<section class="card tk-top', '</section>');
-    // their email system: the tabs that used to be under the top card (Messages, Calls, Setup, Also on your list), one after the other
+    // their email system: Shared › Messages and Calls, then Only you › Health and Setup & history, one after the other
     out.sys = Object.fromEntries(tkSysTabs(d).map(([tab]) => [tab, renderSysTab(d, tab, { now })]));
-    out.system = ['messages', 'calls', 'setup', 'actions'].map((t) => out.sys[t] + '<!--tab-->').join('');
+    out.system = ['messages', 'calls', 'health', 'setup'].map((t) => out.sys[t] + '<!--tab-->').join('');
     const all = out.page + '<!--tab-->' + out.system;
     // each part, up to whatever comes after it (a part that is not there is '')
-    const ENDS = ['<!--tab-->', '<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkLcHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<div class="section-head tk-section" id="tkSec-calls">', '<div class="card tk-pad tk-access"', '<div class="section-head tk-section"><h3>Client links</h3>'];
+    const ENDS = ['<!--tab-->', '<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkLcHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<div class="section-head tk-section" id="tkSec-disputes">', '<div class="card tk-pad tk-access"', '<section class="tk-part"', '<div class="card tk-scroll"><table class="tk-table"><tr><th>Inbox</th>', '<div class="section-head tk-section"><h3>Client links</h3>'];
     const part = (a) => { const i = all.indexOf(a); if (i < 0) return ''; const js = ENDS.map((e) => all.indexOf(e, i + a.length)).filter((j) => j > 0); return all.slice(i, js.length ? Math.min(...js) : all.length); };
     out.messages = part('<div id="tkMsgHost">');
     out.autobuy = part('<div id="tkAbHost">');
@@ -129,8 +129,8 @@ function drawStep(s) {
     out.launch = part('<div id="tkLcHost">');   // the launch call's card (docs/LAUNCH-CALL.md) — '' until the machine's snapshots carry launchCall
     out.also = part('<h3>Also on your list</h3>');
     out.found = between(all, '<h4>What we found</h4>', '<h4>Their answers</h4>');   // the application's research: the brief, the company file
-    out.front = all;   // what he reads: the page and the everyday tabs of the system (not Behind the scenes)
-    out.tabs = TK_SYS_BEHIND.map(([tab]) => [tab, out.sys[tab]]);
+    out.front = all;   // what he reads: the page and the tabs of the system he acts in
+    out.tabs = tkSysTabs(d).map(([tab]) => [tab, out.sys[tab]]);
     out.buy = renderAutobuyBuy(d);
   }
   const c = s.extra && s.extra.calendar;
@@ -209,7 +209,7 @@ for (const s of J) {
       return;
     }
     clean(s.step + ' trial page', o.page);
-    for (const [tab, h] of o.tabs) clean(s.step + ' Behind the scenes › ' + tab, h);
+    for (const [tab, h] of o.tabs) clean(s.step + ' their email system › ' + tab, h);
     clean(s.step + ' buy panel', o.buy);
 
     // 2. the journey step is the machine's simple.step
@@ -580,11 +580,11 @@ test('31 Day 30: "Trial finished — waiting for their decision" (the machine\'s
   assert.ok(flat(o.top).includes('Their first invoice (Starter, $2,497) went out Fri 20 Nov. When the money lands, mark it paid.'));
   assert.deepEqual(tkListGroups(tk.hub).going.map((x) => x.row.id), [ID], 'the invoice is still to mark paid: in view, not folded under Done');
   assert.ok(!flat(o.top).includes('What happens next?'), 'his step is said once, under "What do you need to do?"');
-  const actions = flat(o.tabs.find(([t]) => t === 'actions')[1]);
-  assert.ok(actions.includes('Number AV-202611-ridgelineit Plan Starter Amount $2497.00') && actions.includes('Not paid yet'), 'the invoice as the machine sends it (invoiceNo, plan)');
+  const actions = flat(o.tabs.find(([t]) => t === 'money')[1]);
+  assert.ok(actions.includes('Number AV-202611-ridgelineit Plan Starter Amount $2497.00') && actions.includes('Not paid yet'), 'the invoice as the machine sends it (invoiceNo, plan) — under Only you › Money & plan');
   o = drawStep(byStep('33'));
   assert.ok(flat(o.list).includes('Done / not taken 1') && !flat(o.top).includes('What do you need to do?') && o.top.includes('<li class="now" aria-current="step"><span class="tk-j-dot" aria-hidden="true">5</span>'));
-  assert.ok(flat(o.tabs.find(([t]) => t === 'actions')[1]).includes('Paid 24 Nov'));
+  assert.ok(flat(o.tabs.find(([t]) => t === 'money')[1]).includes('Paid 24 Nov'));
 });
 
 test('"Needs you" first: the journey\'s rows side by side on one list — the ones that need him on top (newest first), then in progress (the Day 30 decision among them), then done', () => {
@@ -606,11 +606,11 @@ test('"Needs you" first: the journey\'s rows side by side on one list — the on
   trialsForget();
 });
 
-test('Behind the scenes › History: an event\'s detail in words, never raw JSON or "null"', () => {
+test('Only you › Setup & history › History: an event\'s detail in words, never raw JSON or "null"', () => {
   assert.equal(tkDetailText({ sendingDay: 0, bounceRate: null, inboxes: [{ email: 'a' }, { email: 'b' }], ok: true }), 'sending day 0 · inboxes 2 items · ok yes');
   assert.equal(tkDetailText('plain words'), 'plain words'); assert.equal(tkDetailText(null), ''); assert.equal(tkDetailText({ a: null }), '');
   const o = drawStep(byStep('14'));
-  const h = flat(o.tabs.find(([t]) => t === 'timeline')[1]);
+  const h = flat(o.tabs.find(([t]) => t === 'setup')[1]);
   assert.ok(!h.includes('{"') && !/\bnull\b/.test(h) && h.includes('Caps set'), h.slice(0, 300));
 });
 
@@ -687,9 +687,9 @@ test('every step: under each email we sent, a small grey line in the machine\'s 
   assert.ok(!byStep('09').detail.conversation.thread.some((m) => m.template === 'welcome_two_dates'), 'not at the setup check any more');
   // 22: she opened it
   assert.ok(/We sent: We start on Wednesday 21 October<\/span>[\s\S]*?<span class="tk-cm-st">delivered · opened Thu 4:30 pm<\/span>/.test(drawStep(byStep('22')).messages));
-  // the seed test's plain note (2026-09-27, integration) shows in Behind the scenes › Deliverability — only when the test was thin
+  // the seed test's plain note (2026-09-27, integration) shows in Only you › Health — only when the test was thin
   // (with the 8 helpers the hub asks for, the test was not thin: no note — the machine only writes one when it was)
-  const dv = flat(drawStep(s21).tabs.find(([t]) => t === 'deliverability')[1]);
+  const dv = flat(drawStep(s21).tabs.find(([t]) => t === 'health')[1]);
   assert.ok(!dv.includes('Tested with'), 'no thin-test note with 8 helpers');
 });
 

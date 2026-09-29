@@ -93,18 +93,19 @@ test('Money card on a client\'s Stats: plan, each invoice (number, amount, issue
   assert.ok(visibleText(renderMoneyCard(Object.assign({}, cobaltDetail, { invoice: { number: 'AV-1', amount: 2497, status: 'blocked' } }))).includes('Not sent yet'));
   assert.ok(visibleText(renderMoneyCard(Object.assign({}, cobaltDetail, { invoice: null }))).includes('No invoice yet.'));
   assert.ok(visibleText(renderMoneyCard(Object.assign({}, detail, { invoice: null }))).includes('Plan Free trial'));
-  // on the Stats pane, right under the four numbers
+  // under Only you › Money & plan (first), never on the shared Overview
   tk.growth['cobalt-hvac'] = { days: 45, at: Date.now(), data: { days: ['2026-10-01'], email: { sent: [40], replies: [1], bounces: [0] } } };
   const stats = renderClientStats(cobaltDetail, 'cobalt-hvac');
-  assert.ok(stats.includes('id="tkMoney"') && stats.indexOf('tk-keys tk-keys4') < stats.indexOf('id="tkMoney"') && stats.indexOf('id="tkMoney"') < stats.indexOf('Emails sent per day'));
-  // still loading the emails: the money shows anyway
+  assert.ok(stats.includes('Emails sent per day') && !stats.includes('tkMoney') && !stats.includes('$'), 'the shared Overview: no money');
+  const money = renderSysTab(cobaltDetail, 'money', {});
+  assert.ok(money.startsWith('<div class="card tk-money" id="tkMoney">') && visibleText(money).includes('Plan Starter plan'));
   delete tk.growth['cobalt-hvac'];
-  assert.ok(renderClientStats(cobaltDetail, 'cobalt-hvac').includes('id="tkMoney"'));
-  // My stats (the owner's own sending) and the team: no money
-  assert.ok(!renderClientStats(Object.assign({}, cobaltDetail, { row: { id: 'aviance', name: 'Aviance' } }), 'aviance').includes('tkMoney'));
+  assert.ok(!renderClientStats(cobaltDetail, 'cobalt-hvac').includes('tkMoney'));
+  // the team: no money, one line saying why
   asEmployee(); document.body.classList.add('ro');
   assert.equal(renderMoneyCard(cobaltDetail), '');
-  assert.ok(!renderClientStats(cobaltDetail, 'cobalt-hvac').includes('tkMoney'));
+  const em = renderSysTab(cobaltDetail, 'money', {});
+  assert.ok(!em.includes('tkMoney"') && !em.includes('$') && visibleText(em).includes('Only the owner sees money.'));
   reset();
   // escaped
   assert.ok(!renderMoneyCard(Object.assign({}, cobaltDetail, { invoice: { number: '<b>x</b>', amount: 1 } })).includes('<b>x</b>'));

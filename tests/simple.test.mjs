@@ -251,9 +251,11 @@ test('a client page: the top card and ONE big button into their email system —
     const screen = () => { trialsRepaint('clientSystem'); return el('tkHost').innerHTML; };   // the fake DOM keeps a tab's own repaint apart: draw the whole screen
     h = screen(); let txt = visibleText(h);
     assert.ok(!h.includes('id="tkSec-messages"'), 'only their stats');
-    for (const w of ['Emails sent 120', 'Opened 50 41.7% of emails sent', 'Replies 6 5% of emails sent', 'Bounced 1', 'By inbox', 'sam@ecreek-mail.com 70', 'hi@ecreek-mail.com 50']) assert.ok(txt.includes(w), w);
-    assert.ok(h.includes('tk-keys tk-keys4'));
-    trialsSetTab('setup'); txt = visibleText(screen());
+    for (const w of ['Emails sent 120', 'Opened 50 41.7% of emails sent', 'Replies 6 5% of emails sent', 'Bounced 1', 'Where they are']) assert.ok(txt.includes(w), w);
+    assert.ok(h.includes('tk-keys tk-keys4') && !txt.includes('By inbox'), 'the four numbers; the inboxes are under Only you › Health');
+    assert.ok(h.includes('class="tk-sys-screen tk-sys-shared"') && txt.includes('This is exactly what Sam sees on their own page.'), 'Shared with eCreek IT, first');
+    trialsSetTab('setup'); h = screen(); txt = visibleText(h);
+    assert.ok(h.includes('class="tk-sys-screen tk-sys-only"') && txt.includes('Only you and your team see this side. Sam never does.'), 'Only you: its own tint and line');
     for (const w of ['Who can see this', 'owner@ecreek.com', 'Give access', 'Stop all access']) assert.ok(txt.includes(w), w);
     el('tkAccessEmail').value = 'not an email'; await clientShare(id);
     assert.ok(!calls.some(([u, b]) => b && b.action === 'shareDashboard'), 'a bad address never goes');
@@ -263,8 +265,10 @@ test('a client page: the top card and ONE big button into their email system —
     assert.ok(calls.some(([u, b]) => b && b.action === 'unshareDashboard'), 'unshareDashboard');
     trialsSetTab('messages'); assert.ok(screen().includes('id="tkSec-messages"'), 'Messages');
     goBack(); assert.equal(currentView, 'trial', 'Back: the client page');
-    tkOpenSystem(id); assert.equal(trialTab, 'messages', 'the tab last open for them');
-    assert.equal(JSON.parse(localStorage.getItem(TK_SYS_TAB_KEY))[id], 'messages', 'kept in this browser');
+    tkOpenSystem(id); assert.equal(trialTab, 'messages', 'the side and tab last open for them');
+    assert.deepEqual(JSON.parse(localStorage.getItem(TK_SYS_TAB_KEY))[id], { mode: 'shared', shared: 'messages', only: 'setup' }, 'kept in this browser');
+    trialsSetMode('only'); assert.equal(trialTab, 'setup', 'Only you: at the tab last open there');
+    trialsSetMode('shared'); assert.equal(trialTab, 'messages');
   } finally { offline(); trialsForget(); trialsStopTimer(); }
 });
 
@@ -496,7 +500,7 @@ test('the one big button, for each situation (and the order when several apply)'
   // a booked call whose time has passed → mark it done (asks first)
   const past = sit((d) => { Object.assign(d.onboardCall, { status: 'booked', bookedFor: '2026-10-16T15:00:00Z', bookedBy: 'calendar' }); });
   assert.deepEqual(buttons(top(past)), [['Mark the call done', 'trialOcTopHeld(&quot;ecreek-it&quot;)']]);
-  assert.ok(top(past).includes("If it happened, mark it done. If they didn't show, say so in the call box under Calls."));
+  assert.ok(top(past).includes("If it happened, mark it done. If they didn't show, say so in the call box under Setup &amp; history."));
   assert.deepEqual(buttons(top(sit((d) => { d.row.todo = [{ id: 'onboard-mark:ecreek-it', text: 'Mark the call', urgent: true, action: { type: 'view', view: 'detail' } }]; }))), [['Mark the call done', 'trialOcTopHeld(&quot;ecreek-it&quot;)']]);
   assert.deepEqual(buttons(top(sit((d) => { Object.assign(d.onboardCall, { status: 'booked', bookedFor: '2026-10-20T15:00:00Z' }); }))), [], 'booked and still ahead: nothing to do');
   // not booked in time → write to them
@@ -507,7 +511,7 @@ test('the one big button, for each situation (and the order when several apply)'
   assert.ok(top(buy).includes('<p class="tk-q-say">You need to buy the domain and 2 inboxes, then paste the logins.</p>'), 'the machine\'s own next step, as "You need to…"');
   // anything else on the to-do list: urgent says it plainly; not urgent says "when you have a minute"
   const dispute = { row: row(acme, { step: 'sending', needsYou: false, next: 'Nothing for you: the Friday update goes out today', label: 'Sending' }) };
-  assert.deepEqual(buttons(top(dispute)), [['Decide the dispute', 'tkOpenSystem(&quot;acme-plumbing&quot;,&quot;calls&quot;)']]);
+  assert.deepEqual(buttons(top(dispute)), [['Decide the dispute', 'tkOpenSystem(&quot;acme-plumbing&quot;,&quot;setup&quot;,&quot;disputes&quot;)']]);
   assert.ok(top(dispute).includes('When you have a minute: decide the dispute on the call with bob@example.com.'));
   const paid = { row: row(simpleRows.cobalt, { step: 'finished', needsYou: true, next: '' }) };
   paid.row.todo = [Object.assign({}, simpleRows.cobalt.todo[0], { urgent: true })];
@@ -545,7 +549,7 @@ test('the big buttons do what they say: scroll to the application, into the repl
     tk.detail['fern-it'] = fernDetail; tk.detailAt['fern-it'] = Date.now(); openTrial('fern-it'); await tick();
     el('tkSec-application')._scrolled = 0; tkGoTo('application'); assert.equal(el('tkSec-application')._scrolled, 1, 'the application scrolls into view');
     assert.equal(currentView, 'trial', 'the application waits on the client page');
-    el('tkTabBar')._scrolled = 0; tkGoTo('behind'); assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'systems', 'behind the scenes: their email system, at Parts');
+    el('tkSec-parts')._scrolled = 0; tkGoTo('behind'); assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'setup', 'behind the scenes: their email system, at Only you › Setup & history'); assert.equal(el('tkSec-parts')._scrolled, 1, 'at Parts');
     tk.detail['ecreek-it'] = clone(ecreekDetail); tk.detailAt['ecreek-it'] = Date.now(); openTrial('ecreek-it'); await tick();
     el('tkMsgReply')._focused = 0; tkFocusReply(); assert.equal(el('tkMsgReply')._focused, 1, 'the cursor goes into the reply box under Messages');
     assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'messages', 'in their email system, at Messages');

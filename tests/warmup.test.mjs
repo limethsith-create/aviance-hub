@@ -341,12 +341,12 @@ test('trial page: the "Warm-up" card — the bar (day N of about 14), how many r
   // no `warmup` yet (before the inboxes are connected): no card
   assert.equal(renderWarmupCard({ row: gale }), '');
   assert.equal(renderWarmupCard({ row: gale, warmup: null }), '');
-  // in their email system, under Setup (not on the client page)
+  // in their email system, under Only you › Health (not on the client page, never on the shared side)
   assert.ok(!renderTrialDetail(d, 'overview', { now: NOW }).includes('tkWuHost'), 'the client page: only the top card and the big button');
-  const setup = renderSysTab(d, 'setup', { now: NOW });
-  assert.ok(setup.indexOf('id="tkSec-about"') < setup.indexOf('<div id="tkWuHost"><section class="card tk-wu"'), 'Setup: who they are, then the warm-up');
-  assert.equal(tkSectionPlace(GALE, 'warmup').tab, 'setup', 'a to-do about the warm-up lands there');
-  assert.ok(renderSysTab({ row: gale }, 'setup', { now: NOW }).includes('<div id="tkWuHost"></div>'));
+  const health = renderSysTab(d, 'health', { now: NOW });
+  assert.ok(health.indexOf('id="tkSec-inboxes"') < health.indexOf('<div id="tkWuHost"><section class="card tk-wu"'), 'Health › Inboxes & warm-up: the warm-up card');
+  assert.equal(tkSectionPlace(GALE, 'warmup').tab, 'health', 'a to-do about the warm-up lands there');
+  assert.ok(renderSysTab({ row: gale }, 'health', { now: NOW }).includes('<div id="tkWuHost"></div>'));
   // hostile
   const evil = renderWarmupCard({ row: gale, warmup: { status: 'warming', label: '<img src=x onerror=alert(1)>', day: '5"><script>', of: 'x', readyBy: '<i>soon</i>', inboxRate: '<b>', inboxes: [{ email: '<script>x</script>@a.com', day: '<u>', inboxRate7d: 'y' }], problem: '<b>p</b>' } });
   for (const bad of ['<img src=x', '<script>', '<i>soon', '<b>p', '<u>']) assert.ok(!evil.includes(bad), bad);
@@ -361,7 +361,7 @@ test('trial page: waiting for helpers → the big button is "Add 2 warm-up helpe
   assert.ok(t.includes("<p class=\"tk-q-say\">Their inboxes can't start warming up until the warm-up circle has 2 more helpers. Helpers are free email accounts you make once — they help every client after this.</p>"));
   assert.ok(t.includes('<section class="card tk-top needs"'), 'his turn: the red edge');
   assert.ok(t.includes('<h3 class="tk-q-title">What do you need to do?</h3>'));
-  const whole = (x) => renderTrialDetail(x, 'overview', { now: NOW }) + renderSysTab(x, 'setup', { now: NOW }) + renderSysTab(x, 'actions', { now: NOW });   // the client page and their email system
+  const whole = (x) => renderTrialDetail(x, 'overview', { now: NOW }) + renderSysTab(x, 'health', { now: NOW }) + renderSysTab(x, 'setup', { now: NOW });   // the client page and their email system
   const page = whole(d);
   assert.ok(!page.includes('Also on your list'), 'the "Add 2 warm-up helpers" to-do is the big button, not listed again');
   assert.equal(count(page, /openSettings\(&quot;warmup&quot;\)/g), 1, 'one way there, not two');
@@ -393,7 +393,7 @@ test('trial page: waiting for helpers → the big button is "Add 2 warm-up helpe
   const urgent = galeWu('waiting'); urgent.row = Object.assign({}, urgent.row, { todo: [{ id: 'meeting-request:m1', text: 'Mia asked for a call time', urgent: true, action: { type: 'view', view: 'calendar', clientId: GALE, meetingId: 'm1' } }, galeWarmupTodo] });
   assert.equal(bigButtons(top(urgent))[0][0], 'Say yes to their call time');
   assert.ok(renderWarmupCard(urgent).includes('<div class="tk-wu-acts"><button type="button" class="btn" onclick="openSettings(&quot;warmup&quot;)">Add warm-up helpers</button></div>'));
-  assert.ok(between(renderSysTab(urgent, 'actions', { now: NOW }), 'Also on your list', 'Pause sending').includes('onclick="trialsTodoAction(&quot;warmup-helpers:gale-roofing&quot;)">Open Settings › Warm-up</button>'));
+  assert.ok(between(renderSysTab(urgent, 'setup', { now: NOW }), 'Also on your list', 'Pause sending').includes('onclick="trialsTodoAction(&quot;warmup-helpers:gale-roofing&quot;)">Open Settings › Warm-up</button>'));
   // the warm-up has started (he added them) but the row still asks: nothing asked on the page
   const started = galeWu('warming', { next: 'Add 2 warm-up helpers — Settings › Warm-up', needsYou: true });
   assert.ok(!top(started).includes('tk-top needs') && bigButtons(top(started)).length === 0 && !top(started).includes('tk-q-title') && tkPrimaryAction(started, { now: NOW }).label === "Nothing — we'll tell you when something needs you");

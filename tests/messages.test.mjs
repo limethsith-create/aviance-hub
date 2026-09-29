@@ -606,7 +606,7 @@ test('"Sam hasn\'t opened the … email": the big button "I\'ve reached Sam" (re
   assert.deepEqual(bigButtons(t), [["I've reached Sam", 'trialsTodoAction(&quot;unopened:ecreek-it&quot;)']]);
   assert.ok(visibleText(t).includes("Sam hasn't opened the “we start on” email — call or text them? Sent Tue 20 Oct, 7:30 pm (your time). Once you've reached Sam, press the button — it clears this reminder."), visibleText(t));
   assert.ok(t.startsWith('<section class="card tk-top needs"'), 'red: it needs him');
-  const page = renderTrialDetail(d, 'overview', { now: NOW }) + renderSysTab(d, 'messages', { now: NOW }) + renderSysTab(d, 'actions', { now: NOW });   // the client page and their email system
+  const page = renderTrialDetail(d, 'overview', { now: NOW }) + renderSysTab(d, 'messages', { now: NOW }) + renderSysTab(d, 'setup', { now: NOW });   // the client page and their email system
   assert.ok(!page.includes('<h3>Also on your list</h3>'), 'the big button — not listed again');
   assert.ok(between(page, 'id="tkSec-messages"', '</section>').includes('<span class="tk-cm-st unopened">delivered · not opened yet</span>'), 'the email itself, in amber (Messages, in their email system)');
   // the list: under "Needs you", the machine's own question as the red line (never "You need to: Sam hasn't…")
