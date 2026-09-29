@@ -13,13 +13,15 @@ import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { simpleRows, stagesWith, fullHub, cobalt, calWeek, CAL_NOW } from './fixtures.mjs';
+import { parse as parseHTML } from './dom-lite.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ───────────── fake DOM (as in simple.test.mjs) ───────────── */
 const elements = {};
+let htmlSeq = 0;   // when each element's innerHTML was last set (the page reader's tests rebuild the screen from the newest)
 function fakeEl(id) {
-  const el = { id, tagName: 'DIV', value: '', defaultValue: '', checked: false, innerHTML: '', outerHTML: '', textContent: '', style: {}, type: '', disabled: false, open: false, hidden: false, _classes: new Set(), _attrs: {},
+  const el = { id, tagName: 'DIV', value: '', defaultValue: '', checked: false, _html: '', _seq: 0, get innerHTML() { return this._html; }, set innerHTML(v) { this._html = String(v); this._seq = ++htmlSeq; }, outerHTML: '', textContent: '', style: {}, type: '', disabled: false, open: false, hidden: false, _classes: new Set(), _attrs: {},
     querySelectorAll() { return []; }, querySelector() { return null; }, appendChild() {}, remove() {}, insertAdjacentHTML() {}, contains() { return false; }, focus() { el._focused = (el._focused || 0) + 1; }, select() {}, submit() {}, addEventListener() {}, scrollIntoView() {}, closest() { return null; },
     getAttribute(k) { return el._attrs[k] ?? null; }, setAttribute(k, v) { el._attrs[k] = String(v); } };
   el.classList = { add: (c) => el._classes.add(c), remove: (c) => el._classes.delete(c), contains: (c) => el._classes.has(c), toggle(c, f) { const on = f === undefined ? !el._classes.has(c) : !!f; on ? el._classes.add(c) : el._classes.delete(c); return on; } };
@@ -94,7 +96,7 @@ test('navigation: places open at once — Trials, Paying clients, Calendar, Team
     const r = think(said);
     assert.ok(r.auto, said + ': runs at once'); r.auto.run();
     assert.equal(currentView, view, said);
-    assert.match(r.say, /^Opening /);
+    assert.match(r.say, /^Here(’|'s| are) /, said + ': ' + r.say);
   }
   const s = think('open my stats'); s.auto.run(); assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'aviance');
   const w = think('open warm-up helpers'); w.auto.run(); assert.equal(currentView, 'settings'); assert.equal(tk.setOpen.warmup, true);
@@ -657,7 +659,7 @@ test('the AI brain: POST /api/mc/ava/chat (stream asked for) with the page (emai
     const c = calls.find((x) => x.url.includes('/api/mc/ava/chat')); assert.equal(c.method, 'POST');
     assert.equal(c.body.page.clientId, 'lakeview-it');
     const last = c.body.messages[c.body.messages.length - 1]; assert.deepEqual(last, { role: 'user', content: 'summarise what [email] asked about pricing' });
-    assert.ok(c.body.messages.some((m) => m.role === 'assistant' && /^Opening Trials/.test(m.content)));
+    assert.ok(c.body.messages.some((m) => m.role === 'assistant' && /^Here are your trials/.test(m.content)));
     assert.match(el('avaLog').innerHTML, /<small class="ava-meta">answered by Groq · \d+\.\d s · [^<]+<\/small>/);
     // follow-up chips for the page when the AI gives none
     assert.match(el('avaLog').innerHTML, /class="ava-chip" onclick="avaChip\(0\)">How is Lakeview IT doing\?/);
@@ -725,8 +727,9 @@ test('AI actions: navigate runs when you asked to go somewhere, else it is a but
     assert.equal(nav({ view: 'mystats' }).label, 'Open My stats'); assert.equal(nav({ view: 'activity' }).label, 'Open Activity'); assert.equal(nav({ view: 'behind' }).label, 'Open Behind the scenes');
     assert.equal(nav({ view: 'client', id: 'lakeview-it' }).label, 'Open Lakeview IT'); assert.equal(nav({ view: 'client', id: 'lakeview-it', tab: 'sent' }).label, "Open Lakeview IT's emails sent");
     assert.equal(nav({ view: 'client' }), null); assert.equal(nav({ view: 'nowhere' }), null);
-    for (const a of [{ view: 'settings' }, { view: 'activity' }, { view: 'client', id: 'lakeview-it', tab: 'money' }, { view: 'client', id: 'lakeview-it', tab: 'setup' }]) assert.equal(nav(a, { owner: false }), null, JSON.stringify(a));
-    assert.ok(nav({ view: 'client', id: 'lakeview-it', tab: 'conversations' }, { owner: false }));
+    for (const a of [{ view: 'settings' }, { view: 'settings', section: 'keys' }, { view: 'activity' }, { view: 'client', id: 'lakeview-it', tab: 'money' }]) assert.equal(nav(a, { owner: false }), null, JSON.stringify(a));
+    // the team sees the rest of "Only you" in the hub (Health, Leads, Setup) — only money is the owner's
+    for (const t of ['conversations', 'setup', 'health', 'leads']) assert.ok(nav({ view: 'client', id: 'lakeview-it', tab: t }, { owner: false }), t);
   } finally { noFetch(); voiceTeardown(); }
 });
 
@@ -1107,7 +1110,7 @@ test('voice: speed 0.9–1.2 (remembered, used by both voices); the natural voic
     assert.match(AVA.log[AVA.log.length - 1].text, /natural voice is ready/); const n = AVA.log.length;
     avaKokoroMsg({ type: 'ready', device: 'wasm', dtype: 'q8', rtf: 0.4 }); assert.equal(AVA.log.length, n, 'once');
     AVA.k.state = 'idle';
-    // hold with a recording: the machine's words win
+    // hold with a recording, and the browser already has the words: they go at once — no /hear round trip
     const recs = fakeRecs(); const posted = [];
     class FakeMR { constructor(stream, o) { this.state = 'inactive'; this.mimeType = (o && o.mimeType) || 'audio/webm'; } static isTypeSupported(t) { return t === 'audio/webm'; } start() { this.state = 'recording'; } stop() { this.state = 'inactive'; this.ondataavailable && this.ondataavailable({ data: new Blob(['x'.repeat(4000)], { type: 'audio/webm' }) }); this.onstop && this.onstop(); } }
     globalThis.MediaRecorder = FakeMR;
@@ -1120,13 +1123,18 @@ test('voice: speed 0.9–1.2 (remembered, used by both voices); the natural voic
       throw new TypeError('Failed to fetch');
     };
     AVA.log = []; keyEv('keydown', 'Space'); let rec = recs.pop(); await tick(); await sleep(AVA_TAP_MS);
-    said(rec, 'what knees me today'); keyEv('keyup', 'Space'); await sleep(30);
+    said(rec, 'what knees me today'); keyEv('keyup', 'Space');
+    assert.ok(AVA.log.some((m) => m.who === 'you' && m.text === 'what knees me today'), 'sent the moment Space is let go: ' + JSON.stringify(AVA.log.map((m) => m.text)));
+    await sleep(30); assert.equal(posted.length, 0, 'no /hear when the browser has the words');
+    // the browser heard nothing: the recording goes to /hear, and its words are asked
+    AVA.log = []; keyEv('keydown', 'Space'); rec = recs.pop(); await tick(); await sleep(AVA_TAP_MS);
+    keyEv('keyup', 'Space'); rec.onend && rec.onend(); await sleep(60);
     assert.equal(posted.length, 1); assert.equal(posted[0].headers['content-type'], 'audio/webm'); assert.ok(posted[0].body instanceof Blob);
     assert.ok(AVA.log.some((m) => m.who === 'you' && m.text === 'what needs me today'), JSON.stringify(AVA.log.map((m) => m.text)));
-    // /hear not there (404): the browser's words, and it isn't asked again for a while
+    // /hear not there (404): nothing to send, and it isn't asked again for a while
     hear = { status: 404, body: {} }; AVA.log = [];
-    keyEv('keydown', 'Space'); rec = recs.pop(); await tick(); await sleep(AVA_TAP_MS); said(rec, 'open trials'); keyEv('keyup', 'Space'); await sleep(30);
-    assert.ok(AVA.log.some((m) => m.who === 'you' && m.text === 'open trials')); assert.equal(AVA_HEAR.ok, false); assert.equal(avaHearOn(), false);
+    keyEv('keydown', 'Space'); rec = recs.pop(); await tick(); await sleep(AVA_TAP_MS); keyEv('keyup', 'Space'); rec.onend && rec.onend(); await sleep(60);
+    assert.ok(!AVA.log.some((m) => m.who === 'you')); assert.equal(AVA_HEAR.ok, false); assert.equal(avaHearOn(), false);
   } finally { delete globalThis.MediaRecorder; Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true }); AVA_HEAR.ok = null; noFetch(); voiceTeardown(); }
 });
 
@@ -1144,4 +1152,302 @@ test('Settings › Ava: Business facts — loaded, saved (≤ 4,000 characters),
     b = avaRenderSet(avaSettingsCtx()).body; assert.match(b, />New &lt;facts&gt; &amp; prices<\/textarea>/); assert.match(b, /Saved/);
     mode = 'missing'; AVA.facts.text = null; await avaLoadFacts(true); assert.match(avaRenderSet(avaSettingsCtx()).body, /Business facts<\/h4><p class="tk-muted tk-small">Not available yet/);
   } finally { noFetch(); voiceTeardown(); }
+});
+
+/* ═════════════ Ava 4: open anything, read the screen out, answer sooner ═════════════
+   The page reader walks a real tree: the screen the hub rendered (the shell's #content, then the newest HTML of each
+   host the section scripts filled in later — #tkHost, #tkTabHost, #calHost …) parsed by tests/dom-lite.mjs. */
+function buildScreen(c) {
+  const root = parseHTML(c.innerHTML, 'content');
+  const splice = (n, src) => n.childNodes.forEach((k) => {
+    if (k.nodeType !== 1) return;
+    const f = k.id && elements[k.id];
+    if (f && f !== c && f._seq > src) { k.childNodes = parseHTML(f.innerHTML).childNodes; k.childNodes.forEach((x) => { x.parentNode = k; }); splice(k, f._seq); }
+    else splice(k, src);
+  });
+  splice(root, c._seq); return root;
+}
+function liveScreen() {
+  const c = el('content'); c.nodeType = 1;
+  Object.defineProperty(c, 'childNodes', { configurable: true, get() { return buildScreen(c).childNodes; } });
+  return () => { delete c.childNodes; delete c.nodeType; };
+}
+const lvDetail = () => ({ row: clone(lakeview), counters: {}, links: {} });
+const growth45 = () => { const days = []; const end = Date.UTC(2026, 8, 29); for (let i = 44; i >= 0; i--) days.push(new Date(end - i * 864e5).toISOString().slice(0, 10)); return { days, email: { sent: days.map((_, i) => (i < 20 ? 0 : 16)), replies: days.map((_, i) => (i === 30 || i === 40 ? 1 : 0)), bounces: days.map(() => 0), opened: days.map((_, i) => (i < 20 ? 0 : 4)) } }; };
+const threadsFixture = () => ({ ok: true, at: Date.now(), list: [
+  { threadId: 't1', kind: 'interested', handledBy: 'client', count: 3, lastAt: '2026-09-28T09:00:00Z', lead: { company: 'Beacon Plastics', name: 'Ann Beacon', email: 'ann@beaconplastics.com' }, snippet: 'Yes, Thursday works.' },
+  { threadId: 't2', kind: 'question', handledBy: 'bot', count: 2, lastAt: '2026-09-27T09:00:00Z', lead: { company: 'Cove Freight', name: 'Bo Cove', email: 'bo@cove.com' }, snippet: 'How much?' },
+  { threadId: 't3', kind: 'not_now', handledBy: 'owner', count: 2, lastAt: '2026-09-20T09:00:00Z', lead: { company: 'Dune Metals', name: 'Di Dune', email: 'di@dune.com' } },
+  { threadId: 't4', kind: 'interested', handledBy: 'client', count: 1, lastAt: '2026-09-19T09:00:00Z', lead: { company: 'Elm Supply' } },
+  { threadId: 't5', kind: 'referral', handledBy: 'owner', count: 4, lastAt: '2026-09-18T09:00:00Z', lead: { company: 'Fir Tools' } },
+  { threadId: 't6', kind: 'interested', handledBy: 'client', count: 1, lastAt: '2026-09-17T09:00:00Z', lead: { company: 'Gum Paper' } },
+] });
+function lakeviewLoaded() {
+  tk.detail['lakeview-it'] = lvDetail(); tk.detailAt['lakeview-it'] = Date.now();
+  tk.growth['lakeview-it'] = { days: tk.growthDays, data: growth45(), at: Date.now() };
+  const st = tkMailState('lakeview-it'); st.threads = threadsFixture(); st.emails = { ok: true, at: Date.now(), list: [], total: 0 };
+}
+
+test('open anything: every view, every client tab (Shared / Only you switched for you) and every Settings section, from the machine\'s navigate action — with a short "Here\'s …"', () => {
+  setup('owner'); lakeviewLoaded();
+  const go = (a) => { const why = {}; const x = avaNavAct(a, ctx(), why); assert.ok(x, JSON.stringify(a)); x.run(); return x; };
+  for (const [view, want] of [['trials', 'trials'], ['paying', 'paying'], ['calendar', 'calendar'], ['team', 'team'], ['activity', 'people'], ['inquiries', 'inquiries'], ['behind', 'trialsBoard'], ['settings', 'settings']]) {
+    const x = go({ type: 'navigate', view }); assert.equal(currentView, want, view); assert.match(x.here, /^Here/);
+  }
+  let x = go({ type: 'navigate', view: 'mystats' }); assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'aviance'); assert.equal(x.here, 'Here are your stats.');
+  for (const tab of ['overview', 'conversations', 'sent', 'calls', 'messages', 'money', 'health', 'leads', 'setup']) {
+    render('trials'); x = go({ type: 'navigate', view: 'client', id: 'lakeview-it', tab });
+    assert.equal(currentView, 'clientSystem', tab); assert.equal(currentTrialId, 'lakeview-it'); assert.equal(trialTab, tab);
+    assert.equal(tkSysMem('lakeview-it').mode, ['money', 'health', 'leads', 'setup'].includes(tab) ? 'only' : 'shared', tab + ': the side switched by itself');
+    assert.match(el('content').innerHTML, new RegExp('tk-sys-' + (['money', 'health', 'leads', 'setup'].includes(tab) ? 'only' : 'shared')), tab);
+  }
+  assert.equal(avaNavAct({ view: 'client', id: 'lakeview-it', tab: 'money' }, ctx()).here, "Here's Lakeview IT's money.");
+  x = go({ view: 'client', id: 'lakeview-it', tab: 'emails' }); assert.equal(trialTab, 'sent', 'an old tab name → its tab today');
+  for (const sec of TK_SETTINGS) {
+    render('trials'); tk.setOpen = {}; x = go({ type: 'navigate', view: 'settings', section: sec });
+    assert.equal(currentView, 'settings', sec); assert.equal(tk.setOpen[sec], true, sec + ' opened'); assert.match(x.here, /^Here's .* in Settings\.$/);
+  }
+  x = go({ view: 'settings', tab: 'keys' }); assert.equal(tk.setOpen.keys, true, 'section also as tab (older links)');
+  x = go({ view: 'client', id: 'lakeview-it' }); assert.equal(currentView, 'trial'); assert.equal(x.here, "Here's Lakeview IT.");
+});
+
+test('open anything: a team member is told politely — Settings, Activity and a client\'s money are the owner\'s; the AI\'s navigate there is refused with a line, not a silent nothing', async () => {
+  setup('team'); voiceReset();
+  const why = {}; assert.equal(avaNavAct({ view: 'settings', section: 'keys' }, ctx(), why), null); assert.equal(why.owner, true);
+  for (const t of ['open settings keys', 'show warm-up settings', 'open activity', "open Lakeview's money"]) { const r = think(t); assert.ok(!r.auto, t); assert.match(r.say, /only for the owner/, t); }
+  aiFetch((p) => p === '/api/mc/ava/chat' ? { status: 200, body: { reply: 'Opening your keys.', actions: [{ type: 'navigate', view: 'settings', section: 'keys' }], brain: 'groq' } } : null);
+  try {
+    render('trials'); AVA.log = [];
+    const r = await avaAsk('I need to change an API key somewhere');
+    assert.equal(currentView, 'trials', 'not opened'); assert.match(r.refused, /only for the owner — Settings/);
+    assert.ok(AVA.log.some((m) => m.notice && /only for the owner/.test(m.text)));
+    const ok = avaNavAct({ view: 'client', id: 'lakeview-it', tab: 'health' }, ctx()); assert.ok(ok, 'the team sees Health'); ok.run(); assert.equal(trialTab, 'health');
+  } finally { noFetch(); voiceTeardown(); }
+});
+
+test('open anything, instantly without the AI: "open settings keys", "open Lakeview\'s money", "show warm-up settings", "open my stats", "go to calendar", "open paying clients", "show the team" — names said a little wrong', async () => {
+  setup('owner'); voiceReset();
+  const calls = aiFetch((p) => p === '/api/mc/ava/chat' ? { status: 200, body: { reply: 'From the AI.', brain: 'groq' } } : null);
+  try {
+    const cases = [
+      ['open settings keys', () => currentView === 'settings' && tk.setOpen.keys, "Here's Keys in Settings."],
+      ["open Lakeview's money", () => currentView === 'clientSystem' && trialTab === 'money', "Here's Lakeview IT's money."],
+      ['open lakevew money', () => currentView === 'clientSystem' && trialTab === 'money', "Here's Lakeview IT's money."],
+      ['show lake view conversations', () => trialTab === 'conversations', "Here's Lakeview IT's conversations."],
+      ['show warm-up settings', () => currentView === 'settings' && tk.setOpen.warmup, "Here's Warm-up in Settings."],
+      ['open my stats', () => currentView === 'trial' && currentTrialId === 'aviance', 'Here are your stats.'],
+      ['go to calendar', () => currentView === 'calendar', "Here's your calendar."],
+      ['open paying clients', () => currentView === 'paying', 'Here are your paying clients.'],
+      ['show the team', () => currentView === 'team', "Here's the team."],
+      ['open the reply bot settings', () => tk.setOpen.replybot, "Here's Reply bot in Settings."],
+      ['open dark mode', () => tk.setOpen.look, "Here's Light or dark in Settings."],
+      ['open lakeview health', () => trialTab === 'health', "Here's Lakeview IT's health."],
+    ];
+    for (const [q, ok, say] of cases) {
+      render('trials'); tk.setOpen = {};
+      const n = calls.length; const r = await avaAsk(q);
+      assert.ok(r.local, q + ': on this device'); assert.equal(calls.filter((c) => c.url.includes('/ava/chat')).length, calls.filter((c, i) => i < n && c.url.includes('/ava/chat')).length, q + ': no AI');
+      assert.ok(ok(), q + ' → ' + currentView + ' ' + trialTab); assert.equal(r.say, say, q);
+    }
+  } finally { noFetch(); voiceTeardown(); }
+});
+
+test('read commands: what counts as "read the screen", "read more", "stop", and "open X and read it"', () => {
+  setup('owner');
+  for (const q of ['read this', 'Read it out', 'read it out loud', 'read the page', 'read this page to me', "what's on this page", 'what is on this tab', "what's on the screen", 'what am I looking at', 'Ava, read this please']) assert.deepEqual(avaReadCmd(q), { kind: 'read' }, q);
+  for (const q of ['read me the numbers', 'read the numbers', 'tell me the numbers', 'read me the stats']) assert.deepEqual(avaReadCmd(q), { kind: 'read', numbers: true }, q);
+  assert.deepEqual(avaReadCmd('read more'), { kind: 'more' }); assert.equal(avaReadCmd('more'), null, '"more" alone only while something is left');
+  AVA.readRest = [{ k: 'text', t: 'x' }]; assert.deepEqual(avaReadCmd('keep going'), { kind: 'more' }); AVA.readRest = null;
+  for (const q of ['stop', 'stop reading', "that's enough"]) assert.deepEqual(avaReadCmd(q), { kind: 'stop' }, q);
+  assert.deepEqual(avaReadCmd("open Lakeview's money and read it"), { kind: 'navread', nav: 'open lakeview money' });
+  assert.deepEqual(avaReadCmd('open settings keys and read it to me'), { kind: 'navread', nav: 'open settings keys' });
+  assert.deepEqual(avaReadCmd('go to the calendar then read it'), { kind: 'navread', nav: 'go to the calendar' });
+  assert.deepEqual(avaReadCmd("read me Lakeview's conversations"), { kind: 'navread', nav: 'open lakeview conversations' });
+  for (const q of ['read the newest reply from Dana and draft an answer', 'open trials and tell me who is sending', 'how many emails did Lakeview send', 'what is a bounce', 'read']) {
+    if (q === 'read') { assert.deepEqual(avaReadCmd(q), { kind: 'read' }); continue; }
+    assert.equal(avaReadCmd(q), null, q);
+  }
+  const r = think("open Lakeview's money and read it"); assert.ok(r.auto); assert.deepEqual(r.read, { what: 'page' }); assert.equal(r.say, "Here's Lakeview IT's money.");
+});
+
+test('reading the screen: a client\'s Overview — the title, "label: value, sub" for each tile, the headings; hidden parts, buttons, the tab bar and "Show the numbers" are skipped', async () => {
+  setup('owner'); lakeviewLoaded(); const undo = liveScreen();
+  try {
+    tkOpenSystem('lakeview-it', 'overview'); trialsRepaint('clientSystem');
+    const lines = avaPageLines(); const txt = lines.map((x) => x.t);
+    assert.equal(lines[0].k, 'title'); assert.match(lines[0].t, /^Lakeview IT — Overview/);
+    assert.ok(txt.includes('Where they are'), JSON.stringify(txt));
+    assert.ok(txt.some((t) => /^Journey: step 4 of 5/.test(t)), 'the journey as one line');
+    const tiles = lines.filter((x) => x.k === 'tile').map((x) => x.t);
+    assert.ok(tiles.some((t) => /^Emails sent: [\d,]+/.test(t)), JSON.stringify(tiles));
+    assert.ok(tiles.some((t) => /^Replies: \d+, [\d.]+% of emails sent$/.test(t)), JSON.stringify(tiles));
+    assert.ok(tiles.includes('Interested: 6, 42.9% of replies') || tiles.some((t) => /^Interested: 6/.test(t)), JSON.stringify(tiles));
+    assert.ok(tiles.some((t) => /^Calls booked: 3, prospects who booked a call$/.test(t)), JSON.stringify(tiles));
+    const all = txt.join(' | ');
+    for (const no of ['Shared with', 'Only you', 'Give access', 'Show the numbers', 'Conversations', 'Emails sent per day · last']) assert.ok(!all.includes(no), 'skipped: ' + no + ' in ' + all);
+    // the numbers only
+    const nums = avaPageLines(true); assert.equal(nums[0].k, 'title'); assert.ok(nums.slice(1).every((x) => x.k === 'tile'));
+    // a hidden part is not read
+    const c = el('content'); const html = el('tkHost').innerHTML; el('tkHost').innerHTML = html.replace('<section class="card tk-where"', '<section hidden class="card tk-where"');
+    assert.ok(!avaPageLines().some((x) => x.t === 'Where they are'), 'hidden: skipped'); void c;
+  } finally { undo(); }
+});
+
+test('reading the screen: Conversations — the first five as short sentences ("Beacon Plastics, Interested, handed to the client, Monday"), and how many there are', () => {
+  setup('owner'); lakeviewLoaded(); const undo = liveScreen();
+  try {
+    tkOpenSystem('lakeview-it', 'conversations'); trialsRepaint('clientSystem');
+    const lines = avaPageLines(); const items = lines.filter((x) => x.k === 'item').map((x) => x.t);
+    assert.ok(lines.some((x) => x.k === 'head' && x.t === 'Conversations: 6'), JSON.stringify(lines));
+    assert.ok(lines.some((x) => x.t === '6 in all — the first 5:'));
+    assert.equal(items.length, 5, 'five, not six');
+    assert.match(items[0], /^Beacon Plastics, Interested, handed to the client, (Monday|yesterday|today)$/);
+    assert.ok(!items.join(' ').includes('@'), 'no email addresses said');
+    assert.ok(!items.join(' ').includes('Gum Paper'), 'the sixth is not read');
+  } finally { undo(); }
+});
+
+test('reading the screen: the Calendar (waiting for your yes, this week\'s calls) and Settings (the open section in full, the others named)', () => {
+  setup('owner'); const undo = liveScreen();
+  try {
+    render('calendar'); if (typeof calRepaint === 'function') calRepaint();
+    const lines = avaPageLines(); const txt = lines.map((x) => x.t).join(' | ');
+    assert.equal(lines[0].t, 'Calendar');
+    assert.match(txt, /Waiting for your yes: \d/, txt);
+    assert.match(txt, /on the calendar/, txt);
+    assert.ok(lines.some((x) => x.k === 'item' && /eCreek IT/.test(x.t)), txt);
+    assert.ok(!/\bYes \| No\b|Other time|Add a meeting|Block time|Today \| ▶/.test(txt), 'no buttons: ' + txt);
+    openSettings('ava'); trialsRepaint('settings');
+    const s = avaPageLines(); const st = s.map((x) => x.t).join(' | ');
+    assert.equal(s[0].t, 'Settings');
+    assert.ok(s.some((x) => x.k === 'head' && /^Ava\b/.test(x.t)), st);
+    assert.match(st, /The other sections: Alerts, .*Keys.* and Your account/, st);
+    assert.ok(!/Save facts|Test Ava|Play a sample/.test(st), 'no buttons: ' + st);
+  } finally { undo(); }
+});
+
+test('reading the screen: about 90 seconds at a time — "read more" goes on, "stop" stops; the same words are shown in the panel', async () => {
+  setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); const undo = liveScreen();
+  noFetch();
+  try {
+    render('trials');
+    el('content').innerHTML = '<div class="view"><div class="card"><h3>Long page</h3><ul>' + Array.from({ length: 5 }, (_, i) => `<li>Item ${i} ${'word '.repeat(10)}</li>`).join('') + '</ul>' + Array.from({ length: 30 }, (_, i) => `<p>Paragraph ${i} says ${'something '.repeat(12)}</p>`).join('') + '<button>Press me</button></div></div>';
+    AVA.log = [];
+    const r = await avaAsk('read this');
+    assert.ok(r.local); assert.deepEqual(r.read, { what: 'page' });
+    const m = AVA.log[AVA.log.length - 1]; assert.equal(m.read, true); assert.match(m.text, /^\*\*Trials\*\*\n\*\*Long page\*\*\n- Item 0/); assert.deepEqual(m.chips, ['Read more', 'Stop']);
+    assert.ok(!AVA.log.some((x) => x.who === 'ava' && x.text === ''), 'no empty answer before it');
+    const words = spoken.map((u) => u.text).join(' ').split(/\s+/).length; assert.ok(words <= AVA_READ_WORDS + 40, 'about 90 seconds: ' + words);
+    assert.match(spoken.map((u) => u.text).join(' '), /There's more\. Say read more to go on, or stop\.$/);
+    assert.ok(!/Press me/.test(m.text));
+    const left = AVA.readRest.length; assert.ok(left > 0);
+    spoken.length = 0; await avaAsk('read more');
+    const m2 = AVA.log[AVA.log.length - 1]; assert.equal(m2.read, true); assert.match(m2.text, /^Paragraph \d+/); assert.ok(!AVA.readRest || AVA.readRest.length < left, 'it went on');
+    assert.ok(spoken.length > 0);
+    // stop: quiet at once, and nothing left to go on with
+    AVA.speaking = true; const r3 = await avaAsk('stop'); assert.equal(r3.silent, true); assert.equal(AVA.readRest, null); assert.equal(AVA.speaking, false);
+    const r4 = await avaAsk('read more'); assert.match(AVA.log[AVA.log.length - 1].text, /That's everything on this page/); void r4;
+  } finally { undo(); voiceTeardown(); }
+});
+
+test('open X and read it: goes there, waits while it loads (up to ~4 s), then reads — and the AI\'s navigate + read run in that order', async () => {
+  setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); const undo = liveScreen();
+  tk.detail['lakeview-it'] = lvDetail(); tk.detailAt['lakeview-it'] = Date.now(); tk.growth['lakeview-it'] = { days: tk.growthDays, data: growth45(), at: Date.now() };
+  const order = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url).replace(/^https?:\/\/[^/]+/, '');
+    if (u.includes('/threads')) { order.push('threads asked'); await sleep(300); order.push('threads came'); return { ok: true, status: 200, text: async () => JSON.stringify({ threads: threadsFixture().list }) }; }
+    if (u.includes('/emails')) return { ok: true, status: 200, text: async () => JSON.stringify({ sent: [], total: 0 }) };
+    if (u.includes('/ava/chat')) { order.push('ai'); return { ok: true, status: 200, text: async () => JSON.stringify({ reply: "Here are Lakeview's conversations.", actions: [{ type: 'read', what: 'page' }, { type: 'navigate', view: 'client', id: 'lakeview-it', tab: 'conversations' }], brain: 'groq' }) }; }
+    throw new TypeError('Failed to fetch');
+  };
+  try {
+    // local: "open … and read it"
+    render('trials'); AVA.log = []; const t0 = Date.now();
+    let r = await avaAsk("open Lakeview's conversations and read it");
+    assert.ok(r.local); assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'conversations');
+    assert.ok(Date.now() - t0 >= 250, 'waited for the conversations to load'); assert.deepEqual(order, ['threads asked', 'threads came']);
+    let m = AVA.log[AVA.log.length - 1]; assert.equal(m.read, true); assert.ok(!/Loading/.test(m.text), m.text); assert.match(m.text, /- Beacon Plastics, Interested/);
+    const said = spoken.map((u) => u.text); assert.equal(said[0], "Here's Lakeview IT's conversations.", 'the short line first, then what is there'); assert.ok(said.some((x) => /Beacon Plastics/.test(x)));
+    // the AI: navigate, wait for the page, read — even with the read listed first
+    render('trials'); order.length = 0; tkMailState('lakeview-it').threads = null; tkMailState('lakeview-it').emails = null; spoken.length = 0; AVA.log = [];
+    r = await avaAsk('what did people write back to Lakeview? read it to me');
+    assert.equal(r.ai, true); assert.ok(r.auto, 'navigates at once when it is to be read'); assert.deepEqual(r.read, { what: 'page' });
+    assert.deepEqual(order.slice(0, 3), ['ai', 'threads asked', 'threads came'], 'asked, went there, waited');
+    m = AVA.log[AVA.log.length - 1]; assert.equal(m.read, true); assert.match(m.text, /Conversations: 6/);
+    assert.equal(spoken[0].text, "Here are Lakeview's conversations.", 'her answer first'); assert.ok(spoken.slice(1).some((u) => /Beacon Plastics/.test(u.text)), 'then the page');
+    // still loading after ~4 s: she reads what is there (and says it is loading) rather than waiting for ever
+    tkMailState('lakeview-it').threads = null; tkMailState('lakeview-it').threadsBusy = true; trialsRepaintTab('conversations');
+    assert.equal(avaPageBusy(), true); const t1 = Date.now(); const rd = await avaReadPage('page'); assert.ok(Date.now() - t1 >= AVA_READ_WAIT - 200 && Date.now() - t1 < AVA_READ_WAIT + 1500); assert.match(rd.text, /Loading their conversations/);
+    tkMailState('lakeview-it').threadsBusy = false;
+  } finally { undo(); noFetch(); voiceTeardown(); }
+});
+
+test('answer sooner: the browser\'s own words go at once (500 ms after the last final words, or the moment Space is let go); /warm when Ava opens or Space is pressed; /status never in the way', async () => {
+  setup('owner'); voiceReset(); const recs = fakeRecs();
+  const calls = []; let statusHang = null;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url).replace(/^https?:\/\/[^/]+/, ''); calls.push({ u, t: Date.now(), method: (init && init.method) || 'GET' });
+    if (u.startsWith('/api/mc/ava/status')) { await new Promise((r) => { statusHang = r; }); return { ok: true, status: 200, text: async () => '{"ready":true}' }; }
+    if (u.startsWith('/api/mc/ava/warm')) return { ok: true, status: 200, text: async () => '{"ok":true}' };
+    if (u.startsWith('/api/mc/ava/chat')) return { ok: true, status: 200, text: async () => JSON.stringify({ reply: 'Three trials are going.', brain: 'groq' }) };
+    throw new TypeError('Failed to fetch');
+  };
+  try {
+    avaClose(); AVA_WARM.at = 0; AVA_AI.readyAt = 0; AVA_AI.checking = null; AVA.log = []; AVA.greeted = true;
+    avaOpen({ listen: false, quiet: true }); await tick();
+    assert.equal(calls.filter((c) => c.u === '/api/mc/ava/warm').length, 1, 'woken up when the panel opens'); assert.ok(calls.some((c) => c.u === '/api/mc/ava/status'), 'status in the background');
+    avaClose(); avaOpen({ listen: false, quiet: true }); await tick(); assert.equal(calls.filter((c) => c.u === '/api/mc/ava/warm').length, 1, 'at most once a minute');
+    AVA_WARM.at = 0; avaClose(); keyEv('keydown', 'Space'); await tick(); assert.equal(calls.filter((c) => c.u === '/api/mc/ava/warm').length, 2, 'and when Space is pressed'); keyEv('keyup', 'Space', {});
+    avaStopListening({ discard: true }); recs.length = 0;
+    // tap the mic, talk: sent 500 ms after the last final words — straight from the timer
+    AVA.log = []; avaMicTap(); let rec = recs.pop(); said(rec, 'how many trials are running');
+    await sleep(AVA_END_MS - 150); assert.ok(!AVA.log.some((m) => m.who === 'you'), 'not before ~500 ms');
+    await sleep(250); assert.ok(AVA.log.some((m) => m.who === 'you' && m.text === 'how many trials are running'), 'sent after ~500 ms');
+    await sleep(20); assert.ok(AVA.log.some((m) => m.who === 'ava' && m.text === 'Three trials are going.'), 'answered while /status still hangs');
+    assert.ok(statusHang, 'status was asked (in the background)'); statusHang();
+    // hold Space, talk, let go: sent at once, no /hear
+    AVA.log = []; keyEv('keydown', 'Space'); rec = recs.pop(); await sleep(AVA_TAP_MS + 5);
+    const r = [{ transcript: 'what needs me' }]; r.isFinal = false; rec.onresult({ resultIndex: 0, results: [r] });   // still being guessed — sent anyway on release
+    const t0 = Date.now(); keyEv('keyup', 'Space');
+    assert.ok(AVA.log.some((m) => m.who === 'you' && m.text === 'what needs me'), 'sent the moment Space is let go'); assert.ok(Date.now() - t0 < 50);
+    assert.ok(!calls.some((c) => c.u.startsWith('/api/mc/ava/hear')));
+    await sleep(30);   // let that answer finish before the next test
+  } finally { if (statusHang) statusHang(); noFetch(); voiceTeardown(); }
+});
+
+test('answer sooner: "thinking" shows at once; the first streamed sentence is said the moment it is here (40+ characters and its full stop, or a comma after 80); the timing line from done.timing', async () => {
+  setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); render('trials');
+  const s = sseStream();
+  globalThis.fetch = async (url) => { if (String(url).includes('/api/mc/ava/chat')) return s.res; throw new TypeError('Failed to fetch'); };
+  try {
+    AVA.log = []; AVA.greeted = true; avaOpen({ listen: false, quiet: true }); spoken.length = 0;
+    const p = avaAsk('how is lakeview doing', { voice: true });
+    assert.equal(avaState(), 'thinking', 'thinking before anything is awaited'); assert.ok(el('avaPanel').classList.contains('thinking')); assert.match(el('avaSub').textContent, /Thinking/);
+    s.push(ev('delta', { text: 'Lakeview IT is doing well this week, all told.' })); await sleep(5);
+    assert.deepEqual(spoken.map((u) => u.text), ['Lakeview IT is doing well this week, all told.'], 'said before the next bit arrives');
+    s.push(ev('delta', { text: ' More.' })); s.push(ev('done', { brain: 'groq', timing: { firstWordMs: 600, totalMs: 1100 } })); s.push(null);
+    const r = await p; assert.match(r.meta, /^answered by Groq · \d\.\d s · 0\.6 s to first word$/);
+    // a short first sentence waits for its full stop; a long one without one is cut at a comma after 80 characters
+    const live = { say: avaSayBegin(), fed: 0, raw: 'Yes' }; spoken.length = 0; avaFeedSpeech(live, false); assert.equal(spoken.length, 0);
+    live.raw = 'Lakeview IT sent four hundred and twelve emails over the last twelve days of sending, and got fourteen replies so far';
+    avaFeedSpeech(live, false); assert.deepEqual(spoken.map((u) => u.text), ['Lakeview IT sent four hundred and twelve emails over the last twelve days of sending,']);
+    live.raw += ' at 3.'; avaFeedSpeech(live, false); assert.equal(spoken.length, 1, 'not cut after a number');
+    assert.equal(avaFirstWord(null), null); assert.equal(avaFirstWord(450), 450); assert.equal(avaFirstWord({ firstTokenMs: 300 }), 300);
+  } finally { noFetch(); voiceTeardown(); }
+});
+
+test('answer sooner: the natural voice not warm yet — the first sentence in the browser\'s voice at once, the rest in the natural voice after it', async () => {
+  setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); globalThis.AudioContext = FakeAC;
+  const sent = []; AVA.k = { state: 'ready', worker: { postMessage: (m) => sent.push(m) }, device: 'wasm', warm: false };
+  try {
+    assert.equal(avaSpeak('Lakeview is doing well. They sent 412 emails. Three calls are booked.'), true);
+    assert.equal(AVA.say.engine, 'kokoro'); assert.deepEqual(spoken.map((u) => u.text), ['Lakeview is doing well.'], 'the browser voice starts at once');
+    assert.deepEqual(sent.filter((m) => m.type === 'speak').map((m) => m.i), [1, 2], 'only the rest is made by the natural voice');
+    avaKokoroAudio({ type: 'audio', gen: AVA.say.gen, i: 1, samples: new Float32Array(10), rate: 24000 });
+    assert.equal(FakeAC.last ? FakeAC.last.played.length : 0, 0, 'waits for the browser to finish the first');
+    spoken[0].onend(); assert.equal(FakeAC.last.played.length, 1, 'then the natural voice');
+    assert.equal(AVA.k.warm, true, 'warm from now on');
+    sent.length = 0; spoken.length = 0; avaSpeak('Next answer. Second part.'); assert.equal(spoken.length, 0); assert.deepEqual(sent.filter((m) => m.type === 'speak').map((m) => m.i), [0, 1]);
+  } finally { voiceTeardown(); }
 });
