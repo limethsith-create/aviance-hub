@@ -420,6 +420,7 @@ document.getElementById('modalWrap').addEventListener('click',e=>{if(e.target.id
 const views={
   trials:{fn:()=>viewTrials(),title:'Trials',sub:'Who is where, and what needs you'},
   trial:{fn:()=>viewTrial(),title:'Trial',sub:'',back:()=>render(typeof tkIsPaidId==='function'&&tkIsPaidId(currentTrialId)?'paying':'trials')},
+  clientSystem:{fn:()=>viewClientSystem(),title:'Email system',sub:'',wide:true,back:()=>currentTrialId?openTrial(currentTrialId):render('trials')},
   paying:{fn:()=>viewPaying(),title:'Paying clients',sub:'New paid-plan applications, and every paying client'},
   trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins',back:()=>currentTrialId?openTrial(currentTrialId):render('trials')},
   calendar:{fn:()=>viewCalendar(),title:'Calendar',sub:'Every call, in Sri Lanka time'},
@@ -433,7 +434,7 @@ const views={
 function render(v){
   const view=views[v];if(!view||!authUser)return;
   currentView=v;
-  document.getElementById('content').innerHTML=`<div class="view">${view.fn()}</div>`;
+  document.getElementById('content').innerHTML=`<div class="view${view.wide?' wide':''}">${view.fn()}</div>`;
   document.getElementById('ptitle').textContent=view.title;
   document.getElementById('psub').textContent=view.sub;
   const back=document.getElementById('backBtn');if(back)back.style.display=view.back?'grid':'none';
@@ -447,7 +448,7 @@ function render(v){
 /* The Back button in the top bar (pages inside one of the four places). */
 function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('trials');}
 
-/* ---- Deep links: #trial/{id}, #inquiry/{id}, #calendar/{meetingId}, #alerts (Settings › Alerts), #settings, #settings/warmup (Settings › Warm-up),
+/* ---- Deep links: #trial/{id}, #system/{id} (a client's email system), #inquiry/{id}, #calendar/{meetingId}, #alerts (Settings › Alerts), #settings, #settings/warmup (Settings › Warm-up),
    #settings/keys (Settings › Keys), #settings/details (Settings › Your details), #inquiries, #calendar, #trials (what a phone alert opens),
    and #settings/google?connected=1 | ?error=… (where Google sends the owner back after "Connect Google" → Settings › Google Meet with a message) ----
    Honoured on load and on hashchange; when signed out, kept until sign-in. */
@@ -469,9 +470,9 @@ function parseDeepLink(h){
     else if(q.error!=null&&q.error!==''){out.google='error';out.error=String(q.error).slice(0,200);}
     return out;
   }
-  const m=h.match(/^(trial|inquiry|calendar)\/([^/?#&=]+)$/);if(!m)return null;
+  const m=h.match(/^(trial|system|inquiry|calendar)\/([^/?#&=]+)$/);if(!m)return null;
   let id='';try{id=decodeURIComponent(m[2]);}catch(e){return null;}
-  return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:m[1],id}:null;
+  return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:m[1]==='system'?'clientSystem':m[1],id}:null;
 }
 let pendingDeepLink=parseDeepLink(INITIAL_HASH);
 function goDeepLink(d){
@@ -480,7 +481,7 @@ function goDeepLink(d){
   pendingDeepLink=null;
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same alert can open it again
   closeModal();closeCmdk();
-  if(d.view==='trial')openTrial(d.id);else if(d.view==='inquiry')openInquiry(d.id);else if(d.view==='calendar'&&d.id)openCalendar(d.id);
+  if(d.view==='trial')openTrial(d.id);else if(d.view==='clientSystem')tkOpenSystem(d.id);else if(d.view==='inquiry')openInquiry(d.id);else if(d.view==='calendar'&&d.id)openCalendar(d.id);
   else if(d.view==='settings'){if(d.google&&typeof googleReturn==='function')googleReturn(d.google,d.error);openSettings(d.section);}
   else render(d.view);
   return true;
@@ -500,8 +501,8 @@ function navItems(){
   const pn=typeof peopleNavCount==='function'?peopleNavCount():'';
   const n=typeof trialsNavCount==='function'?trialsNavCount():'',q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'';
   return [
-    {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','trialPurchase'],isOn:()=>currentView==='trials'||(currentView==='trialPurchase'&&!isPaid())||(currentView==='trial'&&currentTrialId!==MY_STATS_ID&&!isPaid())},
-    {view:'paying',icon:I.money,label:'Paying clients',short:'Paying',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry'],isOn:()=>['paying','inquiries','inquiry'].includes(currentView)||((currentView==='trial'||currentView==='trialPurchase')&&isPaid())},
+    {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','clientSystem','trialPurchase'],isOn:()=>currentView==='trials'||((currentView==='trialPurchase'||currentView==='clientSystem')&&!isPaid())||(currentView==='trial'&&currentTrialId!==MY_STATS_ID&&!isPaid())},
+    {view:'paying',icon:I.money,label:'Paying clients',short:'Paying',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry'],isOn:()=>['paying','inquiries','inquiry'].includes(currentView)||((currentView==='trial'||currentView==='clientSystem'||currentView==='trialPurchase')&&isPaid())},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:c,tone:'amber',badgeTitle:c?c+' waiting for your yes':''},
     {view:'team',icon:I.people,label:'Team',badge:''},
     {view:'mystats',icon:I.chart,label:'My stats',short:'Stats',badge:'',go:'openMyStats()',isOn:()=>currentView==='trial'&&currentTrialId===MY_STATS_ID},

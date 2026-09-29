@@ -87,13 +87,16 @@ const thread1 = { threadId: 't1', lead: threads.threads[0].lead, messages: [
 const base = '/api/mc/hub/' + ID;
 const MAP = { [base]: detail, [base + '/growth?days=45']: { days: ['2026-10-16', '2026-10-17'], email: { sent: [100, 103], replies: [2, 3], bounces: [1, 0] } },
   [base + '/emails?limit=200']: page1, [base + '/emails?limit=200&before=' + encodeURIComponent(page1.next)]: page2, [base + '/threads']: threads, [base + '/threads/t1']: thread1 };
-const openStats = async () => { openTrial(ID); for (let i = 0; i < 4; i++) await tick(); setClientPane(ID, 'stats'); for (let i = 0; i < 6; i++) await tick(); return el('tkHost').innerHTML; };
+/* The whole screen at one tab (the fake DOM keeps a tab's own repaint apart from #tkHost: draw it whole). */
+const screenOf = (tab) => { trialsSetTab(tab); trialsRepaint('clientSystem'); return el('tkHost').innerHTML; };
+/* Their email system: Conversations, then Emails sent (left open there). */
+const openStats = async () => { openTrial(ID); for (let i = 0; i < 4; i++) await tick(); tkOpenSystem(ID, 'conversations'); for (let i = 0; i < 6; i++) await tick(); return screenOf('conversations') + screenOf('sent'); };
 
-test('a client\'s Stats: Conversations (reply type, who answered, when, snippet) and Every email sent (newest first, status pills), then a link to Messages — no second Replies list', async () => {
+test('a client\'s email system: Conversations (reply type, who answered, when, snippet) with a link to Messages, and Every email sent (newest first, status pills) — each its own tab; no second Replies list on the Overview', async () => {
   reset(); const calls = []; globalThis.fetch = route(MAP, calls);
   try {
     const h = await openStats();
-    assert.ok(calls.some((c) => c.u === base + '/emails?limit=200') && calls.some((c) => c.u === base + '/threads'), 'both asked when Stats opens');
+    assert.ok(calls.some((c) => c.u === base + '/emails?limit=200') && calls.some((c) => c.u === base + '/threads'), 'both asked when Conversations opens');
     const conv = between(h, 'id="tkConvos"', 'id="tkSentMail"'); const ct = visibleText(conv);
     assert.ok(ct.includes('Conversations · 5'));
     assert.ok(conv.includes('<span class="pill tk-rt green">Interested</span>') && conv.includes('<span class="pill tk-rt q">Question</span>') && conv.includes('<span class="pill tk-rt red">Bounced</span>') && conv.includes('<span class="pill tk-rt grey">Not now</span>') && conv.includes('<span class="pill tk-rt red">Unsubscribe</span>'));
@@ -108,15 +111,19 @@ test('a client\'s Stats: Conversations (reply type, who answered, when, snippet)
     assert.ok(sent.includes('<span class="pill tk-rt green">Replied</span>') && sent.includes('<span class="pill tk-rt red">Bounced</span>') && sent.includes('<span class="pill tk-rt red">Didn\'t send</span>') && sent.includes('<span class="pill tk-rt grey">Sent</span>'));
     assert.ok(sent.includes('Follow-up') && sent.includes('Cobalt &lt;HVAC&gt;'));
     assert.ok(sent.indexOf('Quick idea for Cobalt') < sent.indexOf('Quick idea for Firm 1'), 'newest first');
-    // the order on the page: the chart, Conversations, Every email sent, the link; no "Replies ·" card
-    assert.ok(h.indexOf('Emails sent per day') < h.indexOf('id="tkConvos"') && h.indexOf('id="tkSentMail"') < h.indexOf('tk-mail-link') && h.indexOf('tk-mail-link') < h.indexOf('id="tkAccess"'));
-    assert.ok(!h.includes('id="tkMyReplies"'), 'Conversations replace the old Replies list');
-    assert.ok(visibleText(h).includes('Your emails with Ann → Messages'));
-    // the link: back to Progress, scrolled to Messages
+    // Conversations: the list, then the link to Messages; the Overview: the chart, no conversations, no "Replies ·" card
+    const cv = screenOf('conversations');
+    assert.ok(cv.indexOf('id="tkConvos"') < cv.indexOf('tk-mail-link') && !cv.includes('id="tkSentMail"'));
+    assert.ok(visibleText(cv).includes('Your emails with Ann → Messages'));
+    trialsSetTab('overview'); for (let i = 0; i < 4; i++) await tick();   // their growth history comes in
+    const ov = screenOf('overview');
+    assert.ok(ov.includes('Emails sent per day') && !ov.includes('id="tkConvos"') && !ov.includes('id="tkSentMail"'));
+    assert.ok(!ov.includes('id="tkMyReplies"'), 'Conversations replace the old Replies list');
+    // the link: Messages, in the same system
     tkMailToMessages(ID);
-    assert.equal(tkClientPane(ID), 'progress'); assert.ok(el('tkHost').innerHTML.includes('id="tkSec-messages"')); assert.ok(el('tkSec-messages')._scrolled >= 1, 'scrolled to Messages');
-    // cached 5 minutes: back to Stats asks nothing again
-    const n = calls.filter((c) => /\/(emails|threads)/.test(c.u)).length; setClientPane(ID, 'stats'); await tick();
+    assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'messages'); assert.ok(el('content').innerHTML.includes('id="tkSec-messages"'));
+    // cached 5 minutes: back to Conversations asks nothing again
+    const n = calls.filter((c) => /\/(emails|threads)/.test(c.u)).length; trialsSetTab('conversations'); await tick();
     assert.equal(calls.filter((c) => /\/(emails|threads)/.test(c.u)).length, n, 'not asked again within 5 minutes');
     // My stats keeps its own Replies list and never asks for these
     assert.ok(renderStats({ totals: { sent: 1 }, replies: [] }).includes('id="tkMyReplies"'));
@@ -131,7 +138,7 @@ test('Every email sent: "Show more" asks for the next 200 with before=next, adds
     await mailMore(ID);
     const more = calls.filter((c) => c.u.includes('&before='));
     assert.equal(more.length, 1); assert.equal(more[0].u, base + '/emails?limit=200&before=' + encodeURIComponent('2026-10-09T03:00:00.000Z'));
-    const sent = between(el('tkHost').innerHTML, 'id="tkSentMail"', 'class="tk-mail-link"');
+    const sent = between(screenOf('sent'), 'id="tkSentMail"', 'class="tk-mail-link"');
     assert.equal(count(sent, /<tr class="tk-click"/g), 203);
     assert.ok(!sent.includes('Show more') && sent.indexOf('Firm 199') < sent.indexOf('Firm 202'), 'older ones below; no more button');
     await mailMore(ID); assert.equal(calls.filter((c) => c.u.includes('&before=')).length, 1, 'nothing more to ask for');

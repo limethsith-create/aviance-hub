@@ -205,7 +205,7 @@ test('"I\'ve bought it — check now": not there yet → says so, the panel stay
     assert.ok(!el('modalWrap').classList.contains('open'), 'nothing left to buy: the panel closes');
     assert.ok(el('tkAbHost').innerHTML.includes('<h3>Inboxes &amp; domain</h3>') && el('tkAbHost').innerHTML.includes('Setting up getbrightdental.com — about 48 hours'));
     assert.deepEqual(bigButtons(el('tkTop').outerHTML), [], 'nothing for him to do while it sets itself up (the row still says "Buy…" until it refreshes)');
-    assert.ok(!el('tkTop').outerHTML.includes('tk-top needs') && el('tkTop').outerHTML.includes("Nothing — we'll tell you when something needs you"));
+    assert.ok(!el('tkTop').outerHTML.includes('tk-top needs') && !el('tkTop').outerHTML.includes('tk-q-title'), 'nothing asked');
     await tick(); await tick();
     assert.ok(st.gets('/api/mc/hub/' + ID) >= 1 && st.gets('/api/mc/hub') >= 1, 'the page and the list refresh quietly behind it');
   } finally { offline(); trialsStopTimer(); closeModal(); }
@@ -243,7 +243,7 @@ test('the card, per status: the steps ticked with times, the current one highlig
   // still to buy while something more urgent has the big button: a small card keeps the way to "what to buy"
   const busy = clone(brightAb('ready_to_buy')); busy.conversation = { thread: [{ dir: 'in', at: '2026-10-17T09:00:00Z', subject: 'Hi', text: 'A question' }], needsReply: true, canReply: true };
   assert.equal(bigButtons(top(busy))[0][0], "Answer Raj's message");
-  const small = between(renderTrialDetail(busy, 'overview', { now: NOW }), '<div id="tkAbHost">', '</section>');
+  const small = between(renderSysTab(busy, 'setup', { now: NOW }), '<div id="tkAbHost">', '</section>');   // their email system › Setup
   assert.ok(small.includes('<p class="tk-ab-say">Waiting for you to buy getbrightdental.com and 2 inboxes on CheapInboxes.</p>') && small.includes('<button type="button" class="btn ghost" onclick="abOpenBuy(&quot;bright-dental&quot;)">See what to buy</button>'));
   assert.equal(renderAutobuyCard(busy, { primary: 'autobuy' }), '', 'when the big button is the purchase itself, no second way in');
   // escaped
@@ -256,13 +256,12 @@ test('the big button while CheapInboxes sets them up: nothing to do (even with t
   for (const s of ['provisioning', 'connecting', 'done']) {
     const d = brightAb(s); const t = top(d);
     assert.deepEqual(bigButtons(t), [], s + ': no button');
-    assert.ok(t.includes("<p class=\"tk-q-none\">Nothing — we'll tell you when something needs you</p>"), s);
+    assert.ok(!t.includes('tk-q-title') && tkPrimaryAction(d, { now: NOW }).label === "Nothing — we'll tell you when something needs you", s);
     assert.ok(!t.includes('Buy the domain') && !t.includes('openTrialPurchase'), s + ': never the Buy & paste page');
-    const page = renderTrialDetail(d, 'overview', { now: NOW });
-    assert.ok(!page.includes('Also on your list') && page.includes('id="tkSec-autobuy"'), s + ': the old to-do is not listed; the card is');
-    assert.ok(page.indexOf('id="tkSec-messages"') < page.indexOf('id="tkSec-autobuy"'), s + ': the card comes after Messages');
+    const setup = renderSysTab(d, 'setup', { now: NOW }), acts = renderSysTab(d, 'actions', { now: NOW });
+    assert.ok(!acts.includes('Also on your list') && setup.includes('id="tkSec-autobuy"'), s + ': the old to-do is not listed; the card is (their email system › Setup)');
+    assert.ok(!renderTrialDetail(d, 'overview', { now: NOW }).includes('id="tkSec-autobuy"'), s + ': not on the client page');
   }
-  assert.ok(top(brightAb('provisioning')).includes('<p class="tk-q-text">We connect the inboxes by ourselves.</p>'), 'what happens next: the machine\'s own words');
   const f = top(brightAb('failed'));
   assert.deepEqual(bigButtons(f), [['See what went wrong', 'tkGoTo(&quot;autobuy&quot;)']]);
   assert.ok(f.includes('<p class="tk-q-say">CheapInboxes could not create the inboxes because the card was declined. Update the card in your CheapInboxes account under Billing, then press Check now.</p>'));
@@ -270,7 +269,7 @@ test('the big button while CheapInboxes sets them up: nothing to do (even with t
   assert.ok(top(noWords).includes('Setting up their inboxes ran into a problem.'));
   // the button takes him to the card
   await openBright('failed');
-  try { el('tkSec-autobuy')._scrolled = 0; tkGoTo('autobuy'); assert.equal(el('tkSec-autobuy')._scrolled, 1); } finally { offline(); trialsStopTimer(); }
+  try { el('tkSec-autobuy')._scrolled = 0; tkGoTo('autobuy'); assert.equal(el('tkSec-autobuy')._scrolled, 1); assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'setup', 'their email system, at Setup'); } finally { offline(); trialsStopTimer(); }
 });
 
 test('"Wrong domain? Undo" only before anything is connected; it asks first and posts {unlink}; "Check now" posts {recheck}', async () => {

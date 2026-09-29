@@ -221,7 +221,7 @@ async function abSend(path,body,opts,btn){
 /* The answer's `autobuy` replaces the cached one at once; the rest of the page and the list refresh quietly behind it. */
 function abStore(id,data){if(data&&data.autobuy&&typeof data.autobuy==='object'&&tk.detail[id])tk.detail[id]=Object.assign({},tk.detail[id],{autobuy:data.autobuy});}
 function abRepaint(id){
-  if(currentView!=='trial'||currentTrialId!==id)return;const d=tk.detail[id];if(!d)return;
+  if(!tkOnClient(id))return;const d=tk.detail[id];if(!d)return;
   const top=document.getElementById('tkTop');if(top)top.outerHTML=renderTrialTop(d,{now:new Date()});
   const host=document.getElementById('tkAbHost');if(host)host.innerHTML=renderAutobuyCard(d);
 }

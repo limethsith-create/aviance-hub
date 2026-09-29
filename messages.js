@@ -14,7 +14,7 @@
      problem (plain words when broken) and encKey; test answers {ok, meetLink, removed, note?}.
 
    What the owner sees
-     · Messages, on every trial page right under the three questions: the whole conversation as a chat
+     · Messages, a tab of every client's email system ("Messages with Sam"): the whole conversation as a chat
        (theirs on the left, grey; ours on the right, outlined; the reply bot's marked "Auto-reply · …";
        automatic emails folded to one line "We sent: …"), times in Sri Lanka time with US Eastern small,
        newest at the bottom and scrolled into view; a reply box and the reply-bot switch for this person.
@@ -322,9 +322,9 @@ function msgPath(id){return '/api/mc/clients/'+encodeURIComponent(id)+'/messages
 function msgCount(el){const c=document.getElementById('tkMsgCount');const n=String((el&&el.value)||'').length;if(c){c.textContent=n+' / '+MSG_MAX;c.classList.toggle('over',n>MSG_MAX);}}
 /* The newest email in view: the chat box scrolls to its bottom (the page itself stays where it is). */
 function msgScrollDown(){try{const b=document.getElementById('tkChat');if(b&&b.scrollHeight!=null)b.scrollTop=b.scrollHeight;}catch(e){}}
-/* Redraw Messages and the three questions (the big button follows needsReply) from the cache, at once. */
+/* Redraw Messages and the top card (the big button follows needsReply) from the cache, at once. */
 function msgRepaint(id){
-  if(currentView!=='trial'||currentTrialId!==id)return;const d=tk.detail[id];if(!d)return;
+  if(!tkOnClient(id))return;const d=tk.detail[id];if(!d)return;
   const host=document.getElementById('tkMsgHost');if(host)host.innerHTML=renderMessages(d,{});
   const top=document.getElementById('tkTop');if(top)top.outerHTML=renderTrialTop(d,{now:new Date()});
   if(d.onboardCall&&typeof d.onboardCall==='object')tkOcRepaint(id);

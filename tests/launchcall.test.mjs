@@ -74,9 +74,11 @@ const cardBtns = (h) => [...between(h, '<h4>Update the call</h4>').matchAll(/<bu
 
 const ID = 'gale-roofing';
 const card = (status, patch) => { const d = galeLaunch(status); if (patch) patch(d); return renderLaunchCall(d.launchCall, d.row, { now: NOW }); };
-const page = (status, patch) => { const d = galeLaunch(status); if (patch) patch(d); return renderTrialDetail(d, 'overview', { now: NOW }); };
+/* The client page, then their email system's Setup (the warm-up), Calls (the launch call, the onboarding call) and Actions (Also on your list). */
+const whole = (d) => renderTrialDetail(d, 'overview', { now: NOW }) + ['setup', 'calls', 'actions'].map((t) => '<!--tab-->' + renderSysTab(d, t, { now: NOW })).join('');
+const page = (status, patch) => { const d = galeLaunch(status); if (patch) patch(d); return whole(d); };
 const top = (h) => between(h, '<section class="card tk-top', '</section>');
-const part = (h, a) => { const i = h.indexOf(a); if (i < 0) return ''; const ends = ['<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkLcHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<details class="tk-behind"'].map((e) => h.indexOf(e, i + a.length)).filter((j) => j > 0); return h.slice(i, ends.length ? Math.min(...ends) : h.length); };
+const part = (h, a) => { const i = h.indexOf(a); if (i < 0) return ''; const ends = ['<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkLcHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<!--tab-->', '<div class="section-head tk-section" id="tkSec-calls">', '<div class="card tk-pad tk-access"'].map((e) => h.indexOf(e, i + a.length)).filter((j) => j > 0); return h.slice(i, ends.length ? Math.min(...ends) : h.length); };
 /* The Calendar's last answer, as the hub keeps it: the launch call's week, so the card can find the Meet link. */
 function withCalendar(reqs) {
   calendarForget(); cal.settings = clone(calLaunchWeek.settings); cal.weeks['2026-10-19'] = clone(calLaunchWeek); cal.at['2026-10-19'] = Date.now(); cal.reqs = reqs ? clone(reqs) : [];
@@ -175,12 +177,13 @@ test('launch card, overdue: "Book by … — overdue" in red; hostile values esc
 });
 
 /* ───────────── 2. the page: under the warm-up card, above the (folded) onboarding call; step ③ from the machine ───────────── */
-test('the trial page: Launch call card right under Warm-up and above the folded onboarding call; step ③ Setting up with the machine\'s sentence; the launch to-do is not listed twice; nothing says the OK only happens on a page', () => {
+test('their email system: the Launch call card (Calls) comes after Warm-up (Setup) and above the folded onboarding call; step ③ Setting up with the machine\'s sentence; the launch to-do is not listed twice; nothing says the OK only happens on a page', () => {
   withCalendar();
   for (const st of STATUSES) {
     const h = page(st);
     const iWu = h.indexOf('<div id="tkWuHost">'), iLc = h.indexOf('<div id="tkLcHost">'), iOc = h.indexOf('<div id="tkOcHost">');
     assert.ok(iWu > 0 && iLc > iWu && iOc > iLc, st + ': Warm-up, then Launch call, then the onboarding call');
+    assert.ok(!between(h, '<section class="card tk-top', '<!--tab-->').includes('tkLcHost'), st + ': not on the client page');
     assert.ok(part(h, '<div id="tkLcHost">').includes('id="tkSec-launchcall"'), st + ': the card');
     assert.ok(part(h, '<div id="tkOcHost">').startsWith('<div id="tkOcHost"><details class="tk-appbox tk-oc-done" id="tkSec-onboardcall">'), st + ': the onboarding call is history');
     const t = top(h);
@@ -190,9 +193,10 @@ test('the trial page: Launch call card right under Warm-up and above the folded 
     assert.ok(!/approval link sent|no click yet|approve on the page to start|click the approval link/i.test(hubText(h.slice(0, h.indexOf('<details class="tk-behind"')))), st + ': nothing implies the OK is a page click only');
   }
   assert.ok(!page('sent').includes('<div id="tkLcHost">') === false);
-  assert.ok(!renderTrialDetail(clone(ecreekDetail), 'overview', { now: NOW }).includes('tkLcHost'), 'no invite yet: no launch card');
-  // the machine's to-do section names ('launchCall') scroll to the card
+  assert.ok(!whole(clone(ecreekDetail)).includes('tkLcHost'), 'no invite yet: no launch card');
+  // the machine's to-do section names ('launchCall') open their email system at Calls, at the card
   assert.equal(TK_SECTION_ALIAS.launchCall, 'launchcall');
+  assert.deepEqual(tkSectionPlace(ID, 'launchCall'), { view: 'clientSystem', tab: 'calls', sec: 'launchcall' });
 });
 
 /* ───────────── 3. the big button per to-do ───────────── */
@@ -216,22 +220,22 @@ test('the big button follows the launch call: say yes to the time (Calendar), ho
   // booked and past: hold it, then press Approved on the call (scrolls to the card)
   h = page('past');
   assert.deepEqual(buttons(top(h)), [['Hold the launch call, then press Approved on the call', 'tkGoTo(&quot;launchcall&quot;)']]);
-  assert.ok(flat(top(h)).includes('The launch call was set for Fri 16 Oct, 8:30 pm your time. On the call, share the approval page and go through the list and the emails with Mia. When Mia says yes, press Approved on the call in the launch-call box below.'));
+  assert.ok(flat(top(h)).includes('The launch call was set for Fri 16 Oct, 8:30 pm your time. On the call, share the approval page and go through the list and the emails with Mia. When Mia says yes, press Approved on the call in the launch-call box under Calls.'));
   assert.ok(top(h).includes('<section class="card tk-top needs"'), 'red: his turn');
   assert.deepEqual(buttons(top(page('past', (d) => { d.row.todo = []; }))), [['Hold the launch call, then press Approved on the call', 'tkGoTo(&quot;launchcall&quot;)']], 'from the time alone, without the to-do');
   // held, no OK: press it
   h = page('held');
   assert.deepEqual(buttons(top(h)), [['Press Approved on the call', 'tkGoTo(&quot;launchcall&quot;)']]);
-  assert.ok(flat(top(h)).includes("The launch call is done, but their OK is not in yet. If Mia said yes to the list and the emails, press Approved on the call in the launch-call box below — sending can't start without it."));
+  assert.ok(flat(top(h)).includes("The launch call is done, but their OK is not in yet. If Mia said yes to the list and the emails, press Approved on the call in the launch-call box under Calls — sending can't start without it."));
   // approved on the page, the call is past: just mark it done (or skip it on the card)
   h = page('approvedOnPageBooked', (d) => { d.launchCall.bookedFor = '2026-10-16T15:00:00Z'; });
   assert.deepEqual(buttons(top(h)), [['Mark the launch call done', 'trialOcTopHeld(&quot;gale-roofing&quot;,&quot;launch&quot;)']]);
-  assert.ok(flat(top(h)).includes('Mia already approved on the page. If the call happened, mark it done. If not, skip it in the launch-call box below.'));
+  assert.ok(flat(top(h)).includes('Mia already approved on the page. If the call happened, mark it done. If not, skip it in the launch-call box under Calls.'));
   // overdue: write to them — unless they approved on the page: then skip it
   h = page('overdue');
   assert.deepEqual(buttons(top(h)), [['Write to them about booking', 'tkFocusReply()']]);
   assert.ok(flat(top(h)).includes('You need to write to them about booking the launch call.'), 'the machine\'s next step, as "You need to…"');
-  assert.ok(flat(top(page('overdue', (d) => { d.row.simple.needsYou = false; }))).includes("Mia hasn't booked the launch call yet, and it's late. Send a short note in the box below."), 'the hub\'s own words when the row has not caught up');
+  assert.ok(flat(top(page('overdue', (d) => { d.row.simple.needsYou = false; }))).includes("Mia hasn't booked the launch call yet, and it's late. Send them a short note under Messages."), 'the hub\'s own words when the row has not caught up');
   h = page('overduePage');
   assert.deepEqual(buttons(top(h)), [['Skip the launch call', 'trialOcAction(&quot;gale-roofing&quot;,&quot;skip&quot;,&quot;launch&quot;)']]);
   assert.ok(flat(top(h)).includes('Mia approved on the page, so sending can start without the call. Skip it — or leave it, and hold the call if they book one.'));
@@ -241,17 +245,18 @@ test('the big button follows the launch call: say yes to the time (Calendar), ho
   // a launch-call to-do the hub does not know by name: the machine says it needs him → the launch-call box, not Behind the scenes
   h = page('sent', (d) => { d.row.simple.needsYou = true; d.row.simple.next = 'Look at the launch call'; });
   assert.deepEqual(buttons(top(h)), [['Open the launch-call box', 'tkGoTo(&quot;launchcall&quot;)']]);
-  // booked and still ahead: nothing to do; "What happens next?" is the call in both clocks
+  // booked and still ahead: nothing to do — nothing asked on the top card; the call in both clocks is on its card (Calls)
   h = page('booked');
   assert.deepEqual(buttons(top(h)), []);
-  assert.ok(flat(top(h)).includes('Nothing until the launch call. Join it on Tue 20 Oct, 8:30 pm your time.'), flat(top(h)));
-  assert.ok(flat(top(h)).includes('The launch call: Tue 20 Oct, 8:30 pm your time (Tue 11:00 am US Eastern).'));
+  assert.equal(tkPrimaryAction(galeLaunch('booked'), { now: NOW }).label, 'Nothing until the launch call. Join it on Tue 20 Oct, 8:30 pm your time.');
+  assert.ok(!top(h).includes('tk-q-title'), flat(top(h)));
+  assert.ok(flat(part(h, '<div id="tkLcHost">')).includes('Tue 20 Oct, 8:30 pm your time'));
   assert.ok(!top(h).includes('tk-top needs'));
   // approved (either way) or skipped: nothing asked, the machine's next step shows
   for (const st of ['approvedOnCall', 'approvedOnPage', 'skipped']) {
     h = page(st);
     assert.deepEqual(buttons(top(h)), [], st);
-    assert.ok(flat(top(h)).includes('First emails on Monday 26 October.') || flat(top(h)).includes("Nothing — we'll tell you when something needs you"), st + ': ' + flat(top(h)));
+    assert.ok(!top(h).includes('tk-q-title') && tkPrimaryAction(galeLaunch(st), { now: NOW }).kind === 'none', st + ': ' + flat(top(h)));
   }
   assert.equal(tkPrimaryAction(galeLaunch('approvedOnCall'), { now: NOW }).kind, 'none');
   // the Trials list: the row's red line comes from the machine's next step
@@ -282,7 +287,8 @@ test('Approved on the call and Skip the call: the contract bodies to /launch-cal
   const posts = () => calls.filter((c) => c[1].endsWith('/launch-call'));
   try {
     tk.detail[ID] = detailNow(); tk.detailAt[ID] = Date.now(); openTrial(ID); await tick();
-    assert.equal(currentView, 'trial'); assert.ok(el('content').innerHTML.includes('<div id="tkLcHost">'));
+    assert.equal(currentView, 'trial'); assert.ok(el('content').innerHTML.includes('id="tkSysBtn"'));
+    tkOpenSystem(ID, 'calls'); await tick(); assert.equal(currentView, 'clientSystem'); assert.ok(el('content').innerHTML.includes('<div id="tkLcHost">'), 'the card, in their email system › Calls');
     el('tkLcHost').innerHTML = renderLaunchCall(tk.detail[ID].launchCall, tk.detail[ID].row, { now: new Date() }); el('tkTop').outerHTML = 'TOP-BEFORE';
     // Approved on the call
     asked = null; await trialOcAction(ID, 'approvedOnCall', 'launch');
@@ -366,10 +372,10 @@ test('Calendar: a kind:launch meeting is labelled "Launch call" (the machine\'s 
   // never for an onboarding call, a request, or a meeting without a trial
   assert.ok(!renderCalMeeting(clone(calLaunch.onboarding), st, { now: past }).includes('Approved on the call') && !renderCalMeeting(clone(calLaunch.requested), st, { now }).includes('Approved on the call'));
   assert.ok(!renderCalMeeting(Object.assign(clone(calLaunch.confirmed), { clientId: null }), st, { now: past }).includes('calLaunchApprove'));
-  // pressing it: the trial, scrolled to the launch-call card
+  // pressing it: their email system at Calls, scrolled to the launch-call card
   tk.detail[ID] = galeLaunch('past'); tk.detailAt[ID] = Date.now(); trialsIngestHub(simpleHub);
   el('tkSec-launchcall')._scrolled = 0; calLaunchApprove('mlaunch');
-  assert.equal(currentView, 'trial'); assert.equal(currentTrialId, ID); assert.equal(el('tkSec-launchcall')._scrolled, 1);
+  assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'calls'); assert.equal(currentTrialId, ID); assert.equal(el('tkSec-launchcall')._scrolled, 1);
   trialsForget(); calendarForget();
 });
 
@@ -411,7 +417,7 @@ test('journey-style: the whole trial page (front, every tab), the list row and t
 
 test('"Before the call" on the launch-call card: the research brief at its top — the same card as under "What we found" (one function), open while the call is ahead, one closed line once it is over; none without a brief; a repaint keeps it', () => {
   const withBrief = (st) => { const d = galeLaunch(st); d.application.research = { status: 'done', at: '2026-09-28T09:05:00Z', brief: clone(researchBrief) }; return d; };
-  const lcPart = (d) => part(renderTrialDetail(d, 'overview', { now: NOW }), '<div id="tkLcHost">');
+  const lcPart = (d) => part(whole(d), '<div id="tkLcHost">');
   for (const st of STATUSES) {
     const c = lcPart(withBrief(st));
     const folded = ['held', 'approvedOnCall', 'skipped'].includes(st);
@@ -423,7 +429,7 @@ test('"Before the call" on the launch-call card: the research brief at its top �
     for (const re of EMPTY) { const m = c.match(re); assert.ok(!m, st + ': an empty label: ' + (m && m[0])); }
   }
   // one function, both places: the same paragraph and the same sources under "What we found"
-  const d = withBrief('booked'); const page = renderTrialDetail(d, 'overview', { now: NOW });
+  const d = withBrief('booked'); const page = whole(d);
   const onCard = between(part(page, '<div id="tkLcHost">'), '<p class="tk-brief-text">', '</details>');
   const inFound = between(between(page, '<h4>What we found</h4>'), '<p class="tk-brief-text">', '</details>');
   assert.ok(onCard.length > 500 && onCard === inFound, 'the same card in both places');

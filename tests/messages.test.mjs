@@ -151,14 +151,14 @@ test('needsReply: the big button is "Answer Sam\'s message" (into the reply box)
   // the page
   const waiting = convPage((d) => { d.conversation.needsReply = true; });
   assert.deepEqual(bigButtons(top(waiting)), [["Answer Sam's message", 'tkFocusReply()']]);
-  assert.ok(top(waiting).includes('<p class="tk-q-say">Sam wrote to you. Read it under Messages below and write back there.</p>'));
-  assert.ok(top(waiting).includes('class="card tk-top needs"') && top(waiting).includes("It's your turn."), 'his turn: the red edge, even before the list catches up');
+  assert.ok(top(waiting).includes('<p class="tk-q-say">Sam wrote to you. Read it and write back under Messages.</p>'));
+  assert.ok(top(waiting).includes('class="card tk-top needs"') && top(waiting).includes('What do you need to do?'), 'his turn: the red edge, even before the list catches up');
   const answered = convPage((d) => { d.conversation.needsReply = false; d.onboardCall.needsReply = true; });
   assert.deepEqual(bigButtons(top(answered)), [], 'the conversation says answered (by him or the bot): the old call flag does not win');
   // just answered (by him or the bot): the list's row may still say "they wrote" for a moment — the page trusts the conversation
   const stale = convPage((d) => { d.conversation.needsReply = false; d.row = Object.assign({}, simpleRows.ecreek); });
   assert.equal(tkPrimaryAction(stale, { now: NOW }).kind, 'none');
-  assert.ok(top(stale).includes("<p class=\"tk-q-none\">Nothing — we'll tell you when something needs you</p>") && !top(stale).includes('onboarding call box') && !top(stale).includes('tk-top needs'));
+  assert.ok(!top(stale).includes('tk-q-title') && !top(stale).includes('onboarding call box') && !top(stale).includes('tk-top needs'), 'nothing asked');
   const noName = convPage((d) => { d.row = Object.assign({}, d.row, { contactName: '', simple: Object.assign({}, d.row.simple, { person: '' }) }); });
   assert.deepEqual(bigButtons(top(noName)), [['Answer their message', 'tkFocusReply()']]);
   // a calendar request or a new application still comes first
@@ -177,17 +177,20 @@ test('needsReply: the big button is "Answer Sam\'s message" (into the reply box)
   assert.match(css, /\.tk-person-you\{[^}]*color:var\(--red\)/);
 });
 
-test('the big button goes into the reply box under Messages; with no inbox to send from it goes to Messages, which says why', async () => {
+test('the big button opens their email system at Messages with the cursor in the reply box; with no inbox to send from it goes to Messages, which says why', async () => {
   asOwner(); trialsForget(); calendarForget(); asOwner(); trialsIngestHub(simpleHub);
   globalThis.fetch = async (url) => { const u = new URL(url); if (u.pathname.startsWith('/api/mc/hub/')) return ok(ecreekConvDetail)(); if (u.pathname === '/api/mc/hub') return ok(simpleHub)(); return ok({ ok: true, checked: 0, newReplies: 0, booked: 0, remindersSent: 0 })(); };
   try {
     tk.detail['ecreek-it'] = clone(ecreekConvDetail); tk.detailAt['ecreek-it'] = Date.now(); openTrial('ecreek-it'); await tick();
-    assert.ok(el('content').innerHTML.includes('<div id="tkMsgHost"><section class="card tk-msgs" id="tkSec-messages">'));
+    assert.ok(!el('content').innerHTML.includes('id="tkSec-messages"'), 'not on the client page');
     el('tkMsgReply')._focused = 0; el('tkMsgReply')._scrolled = 0; tkFocusReply();
+    assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'messages');
+    assert.ok(el('content').innerHTML.includes('<div id="tkMsgHost"><section class="card tk-msgs" id="tkSec-messages">'));
     assert.equal(el('tkMsgReply')._focused, 1); assert.equal(el('tkMsgReply')._scrolled, 1);
+    tkFocusReply(); assert.equal(el('tkMsgReply')._focused, 2, 'already there: straight into the box');
     // the newest email in view: the chat box is scrolled to its bottom when the page is drawn
     el('tkChat').scrollTop = 0; el('tkChat').scrollHeight = 1234; trialsRepaint('trial'); assert.equal(el('tkChat').scrollTop, 1234);
-    el('tkChat').scrollTop = 0; trialsOnRender('trial'); assert.equal(el('tkChat').scrollTop, 1234);
+    el('tkChat').scrollTop = 0; trialsOnRender('clientSystem'); assert.equal(el('tkChat').scrollTop, 1234);
     // the onboarding card: "See the messages" scrolls to them
     el('tkSec-messages')._scrolled = 0; tkGoTo('messages'); assert.equal(el('tkSec-messages')._scrolled, 1);
     // no textarea on the page → Messages itself
@@ -229,7 +232,7 @@ test('reply and the bot switch post {reply, text} / {botOff} / {botOn} to /messa
     const msgs = el('tkMsgHost').innerHTML;
     assert.ok(msgs.includes('<b>You wrote</b>') && msgs.includes('Wednesday works.\nSame time?') && !msgs.includes('is waiting for your answer'), 'redrawn from the answer');
     assert.ok(msgs.lastIndexOf('Wednesday works.') > msgs.indexOf('Sam is out today'), 'the newest at the bottom');
-    assert.ok(!el('tkTop').outerHTML.includes("Answer Sam's message") && el('tkTop').outerHTML.includes('What do you need to do?'), 'the big button follows at once');
+    assert.ok(!el('tkTop').outerHTML.includes("Answer Sam's message") && !el('tkTop').outerHTML.includes('tk-top needs'), 'the big button follows at once');
     assert.equal(tk.detail['ecreek-it'].conversation.needsReply, false);
     await tick(); assert.ok(calls.some((c) => c[1] === '/api/mc/hub/ecreek-it') && calls.some((c) => c[1] === '/api/mc/hub'), 'the rest of the page and the list refresh behind it');
     // the switch
@@ -603,9 +606,9 @@ test('"Sam hasn\'t opened the … email": the big button "I\'ve reached Sam" (re
   assert.deepEqual(bigButtons(t), [["I've reached Sam", 'trialsTodoAction(&quot;unopened:ecreek-it&quot;)']]);
   assert.ok(visibleText(t).includes("Sam hasn't opened the “we start on” email — call or text them? Sent Tue 20 Oct, 7:30 pm (your time). Once you've reached Sam, press the button — it clears this reminder."), visibleText(t));
   assert.ok(t.startsWith('<section class="card tk-top needs"'), 'red: it needs him');
-  const page = renderTrialDetail(d, 'overview', { now: NOW });
+  const page = renderTrialDetail(d, 'overview', { now: NOW }) + renderSysTab(d, 'messages', { now: NOW }) + renderSysTab(d, 'actions', { now: NOW });   // the client page and their email system
   assert.ok(!page.includes('<h3>Also on your list</h3>'), 'the big button — not listed again');
-  assert.ok(between(page, 'id="tkSec-messages"', '</section>').includes('<span class="tk-cm-st unopened">delivered · not opened yet</span>'), 'the email itself, in amber');
+  assert.ok(between(page, 'id="tkSec-messages"', '</section>').includes('<span class="tk-cm-st unopened">delivered · not opened yet</span>'), 'the email itself, in amber (Messages, in their email system)');
   // the list: under "Needs you", the machine's own question as the red line (never "You need to: Sam hasn't…")
   const hub = Object.assign(clone(simpleHub), { stages: stagesWith({ live: [d.row] }) });
   const list = renderTrialList(hub, { now: NOW });

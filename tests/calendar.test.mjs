@@ -504,10 +504,11 @@ test('Trials list + trial page: a client who asked for a time says "They asked f
     const page = renderTrialDetail(ecreekDetail, 'overview', { now: CAL_NOW });
     assert.ok(page.includes('<p class="tk-q-say">Sam asked for a call on Wed 30 Sep · 11:30 pm your time (Wed 2:00 pm US Eastern). Say yes, or suggest another time.</p><button type="button" class="btn tk-primary" onclick="openCalendar(&quot;mreq1&quot;)">Say yes to their call time</button>'));
     assert.ok(!page.includes('cal-trial-ask'));
-    // a new application outranks it: then the time they asked for still shows, as its own card above the call
+    // a new application outranks it: then the time they asked for still shows, as its own card above the call (their email system › Calls)
     const both = Object.assign({}, ecreekDetail, { application: Object.assign({}, ecreekDetail.application, { review: 'pending' }) });
-    const p2 = renderTrialDetail(both, 'overview', { now: CAL_NOW });
-    assert.ok(p2.includes('>Read the application and say yes or no</button>'));
+    assert.ok(renderTrialDetail(both, 'overview', { now: CAL_NOW }).includes('>Read the application and say yes or no</button>'));
+    const p2 = renderSysTab(both, 'calls', { now: CAL_NOW });
+    assert.ok(!renderSysTab(ecreekDetail, 'calls', { now: CAL_NOW }).includes('cal-trial-ask'), 'when it is the big button: said once');
     assert.ok(p2.includes('<div class="card cal-trial-ask"><div class="cal-trial-ask-main"><b>Sam asked for a call: Wed 30 Sep · 11:30 pm (your time)</b><small>Wed 2:00 pm US Eastern · 30 min · say yes in the Calendar</small></div><button class="btn" onclick="openCalendar(&quot;mreq1&quot;)">Open the Calendar</button></div>'));
     assert.ok(p2.indexOf('cal-trial-ask') < p2.indexOf('tkOcHost'), 'above the onboarding call card');
     calendarForget();
