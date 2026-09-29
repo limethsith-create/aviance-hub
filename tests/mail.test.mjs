@@ -92,7 +92,7 @@ const screenOf = (tab) => { trialsSetTab(tab); trialsRepaint('clientSystem'); re
 /* Their email system: Conversations, then Emails sent (left open there). */
 const openStats = async () => { openTrial(ID); for (let i = 0; i < 4; i++) await tick(); tkOpenSystem(ID, 'conversations'); for (let i = 0; i < 6; i++) await tick(); return screenOf('conversations') + screenOf('sent'); };
 
-test('a client\'s email system: Conversations (reply type, who answered, when, snippet) with a link to Messages, and Every email sent (newest first, status pills) — each its own tab; no second Replies list on the Overview', async () => {
+test('a client\'s email system (Shared): Conversations (reply type, who answered, when, snippet), and Every email sent (newest first, status pills) — each its own tab; no second Replies list on the Overview', async () => {
   reset(); const calls = []; globalThis.fetch = route(MAP, calls);
   try {
     const h = await openStats();
@@ -104,17 +104,17 @@ test('a client\'s email system: Conversations (reply type, who answered, when, s
     assert.ok(conv.includes('Cobalt &lt;HVAC&gt;') && !conv.includes('Cobalt <HVAC>'), 'escaped');
     assert.ok(conv.indexOf('Cobalt') < conv.indexOf('River Dental') && conv.indexOf('River Dental') < conv.indexOf('Gone Ltd'), 'newest first');
     assert.equal(count(conv, /onclick="openMailThread\(/g), 5, 'every row opens its thread');
-    const sent = between(h, 'id="tkSentMail"', 'class="tk-mail-link"'); const st = visibleText(sent);
+    const sent = h.slice(h.indexOf('id="tkSentMail"')); const st = visibleText(sent);
     assert.ok(st.includes('Every email sent · 203') && st.includes('Showing 200 of 203') && sent.includes('>Show more</button>'));
     for (const th of ['When', 'To', 'Company', 'Subject', 'From inbox', 'Status']) assert.ok(sent.includes('<th>' + th + '</th>'), th);
     assert.equal(count(sent, /<tr class="tk-click"/g), 200);
     assert.ok(sent.includes('<span class="pill tk-rt green">Replied</span>') && sent.includes('<span class="pill tk-rt red">Bounced</span>') && sent.includes('<span class="pill tk-rt red">Didn\'t send</span>') && sent.includes('<span class="pill tk-rt grey">Sent</span>'));
     assert.ok(sent.includes('Follow-up') && sent.includes('Cobalt &lt;HVAC&gt;'));
     assert.ok(sent.indexOf('Quick idea for Cobalt') < sent.indexOf('Quick idea for Firm 1'), 'newest first');
-    // Conversations: the list, then the link to Messages; the Overview: the chart, no conversations, no "Replies ·" card
+    // Conversations: the list only (Messages is the tab beside it); the Overview: the chart, no conversations, no "Replies ·" card
     const cv = screenOf('conversations');
-    assert.ok(cv.indexOf('id="tkConvos"') < cv.indexOf('tk-mail-link') && !cv.includes('id="tkSentMail"'));
-    assert.ok(visibleText(cv).includes('Your emails with Ann → Messages'));
+    assert.ok(cv.includes('id="tkConvos"') && !cv.includes('id="tkSentMail"') && !cv.includes('tk-mail-link'));
+    assert.ok(cv.includes('onclick="trialsSetTab(&quot;messages&quot;)">Messages</button>'), 'Messages: the tab beside it');
     trialsSetTab('overview'); for (let i = 0; i < 4; i++) await tick();   // their growth history comes in
     const ov = screenOf('overview');
     assert.ok(ov.includes('Emails sent per day') && !ov.includes('id="tkConvos"') && !ov.includes('id="tkSentMail"'));

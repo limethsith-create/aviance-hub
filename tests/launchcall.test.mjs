@@ -74,11 +74,13 @@ const cardBtns = (h) => [...between(h, '<h4>Update the call</h4>').matchAll(/<bu
 
 const ID = 'gale-roofing';
 const card = (status, patch) => { const d = galeLaunch(status); if (patch) patch(d); return renderLaunchCall(d.launchCall, d.row, { now: NOW }); };
-/* The client page, then their email system's Setup (the warm-up), Calls (the launch call, the onboarding call) and Actions (Also on your list). */
-const whole = (d) => renderTrialDetail(d, 'overview', { now: NOW }) + ['setup', 'calls', 'actions'].map((t) => '<!--tab-->' + renderSysTab(d, t, { now: NOW })).join('');
+/* The client page, then their email system's Only you › Health (the warm-up) and Setup & history (the launch call, the onboarding call, Also on your list). */
+const whole = (d) => renderTrialDetail(d, 'overview', { now: NOW }) + ['health', 'setup'].map((t) => '<!--tab-->' + renderSysTab(d, t, { now: NOW })).join('');
 const page = (status, patch) => { const d = galeLaunch(status); if (patch) patch(d); return whole(d); };
 const top = (h) => between(h, '<section class="card tk-top', '</section>');
-const part = (h, a) => { const i = h.indexOf(a); if (i < 0) return ''; const ends = ['<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkLcHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<!--tab-->', '<div class="section-head tk-section" id="tkSec-calls">', '<div class="card tk-pad tk-access"'].map((e) => h.indexOf(e, i + a.length)).filter((j) => j > 0); return h.slice(i, ends.length ? Math.min(...ends) : h.length); };
+/* What he reads to act: everything but the machine's own records (Only you › Setup & history › Parts and History). */
+const noRecords = (h) => h.replace(/<section class="tk-part" id="tkSec-(parts|history)">[\s\S]*?<\/section>(?=<section class="tk-part"|<!--tab-->|$)/g, '');
+const part = (h, a) => { const i = h.indexOf(a); if (i < 0) return ''; const ends = ['<div id="tkAbHost">', '<div id="tkWuHost">', '<div id="tkLcHost">', '<div id="tkOcHost">', 'id="tkSec-application"', '<h3>Also on your list</h3>', '<!--tab-->', '<div class="section-head tk-section" id="tkSec-disputes">', '<div class="card tk-pad tk-access"', '<section class="tk-part"', '<div class="card tk-scroll"><table class="tk-table"><tr><th>Inbox</th>'].map((e) => h.indexOf(e, i + a.length)).filter((j) => j > 0); return h.slice(i, ends.length ? Math.min(...ends) : h.length); };
 /* The Calendar's last answer, as the hub keeps it: the launch call's week, so the card can find the Meet link. */
 function withCalendar(reqs) {
   calendarForget(); cal.settings = clone(calLaunchWeek.settings); cal.weeks['2026-10-19'] = clone(calLaunchWeek); cal.at['2026-10-19'] = Date.now(); cal.reqs = reqs ? clone(reqs) : [];
@@ -177,7 +179,7 @@ test('launch card, overdue: "Book by … — overdue" in red; hostile values esc
 });
 
 /* ───────────── 2. the page: under the warm-up card, above the (folded) onboarding call; step ③ from the machine ───────────── */
-test('their email system: the Launch call card (Calls) comes after Warm-up (Setup) and above the folded onboarding call; step ③ Setting up with the machine\'s sentence; the launch to-do is not listed twice; nothing says the OK only happens on a page', () => {
+test('their email system: the Launch call card (Only you › Setup & history) comes after Warm-up (Only you › Health) and above the folded onboarding call; step ③ Setting up with the machine\'s sentence; the launch to-do is not listed twice; nothing says the OK only happens on a page', () => {
   withCalendar();
   for (const st of STATUSES) {
     const h = page(st);
@@ -190,13 +192,13 @@ test('their email system: the Launch call card (Calls) comes after Warm-up (Setu
     assert.ok(t.includes('aria-label="The trial journey, step 3 of 5"') && t.includes('<li class="now" aria-current="step"><span class="tk-j-dot" aria-hidden="true">3</span><span class="tk-j-name">Setting up</span>'), st + ': step ③');
     assert.ok(t.includes('<p class="tk-q-big">' + esc(launchSimple[st].label) + '</p>'), st + ': the machine\'s sentence');
     assert.ok(!h.includes('<h3>Also on your list</h3>'), st + ': the launch to-do is the big button, not a second list');
-    assert.ok(!/approval link sent|no click yet|approve on the page to start|click the approval link/i.test(hubText(h.slice(0, h.indexOf('<details class="tk-behind"')))), st + ': nothing implies the OK is a page click only');
+    assert.ok(!/approval link sent|no click yet|approve on the page to start|click the approval link/i.test(hubText(noRecords(h))), st + ': nothing implies the OK is a page click only');
   }
   assert.ok(!page('sent').includes('<div id="tkLcHost">') === false);
   assert.ok(!whole(clone(ecreekDetail)).includes('tkLcHost'), 'no invite yet: no launch card');
-  // the machine's to-do section names ('launchCall') open their email system at Calls, at the card
+  // the machine's to-do section names ('launchCall') open their email system at Only you › Setup & history, at the card
   assert.equal(TK_SECTION_ALIAS.launchCall, 'launchcall');
-  assert.deepEqual(tkSectionPlace(ID, 'launchCall'), { view: 'clientSystem', tab: 'calls', sec: 'launchcall' });
+  assert.deepEqual(tkSectionPlace(ID, 'launchCall'), { view: 'clientSystem', tab: 'setup', sec: 'launchcall' });
 });
 
 /* ───────────── 3. the big button per to-do ───────────── */
@@ -220,17 +222,17 @@ test('the big button follows the launch call: say yes to the time (Calendar), ho
   // booked and past: hold it, then press Approved on the call (scrolls to the card)
   h = page('past');
   assert.deepEqual(buttons(top(h)), [['Hold the launch call, then press Approved on the call', 'tkGoTo(&quot;launchcall&quot;)']]);
-  assert.ok(flat(top(h)).includes('The launch call was set for Fri 16 Oct, 8:30 pm your time. On the call, share the approval page and go through the list and the emails with Mia. When Mia says yes, press Approved on the call in the launch-call box under Calls.'));
+  assert.ok(flat(top(h)).includes('The launch call was set for Fri 16 Oct, 8:30 pm your time. On the call, share the approval page and go through the list and the emails with Mia. When Mia says yes, press Approved on the call in the launch-call box under Setup & history.'));
   assert.ok(top(h).includes('<section class="card tk-top needs"'), 'red: his turn');
   assert.deepEqual(buttons(top(page('past', (d) => { d.row.todo = []; }))), [['Hold the launch call, then press Approved on the call', 'tkGoTo(&quot;launchcall&quot;)']], 'from the time alone, without the to-do');
   // held, no OK: press it
   h = page('held');
   assert.deepEqual(buttons(top(h)), [['Press Approved on the call', 'tkGoTo(&quot;launchcall&quot;)']]);
-  assert.ok(flat(top(h)).includes("The launch call is done, but their OK is not in yet. If Mia said yes to the list and the emails, press Approved on the call in the launch-call box under Calls — sending can't start without it."));
+  assert.ok(flat(top(h)).includes("The launch call is done, but their OK is not in yet. If Mia said yes to the list and the emails, press Approved on the call in the launch-call box under Setup & history — sending can't start without it."));
   // approved on the page, the call is past: just mark it done (or skip it on the card)
   h = page('approvedOnPageBooked', (d) => { d.launchCall.bookedFor = '2026-10-16T15:00:00Z'; });
   assert.deepEqual(buttons(top(h)), [['Mark the launch call done', 'trialOcTopHeld(&quot;gale-roofing&quot;,&quot;launch&quot;)']]);
-  assert.ok(flat(top(h)).includes('Mia already approved on the page. If the call happened, mark it done. If not, skip it in the launch-call box under Calls.'));
+  assert.ok(flat(top(h)).includes('Mia already approved on the page. If the call happened, mark it done. If not, skip it in the launch-call box under Setup & history.'));
   // overdue: write to them — unless they approved on the page: then skip it
   h = page('overdue');
   assert.deepEqual(buttons(top(h)), [['Write to them about booking', 'tkFocusReply()']]);
@@ -288,7 +290,7 @@ test('Approved on the call and Skip the call: the contract bodies to /launch-cal
   try {
     tk.detail[ID] = detailNow(); tk.detailAt[ID] = Date.now(); openTrial(ID); await tick();
     assert.equal(currentView, 'trial'); assert.ok(el('content').innerHTML.includes('id="tkSysBtn"'));
-    tkOpenSystem(ID, 'calls'); await tick(); assert.equal(currentView, 'clientSystem'); assert.ok(el('content').innerHTML.includes('<div id="tkLcHost">'), 'the card, in their email system › Calls');
+    tkOpenSystem(ID, 'setup'); await tick(); assert.equal(currentView, 'clientSystem'); assert.ok(el('content').innerHTML.includes('<div id="tkLcHost">'), 'the card, in their email system › Only you › Setup & history');
     el('tkLcHost').innerHTML = renderLaunchCall(tk.detail[ID].launchCall, tk.detail[ID].row, { now: new Date() }); el('tkTop').outerHTML = 'TOP-BEFORE';
     // Approved on the call
     asked = null; await trialOcAction(ID, 'approvedOnCall', 'launch');
@@ -375,7 +377,7 @@ test('Calendar: a kind:launch meeting is labelled "Launch call" (the machine\'s 
   // pressing it: their email system at Calls, scrolled to the launch-call card
   tk.detail[ID] = galeLaunch('past'); tk.detailAt[ID] = Date.now(); trialsIngestHub(simpleHub);
   el('tkSec-launchcall')._scrolled = 0; calLaunchApprove('mlaunch');
-  assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'calls'); assert.equal(currentTrialId, ID); assert.equal(el('tkSec-launchcall')._scrolled, 1);
+  assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'setup'); assert.equal(currentTrialId, ID); assert.equal(el('tkSec-launchcall')._scrolled, 1);
   trialsForget(); calendarForget();
 });
 
