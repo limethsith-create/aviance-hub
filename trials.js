@@ -892,8 +892,8 @@ function renderTrialList(hub,meta,paid){
   const apps=g.needs.filter(x=>tkIsUnderReview(x.row));const needsRest=g.needs.filter(x=>!tkIsUnderReview(x.row));
   const appsHTML=apps.length?head(paid?'New paying-client applications':'New trial applications','red',apps.length)+`<div class="tk-apps">${apps.map(x=>renderApplicationRow(x.row)).join('')}</div>`:'';
   const needs=needsRest.length?head('Needs you','red')+`<div class="tk-people">${needsRest.map(renderTrialRow).join('')}</div>`:apps.length?'':`<p class="tk-allclear">Nothing needs you right now. We'll tell you when something does.</p>`;
-  // everyone running with nothing needed from him: folded (the stage tiles above say how many are where)
-  const going=g.going.length?`<details class="tk-done tk-going" id="tkGoingGroup"${meta.goingOpen||tk.goingOpen?' open':''} ontoggle="tk.goingOpen=this.open"><summary><span class="tk-done-title">In progress — nothing needed from you</span><span class="tk-done-count">${g.going.length}</span></summary><div class="tk-people">${g.going.map(renderTrialRow).join('')}</div></details>`:'';
+  // everyone running with nothing needed from him: folded while something needs him, open when nothing does
+  const going=g.going.length?`<details class="tk-done tk-going" id="tkGoingGroup"${meta.goingOpen||tk.goingOpen||(tk.goingOpen===undefined&&!g.needs.length)?' open':''} ontoggle="tk.goingOpen=this.open"><summary><span class="tk-done-title">In progress — nothing needed from you</span><span class="tk-done-count">${g.going.length}</span></summary><div class="tk-people">${g.going.map(renderTrialRow).join('')}</div></details>`:'';
   const done=g.done.length?`<details class="tk-done" id="tkDoneGroup"${meta.doneOpen?' open':''} ontoggle="trialsDoneToggle(this.open)"><summary><span class="tk-done-title">Done / not taken</span><span class="tk-done-count">${g.done.length}</span></summary><div class="tk-people">${g.done.map(renderTrialRow).join('')}</div></details>`:'';
   return tiles+appsHTML+needs+going+done+extra+add;
 }

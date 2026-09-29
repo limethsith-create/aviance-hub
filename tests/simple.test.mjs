@@ -190,6 +190,8 @@ test('where everyone is: one tile per stage with its count on top of Trials and 
   tk.stage = null;
   // running clients are folded, not a long open list
   assert.ok(html.includes('<details class="tk-done tk-going" id="tkGoingGroup"') && !html.includes('id="tkGoingGroup" open'));
+  // nothing needs him: the running clients show at once
+  { const calm = JSON.parse(JSON.stringify(hub)); (calm.stages || []).forEach((st) => (st.clients || []).forEach((c) => { c.todo = []; if (c.simple) c.simple.needsYou = false; })); const h2 = renderTrialList(calm, { now: NOW }); if (h2.includes('Nothing needs you right now')) assert.ok(h2.includes('id="tkGoingGroup" open'), 'open when nothing needs him'); }
   // Paying clients: its own add button (with the plan)
   const paying = renderTrialList(hub, { now: NOW }, true);
   assert.ok(paying.includes('onclick="openNewPayingClient()">+ Add a paying client yourself</button>'));
