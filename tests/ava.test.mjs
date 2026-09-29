@@ -282,7 +282,7 @@ test('voice: listens in en-US with live words, answers what was said, speaks the
   assert.ok(el('avaFab').classList.contains('listening'));
   const res = (text, isFinal) => { const r = [{ transcript: text }]; r.isFinal = isFinal; return r; };
   rec.onresult({ resultIndex: 0, results: [res('what needs', false)] });
-  assert.match(el('avaHeard').textContent, /what needs/, 'words shown live');
+  assert.match(el('avaHeardText').textContent, /what needs/, 'words shown live');
   rec.onresult({ resultIndex: 0, results: [res('what needs me today', true)] });
   rec.onend(); await tick(); await tick();
   assert.equal(AVA.listening, false);
@@ -359,4 +359,490 @@ test('one global script: ava.js declares no name another file already has; every
   assert.ok(mine.length > 50 && mine.every((n) => /^(ava|AVA)/.test(n)), mine.filter((n) => !/^(ava|AVA)/.test(n)).join(', '));
   // index.html: only the link, the mount and the script
   assert.ok(html.includes('<link rel="stylesheet" href="ava.css">') && html.includes('<div id="avaRoot" hidden></div>\n<script src="ava.js"></script>'));
+});
+
+/* ═════════════ Ava 2: the natural voice, talking to her, the smarter brain, Settings › Ava ═════════════
+   The natural voice runs ava-voice-worker.js for real — in a vm "worker" with a mocked kokoro-js module (the CDN and
+   the model are never fetched) — and plays into a fake AudioContext. The machine's /api/mc/ava/* routes are faked. */
+const workerSrc = fs.readFileSync(path.join(root, 'ava-voice-worker.js'), 'utf8');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function kokoroMock(opt = {}) {
+  const calls = [];
+  const mod = { KokoroTTS: { from_pretrained: async (id, o) => {
+    calls.push(['load', id, o.device, o.dtype]);
+    if (opt.fail || (opt.gpuFail && o.device === 'webgpu')) throw new Error('model blocked');
+    o.progress_callback && o.progress_callback({ status: 'progress', file: 'onnx/model_quantized.onnx', loaded: 46e6, total: 92e6 });
+    return { generate: async (text, g) => {
+      calls.push(['gen', text, g.voice]);
+      if (opt.slow) { await sleep(40); return { audio: new Float32Array(240), sampling_rate: 24000 }; }   // 40 ms for 0.01 s of speech
+      if (opt.genFail && /FAIL/.test(text)) throw new Error('synth failed');
+      if (opt.delay) await sleep(opt.delay);
+      return { audio: new Float32Array(Math.max(1, text.length * 1000)), sampling_rate: 24000 };
+    } };
+  } } };
+  return { calls, mod };
+}
+class FakeWorker {
+  constructor(url, o) {
+    FakeWorker.last = this; this.url = url; this.opts = o; this.sent = [];
+    const g = { postMessage: (m) => setTimeout(() => this.onmessage && this.onmessage({ data: m }), 0), avaVoiceImport: async (u) => { this.importUrl = u; return FakeWorker.mock.mod; }, navigator: FakeWorker.gpu ? { gpu: { requestAdapter: async () => FakeWorker.gpu } } : {} };
+    g.self = g; this.g = g; vm.createContext(g); vm.runInContext(workerSrc, g, { filename: 'ava-voice-worker.js' });
+  }
+  postMessage(m) { this.sent.push(m); setTimeout(() => this.g.onmessage({ data: m }), 0); }
+  terminate() { this.terminated = true; }
+}
+class FakeAC {
+  constructor() { FakeAC.last = this; this.state = 'running'; this.played = []; this.destination = {}; }
+  createBuffer(ch, len, rate) { return { duration: len / rate, length: len, sampleRate: rate, copyToChannel() {} }; }
+  createBufferSource() { const s = { connect() {}, start: () => { this.played.push(s); }, stop: () => { s.stopped = true; } }; return s; }
+  resume() { this.state = 'running'; }
+}
+function fakeSpeech() {
+  const spoken = []; const synth = { voices: [], speak: (u) => spoken.push(u), cancel() { synth.cancelled = (synth.cancelled || 0) + 1; }, getVoices: () => synth.voices, addEventListener() {} };
+  globalThis.SpeechSynthesisUtterance = function (t) { this.text = t; }; globalThis.speechSynthesis = synth;
+  return { spoken, synth };
+}
+function voiceReset() {
+  avaHush(); AVA.k = { state: 'idle', worker: null, device: null, dtype: null, loaded: 0, total: 0, rtf: null, err: null };
+  AVA.voicePref = null; AVA.handsFree = null; AVA.loopPaused = false; AVA.voice = null; AVA.ac = null; AVA.micGuided = false; AVA.retried = 0;
+  for (const k of [AVA_VOICE_KEY, AVA_HANDS_KEY, AVA_SLOW_KEY, AVA_MUTE_KEY]) localStorage.removeItem(k);
+  AVA.muted = false; AVA_AI.off = null; AVA_AI.offUntil = 0; AVA_AI.noted = false; FakeAC.last = null;
+}
+function voiceTeardown() {
+  avaClose(); voiceReset();
+  for (const k of ['Worker', 'AudioContext', 'speechSynthesis', 'SpeechSynthesisUtterance', 'webkitSpeechRecognition', 'SpeechRecognition']) delete globalThis[k];
+  FakeWorker.gpu = null;
+}
+async function until(fn, ms = 1500) { const t = Date.now(); while (!fn()) { if (Date.now() - t > ms) throw new Error('timed out waiting'); await sleep(5); } }
+
+test('natural voice: loads lazily when Ava opens (one-time download line with %), browser voice meanwhile, then Kokoro sentence by sentence in order', async () => {
+  setup('owner'); voiceReset();
+  const { spoken } = fakeSpeech();
+  FakeWorker.mock = kokoroMock(); globalThis.Worker = FakeWorker; globalThis.AudioContext = FakeAC;
+  try {
+    assert.equal(avaKokoroState(), 'idle'); assert.equal(AVA.k.worker, null);
+    avaOpen({ listen: false, quiet: true });
+    const w = FakeWorker.last; assert.equal(w.url, 'ava-voice-worker.js'); assert.deepEqual(w.opts, { type: 'module' });
+    assert.equal(AVA.k.state, 'loading'); assert.deepEqual(w.sent[0], { type: 'load', device: 'wasm' });
+    assert.equal(el('avaVload').hidden, false);
+    assert.match(el('avaVloadText').textContent, /^Getting Ava's natural voice ready \(one-time download, about 115 MB\)…/);
+    // still loading: the browser's voice answers, one sentence per utterance
+    avaSpeak('Opening Trials. Three need you.');
+    assert.deepEqual(spoken.map((u) => u.text), ['Opening Trials.', 'Three need you.']); assert.equal(spoken[0].rate, 1.03);
+    await until(() => AVA.k.state === 'ready');
+    assert.equal(w.importUrl, 'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js');
+    assert.deepEqual(FakeWorker.mock.calls[0], ['load', 'onnx-community/Kokoro-82M-v1.0-ONNX', 'wasm', 'q8']);
+    assert.equal(AVA.k.dtype, 'q8'); assert.ok(AVA.k.rtf < 1.2); assert.equal(el('avaVload').hidden, true);
+    assert.equal(AVA.k.loaded, 46e6); assert.equal(AVA.k.total, 92e6);
+    // ready: Kokoro, every sentence asked for at once (made while the first plays), played strictly in order
+    spoken.length = 0;
+    const said = 'Hi Limeth, I\'m Ava. Lakeview IT has sent 412 emails. They\'re at step 4 of 5.';
+    assert.equal(avaSpeak(said), true); assert.equal(AVA.say.engine, 'kokoro'); assert.equal(spoken.length, 0);
+    const asks = w.sent.filter((m) => m.type === 'speak'); assert.deepEqual(asks.map((m) => m.text), avaChunks(said)); assert.ok(asks.every((m) => m.voice === 'af_heart'));
+    await until(() => FakeAC.last && FakeAC.last.played.length === 1);
+    assert.equal(AVA.speaking, true);
+    const ac = FakeAC.last; await sleep(20); assert.equal(ac.played.length, 1, 'the next waits for the first to end');
+    ac.played[0].onended(); await until(() => ac.played.length === 2);
+    ac.played[1].onended(); await until(() => ac.played.length === 3);
+    ac.played[2].onended(); assert.equal(AVA.speaking, false); assert.equal(AVA.say, null);
+    // the voice picked is the voice made
+    avaSetVoice('af_nicole'); avaSpeak('Hello there.'); await sleep(5);
+    assert.equal(w.sent.filter((m) => m.type === 'speak').pop().voice, 'af_nicole'); assert.equal(localStorage.getItem(AVA_VOICE_KEY), 'af_nicole');
+  } finally { voiceTeardown(); }
+});
+
+test('natural voice: WebGPU when the browser has a GPU (fp32, ~350 MB), falls back to WASM q8; a failed load, a failed sentence and a slow computer all use the browser voice', async () => {
+  setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); globalThis.Worker = FakeWorker; globalThis.AudioContext = FakeAC;
+  const nav = globalThis.navigator;
+  try {
+    // a GPU: asked for, fp32; the line says so
+    Object.defineProperty(globalThis, 'navigator', { value: Object.assign({}, nav, { gpu: {} }), configurable: true });
+    FakeWorker.gpu = { name: 'gpu' }; FakeWorker.mock = kokoroMock();
+    avaVoiceWarm(); assert.equal(FakeWorker.last.sent[0].device, 'webgpu'); assert.match(avaVoiceLoadingLine().text, /about 350 MB/);
+    await until(() => AVA.k.state === 'ready'); assert.deepEqual([AVA.k.device, AVA.k.dtype], ['webgpu', 'fp32']);
+    // a GPU that can't run it: the CPU model
+    voiceReset(); FakeWorker.gpu = { name: 'gpu' }; FakeWorker.mock = kokoroMock({ gpuFail: true });
+    avaVoiceWarm(); await until(() => AVA.k.state === 'ready'); assert.deepEqual([AVA.k.device, AVA.k.dtype], ['wasm', 'q8']);
+    assert.deepEqual(FakeWorker.mock.calls.filter((c) => c[0] === 'load').map((c) => c[2]), ['webgpu', 'wasm']);
+    // navigator.gpu but no adapter: straight to the CPU model (no 330 MB download that can't run)
+    voiceReset(); FakeWorker.gpu = null; FakeWorker.mock = kokoroMock();
+    avaVoiceWarm(); await until(() => AVA.k.state === 'ready'); assert.deepEqual(FakeWorker.mock.calls.filter((c) => c[0] === 'load').map((c) => c[2]), ['wasm']);
+    assert.equal(AVA.k.device, 'wasm');
+    Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true });
+    // the model can't load: failed → the browser voice, and it says so
+    voiceReset(); FakeWorker.mock = kokoroMock({ fail: true });
+    avaVoiceWarm(); await until(() => AVA.k.state === 'failed');
+    assert.match(AVA.k.err, /model blocked/); assert.match(avaVoiceLabel(), /didn't load — using the browser voice/);
+    spoken.length = 0; avaSpeak('Still here.'); assert.equal(AVA.say.engine, 'browser'); assert.equal(spoken[0].text, 'Still here.');
+    // one sentence fails half-way: that one and the rest in the browser voice
+    voiceReset(); FakeWorker.mock = kokoroMock({ genFail: true });
+    avaVoiceWarm(); await until(() => AVA.k.state === 'ready');
+    spoken.length = 0; avaSpeak('First one works. This one will FAIL today. And the last one.');
+    await until(() => spoken.length > 0);
+    assert.deepEqual(spoken.map((u) => u.text), ['This one will FAIL today.', 'And the last one.']);
+    // too slow here (more than 1.2 s per second of speech): the browser voice, remembered — no download next visit
+    voiceReset(); FakeWorker.mock = kokoroMock({ slow: true });
+    avaVoiceWarm(); await until(() => AVA.k.state === 'slow');
+    assert.ok(AVA.k.rtf > 1.2); assert.equal(localStorage.getItem(AVA_SLOW_KEY), '1'); assert.ok(FakeWorker.last.terminated);
+    assert.match(avaVoiceLabel(), /too slow for the natural voice/);
+    const before = FakeWorker.last; AVA.k.state = 'idle'; AVA.k.worker = null; assert.equal(avaVoiceWarm(), false); assert.equal(FakeWorker.last, before); assert.equal(AVA.k.state, 'slow');
+    // picking a natural voice by hand tries again
+    FakeWorker.mock = kokoroMock(); avaSetVoice('af_heart'); assert.notEqual(FakeWorker.last, before); await until(() => AVA.k.state === 'ready');
+    // "Browser voice": never loads, remembered (storage may throw)
+    voiceReset(); avaSetVoice('browser'); assert.equal(avaKokoroState(), 'off'); const n = FakeWorker.last; avaOpen({ quiet: true }); assert.equal(FakeWorker.last, n);
+    const ls = globalThis.localStorage; globalThis.localStorage = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); }, removeItem() {} };
+    try { AVA.voicePref = null; assert.equal(avaVoicePref(), 'af_heart'); avaSetVoice('bf_emma'); assert.equal(avaVoicePref(), 'bf_emma'); } finally { globalThis.localStorage = ls; }
+  } finally { Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true }); voiceTeardown(); }
+});
+
+test('browser voice: the most natural one ("Natural"/"Neural"/"Online", then Google US English, Samantha, Ava), never a male one first; no Worker (or a phone) = no download', () => {
+  setup('owner'); voiceReset(); const { synth } = fakeSpeech();
+  try {
+    synth.voices = [{ name: 'Microsoft David - English (United States)', lang: 'en-US' }, { name: 'Samantha', lang: 'en-US' }, { name: 'Google US English', lang: 'en-US' }, { name: 'Microsoft Aria Online (Natural) - English (United States)', lang: 'en-US' }, { name: 'Google Deutsch', lang: 'de-DE' }];
+    assert.match(avaPickVoice().name, /Aria Online \(Natural\)/);
+    AVA.voice = null; synth.voices = synth.voices.filter((v) => !/Aria/.test(v.name)); assert.equal(avaPickVoice().name, 'Google US English');
+    AVA.voice = null; synth.voices = [{ name: 'Alex', lang: 'en-US' }, { name: 'Ava (Premium)', lang: 'en-US' }, { name: 'Samantha', lang: 'en-US' }]; assert.equal(avaPickVoice().name, 'Ava (Premium)');
+    // no Worker: unsupported, nothing to load, the browser's voice
+    assert.equal(avaKokoroSupported(), false); assert.equal(avaVoiceWarm(), false); assert.equal(avaKokoroState(), 'unsupported');
+    // a phone: never downloads it
+    globalThis.Worker = FakeWorker; globalThis.AudioContext = FakeAC; globalThis.matchMedia = () => ({ matches: true });
+    assert.equal(avaKokoroSupported(), false); assert.match(avaVoiceLabel(), /phone’s own voice/);
+  } finally { delete globalThis.matchMedia; voiceTeardown(); }
+});
+
+test('sentences: said in pieces — sentences, a long one cut at a comma, the first kept short, no symbols read out', () => {
+  assert.deepEqual(avaChunks('Opening Trials.'), ['Opening Trials.']);
+  assert.deepEqual(avaChunks("Hi Limeth! I'm Ava. Ask me anything?"), ['Hi Limeth!', "I'm Ava.", 'Ask me anything?']);
+  assert.deepEqual(avaChunks('Settings › Keys — paste it once.'), ['Settings, Keys, paste it once.']);
+  assert.deepEqual(avaChunks('You received $1,500.50 this month.'), ['You received $1,500.50 this month.'], 'numbers are not cut');
+  const long = '3 things need you: Fern IT — a new application to read; eCreek IT — say yes to their call time; Bright Dental — buy the domain and the two inboxes, then paste the logins.';
+  const parts = avaChunks(long);
+  assert.ok(parts.length >= 2 && parts[0].length <= 90, JSON.stringify(parts)); assert.ok(parts.every((p) => p.length <= 180));
+  assert.equal(parts.join(' ').replace(/\s+/g, ' '), avaSpeakable(long));
+  assert.deepEqual(avaChunks(''), []); assert.deepEqual(avaChunks('Done. OK'), ['Done. OK'], 'a scrap goes with the piece before');
+});
+
+test('barge-in: a mic tap or closing stops her at once — the sound, the browser queue and the sentences still being made', async () => {
+  setup('owner'); voiceReset(); const { synth } = fakeSpeech(); globalThis.Worker = FakeWorker; globalThis.AudioContext = FakeAC; FakeWorker.mock = kokoroMock();
+  let rec; globalThis.webkitSpeechRecognition = function () { rec = this; this.start = () => { this.started = true; }; this.stop = () => {}; };
+  try {
+    avaOpen({ quiet: true }); await until(() => AVA.k.state === 'ready');
+    avaSpeak('One. Two is here. Three is here too.'); await until(() => FakeAC.last && FakeAC.last.played.length === 1);
+    const src = FakeAC.last.played[0]; const gen = AVA.say.gen; const c0 = synth.cancelled || 0;
+    assert.equal(avaMicTap(), true, 'the tap listens');
+    assert.ok(src.stopped, 'the sound stops'); assert.equal(AVA.speaking, false); assert.ok(synth.cancelled > c0);
+    assert.ok(FakeWorker.last.sent.some((m) => m.type === 'cancel' && m.gen === gen), 'the worker drops the rest'); assert.ok(rec.started);
+    await sleep(20); assert.equal(FakeAC.last.played.length, 1, 'nothing more is played');
+    avaStopListening({ user: true });
+    avaSpeak('Another answer. With two sentences.'); await until(() => FakeAC.last.played.length === 2);
+    const s2 = FakeAC.last.played[1]; avaClose(); assert.ok(s2.stopped); assert.equal(AVA.speaking, false);
+    assert.equal(avaSpeak(''), false); AVA.muted = true; assert.equal(avaSpeak('quiet'), false); AVA.muted = false;
+  } finally { voiceTeardown(); }
+});
+
+test('talking to her: live words in a big listening strip, sent by itself when you stop, and hands-free listens again after she answers until "thanks Ava"', async () => {
+  setup('owner'); voiceReset(); const { spoken } = fakeSpeech();
+  const recs = []; globalThis.webkitSpeechRecognition = function () { recs.push(this); this.start = () => { this.started = true; }; this.stop = () => { this.stopped = true; this.onend && this.onend(); }; };
+  const res = (text, isFinal) => { const r = [{ transcript: text }]; r.isFinal = isFinal; return r; };
+  try {
+    avaOpen({ listen: true }); let rec = recs.pop();
+    assert.ok(rec.started); assert.equal(el('avaHeard').classList.contains('show'), true); assert.ok(el('avaPanel').classList.contains('listening'));
+    assert.equal(el('avaHeardText').textContent, 'Listening… speak now'); assert.equal(el('avaSub').textContent, 'Listening…');
+    // they stop talking: sent without waiting for the browser (interim words only, 1.4 s of quiet)
+    rec.onresult({ resultIndex: 0, results: [res('open the calendar', false)] });
+    assert.equal(el('avaHeardText').textContent, '“open the calendar”');
+    await sleep(1450); assert.ok(rec.stopped); await tick();
+    assert.equal(currentView, 'calendar'); assert.equal(AVA.listening, false);
+    // hands-free on: after she finishes speaking she listens again by herself
+    spoken[spoken.length - 1].onend();
+    avaSetHandsFree(true); assert.equal(localStorage.getItem(AVA_HANDS_KEY), '1'); assert.ok(el('avaHands').classList.contains('on'));
+    rec = recs.pop(); assert.ok(rec && rec.started, 'turning it on starts listening');
+    rec.onresult({ resultIndex: 0, results: [res('how many trials are running', true)] }); rec.onend(); await tick(); await tick();
+    assert.ok(spoken.some((u) => /trials are going/.test(u.text)));
+    assert.equal(recs.length, 0, 'not while she is speaking');
+    spoken[spoken.length - 1].onend(); await sleep(350);
+    rec = recs.pop(); assert.ok(rec && rec.started, 'listening again after the answer');
+    // "thanks Ava" ends the loop
+    spoken.length = 0; rec.onresult({ resultIndex: 0, results: [res('thanks Ava', true)] }); rec.onend(); await tick();
+    assert.equal(AVA.loopPaused, true); assert.match(AVA.log[AVA.log.length - 1].text, /I'll stop listening/);
+    spoken[spoken.length - 1].onend(); await sleep(350); assert.equal(recs.length, 0, 'no more listening');
+    // a mic tap while listening stops and pauses the loop; the next tap starts it again
+    avaMicTap(); rec = recs.pop(); assert.equal(AVA.loopPaused, false); avaMicTap(); assert.equal(AVA.loopPaused, true); assert.ok(rec.stopped);
+    // muted + hands-free: she listens again as soon as the answer is shown
+    avaSetMute(true); avaMicTap(); rec = recs.pop(); rec.onresult({ resultIndex: 0, results: [res('open trials', true)] }); rec.onend(); await tick(); await sleep(350);
+    assert.ok(recs.pop(), 'listening again (muted)');
+  } finally { avaSetMute(false); voiceTeardown(); }
+});
+
+test('mic problems: blocked → a 3-step guide (once) and typing still works; nothing heard / network → one quiet retry, then a note; no microphone; aborted says nothing', async () => {
+  setup('owner'); voiceReset();
+  const recs = []; globalThis.webkitSpeechRecognition = function () { recs.push(this); this.start = () => { this.started = true; }; this.stop = () => {}; };
+  try {
+    avaOpen({ quiet: true });
+    avaMicTap(); let rec = recs.pop(); rec.onerror({ error: 'not-allowed' }); rec.onend();
+    const g = AVA.log[AVA.log.length - 1]; assert.match(g.text, /microphone is blocked for this site/); assert.deepEqual(g.guide, AVA_MIC_GUIDE);
+    assert.match(el('avaLog').innerHTML, /<ol class="ava-guide"><li>Click the lock icon at the left of the address bar\.<\/li><li>Set Microphone to Allow\.<\/li><li>Reload the page, then tap the mic again\.<\/li><\/ol>/);
+    assert.match(el('avaNote').textContent, /microphone is blocked/); assert.equal(recs.length, 0, 'no retry when blocked');
+    const n = AVA.log.length; avaMicTap(); rec = recs.pop(); rec.onerror({ error: 'service-not-allowed' }); rec.onend(); assert.equal(AVA.log.length, n, 'the guide shows once');
+    // already denied (Permissions API): the guide before anything else
+    AVA.micGuided = false; const nav = globalThis.navigator;
+    Object.defineProperty(globalThis, 'navigator', { value: Object.assign({}, nav, { permissions: { query: async () => ({ state: 'denied' }) } }), configurable: true });
+    try { assert.equal(await avaMicCheck(), 'denied'); assert.deepEqual(AVA.log[AVA.log.length - 1].guide, AVA_MIC_GUIDE); } finally { Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true }); }
+    // nothing heard: one retry by itself, then a note
+    avaMicTap(); rec = recs.pop(); rec.onerror({ error: 'no-speech' }); rec.onend();
+    rec = recs.pop(); assert.ok(rec && rec.started, 'tried again once'); rec.onerror({ error: 'no-speech' }); rec.onend();
+    assert.equal(recs.length, 0); assert.match(el('avaNote').textContent, /I didn't hear anything/);
+    // network: one retry, then a note
+    avaMicTap(); rec = recs.pop(); rec.onerror({ error: 'network' }); rec.onend(); rec = recs.pop(); assert.ok(rec.started); rec.onerror({ error: 'network' }); rec.onend();
+    assert.match(el('avaNote').textContent, /needs the internet/);
+    avaMicTap(); rec = recs.pop(); rec.onerror({ error: 'audio-capture' }); rec.onend(); assert.match(el('avaNote').textContent, /can't find a microphone/); assert.equal(recs.length, 0);
+    avaNote(''); avaMicTap(); rec = recs.pop(); rec.onerror({ error: 'aborted' }); rec.onend(); assert.equal(el('avaNote').textContent, ''); assert.equal(recs.length, 0);
+    // a start that throws
+    globalThis.webkitSpeechRecognition = function () { this.start = () => { throw new Error('busy'); }; };
+    assert.equal(avaMicTap(), false); assert.equal(AVA.listening, false); assert.match(el('avaNote').textContent, /tap the mic again/);
+  } finally { voiceTeardown(); }
+});
+
+/* ───────────── the smarter brain ───────────── */
+function aiFetch(handler) {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url); const body = init && init.body ? JSON.parse(init.body) : null; calls.push({ url: u, method: (init && init.method) || 'GET', body });
+    const r = handler(u.replace(/^https?:\/\/[^/]+/, ''), body, init) || { status: 404, body: { error: 'Not found' } };
+    return { ok: r.status >= 200 && r.status < 300, status: r.status, text: async () => JSON.stringify(r.body) };
+  };
+  return calls;
+}
+const noFetch = () => { globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); }; };
+
+test('fast path: places, clients, numbers and the guide answer at once from the hub — the AI is not called', async () => {
+  setup('owner'); voiceReset();
+  const calls = aiFetch(() => ({ status: 200, body: { reply: 'AI', actions: [], brain: 'groq' } }));
+  try {
+    for (const q of ['open trials', 'how many emails did Lakeview send', 'what needs me today', 'how do I give a client access', 'add a trial client']) {
+      const r = await avaAsk(q); assert.ok(!r.ai, q); AVA.pending = null;
+    }
+    assert.equal(calls.filter((c) => /\/api\/mc\/ava\/chat$/.test(c.url)).length, 0);
+  } finally { noFetch(); voiceTeardown(); }
+});
+
+test('the smarter brain: what the local brain is unsure of goes to POST /api/mc/ava/chat with the last turns and the page (emails taken out); "answered by Groq · 0.9 s"', async () => {
+  setup('owner'); voiceReset(); render('trials'); openTrial('lakeview-it');
+  const calls = aiFetch((p, body) => p === '/api/mc/ava/chat' ? { status: 200, body: { reply: 'Lakeview replies are mostly questions about price.', actions: [], brain: 'groq', tried: ['groq'] } } : null);
+  try {
+    AVA.log = []; await avaAsk('open trials'); openTrial('lakeview-it');
+    const r = await avaAsk('summarise what dana@lakeview.com asked about pricing');
+    assert.equal(r.ai, true); assert.equal(r.say, 'Lakeview replies are mostly questions about price.');
+    assert.match(r.meta, /^answered by Groq · \d+\.\d s$/);
+    const c = calls.find((x) => x.url.endsWith('/api/mc/ava/chat')); assert.equal(c.method, 'POST');
+    assert.deepEqual(c.body.page, { view: 'trial', clientId: 'lakeview-it', tab: null });
+    const last = c.body.messages[c.body.messages.length - 1]; assert.deepEqual(last, { role: 'user', content: 'summarise what [email] asked about pricing' });
+    assert.ok(c.body.messages.some((m) => m.role === 'assistant' && /^Opening Trials/.test(m.content)));
+    assert.ok(c.body.messages.length <= 10);
+    assert.match(el('avaLog').innerHTML, /<small class="ava-meta">answered by Groq · \d+\.\d s<\/small>/);
+    // a thinking state while it waits
+    let seen = null; globalThis.fetch = async () => { seen = { busy: AVA.busy, sub: el('avaSub').textContent, dots: /ava-dots/.test(el('avaLog').innerHTML) }; return { ok: true, status: 200, text: async () => JSON.stringify({ reply: 'ok', brain: 'cerebras' }) }; };
+    const r2 = await avaAsk('what is the meaning of life'); assert.deepEqual(seen, { busy: true, sub: 'Thinking…', dots: true }); assert.match(r2.meta, /Cerebras/);
+  } finally { noFetch(); voiceTeardown(); }
+});
+
+test('no key yet (503 needsKeys) / not updated (404) / limit (429) / down: the local answer, and once a line about Settings › Keys with a button (a team member gets no button)', async () => {
+  setup('owner'); voiceReset();
+  let mode = 'keys';
+  const calls = aiFetch((p) => p !== '/api/mc/ava/chat' ? null : mode === 'keys' ? { status: 503, body: { error: 'No brain has a key', needsKeys: true } } : mode === 'limit' ? { status: 429, body: { error: 'Daily cap reached' } } : mode === 'down' ? { status: 502, body: { error: 'No brain answered', tried: ['groq', 'cerebras'] } } : { status: 404, body: {} });
+  try {
+    AVA.log = [];
+    let r = await avaAsk('purple elephant banana');
+    assert.equal(r.unknown, true, 'the local answer'); assert.equal(r.aiNote, 'keys');
+    const note = AVA.log[AVA.log.length - 1]; assert.equal(note.notice, true);
+    assert.equal(note.text, "My smarter brain isn't switched on yet — add a free key in Settings › Keys.");
+    assert.match(el('avaLog').innerHTML, /ava-msg ava notice/); assert.match(el('avaLog').innerHTML, />Open Settings › Keys</);
+    note.actions[0].run(); assert.equal(currentView, 'settings'); assert.equal(tk.setOpen.keys, true);
+    // said once; and not asked again for a while
+    const chats = () => calls.filter((c) => c.url.endsWith('/api/mc/ava/chat')).length;
+    const n = chats(); r = await avaAsk('orange giraffe'); assert.ok(!r.aiNote); assert.equal(chats(), n, 'off for a few minutes: no call');
+    // the guide, less sure: the AI first, the guide's answer when it is off
+    AVA_AI.off = null; AVA_AI.offUntil = 0; r = await avaAsk('tell me something about bounce'); assert.ok(r.kb || r.unknown);
+    // 404: the system isn't updated
+    AVA_AI.off = null; AVA_AI.offUntil = 0; AVA_AI.noted = false; mode = 'missing'; r = await avaAsk('purple elephant'); assert.equal(r.aiNote, 'missing'); assert.match(AVA.log[AVA.log.length - 1].text, /your system needs an update/);
+    // 429: the limit
+    AVA_AI.off = null; AVA_AI.offUntil = 0; mode = 'limit'; r = await avaAsk('purple elephant'); assert.equal(r.aiNote, 'limit'); assert.match(AVA.log[AVA.log.length - 1].text, /reached its limit/);
+    // 502 / no internet: the local answer, quietly, and asked again next time
+    AVA_AI.off = null; AVA_AI.offUntil = 0; AVA_AI.noted = false; mode = 'down'; r = await avaAsk('purple elephant'); assert.equal(r.unknown, true); assert.ok(!r.aiNote);
+    const m = chats(); await avaAsk('purple elephant'); assert.equal(chats(), m + 1);
+    noFetch(); r = await avaAsk('purple elephant'); assert.equal(r.unknown, true);
+    // a team member: no button into Settings
+    setup('team'); voiceReset(); mode = 'keys'; aiFetch((p) => p === '/api/mc/ava/chat' ? { status: 503, body: { error: 'x', needsKeys: true } } : null);
+    AVA.log = []; await avaAsk('purple elephant banana');
+    const tn = AVA.log[AVA.log.length - 1]; assert.match(tn.text, /the owner can add a free key/); assert.ok(!tn.actions);
+  } finally { noFetch(); voiceTeardown(); asOwner(); }
+});
+
+test('AI actions: navigate runs when you asked to go somewhere, else it is a button; a team member never gets a place that is the owner\'s', async () => {
+  setup('owner'); voiceReset();
+  let actions = [];
+  aiFetch((p) => p === '/api/mc/ava/chat' ? { status: 200, body: { reply: 'Here you go.', actions, brain: 'groq' } } : null);
+  try {
+    render('trials');
+    actions = [{ type: 'navigate', view: 'client', id: 'lakeview-it', tab: 'conversations' }];
+    let r = await avaAsk('take me to where people wrote back to us yesterday');
+    assert.ok(r.auto || currentView === 'clientSystem'); assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'conversations');
+    render('trials'); actions = [{ type: 'navigate', view: 'calendar' }];
+    r = await avaAsk('purple elephant who wrote something'); assert.ok(!r.auto); assert.equal(currentView, 'trials');
+    assert.equal(r.actions[0].label, 'Open Calendar'); r.actions[0].run(); assert.equal(currentView, 'calendar');
+    const nav = (a, c) => avaNavAct(a, Object.assign(ctx(), c || {}));
+    assert.equal(nav({ view: 'settings', tab: 'keys' }).label, 'Open Settings › Keys');
+    assert.equal(nav({ view: 'mystats' }).label, 'Open My stats'); assert.equal(nav({ view: 'activity' }).label, 'Open Activity'); assert.equal(nav({ view: 'behind' }).label, 'Open Behind the scenes');
+    assert.equal(nav({ view: 'client', id: 'lakeview-it' }).label, 'Open Lakeview IT'); assert.equal(nav({ view: 'client', id: 'lakeview-it', tab: 'sent' }).label, "Open Lakeview IT's emails sent");
+    assert.equal(nav({ view: 'client' }), null); assert.equal(nav({ view: 'nowhere' }), null);
+    for (const a of [{ view: 'settings' }, { view: 'activity' }, { view: 'client', id: 'lakeview-it', tab: 'money' }, { view: 'client', id: 'lakeview-it', tab: 'setup' }]) assert.equal(nav(a, { owner: false }), null, JSON.stringify(a));
+    assert.ok(nav({ view: 'client', id: 'lakeview-it', tab: 'conversations' }, { owner: false }));
+  } finally { noFetch(); voiceTeardown(); }
+});
+
+test('AI confirm cards: "Ava wants to: …" — every action runs only on Do it (or a spoken yes), with the hub\'s own functions; No does nothing; owner-only cards never reach a team member', async () => {
+  setup('owner'); voiceReset();
+  const ran = []; const saved = {};
+  const spy = (name) => { saved[name] = globalThis[name]; globalThis[name] = (...a) => { ran.push([name, ...a]); }; };
+  ['openNewTrialClient', 'openNewPayingClient', 'openTrial', 'trialsTodoAction', 'tkOpenSystem', 'demoAction'].forEach(spy);
+  let actions = [];
+  const calls = aiFetch((p, body) => {
+    if (p === '/api/mc/ava/chat') return { status: 200, body: { reply: 'I can do that.', actions, brain: 'groq' } };
+    if (p === '/api/mc/team') return { status: 200, body: { ok: true } };
+    if (p === '/api/mc/ava/requests') return { status: 200, body: { requests: [] } };
+    return null;
+  });
+  const cases = [
+    ['open_add_trial', {}, ['openNewTrialClient']],
+    ['open_add_paid', {}, ['openNewPayingClient']],
+    ['open_client', { id: 'lakeview-it' }, ['openTrial', 'lakeview-it']],
+    ['mark_todo_seen', { id: 'lakeview-it', todoId: 'alert:42' }, ['trialsTodoAction', 'alert:42']],
+    ['give_access', { id: 'lakeview-it' }, ['tkOpenSystem', 'lakeview-it', 'setup', 'access']],
+    ['load_test_run', {}, ['demoAction', 'load']],
+    ['remove_test_run', {}, ['demoAction', 'remove']],
+  ];
+  try {
+    for (const [name, args, want] of cases) {
+      actions = [{ type: 'confirm', label: 'Do the thing: ' + name, name, args }];
+      AVA.log = []; ran.length = 0;
+      const r = await avaAsk('purple elephant dancing ' + cases.findIndex((c) => c[0] === name));
+      assert.equal(r.cards.length, 1, name); assert.deepEqual(ran, [], name + ': nothing before the click');
+      assert.match(el('avaLog').innerHTML, new RegExp('<small>Ava wants to</small><b>Do the thing: ' + name + '</b>'));
+      assert.match(el('avaLog').innerHTML, /onclick="avaCard\(0,1\)">Do it<\/button><button type="button" class="ava-act" onclick="avaCard\(0,0\)">No</);
+      avaCard(0, 1); assert.deepEqual(ran[0], want, name); assert.equal(r.cards[0].state, 'done');
+      avaCard(0, 1); assert.equal(ran.length, 1, name + ': once only');
+      assert.match(el('avaLog').innerHTML, /<p class="ava-card-state">Done\.<\/p>/);
+    }
+    // No: nothing runs
+    actions = [{ type: 'confirm', label: 'Open the add form', name: 'open_add_trial', args: {} }]; ran.length = 0; AVA.log = [];
+    await avaAsk('purple elephant'); avaCard(0, 0); assert.deepEqual(ran, []); assert.match(el('avaLog').innerHTML, /Okay, I won’t\./);
+    // a spoken "yes" right after runs the card
+    AVA.log = []; await avaAsk('purple elephant'); const y = await avaAsk('yes'); assert.ok(y.auto); y.auto.run(); assert.deepEqual(ran, [['openNewTrialClient']]);
+    // set my status / a change request: posted to the machine
+    actions = [{ type: 'confirm', label: 'Set your status', name: 'set_my_status', args: { text: 'Calling Lakeview' } }, { type: 'confirm', label: 'Send a request', name: 'add_change_request', args: { text: 'A bigger mic button' } }];
+    AVA.log = []; const r = await avaAsk('purple elephant'); assert.equal(r.cards.length, 2);
+    avaCard(0, 1); avaCard(1, 1); await tick(); await tick();
+    assert.deepEqual(calls.find((c) => c.url.endsWith('/api/mc/team') && c.method === 'POST').body, { action: 'status', text: 'Calling Lakeview' });
+    assert.deepEqual(calls.find((c) => c.url.endsWith('/api/mc/ava/requests') && c.method === 'POST').body, { action: 'add', text: 'A bigger mic button' });
+    // unknown names / missing args are dropped
+    actions = [{ type: 'confirm', label: 'Delete everything', name: 'delete_all', args: {} }, { type: 'confirm', label: 'Open', name: 'open_client', args: {} }];
+    assert.equal((await avaAsk('purple elephant')).cards.length, 0);
+    // a team member: owner-only cards never shown; their own status is fine
+    setup('team'); voiceReset();
+    actions = cases.map(([name, args]) => ({ type: 'confirm', label: name, name, args })).concat([{ type: 'confirm', label: 'status', name: 'set_my_status', args: { text: 'x' } }]);
+    const t = await avaAsk('purple elephant'); assert.deepEqual(t.cards.map((c) => c.name), ['open_client', 'set_my_status']);
+    // and even a forged owner-only card does nothing for them
+    ran.length = 0; assert.equal(avaCardDo({ kind: 'confirm', name: 'load_test_run', args: {} }, true), false); assert.deepEqual(ran, []);
+  } finally { Object.assign(globalThis, saved); noFetch(); voiceTeardown(); asOwner(); }
+});
+
+test('AI drafts: a card with the text and Copy (the clipboard, a "Copied" toast); drafts are shown, not read out', async () => {
+  setup('owner'); voiceReset(); const { spoken } = fakeSpeech();
+  aiFetch((p) => p === '/api/mc/ava/chat' ? { status: 200, body: { reply: 'Here is a draft.', actions: [{ type: 'draft', title: 'Reply to Dana', text: 'Hi Dana,\nThanks for the note — Tuesday works.' }], brain: 'groq' } } : null);
+  const clip = []; const nav = globalThis.navigator;
+  Object.defineProperty(globalThis, 'navigator', { value: Object.assign({}, nav, { clipboard: { writeText: async (t) => { clip.push(t); } } }), configurable: true });
+  try {
+    AVA.log = []; const r = await avaAsk('draft a reply to dana saying tuesday works');
+    assert.equal(r.cards[0].kind, 'draft');
+    assert.match(el('avaLog').innerHTML, /<div class="ava-card draft"><div class="ava-card-head"><b>Reply to Dana<\/b><button type="button" class="ava-act" onclick="avaCopy\(0\)">Copy<\/button><\/div><div class="ava-draft">Hi Dana,\nThanks for the note — Tuesday works\.<\/div>/);
+    assert.deepEqual(spoken.map((u) => u.text), ['Here is a draft.']);
+    assert.equal(await avaCopy(0), true); assert.deepEqual(clip, ['Hi Dana,\nThanks for the note — Tuesday works.']); assert.match(el('toast').innerHTML, /Copied/);
+    assert.match(el('avaLog').innerHTML, />Copied</);
+  } finally { Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true }); noFetch(); voiceTeardown(); }
+});
+
+/* ───────────── Settings › Ava ───────────── */
+test('Settings › Ava: brains (ready / needs a key / last error), Test Ava, Settings › Keys, the voice, the requests with Done, privacy — and every loading / missing / error state', async () => {
+  setup('owner'); voiceReset();
+  const S = (c) => avaRenderSet(Object.assign({ status: {}, reqs: {}, test: {}, voice: 'af_heart', kokoro: 'idle' }, c));
+  // loading, missing, error
+  assert.match(S({}).body, /Checking Ava’s brains…/); assert.equal(S({}).state, '');
+  let m = S({ status: { missing: true }, reqs: { missing: true } });
+  assert.match(m.state, /Not available yet/); assert.match(m.body, /hasn't been updated for Ava's smarter brain yet/); assert.match(m.body, /<button type="button" class="btn" disabled onclick="avaTest\(\)">Test Ava/);
+  assert.match(S({ status: { err: 'Down.' } }).body, /Down\. <button type="button" class="tk-textbtn" onclick="avaSetRetry\(\)">Try again/);
+  // brains
+  const brains = [{ id: 'groq', name: 'Groq', ready: true, model: 'llama-3.3-70b', lastOkAt: new Date(Date.now() - 120e3).toISOString() }, { id: 'cerebras', name: 'Cerebras', ready: false, model: 'llama-4', lastError: 'no key' }, { id: 'gemini', name: 'Gemini', ready: false }];
+  const on = S({ status: { data: { brains, ready: true } } });
+  assert.match(on.state, /pill green">On · Groq</);
+  assert.match(on.body, /<b>Groq<\/b><small>llama-3\.3-70b<\/small>/); assert.match(on.body, /pill green">Ready</); assert.match(on.body, /Last answered/); assert.match(on.body, /class="tk-red">no key</);
+  assert.match(on.body, /onclick="openSettings\('keys'\)">Open Settings › Keys</);
+  assert.match(S({ status: { data: { brains: brains.map((b) => Object.assign({}, b, { ready: false })), ready: false } } }).state, /Needs a key/);
+  // the voice picker + privacy
+  assert.match(on.body, /<select id="avaSetVoice" onchange="avaSetVoice\(this.value\)"><option value="af_heart" selected>Heart — warm and natural<\/option>/);
+  assert.match(on.body, /<option value="browser">The browser's own voice<\/option>/); assert.match(on.body, /onclick="avaVoiceTest\(\)">Play a sample/);
+  assert.ok(on.body.includes("Your voice is turned into text by your browser (Chrome uses Google). Ava's AI only uses services that don't train on your data, and never sends your prospects' names or emails."));
+  // requests
+  const reqs = [{ id: 'r1', at: '2026-09-28T10:00:00Z', by: 'Nimal Perera', text: 'Read the reply bot rules out loud', status: 'open' }, { id: 'r2', at: '2026-09-20T10:00:00Z', by: 'Limeth', text: 'Old one', status: 'done', doneAt: '2026-09-21T10:00:00Z' }];
+  const rq = S({ status: { data: { brains } }, reqs: { data: reqs } }).body;
+  assert.match(rq, /What people asked Ava to change <span class="pill amber">1 open<\/span>/);
+  assert.match(rq, /<b>Read the reply bot rules out loud<\/b><small>Nimal Perera · /); assert.match(rq, /onclick="avaReqDone\(&quot;r1&quot;\)">Done<\/button>|onclick="avaReqDone\('r1'\)">Done<\/button>|onclick="avaReqDone\("r1"\)">Done<\/button>/);
+  assert.match(rq, /<li class="done"><span><b>Old one/);
+  assert.match(S({ reqs: { data: [] } }).body, /Nothing yet/);
+  // Test Ava: busy, the answer, no key, errors
+  assert.match(S({ test: { busy: true } }).body, /Asking Ava…/);
+  assert.match(S({ test: { result: { reply: 'Hello!', brain: 'Groq', ms: 870 } } }).body, /“Hello!” <small class="tk-muted">answered by Groq · 0\.9 s<\/small>/);
+  // live: the routes, Test Ava and Done
+  let status = { brains, ready: true }; let chat = { status: 200, body: { reply: 'Hello from Groq!', brain: 'groq' } };
+  const calls = aiFetch((p, body) => p === '/api/mc/ava/status' ? { status: 200, body: status } : p === '/api/mc/ava/requests' ? { status: 200, body: { requests: body && body.action === 'done' ? reqs.map((q) => Object.assign({}, q, { status: 'done' })) : reqs } } : p === '/api/mc/ava/chat' ? chat : null);
+  AVA.st = { data: null, at: 0, err: null, missing: false }; AVA.reqs = { data: null, at: 0, err: null, missing: false };
+  openSettings('ava'); await avaLoadSettings(true);
+  assert.equal(AVA.st.data.brains.length, 3); assert.equal(AVA.reqs.data.length, 2); assert.equal(avaBrainName('groq'), 'Groq');
+  const page = renderSettings(trialsSettingsCtx());
+  assert.match(page, /<details class="tk-set" id="tkSet-ava" open[^>]*><summary><span class="tk-set-head"><span class="tk-set-title">Ava<\/span>/);
+  assert.ok(page.indexOf('tkSet-keys') < page.indexOf('tkSet-ava'), 'right after Keys');
+  await avaTest(); assert.equal(AVA.test.result.reply, 'Hello from Groq!'); assert.equal(AVA.test.result.brain, 'Groq');
+  chat = { status: 503, body: { error: 'x', needsKeys: true } }; await avaTest(); assert.match(AVA.test.err, /add a free key in Settings › Keys/);
+  chat = { status: 429, body: { error: 'Daily cap reached' } }; await avaTest(); assert.match(AVA.test.err, /limit/);
+  chat = { status: 502, body: { error: 'No brain answered', tried: ['groq', 'cerebras'] } }; await avaTest(); assert.match(AVA.test.err, /tried Groq, Cerebras/);
+  await avaReqDone('r1'); assert.deepEqual(calls.filter((c) => c.method === 'POST' && c.url.endsWith('/api/mc/ava/requests')).pop().body, { action: 'done', id: 'r1' });
+  assert.ok(AVA.reqs.data.every((q) => q.status === 'done'));
+  // 404s: "not available yet"
+  aiFetch(() => ({ status: 404, body: {} })); await avaLoadSettings(true); assert.equal(AVA.st.missing, true); assert.equal(AVA.reqs.missing, true);
+  // Settings › Ava by voice, and the owner only
+  const r = think('open ava settings'); r.auto.run(); assert.equal(tk.setOpen.ava, true);
+  setup('team'); assert.match(think('open ava settings').say, /only for the owner/); assert.equal(await avaLoadStatus(true), null);
+  noFetch(); asOwner(); voiceTeardown();
+});
+
+test('the voice worker: one load, sentences answered in order, a cancel drops what is queued and what is being made; a load error is reported (fatal)', async () => {
+  const out = []; FakeWorker.mock = kokoroMock({ delay: 25 }); FakeWorker.gpu = null;   // (making a sentence takes time, as for real)
+  const w = new FakeWorker('ava-voice-worker.js', { type: 'module' }); w.onmessage = (e) => out.push(e.data);
+  w.postMessage({ type: 'load', device: 'wasm' }); w.postMessage({ type: 'load', device: 'wasm' });
+  await until(() => out.some((m) => m.type === 'ready'));
+  assert.equal(FakeWorker.mock.calls.filter((c) => c[0] === 'load').length, 1, 'loaded once');
+  assert.deepEqual(out.filter((m) => m.type !== 'progress').map((m) => m.type), ['device', 'ready']);
+  for (let i = 0; i < 3; i++) w.postMessage({ type: 'speak', gen: 7, i, text: 'Sentence number ' + i + '.', voice: 'af_bella', speed: 1 });
+  await until(() => out.filter((m) => m.type === 'audio').length === 3);
+  assert.deepEqual(out.filter((m) => m.type === 'audio').map((m) => [m.gen, m.i, m.rate]), [[7, 0, 24000], [7, 1, 24000], [7, 2, 24000]]);
+  assert.ok(out.find((m) => m.type === 'audio').samples.length > 0);
+  out.length = 0; FakeWorker.mock.calls.length = 0;
+  for (let i = 0; i < 3; i++) w.postMessage({ type: 'speak', gen: 8, i, text: 'Old ' + i + '.' });
+  w.postMessage({ type: 'cancel', gen: 8 }); w.postMessage({ type: 'speak', gen: 9, i: 0, text: 'New one.' });
+  await until(() => out.some((m) => m.type === 'audio' && m.gen === 9)); await sleep(10);
+  assert.equal(out.filter((m) => m.type === 'audio' && m.gen === 8).length, 0, 'none of the old answer is sent');
+  assert.ok(FakeWorker.mock.calls.filter((c) => /^Old/.test(c[1])).length <= 1, 'at most the one already being made is made');
+  FakeWorker.mock = kokoroMock({ fail: true }); const out2 = [];
+  const w2 = new FakeWorker('ava-voice-worker.js', { type: 'module' }); w2.onmessage = (e) => out2.push(e.data);
+  w2.postMessage({ type: 'load', device: 'wasm' }); await until(() => out2.some((m) => m.type === 'error'));
+  assert.deepEqual(clone(out2.find((m) => m.type === 'error')), { type: 'error', fatal: true, message: 'model blocked' });
 });

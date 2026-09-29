@@ -56,8 +56,63 @@ body.dark .ava-act+.ava-act{background:transparent;color:var(--text);border-colo
 .ava-dots i:nth-child(2){animation-delay:.15s}.ava-dots i:nth-child(3){animation-delay:.3s}
 @keyframes avaDot{0%,80%,100%{opacity:.3}40%{opacity:1}}
 
-.ava-heard{display:none;padding:8px 14px;font-size:14px;color:var(--muted);font-style:italic;border-top:1px solid var(--border-soft)}
-.ava-heard.show{display:block}
+/* Listening: a big, unmistakable strip — moving bars and the words as they are heard. */
+.ava-heard{display:none;align-items:center;gap:12px;padding:14px;border-top:1px solid var(--border-soft);background:color-mix(in srgb,var(--red) 8%,var(--surface))}
+.ava-heard.show{display:flex}
+.ava-heard-text{flex:1;min-width:0;font-size:17px;line-height:1.35;color:var(--text);overflow-wrap:anywhere}
+.ava-bars{display:inline-flex;align-items:center;gap:3px;height:26px;flex:none}
+.ava-bars i{width:4px;height:8px;border-radius:2px;background:var(--red);animation:avaBar .9s ease-in-out infinite}
+.ava-bars i:nth-child(2){animation-delay:.12s}.ava-bars i:nth-child(3){animation-delay:.24s}.ava-bars i:nth-child(4){animation-delay:.36s}.ava-bars i:nth-child(5){animation-delay:.48s}
+@keyframes avaBar{0%,100%{height:6px}50%{height:24px}}
+.ava-panel.listening{box-shadow:0 0 0 2px var(--red),var(--sh-lg,0 12px 32px rgba(0,0,0,.14))}
+.ava-fab.speaking .ava-fab-ring{animation:avaTalk 1.6s ease-in-out infinite}
+@keyframes avaTalk{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 45%,transparent)}50%{box-shadow:0 0 0 8px color-mix(in srgb,var(--accent) 0%,transparent)}}
+
+/* The natural voice, downloading the first time. */
+.ava-vload{display:flex;flex-direction:column;gap:6px;padding:10px 14px;font-size:13px;color:var(--muted);border-bottom:1px solid var(--border-soft);background:var(--surface-2)}
+.ava-vload[hidden]{display:none}
+.ava-vbar{display:block;height:4px;border-radius:999px;background:var(--border);overflow:hidden}
+.ava-vbar i{display:block;height:100%;width:8%;background:var(--text);border-radius:999px;transition:width .3s}
+body.dark .ava-vbar i{background:var(--accent)}
+
+/* Hands-free and the voice, under the box. */
+.ava-opts{display:flex;align-items:center;gap:8px;padding:0 10px 10px;flex-wrap:wrap}
+.ava-hands{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--text);font:inherit;font-size:14px;cursor:pointer}
+.ava-hands svg{width:18px;height:18px}
+.ava-hands.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+body.dark .ava-hands.on{background:var(--accent);border-color:var(--accent);color:#000}
+.ava-hands:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.ava-voice{display:inline-flex;align-items:center;gap:6px;margin-left:auto;font-size:13px;color:var(--muted);min-width:0}
+.ava-voice select{min-height:40px;max-width:190px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r-sm,10px);background:var(--surface);color:var(--text);font:inherit;font-size:14px}
+
+/* What the smarter brain proposes: "Ava wants to …" (Do it / No) and drafts to copy. */
+.ava-card{border:1px solid var(--border);border-radius:12px;padding:10px 12px;background:var(--surface);display:flex;flex-direction:column;gap:8px}
+.ava-card.confirm{border-color:var(--text)}
+body.dark .ava-card.confirm{border-color:var(--accent)}
+.ava-card-q{margin:0!important;padding:0!important;background:none!important;display:flex;flex-direction:column;gap:2px}
+.ava-card-q small{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.ava-card-q b{font-size:15px;font-weight:600}
+.ava-card-state{margin:0!important;padding:0!important;background:none!important;font-size:14px;color:var(--muted)}
+.ava-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ava-card-head b{font-size:14px}
+.ava-draft{white-space:pre-wrap;font-size:14px;line-height:1.45;max-height:220px;overflow:auto;padding:8px 10px;border-radius:8px;background:var(--surface-2);overflow-wrap:anywhere}
+.ava-meta{font-size:12px;color:var(--muted);padding-left:4px}
+.ava-msg.notice p{background:transparent;border:1px dashed var(--border);font-size:14px;color:var(--muted)}
+.ava-guide{margin:0;padding:8px 12px 8px 30px;border-radius:12px;background:var(--surface-2);font-size:14px;line-height:1.5}
+
+/* Settings › Ava */
+.ava-set-h{margin:18px 0 8px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+.ava-brains,.ava-reqs{list-style:none;margin:0 0 12px;padding:0;border:1px solid var(--border-soft);border-radius:var(--r-sm,10px)}
+.ava-brains li,.ava-reqs li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-top:1px solid var(--border-soft);flex-wrap:wrap}
+.ava-brains li:first-child,.ava-reqs li:first-child{border-top:0}
+.ava-brain-name,.ava-reqs li>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ava-brain-name small,.ava-reqs small,.ava-brain-state small{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.ava-brain-state{display:flex;flex-direction:column;align-items:flex-end;gap:2px;min-width:0;text-align:right}
+.ava-reqs li.done b{color:var(--muted);font-weight:500;text-decoration:line-through}
+.ava-set-voice{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ava-set-voice select{min-height:44px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm,10px);background:var(--surface);color:var(--text);font:inherit;font-size:16px;max-width:100%}
+.ava-test-ok{margin-top:10px}
+.ava-privacy{margin:18px 0 0;padding:10px 12px;border-radius:var(--r-sm,10px);background:var(--surface-2);font-size:13px;line-height:1.5;color:var(--muted)}
 .ava-in{display:flex;gap:6px;align-items:center;padding:10px;border-top:1px solid var(--border-soft)}
 .ava-in input{flex:1;min-width:0;min-height:44px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm,10px);background:var(--surface);color:var(--text);font:inherit;font-size:16px}
 .ava-in input:focus{outline:2px solid var(--text);outline-offset:-1px;border-color:transparent}
@@ -79,4 +134,5 @@ body.ava-on .content{padding-bottom:96px}
   .ava-fab{right:16px;bottom:calc(58px + env(safe-area-inset-bottom) + 14px);width:56px;height:56px}
   .ava-panel{left:8px;right:8px;width:auto;max-width:none;bottom:calc(58px + env(safe-area-inset-bottom) + 80px);max-height:calc(100dvh - 58px - env(safe-area-inset-bottom) - 150px)}
 }
-@media(prefers-reduced-motion:reduce){.ava-panel,.ava-fab,.ava-fab-ring,.ava-dots i{animation:none!important;transition:none!important}}
+@media(max-width:420px){.ava-voice span{display:none}.ava-voice select{max-width:170px}}
+@media(prefers-reduced-motion:reduce){.ava-panel,.ava-fab,.ava-fab-ring,.ava-dots i,.ava-bars i{animation:none!important;transition:none!important}}
