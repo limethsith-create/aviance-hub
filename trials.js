@@ -2039,7 +2039,7 @@ function renderStats(m,opts){
   const bounces=m.bounces||[];
   const bncHTML=bounces.length?`<details class="card"><summary><b>Bounces · ${tkNum(bounces.length)}</b></summary><div class="tk-scroll"><table class="tk-table"><tr><th>Day</th><th>Address</th><th>Why</th><th>From inbox</th></tr>${bounces.map(b=>`<tr><td class="num">${when(b.at)}</td><td>${esc(b.email)}</td><td>${esc(b.reason)}</td><td>${esc(b.account||'')}</td></tr>`).join('')}</table></div></details>`:'';
   return `<div class="tk-myout">${opts.head||''}<div class="tk-keys tk-keys4">${tiles.map(([l,v,sub])=>`<div class="card tk-key"><small>${esc(l)}</small><b>${v}</b><span class="tk-key-sub">${esc(sub)}</span></div>`).join('')}</div>
-    ${opts.extra||''}${chart}${inb}${repHTML}${sentHTML}${bncHTML}</div>`;
+    ${opts.extra||''}${chart}${opts.afterChart||''}${inb}${opts.noReplies?'':repHTML}${sentHTML}${bncHTML}</div>`;
 }
 /* My stats: the owner's own outreach (GET /api/mc/outreach — the machine's day-by-day report). */
 function tkStatsFromOutreach(o){
@@ -2155,6 +2155,7 @@ function renderMyStatsPage(){
 function tkClientPane(id){return (tk.pane&&tk.pane[id])||'progress'}   // what needs you first; Stats is one tap away
 function setClientPane(id,p){(tk.pane||(tk.pane={}))[id]=p;if(p==='stats')tkClientStatsKick(id);trialsRepaint('trial')}
 function tkClientStatsKick(id){
+  tkMailKick(id);   // their conversations and every email sent (5 minutes each)
   const c=tk.growth[id];if(c&&Date.now()-c.at<TK_GROWTH_FRESH_MS)return;if(tk.growthBusy[id])return;
   tk.growthBusy[id]=true;
   loadGrowth(id,tk.growthDays,true).then(()=>{delete tk.growthBusy[id];if(currentView==='trial'&&currentTrialId===id)trialsRepaint('trial',{soft:true});});
@@ -2182,7 +2183,182 @@ function renderClientStats(d,id){
   const g=tk.growth[id];const busy=!g&&(tk.growthBusy[id]||!tk.growthErr[id]);
   const own=id==='aviance'||id==='_test'||(typeof MY_STATS_ID!=='undefined'&&id===MY_STATS_ID);   // the owner's own sending: no money
   const money=own?'':renderMoneyCard(d);
-  return (busy?renderLoading('Loading their stats…')+money:renderStats(tkStatsFromClient(d,g&&g.data),{extra:money}))+(tk.growthErr[id]&&!g?`<div class="card tk-pad tk-muted tk-small">${esc(tk.growthErr[id])}</div>`:'')+renderClientAccess(d,id);
+  const mail=renderClientMail(d,id);   // every conversation and every email sent — supersedes the short Replies list
+  return (busy?renderLoading('Loading their stats…')+money+mail:renderStats(tkStatsFromClient(d,g&&g.data),{extra:money,afterChart:mail,noReplies:!own}))+(tk.growthErr[id]&&!g?`<div class="card tk-pad tk-muted tk-small">${esc(tk.growthErr[id])}</div>`:'')+renderClientAccess(d,id);
+}
+/* ===================== A client's mail: every conversation and every email their system sent =====================
+   On a client's Stats, after the chart — like the owner's own Gmail outreach, one copy per client. Employees see it too.
+     GET /api/mc/hub/{id}/emails?limit=200&before=<ISO> → {total, sent:[{id, at, to, toName, company, subject, from, kind, status, threadId}], next}
+     GET /api/mc/hub/{id}/threads                        → {threads:[{threadId, lead:{email,name,company}, lastAt, count, kind, handledBy, snippet}]}
+     GET /api/mc/hub/{id}/threads/{threadId}             → {threadId, lead, messages:[{at, dir, by, from, to, subject, text}]} (oldest first)
+   Kept 5 minutes per client (and per thread); a machine without these routes (404) gets a kind "not available yet". */
+const TK_MAIL_FRESH_MS=5*60000;
+const TK_MAIL_PAGE=200;
+const TK_MAIL_MISSING="This isn't available yet — your system hasn't been updated to show these emails.";
+/* reply type → [words, pill colour] */
+const TK_REPLY_KIND={interested:['Interested','green'],question:['Question','q'],referral:['Referral','green'],not_now:['Not now','grey'],out_of_office:['Out of office','grey'],
+  unclear:['Needs a look','amber'],unsubscribe:['Unsubscribe','red'],not_interested:['Not interested','red'],bounce:['Bounced','red']};
+const TK_MAIL_STATUS={sent:['Sent','grey'],replied:['Replied','green'],bounced:['Bounced','red'],failed:["Didn't send",'red']};
+const TK_MAIL_KIND={first:'First email',followup:'Follow-up',bot:'Reply bot',owner:'You',client:'The client'};
+function tkMailOwn(id){return id==='aviance'||id==='_test'||(typeof MY_STATS_ID!=='undefined'&&id===MY_STATS_ID)}
+function tkMailState(id){const m=tk.mail||(tk.mail={});return m[id]||(m[id]={emails:null,threads:null})}
+function tkReplyPill(kind){const k=TK_REPLY_KIND[kind];return k?`<span class="pill tk-rt ${k[1]}">${esc(k[0])}</span>`:''}
+function tkMailStatusPill(s){const k=TK_MAIL_STATUS[s]||[String(s||'Sent').replace(/^./,c=>c.toUpperCase()),'grey'];return `<span class="pill tk-rt ${k[1]}">${esc(k[0])}</span>`}
+function tkHandledBy(h,kind){
+  if(h==='bot')return 'Reply bot answered';if(h==='client')return 'Handed to the client';if(h==='owner')return 'You answered';
+  return ['bounce','out_of_office','unsubscribe'].includes(kind)?'Nothing to answer':'Not answered yet';
+}
+/* "Ann Lee <ann@x.com>" → {name, addr} */
+function tkMailAddr(s){s=String(s||'').trim();const m=/^"?([^"<]*?)"?\s*<([^>]+)>$/.exec(s);return m?{name:m[1].trim(),addr:m[2].trim()}:{name:'',addr:s}}
+async function loadClientEmails(id,before){
+  const q='?limit='+TK_MAIL_PAGE+(before?'&before='+encodeURIComponent(before):'');
+  const r=await machineFetch('/api/mc/hub/'+encodeURIComponent(id)+'/emails'+q);
+  if(r.ok&&!(r.data&&Array.isArray(r.data.sent))){r.ok=false;r.error="The emails didn't load. Try again in a minute.";}
+  return r;
+}
+async function loadClientThreads(id){
+  const r=await machineFetch('/api/mc/hub/'+encodeURIComponent(id)+'/threads');
+  if(r.ok&&!(r.data&&Array.isArray(r.data.threads))){r.ok=false;r.error="The conversations didn't load. Try again in a minute.";}
+  return r;
+}
+/* Ask for both when Stats opens (or its 5 minutes are up); repaint softly when they come in. */
+function tkMailKick(id,force){
+  if(!id||tkMailOwn(id))return null;
+  const st=tkMailState(id);const now=Date.now();const jobs=[];
+  if(!st.emailsBusy&&(force||!st.emails||now-st.emails.at>TK_MAIL_FRESH_MS)){
+    st.emailsBusy=true;
+    jobs.push(loadClientEmails(id).then(r=>{
+      st.emailsBusy=false;const old=st.emails;
+      if(r.ok){
+        const first=r.data.sent;let list=first.slice(),next=r.data.next||null;
+        // already paged further: keep what was shown below the first page
+        if(old&&old.ok&&old.pages>1){const seen=new Set(list.map(x=>x.id));const last=first.length?String(first[first.length-1].at||''):'';old.list.forEach(x=>{if(!seen.has(x.id)&&String(x.at||'')<=last)list.push(x);});next=old.next;}
+        st.emails={ok:true,list,total:r.data.total!=null?Number(r.data.total):list.length,next,pages:old&&old.ok?Math.max(1,old.pages||1):1,at:Date.now()};
+      }else if(!(old&&old.ok))st.emails={ok:false,missing:r.status===404,error:r.error,at:Date.now()};
+    }));
+  }
+  if(!st.threadsBusy&&(force||!st.threads||now-st.threads.at>TK_MAIL_FRESH_MS)){
+    st.threadsBusy=true;
+    jobs.push(loadClientThreads(id).then(r=>{
+      st.threadsBusy=false;
+      if(r.ok)st.threads={ok:true,list:r.data.threads,at:Date.now()};
+      else if(!(st.threads&&st.threads.ok))st.threads={ok:false,missing:r.status===404,error:r.error,at:Date.now()};
+    }));
+  }
+  if(!jobs.length)return null;
+  return Promise.all(jobs).then(()=>{if(currentView==='trial'&&currentTrialId===id&&tkClientPane(id)==='stats')trialsRepaint('trial',{soft:true});});
+}
+/* "Show more": the next 200, older than the last one shown. */
+async function mailMore(id){
+  const st=tkMailState(id);const e=st.emails;if(!e||!e.ok||!e.next||st.moreBusy)return;
+  st.moreBusy=true;trialsRepaint('trial',{soft:true});
+  const r=await loadClientEmails(id,e.next);st.moreBusy=false;
+  if(r.ok){const seen=new Set(e.list.map(x=>x.id));r.data.sent.forEach(x=>{if(!seen.has(x.id))e.list.push(x);});e.next=r.data.next||null;e.pages=(e.pages||1)+1;if(r.data.total!=null)e.total=Number(r.data.total);}
+  else toast(r.status===404?"This isn't available yet":'Could not get more: '+(r.error||'no answer'));
+  trialsRepaint('trial',{soft:true});
+}
+function tkMailProblem(x){return `<p class="tk-muted tk-small tk-mail-note">${esc(x.missing?TK_MAIL_MISSING:x.error||"This didn't load. Try again in a minute.")}</p>`}
+function renderConversations(id){
+  const t=tkMailState(id).threads;
+  const head=n=>`<div class="tk-mail-head"><h4>Conversations${n!=null?' · '+tkNum(n):''}</h4><span class="tk-muted tk-small">Everyone who wrote back — tap one to read it all</span></div>`;
+  if(!t)return `<div class="card tk-mail" id="tkConvos">${head()}${renderLoading('Loading their conversations…')}</div>`;
+  if(!t.ok)return `<div class="card tk-mail" id="tkConvos">${head()}${tkMailProblem(t)}</div>`;
+  const list=t.list.slice().sort((a,b)=>String(b.lastAt||'').localeCompare(String(a.lastAt||'')));
+  if(!list.length)return `<div class="card tk-mail" id="tkConvos">${head(0)}<p class="tk-muted tk-mail-note">No replies yet. When someone writes back, the whole conversation shows here.</p></div>`;
+  const rows=list.map(c=>{const l=c.lead||{};const who=l.company||l.name||l.email||'Someone';const sub=[l.company&&l.name?l.name:'',l.email&&(l.company||l.name)?l.email:''].filter(Boolean).join(' · ');
+    return `<button type="button" class="tk-convo" onclick="openMailThread(${tkAttr(id)},${tkAttr(c.threadId)})">
+      <span class="tk-convo-top"><b class="tk-convo-who">${esc(who)}</b>${tkReplyPill(c.kind)}<span class="tk-convo-at">${esc(tkDateTime(c.lastAt))}</span></span>
+      ${sub?`<span class="tk-convo-sub">${esc(sub)}</span>`:''}
+      <span class="tk-convo-meta"><span class="tk-convo-by ${esc(c.handledBy||'none')}">${esc(tkHandledBy(c.handledBy,c.kind))}</span>${c.count?` · ${tkNum(c.count)} email${Number(c.count)===1?'':'s'}`:''}</span>
+      ${c.snippet?`<span class="tk-convo-snip">${esc(String(c.snippet).replace(/\s+/g,' '))}</span>`:''}
+      <span class="tk-convo-go" aria-hidden="true">›</span></button>`}).join('');
+  return `<div class="card tk-mail" id="tkConvos">${head(list.length)}<div class="tk-convos">${rows}</div></div>`;
+}
+function renderSentMail(id){
+  const st=tkMailState(id);const e=st.emails;
+  const head=(n,sub)=>`<div class="tk-mail-head"><h4>Every email sent${n!=null?' · '+tkNum(n):''}</h4><span class="tk-muted tk-small">${esc(sub||'Newest first — tap one to read it')}</span></div>`;
+  if(!e)return `<div class="card tk-mail" id="tkSentMail">${head()}${renderLoading('Loading every email sent…')}</div>`;
+  if(!e.ok)return `<div class="card tk-mail" id="tkSentMail">${head()}${tkMailProblem(e)}</div>`;
+  if(!e.list.length)return `<div class="card tk-mail" id="tkSentMail">${head(0,' ')}<p class="tk-muted tk-mail-note">Nothing sent yet.</p></div>`;
+  const rows=e.list.map(x=>`<tr class="tk-click" tabindex="0" role="button" onclick="openMailEmail(${tkAttr(id)},${tkAttr(x.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openMailEmail(${tkAttr(id)},${tkAttr(x.id)})}">
+    <td class="num tk-mt-when" data-l="When">${esc(tkDateTime(x.at))}</td>
+    <td class="tk-mt-to" data-l="To">${x.toName?`<b>${esc(x.toName)}</b><br>`:''}<span class="tk-muted">${esc(x.to)}</span></td>
+    <td class="tk-mt-co" data-l="Company">${esc(x.company||'')}</td>
+    <td class="tk-mt-subj" data-l="Subject">${esc(x.subject||'(no subject)')}${TK_MAIL_KIND[x.kind]&&x.kind!=='first'?` <span class="tk-mt-kind">${esc(TK_MAIL_KIND[x.kind])}</span>`:''}</td>
+    <td class="tk-mt-from" data-l="From inbox"><span class="tk-muted">${esc(x.from||'')}</span></td>
+    <td class="tk-mt-st" data-l="Status">${tkMailStatusPill(x.status)}</td></tr>`).join('');
+  const shown=e.list.length;const total=Math.max(e.total||0,shown);
+  const more=e.next?`<div class="tk-mail-more"><span class="tk-muted tk-small">Showing ${tkNum(shown)} of ${tkNum(total)}</span><button class="btn ghost" ${st.moreBusy?'disabled':''} onclick="mailMore(${tkAttr(id)})">${st.moreBusy?'Loading…':'Show more'}</button></div>`:'';
+  return `<div class="card tk-mail" id="tkSentMail">${head(total)}<div class="tk-scroll"><table class="tk-table tk-mail-table"><thead><tr><th>When</th><th>To</th><th>Company</th><th>Subject</th><th>From inbox</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>${more}</div>`;
+}
+function renderMailLink(d,id){
+  const first=tkFirstName(tkSimple((d&&d.row)||{}).person)||'them';
+  return `<p class="tk-mail-link"><button type="button" class="tk-linkbtn" onclick="tkMailToMessages(${tkAttr(id)})">${esc('Your emails with '+first)} → Messages</button></p>`;
+}
+function renderClientMail(d,id){return tkMailOwn(id)?'':renderConversations(id)+renderSentMail(id)+renderMailLink(d,id)}
+/* Back to Progress, at Messages (the owner's own emails with the client). */
+function tkMailToMessages(id){(tk.pane||(tk.pane={}))[id]='progress';tk.scrollTo='messages';trialsRepaint('trial');}
+
+/* ---- The viewer: one conversation (or one email), read like Gmail ---- */
+function tkMailBy(m,firstOut){
+  const by=m.by;if(by==='bot')return 'Reply bot';if(by==='owner')return 'You';if(by==='client')return 'The client';
+  if(by==='prospect'||m.dir==='in')return 'Prospect';
+  return firstOut?'Us · first email':'Us · follow-up';
+}
+function tkSubjNorm(x){return String(x||'').replace(/^\s*((re|fwd?|aw)\s*:\s*)+/i,'').trim().toLowerCase()}
+function renderMailViewer(o){
+  o=o||{};const th=o.thread;const lead=(th&&th.lead)||o.lead||{};const em=o.email;
+  const msgs=th&&Array.isArray(th.messages)?th.messages.slice().sort((a,b)=>String(a.at||'').localeCompare(String(b.at||''))):[];
+  const subject=(msgs.find(m=>m.subject)||{}).subject||(em&&em.subject)||'(no subject)';
+  const who=[lead.company,lead.name,lead.email].filter(Boolean);
+  const sub=who.join(' · ')+(msgs.length?' · '+tkNum(msgs.length)+' email'+(msgs.length===1?'':'s'):'');
+  let firstOut=true;
+  const card=m=>{const a=tkMailAddr(m.from);const out=m.dir!=='in';const label=tkMailBy(m,out&&m.by==='system'&&firstOut);if(out&&m.by==='system')firstOut=false;
+    const to=tkMailAddr(m.to);const init=(a.name||a.addr||'?').trim().charAt(0).toUpperCase();
+    return `<article class="tk-mv-msg ${out?'out':'in'}">
+      <header class="tk-mv-mh"><span class="tk-mv-av" aria-hidden="true">${esc(init)}</span>
+        <span class="tk-mv-from"><b>${esc(a.name||a.addr||'(unknown)')}</b>${a.name&&a.addr?` <span class="tk-mv-addr">&lt;${esc(a.addr)}&gt;</span>`:''}
+          <span class="tk-mv-to">to ${esc(to.name||to.addr||'—')}</span></span>
+        <span class="tk-mv-side"><span class="tk-mv-tag ${out?'out':'in'}">${esc(label)}</span><time class="tk-mv-at">${esc(tkDateTime(m.at))}</time></span></header>
+      ${m.subject&&tkSubjNorm(m.subject)!==tkSubjNorm(subject)?`<div class="tk-mv-subj">${esc(m.subject)}</div>`:''}
+      <div class="tk-mv-text">${esc(m.text||'(no text saved)')}</div></article>`;};
+  let body;
+  if(o.error)body=`<p class="tk-mv-err">${esc(o.error)}</p>`;
+  else if(msgs.length)body=msgs.map(card).join('');
+  else if(em&&!em.threadId)body=`<dl class="tk-mv-facts"><dt>To</dt><dd>${esc([em.toName,em.to].filter(Boolean).join(' · '))}</dd><dt>From</dt><dd>${esc(em.from||'')}</dd><dt>When</dt><dd>${esc(tkDateTime(em.at))}</dd><dt>Status</dt><dd>${tkMailStatusPill(em.status)}</dd></dl><p class="tk-muted tk-small">The full text of this email isn't available here yet.</p>`;
+  else body=renderLoading('Opening the conversation…');
+  return `<div class="tk-mailview" role="dialog" aria-label="${esc(subject)}">
+    <div class="modal-head tk-mv-head"><div class="tk-mv-title"><h3>${esc(subject)}</h3>${sub?`<p>${esc(sub)}</p>`:''}</div><button type="button" class="tk-mv-x" aria-label="Close" onclick="closeModal()">×</button></div>
+    <div class="modal-body tk-mv-body">${body}</div>
+    <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Close</button></div></div>`;
+}
+async function loadMailThread(id,threadId,force){
+  const c=tk.threads||(tk.threads={});const hit=c[threadId];
+  if(!force&&hit&&Date.now()-hit.at<TK_MAIL_FRESH_MS)return {ok:true,data:hit.data};
+  const r=await machineFetch('/api/mc/hub/'+encodeURIComponent(id)+'/threads/'+encodeURIComponent(threadId));
+  if(r.ok&&!(r.data&&Array.isArray(r.data.messages))){r.ok=false;r.error="This conversation didn't load. Try again in a minute.";}
+  if(r.ok)c[threadId]={data:r.data,at:Date.now()};
+  else if(r.status===404)r.error="This isn't available yet — your system hasn't been updated to open conversations.";
+  return r;
+}
+function tkMailViewOpen(){const w=document.getElementById('modalWrap');return !!(w&&w.classList&&w.classList.contains('open'))}
+async function openMailThread(id,threadId,email){
+  const t=tkMailState(id).threads;const row=t&&t.ok?t.list.find(x=>x.threadId===threadId):null;
+  const lead=(row&&row.lead)||(email?{email:email.to,name:email.toName,company:email.company}:{});
+  const key=String(id)+'|'+String(threadId);tk.mailView=key;
+  const hit=tk.threads&&tk.threads[threadId];
+  openModal(renderMailViewer({lead,email,thread:hit?hit.data:null}));
+  if(hit&&Date.now()-hit.at<TK_MAIL_FRESH_MS)return true;
+  const r=await loadMailThread(id,threadId);
+  if(tk.mailView!==key||!tkMailViewOpen())return r.ok;   // closed or moved on meanwhile
+  openModal(renderMailViewer(r.ok?{lead,email,thread:r.data}:{lead,email,error:r.error||"This conversation didn't load. Try again in a minute."}));
+  return r.ok;
+}
+function openMailEmail(id,emailId){
+  const e=tkMailState(id).emails;const x=e&&e.ok?e.list.find(m=>String(m.id)===String(emailId)):null;if(!x)return false;
+  if(x.threadId)return openMailThread(id,x.threadId,x);
+  tk.mailView=String(id)+'|email:'+String(emailId);
+  openModal(renderMailViewer({email:x,lead:{email:x.to,name:x.toName,company:x.company}}));return true;
 }
 /* ---- The application as a Word document (.docx), built here in the browser — no library: a small store-only zip
    with the three parts Word needs. What they sent, the match (fit score), the fit check and our research. ---- */
@@ -2739,7 +2915,7 @@ function trialsOnRender(v){
 /* Sign-out: drop every cached answer, including the sparkline history kept in localStorage. */
 function trialsForget(){
   trialsStopTimer();
-  Object.assign(tk,{outreach:null,outreachAt:0,outreachErr:null,hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{},demo:null,moneyTried:{}});
+  Object.assign(tk,{outreach:null,outreachAt:0,outreachErr:null,hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{},demo:null,moneyTried:{},mail:{},threads:{},mailView:null});
   currentTrialId=null;trialTab='overview';tk.behindOpen=false;tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;
   try{inquiriesForget();}catch(e){}
   try{messagesForget();}catch(e){}
