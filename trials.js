@@ -947,7 +947,7 @@ function renderTabBar(active,d){
   const sw=(m,inner)=>`<button type="button" class="tk-sysmode-b${m===mode?' on':''}${m==='only'?' only':''}" aria-pressed="${m===mode}" onclick="trialsSetMode(${tkAttr(m)})">${inner}</button>`;
   const sh=tkSharedWith(d);
   const line=mode==='shared'
-    ?`<p class="tk-sys-line"><span>${esc('This is exactly what '+(first?first+' sees':'they see')+' on their own page.')}</span><span class="tk-sys-who">${esc(sh.text)}${sh.list.length?'':' —'} <button type="button" class="tk-textbtn" onclick="tkGoTo(${tkAttr('access')})">${sh.list.length?'Manage':'Give access'}</button></span></p>`
+    ?`<p class="tk-sys-line"><span>${esc('This is exactly what '+(first?first+' sees':'they see')+' on their own page.')}</span><span class="tk-sys-who">${esc(sh.text)}${sh.list.length?'':' —'} <button type="button" class="tk-textbtn" onclick="tkGoTo(${tkAttr('access')})">${sh.list.length?'Manage':'Give access'}</button>${d&&d.dashboardAccess&&d.dashboardAccess.url?` · <a class="tk-textbtn" href="${esc(d.dashboardAccess.url)}" target="_blank" rel="noopener">Open their page ↗</a>`:''}</span></p>`
     :`<p class="tk-sys-line only">${TK_LOCK}<span>${esc('Only you and your team see this side. '+(first||'The client')+' never does.')}</span></p>`;
   return `<div class="tk-sysbar" id="tkTabBar"><div class="tk-sysmode" role="group" aria-label="Who sees this">${sw('shared',`<span class="tk-sysmode-k">Shared with</span> <b>${esc(s.company)}</b>`)}${sw('only',`${TK_LOCK}<b>Only you</b>`)}</div>${line}
     <nav class="tk-systabs" role="tablist" aria-label="${mode==='only'?'Only you':'Shared with '+esc(s.company)}"><div class="tk-systabs-row">${tabs.map(b).join('')}</div></nav></div>`;
