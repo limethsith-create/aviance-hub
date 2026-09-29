@@ -151,7 +151,7 @@ const AVA_TABS={
   health:{words:/\bhealth\b|\bdeliverability\b|\bbounces?\b|\bspam\b/,keys:['health','deliverability'],label:'Health',owner:true},
   leads:{words:/\bleads?\b|\blist\b/,keys:['leads'],label:'Leads',owner:true},
   setup:{words:/\bsetup\b|\bdomain\b|\binboxes\b|\baccess\b/,keys:['setup'],label:'Setup',owner:true},
-  history:{words:/\bhistory\b|\btimeline\b|\blog\b/,keys:['history','timeline'],label:'History'},
+  history:{words:/\bhistory\b|\btimeline\b|\blog\b/,keys:['history','timeline','setup'],label:'History'},
 };
 function avaTabKey(id,want){
   const spec=AVA_TABS[want];if(!spec)return 'overview';

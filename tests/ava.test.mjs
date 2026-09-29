@@ -127,7 +127,7 @@ test("clients: a tab of their email system by its words — conversations, email
   assert.ok(['sent', 'emails'].includes(open('show lakeview emails sent')), 'emails sent → today\'s key');
   assert.equal(open('open lakeview calls'), 'calls');
   assert.equal(open('open lakeview messages'), 'messages');
-  assert.ok(['timeline', 'history'].includes(open("show Lakeview's history")));
+  assert.ok(['timeline', 'history', 'setup'].includes(open("show Lakeview's history")));
   assert.ok(['deliverability', 'health'].includes(open("show Lakeview's health")));
   assert.equal(open('open lakeview leads'), 'leads');
   assert.equal(open('open lakeview setup'), 'setup');
