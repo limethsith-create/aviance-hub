@@ -7,16 +7,20 @@
      tk (trials.js: the board tk.hub, each client's page tk.detail, My stats tk.outreach),
      cal (calendar.js), tm (people.js: the team), authUser + hubIsOwner() (the shell).
 
-     Ears   — the browser's SpeechRecognition (Chrome/Edge/Safari; Chrome turns the voice
-              into text on Google's servers). Typing always works (Firefox has no voice).
-              Hands-free: after she answers she listens again ("stop" / "thanks Ava" ends it).
-     Mouth  — a natural voice made on the device: Kokoro (kokoro-js, an open model) in a Web Worker
-              (ava-voice-worker.js), downloaded once and kept by the browser; the browser's best voice
-              until it's ready or if it can't run. Said sentence by sentence; a mic tap stops her at once.
-     Brain  — avaThink(text, ctx) → {say, actions, auto?, confirm?}: local rules over the loaded
-              data + the written guide AVA_KB — instant, no network. What it isn't sure about goes to
-              the machine's AI (POST /api/mc/ava/chat) when a key is set (avaAnswer); otherwise the
-              local answer, and once a word about Settings › Keys. Settings › Ava shows it all.
+     Ears   — hold Space (anywhere but a text box) or hold the mic, talk, let go: sent. The browser's SpeechRecognition
+              gives the live words (Chrome/Edge/Safari; Chrome uses Google for it); when the machine has POST
+              /api/mc/ava/hear, a short recording gives sharper words. A tap on the mic listens until you stop talking.
+              Typing always works. Hands-free: after she answers she listens again ("stop" / "thanks Ava" ends it).
+     Mouth  — the browser's best voice at once; a natural voice made on the device (Kokoro, kokoro-js, in a Web Worker —
+              ava-voice-worker.js) takes over once it has downloaded. Said sentence by sentence — while the answer is still
+              streaming in — at the speed picked (0.9–1.2); Space, Esc or a mic tap stops her at once.
+     Brain  — AI first: every question goes to the machine's AI (POST /api/mc/ava/chat, streamed as server-sent events,
+              or plain JSON) with the page, the person and the last 16 turns — except a plain command ("open trials",
+              "open Lakeview", "go back", "settings"), which avaThink runs here at once. avaThink (local rules over the
+              loaded data + the written guide AVA_KB) is the fallback when the AI can't answer, and then she says plainly
+              that she is in basic mode, and what to do. Settings › Ava shows it all.
+     Panel  — calm, light markdown answers (hub links are buttons), Copy, follow-up chips, New chat; the conversation is
+              kept for the tab (sessionStorage).
 
    Roles: a team member (read-only, body.ro) never hears money and gets no action that changes
    anything. The owner's actions (open the add-a-client form, give access, the test run) always
@@ -30,9 +34,11 @@
 const AVA={open:false,listening:false,rec:null,log:[],acts:[],pending:null,greeted:false,muted:null,busy:false,interim:'',mounted:false,voice:null,lastClient:null,
   speaking:false,say:null,gen:0,src:null,ac:null,voicePref:null,handsFree:null,loopPaused:false,retried:0,micGuided:false,cardList:[],
   k:{state:'idle',worker:null,device:null,dtype:null,loaded:0,total:0,rtf:null,err:null},   // the natural voice (Kokoro, in ava-voice-worker.js)
-  st:{data:null,at:0,err:null,missing:false},reqs:{data:null,at:0,err:null,missing:false},test:{busy:false,result:null,err:null}};   // Settings › Ava
+  speed:null,big:null,ptt:null,ptting:false,stage:null,recall:null,links:[],cap:null,naturalNote:false,
+  st:{data:null,at:0,err:null,missing:false},reqs:{data:null,at:0,err:null,missing:false},test:{busy:false,result:null,err:null},
+  facts:{text:null,at:0,err:null,missing:false,busy:false,saved:null}};   // Settings › Ava
 const AVA_MUTE_KEY='avianceAvaMute:v1';
-const AVA_MAX_LOG=24;
+const AVA_MAX_LOG=40;
 
 /* ===================== 1. WORDS: normalise, synonyms, fuzzy match ===================== */
 /* Spoken and typed words that mean the same thing → one word (applied after lower-casing). */
@@ -215,12 +221,12 @@ const AVA_KB=[
   {id:'opened',kw:'opened blank empty dash not tracked opens client why',a:"Opened is blank for clients on purpose: their emails go out without an open tracker, because trackers hurt landing in the inbox. So there's nothing to count. Only your own outreach on My stats tracks opens.",go:'mystats'},
   {id:'bounce',kw:'bounce bounced what is bounce rate address does not exist pause',a:"A bounce is an email that came back because the address doesn't exist or the mailbox refused it. A few are normal. If too many bounce — about 2 to 3 percent — sending slows down or pauses by itself to protect the inboxes, and you get an alert.",go:null},
   {id:'bell',kw:'bell notifications what needs you alerts not seen mark as seen',a:"The bell at the top lists what needs you right now. Settings, Alerts has every message from the system, not seen first, with Mark as seen.",go:'set-alerts'},
-  {id:'search',kw:'search find command k shortcut keyboard slash',a:"Press Control or Command K — or the slash key — to find any client or page. Press Control or Command J to talk to me.",go:null},
+  {id:'search',kw:'search find command k shortcut keyboard slash space',a:"Press Control or Command K — or the slash key — to find any client or page. Hold the Space bar to talk to me, and let go to send; Control or Command J opens me.",go:null},
   {id:'dark',kw:'dark mode light theme look',a:"Settings, Light or dark switches how the hub looks on this device. It's also in the Control K search.",go:'settings',owner:true},
   {id:'behind',kw:'behind the scenes board every to do waiting list queue parts',a:"Behind the scenes, in Settings, is the full picture: every trial by stage, every to-do in one list, the waiting list and your own sending. Each client's email system also has behind-the-scenes tabs like Growth, Parts and Deliverability.",go:'behind'},
   {id:'waitlist',kw:'three trials waiting list queue full max limit',a:"At most three trials run at the same time. Anyone else you say yes to joins the waiting list and starts when a place opens.",go:'behind'},
   {id:'inquiries',kw:'plan call requests inquiries paid plan booked call website',a:"Plan call requests are people who booked a call about a paid plan from the website without an application. Find them at the bottom of Paying clients.",go:'inquiries'},
-  {id:'ava',kw:'who are you ava privacy voice listen microphone data google what can you do',a:"I'm Ava, the hub's helper. I answer the simple things right here in your browser, from what the hub has loaded, and my voice is made on your device too. Harder questions go to my smarter brain — a free AI service that doesn't train on your data — and never with your prospects' names or emails. Your voice is turned into text by your browser; Chrome uses Google for that. You can always type instead.",go:null},
+  {id:'ava',kw:'who are you ava privacy voice listen microphone data google what can you do',a:"I'm Ava, the hub's helper. With my AI brain switched on, you can ask me anything — about the hub, your clients or anything else — and plain commands like 'open trials' run at once. The AI is a free service that doesn't train on your data, and your prospects' email addresses are never sent. Without it I'm in basic mode and answer the simple things from what the hub has loaded. Hold Space to talk, or type.",go:null},
 ];
 function avaKbScore(entry,qTokens){
   if(!entry._bag){entry._bag=new Set(avaTokens(entry.kw+' '+entry.id));}
@@ -527,7 +533,9 @@ function avaNavigate(t,ctx){
    tapped or Ava is closed (barge-in). */
 const AVA_VOICE_KEY='avianceAvaVoice:v1';
 const AVA_HANDS_KEY='avianceAvaHands:v1';
-const AVA_SLOW_KEY='avianceAvaSlow:v1';     // this computer was too slow for the natural voice: don't download it again every visit
+const AVA_SLOW_KEY='avianceAvaSlow:v1';
+const AVA_SPEED_KEY='avianceAvaSpeed:v1';   // how fast she talks: 0.9 – 1.2 (1 = normal)
+const AVA_NATURAL_KEY='avianceAvaNatural:v1';   // told once that the natural voice is ready     // this computer was too slow for the natural voice: don't download it again every visit
 const AVA_VOICES=[['af_heart','Heart','warm and natural'],['af_bella','Bella','bright and friendly'],['af_nicole','Nicole','soft and calm'],['bf_emma','Emma','British']];
 const AVA_VOICE_MB={webgpu:350,wasm:115};   // kokoro-js bundle 2 MB + ONNX runtime 22 MB + the model (fp32 326 MB / q8 92 MB)
 const AVA_SLOW_RTF=1.2;                     // a device that needs longer than 1.2 s to make 1 s of speech would pause mid-answer: the browser voice
@@ -540,6 +548,8 @@ function avaSetVoice(v){
   avaHush();if(v!=='browser')avaVoiceWarm();avaPaintVoice();
   if(typeof currentView!=='undefined'&&currentView==='settings'&&typeof trialsRepaint==='function')trialsRepaint('settings',{soft:true});
 }
+function avaSpeed(){if(AVA.speed==null){const v=Number(avaStore(AVA_SPEED_KEY));AVA.speed=v>=0.9&&v<=1.2?v:1;}return AVA.speed}
+function avaSetSpeed(v){v=Math.round(Math.min(1.2,Math.max(0.9,Number(v)||1))*100)/100;AVA.speed=v;avaStore(AVA_SPEED_KEY,String(v));avaPaintVoice();return v}
 function avaHandsFree(){if(AVA.handsFree==null)AVA.handsFree=avaStore(AVA_HANDS_KEY)==='1';return AVA.handsFree}
 function avaSetHandsFree(on){AVA.handsFree=!!on;AVA.loopPaused=false;avaStore(AVA_HANDS_KEY,on?'1':'0');avaPaintVoice();
   if(on&&AVA.open&&!AVA.listening&&!AVA.speaking&&!AVA.busy&&avaCanListen())avaListen();}
@@ -571,6 +581,7 @@ function avaKokoroMsg(m){
   if(m.type==='ready'){k.device=m.device||k.device;k.dtype=m.dtype||null;k.rtf=m.rtf==null?null:Number(m.rtf);k.state=k.rtf!=null&&k.rtf>AVA_SLOW_RTF?'slow':'ready';k.err=null;
     if(k.state==='slow'){avaStore(AVA_SLOW_KEY,'1');try{k.worker&&k.worker.terminate&&k.worker.terminate();}catch(e){}k.worker=null;}
     avaPaintVoice();
+    if(k.state==='ready'&&avaStore(AVA_NATURAL_KEY)!=='1'){avaStore(AVA_NATURAL_KEY,'1');AVA.naturalNote=true;avaNaturalNote();}
     if(typeof currentView!=='undefined'&&currentView==='settings'&&typeof trialsRepaint==='function')trialsRepaint('settings',{soft:true});return;}
   if(m.type==='audio'){avaKokoroAudio(m);return;}
   if(m.type==='error'){
@@ -578,6 +589,8 @@ function avaKokoroMsg(m){
     const s=AVA.say;if(s&&s.engine==='kokoro'&&(m.fatal||m.gen===s.gen))avaSayFallback(s.gen,m.fatal?s.next:(m.i!=null?Math.max(s.next,m.i):s.next));
   }
 }
+/* The first time the natural voice is ready she says so, once (shown, not read out), the next time the panel is open. */
+function avaNaturalNote(){if(!AVA.naturalNote||!AVA.open)return false;AVA.naturalNote=false;avaPush({who:'ava',notice:true,text:"My natural voice is ready — I'll use it from my next answer. You can change it (and how fast I talk) under Voice."});return true}
 function avaUseKokoro(){return avaVoicePref()!=='browser'&&AVA.k.state==='ready'&&!!AVA.k.worker}
 function avaVoiceLabel(){
   const st=avaKokoroState();const v=AVA_VOICES.find(x=>x[0]===avaVoicePref());
@@ -596,18 +609,26 @@ function avaVoiceLoadingLine(){
 }
 
 /* ---- saying it: sentence by sentence ---- */
-function avaSpeakable(s){return String(s||'').replace(/›/g,',').replace(/\s*[—–]\s*/g,', ').replace(/[“”"]/g,'').replace(/\s+/g,' ').replace(/\s+([,.!?;:])/g,'$1').replace(/,\s*,/g,',').trim()}
+/* Markdown → plain words to say: no **, lists, headings, code marks or web addresses (a link says its words). */
+function avaPlain(md){
+  const t=String(md||'').replace(/\r\n?/g,'\n').replace(/```[\s\S]*?```/g,' ')
+    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g,'$1').replace(/https?:\/\/[^\s)]+/g,'').replace(/(^|\s)#(system|trial|settings|calendar|trials|paying|inquiries|stats|alerts)(\/[^\s)]*)?/g,'$1')
+    .replace(/`([^`\n]+)`/g,'$1').replace(/(\*\*|__)(.+?)\1/g,'$2').replace(/(^|[\s(])[*_]([^*_\n]+)[*_](?=[\s).,!?;:]|$)/g,'$1$2')
+    .replace(/^\s{0,3}#{1,6}\s+/gm,'').replace(/^\s*>\s?/gm,'').replace(/^\s*[-*•]\s+/gm,'').replace(/^\s*\d+[.)]\s+/gm,'').replace(/\*/g,'');
+  return t.split(/\n+/).map(l=>l.trim()).filter(Boolean).map((l,i,a)=>i<a.length-1&&!/[.!?:;,]$/.test(l)?l+'.':l).join(' ');
+}
+function avaSpeakable(s){return avaPlain(s).replace(/›/g,',').replace(/\s*[—–]\s*/g,', ').replace(/[“”"]/g,'').replace(/\s+/g,' ').replace(/\s+([,.!?;:])/g,'$1').replace(/,\s*,/g,',').trim()}
 /* The text in pieces to say one after the other: sentences, and a long one cut at a comma / semicolon / colon. The
    first piece is kept short so she starts talking at once. */
-function avaChunks(text){
+function avaChunks(text,more){
   const t=avaSpeakable(text);if(!t)return [];
   const sents=t.split(/(?<=[.!?])\s+/).map(s=>s.trim()).filter(Boolean);
   const out=[];
   sents.forEach(s=>{
-    const max=out.length?180:90;
+    const max=out.length||more?180:90;
     if(s.length<=max){out.push(s);return;}
     const bits=s.split(/(?<=[,;:])\s+/);let cur='';
-    bits.forEach(b=>{const lim=out.length?180:90;if(cur&&(cur+' '+b).length>lim){out.push(cur);cur=b;}else cur=cur?cur+' '+b:b;});
+    bits.forEach(b=>{const lim=out.length||more?180:90;if(cur&&(cur+' '+b).length>lim){out.push(cur);cur=b;}else cur=cur?cur+' '+b:b;});
     if(cur)out.push(cur);
   });
   // a scrap of two or three letters is said with the piece before it
@@ -623,41 +644,54 @@ function avaPickVoice(){
     AVA.voice=best||null;}catch(e){}
   return AVA.voice;
 }
-/* Say `text`. → true when something is being said (avaSpokeDone runs at the end), false when there is nothing to say. */
-function avaSpeak(text){
+/* A speaking turn that can grow while the answer streams in: avaSayBegin() → avaSayAdd(s, text) … → avaSayEnd(s).
+   avaSpeak(text) is all three at once. Each piece goes to the natural voice (made while the one before plays) or the
+   browser's queue as soon as it is added, so she starts talking on the first full sentence. */
+function avaSayBegin(){
   avaHush();
-  if(avaMuted()||!text)return false;
+  if(avaMuted())return null;
   if(avaVoicePref()!=='browser')avaVoiceWarm();
-  const parts=avaChunks(text);if(!parts.length)return false;
   const gen=++AVA.gen;
-  const s={gen,parts,next:0,engine:null,buf:{},playing:false};AVA.say=s;
-  if(avaUseKokoro()){
-    s.engine='kokoro';const voice=avaVoicePref();
-    parts.forEach((p,i)=>{try{AVA.k.worker.postMessage({type:'speak',gen,i,text:p,voice,speed:1});}catch(e){}});
-  }else{
-    if(!avaCanSpeak()){AVA.say=null;return false;}
-    s.engine='browser';if(!avaBrowserSay(gen,0)){AVA.say=null;return false;}
-  }
-  AVA.speaking=true;avaPaintMic();return true;
+  const s={gen,parts:[],next:0,engine:null,buf:{},playing:false,final:false,done:0};
+  if(avaUseKokoro())s.engine='kokoro';else if(avaCanSpeak())s.engine='browser';else return null;
+  AVA.say=s;return s;
 }
-function avaBrowserSay(gen,from){
-  const s=AVA.say;if(!s||s.gen!==gen)return false;
+function avaSayAdd(s,text){
+  if(!s||AVA.say!==s||s.final)return false;
+  const parts=avaChunks(text,s.parts.length>0);if(!parts.length)return false;
+  parts.forEach(p=>{const i=s.parts.push(p)-1;
+    if(s.engine==='kokoro'){try{AVA.k.worker.postMessage({type:'speak',gen:s.gen,i,text:p,voice:avaVoicePref(),speed:avaSpeed()});}catch(e){}}
+    else avaBrowserUtter(s,i);});
+  if(!AVA.speaking){AVA.speaking=true;avaPaintMic();}
+  if(s.engine==='kokoro')avaPlayNext();
+  return true;
+}
+function avaSayEnd(s){
+  if(!s||AVA.say!==s)return false;
+  s.final=true;
+  if(!s.parts.length){AVA.say=null;if(AVA.speaking){AVA.speaking=false;avaPaintMic();}return false;}
+  if(s.engine==='browser'&&s.done>=s.parts.length)avaSpokeDone(s.gen);
+  else if(s.engine==='kokoro')avaPlayNext();
+  return true;
+}
+/* Say `text`. → true when something is being said (avaSpokeDone runs at the end), false when there is nothing to say. */
+function avaSpeak(text){const s=avaSayBegin();if(!s)return false;avaSayAdd(s,text);return avaSayEnd(s)}
+function avaBrowserUtter(s,i){
   try{
-    const v=avaPickVoice();const last=s.parts.length-1;
-    for(let i=from;i<=last;i++){
-      const u=new window.SpeechSynthesisUtterance(s.parts[i]);u.lang='en-US';u.rate=1.03;u.pitch=1;if(v)u.voice=v;
-      if(i===last){u.onend=()=>avaSpokeDone(gen);u.onerror=()=>avaSpokeDone(gen);}
-      window.speechSynthesis.speak(u);
-    }
-    return true;
+    const v=avaPickVoice();const u=new window.SpeechSynthesisUtterance(s.parts[i]);u.lang='en-US';u.rate=Math.round(1.03*avaSpeed()*100)/100;u.pitch=1;if(v)u.voice=v;
+    const fin=()=>{if(AVA.say!==s)return;s.done=Math.max(s.done,i+1);if(s.final&&s.done>=s.parts.length)avaSpokeDone(s.gen);};
+    u.onend=fin;u.onerror=fin;window.speechSynthesis.speak(u);return true;
   }catch(e){return false}
 }
-/* The natural voice failed half-way: the rest in the browser's voice. */
+/* The natural voice failed half-way: the rest (and anything still to come) in the browser's voice. */
 function avaSayFallback(gen,from){
   const s=AVA.say;if(!s||s.gen!==gen||s.engine!=='kokoro')return;
   try{AVA.k.worker&&AVA.k.worker.postMessage({type:'cancel',gen});}catch(e){}
-  avaStopSource();s.engine='browser';
-  if(!avaCanSpeak()||from>=s.parts.length||!avaBrowserSay(gen,from))avaSpokeDone(gen);
+  avaStopSource();s.playing=false;
+  if(!avaCanSpeak()){avaSpokeDone(gen);return;}
+  s.engine='browser';s.done=from;
+  for(let i=from;i<s.parts.length;i++)avaBrowserUtter(s,i);
+  if(s.final&&from>=s.parts.length)avaSpokeDone(gen);
 }
 function avaAudio(){
   if(AVA.ac)return AVA.ac;const C=avaAudioClass();if(!C)return null;
@@ -671,7 +705,7 @@ function avaKokoroAudio(m){
 }
 function avaPlayNext(){
   const s=AVA.say;if(!s||s.engine!=='kokoro'||s.playing)return;
-  if(s.next>=s.parts.length){avaSpokeDone(s.gen);return;}
+  if(s.next>=s.parts.length){if(s.final)avaSpokeDone(s.gen);return;}
   const m=s.buf[s.next];if(!m)return;   // still being made
   delete s.buf[s.next];
   const ac=avaAudio();if(!ac){avaSayFallback(s.gen,s.next);return;}
@@ -722,13 +756,15 @@ function avaListen(opts){
   if(!opts.auto){AVA.loopPaused=false;}
   if(!opts.retry)AVA.retried=0;
   let rec;try{rec=new R();}catch(e){avaNote("Voice didn't start — type your question instead.");return false;}
-  rec.lang='en-US';rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=1;
+  // push-to-talk (hold Space / hold the mic): keep listening through pauses until it is let go
+  const ptt=!!opts.ptt;rec._ptt=ptt;
+  rec.lang='en-US';rec.interimResults=true;rec.continuous=ptt;rec.maxAlternatives=1;
   let final='',interim='',err=null;
   const quiet=ms=>{clearTimeout(AVA.silence);AVA.silence=setTimeout(()=>{if(AVA.rec===rec){try{rec.stop();}catch(e){}}},ms);};
   rec.onresult=e=>{interim='';for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i];if(r.isFinal)final+=r[0].transcript;else interim+=r[0].transcript;}
     AVA.interim=(final+' '+interim).trim();avaPaintHeard();
     // they stopped talking: send it without waiting for the browser to notice
-    if(AVA.interim)quiet(final&&!interim.trim()?700:1400);};
+    if(AVA.interim&&!rec._ptt)quiet(final&&!interim.trim()?700:1400);};
   rec.onerror=e=>{err=(e&&e.error)||'unknown';
     if(err==='not-allowed'||err==='service-not-allowed')avaMicBlocked();
     else if(err==='audio-capture')avaNote("I can't find a microphone. Plug one in (or pick it in the browser's settings), or type instead.");
@@ -737,23 +773,90 @@ function avaListen(opts){
   rec.onend=()=>{
     clearTimeout(AVA.silence);
     if(AVA.rec===rec){AVA.rec=null;AVA.listening=false;}
-    const said=(final||interim||'').trim();AVA.interim='';avaPaintHeard();avaPaintMic();
+    const said=((final+' '+interim).trim()||'').trim();AVA.interim='';avaPaintHeard();avaPaintMic();
+    if(rec._defer){rec._said=said;if(rec._deferRes)rec._deferRes(said);return;}   // a hold with a recording: avaHoldSend decides
+    if(rec._discard)return;   // a short tap on Space / the mic: not a question
     if(said){avaAsk(said,{voice:true});return;}
+    if(rec._ptt&&!err){avaNote(avaIsPhone()?"I didn't hear anything — hold the mic while you talk, then let go.":"I didn't hear anything — hold Space while you talk, then let go.");return;}
     if(rec._userStop||err==='not-allowed'||err==='service-not-allowed'||err==='audio-capture'||err==='aborted'||err==='language-not-supported')return;
     // nothing heard / the speech service hiccuped: try once more by itself, then say so
     if(AVA.open&&(AVA.retried||0)<1&&(err==null||err==='no-speech'||err==='network')){AVA.retried=(AVA.retried||0)+1;avaListen({auto:true,retry:true});return;}
     if(err==null||err==='no-speech'){avaNote("I didn't hear anything. Tap the mic and speak, or type.");AVA.loopPaused=true;}
   };
-  AVA.rec=rec;AVA.listening=true;AVA.interim='';avaPaintMic();avaPaintHeard();if(!opts.retry)avaNote('');
+  AVA.rec=rec;AVA.listening=true;AVA.ptting=ptt;AVA.interim='';avaPaintMic();avaPaintHeard();if(!opts.retry)avaNote('');
   try{rec.start();}catch(e){AVA.listening=false;AVA.rec=null;avaPaintMic();avaPaintHeard();avaNote("Voice didn't start — tap the mic again, or type.");return false;}
   return true;
 }
+/* opts.user: a tap stopped it (pauses hands-free; what was heard is still sent) · opts.discard: throw away what was heard
+   (a short tap on Space) · otherwise: stop and send (letting go of Space / the mic). */
 function avaStopListening(opts){
   opts=opts||{};clearTimeout(AVA.silence);const rec=AVA.rec;
   if(opts.user){AVA.loopPaused=true;if(rec)rec._userStop=true;}
-  try{if(rec)rec.stop();}catch(e){}
-  AVA.listening=false;avaPaintMic();avaPaintHeard();
+  if(opts.discard&&rec)rec._discard=true;
+  try{if(rec){if(opts.discard&&typeof rec.abort==='function')rec.abort();else rec.stop();}}catch(e){}
+  AVA.listening=false;AVA.ptting=false;avaPaintMic();avaPaintHeard();
 }
+
+/* ---- push-to-talk: hold Space (anywhere but a text box) or hold the mic / the round button ----
+   Down: open Ava if she's closed and listen at once. Up: stop and send. A short tap (under AVA_TAP_MS) is not a question:
+   Space toggles the panel, the round button opens her and listens as before, the mic listens until you stop talking. */
+const AVA_TAP_MS=250;
+function avaEditable(t){
+  if(!t||typeof t!=='object')return false;
+  const tag=String(t.tagName||'').toUpperCase();if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return true;
+  if(t.isContentEditable===true)return true;
+  const ce=typeof t.getAttribute==='function'?t.getAttribute('contenteditable'):null;return ce!=null&&ce!=='false';
+}
+function avaModalOpen(){const w=avaEl('modalWrap');const c=avaEl('cmdk');return !!((w&&w.classList&&w.classList.contains('open'))||(c&&c.classList&&c.classList.contains('open')))}
+function avaHoldStart(src){
+  if(AVA.ptt)return false;
+  avaAudioUnlock();
+  const wasOpen=AVA.open;
+  AVA.ptt={src,at:Date.now(),wasOpen,cap:null};
+  if(!wasOpen)avaOpen({listen:false,quiet:true});
+  const web=avaCanListen();
+  if(!web&&!avaHearOn()){avaHush();avaNote("Voice isn't available in this browser — type your question instead. (It works in Chrome, Edge and Safari.)");return false;}
+  if(AVA.listening)avaStopListening({discard:true});
+  let ok=false;
+  if(web)ok=avaListen({ptt:true});
+  else{avaHush();AVA.listening=true;AVA.ptting=true;AVA.rec=null;AVA.interim='';avaNote('');avaPaintMic();avaPaintHeard();ok=true;}   // no words in this browser: the recording only
+  if(ok&&AVA.ptt)AVA.ptt.cap=avaCaptureStart();
+  return ok;
+}
+/* → 'tap' | 'hold' | 'cancel' | null */
+function avaHoldEnd(cancel){
+  const p=AVA.ptt;if(!p)return null;AVA.ptt=null;
+  const held=Date.now()-p.at>=AVA_TAP_MS;
+  const rec=AVA.listening&&AVA.rec&&AVA.rec._ptt?AVA.rec:null;
+  const bare=AVA.listening&&!AVA.rec&&AVA.ptting;   // recording only (no words from this browser)
+  const drop=()=>{if(rec)avaStopListening({discard:true});else if(bare)avaStopListening({});avaCaptureKill(p.cap);};
+  if(cancel){drop();return 'cancel';}
+  if(held){
+    if(p.cap&&p.cap.rec&&(rec||bare)){avaHoldSend(p.cap,rec);return 'hold';}
+    avaCaptureKill(p.cap);
+    if(rec)avaStopListening({});
+    else if(bare){avaStopListening({});avaNote("I couldn't record your voice here — allow the microphone, or type your question.");}
+    return 'hold';
+  }
+  // a tap
+  if(p.src==='space'){drop();if(p.wasOpen)avaClose();else avaTipSeen();return 'tap';}
+  if(p.src==='fab'){if(p.wasOpen){drop();avaClose();}else{avaCaptureKill(p.cap);if(rec){rec._ptt=false;AVA.ptting=false;avaPaintHeard();}else if(bare)avaStopListening({});}return 'tap';}
+  // the mic: carry on listening, and send when they stop talking (tap-to-talk)
+  avaCaptureKill(p.cap);if(rec){rec._ptt=false;AVA.ptting=false;avaPaintHeard();}else if(bare)avaStopListening({});
+  return 'tap';
+}
+function avaPointer(e,src){
+  AVA.holdAt=Date.now();
+  if(e&&e.button!=null&&e.button!==0)return;
+  if(src==='mic'&&AVA.listening){avaStopListening({user:true});return;}   // a tap while listening stops it
+  if(src==='fab'&&AVA.open){AVA.ptt={src,at:Date.now(),wasOpen:true};return;}
+  try{e&&e.currentTarget&&e.currentTarget.setPointerCapture&&e.currentTarget.setPointerCapture(e.pointerId);}catch(x){}
+  avaHoldStart(src);
+}
+function avaPointerUp(e,cancel){if(AVA.ptt&&AVA.ptt.src!=='space')avaHoldEnd(!!cancel);}
+/* A click after a pointer press was handled already; a click from the keyboard (Enter) is a plain tap. */
+function avaFabClick(){if(Date.now()-(AVA.holdAt||0)<1500)return;avaFabTap();}
+function avaMicClick(){if(Date.now()-(AVA.holdAt||0)<1500)return;avaMicTap();}
 /* The browser said no to the microphone: a short guide, once per visit, and typing still works. */
 function avaMicBlocked(){
   AVA.loopPaused=true;
@@ -768,39 +871,158 @@ function avaMicCheck(){
   return Promise.resolve(null);
 }
 
-/* ===================== 8. THE SMARTER BRAIN (the machine's AI, when a key is set) =====================
-   GET  /api/mc/ava/status   → {brains:[{id, name, ready, model, lastError, lastOkAt}]}
-   POST /api/mc/ava/chat     {messages:[{role,content}], page:{view, clientId, tab}} → {reply, actions, brain, tried} | {error, needsKeys:true}
+/* ===================== 8. THE AI BRAIN (the machine's AI, when a key is set) — asked first =====================
+   GET  /api/mc/ava/status   → {ready, brains:[{id, name, ready, model, lastError, lastOkAt}]}
+   POST /api/mc/ava/chat?stream=1   (accept: text/event-stream, application/json)
+        {messages:[{role,content}] (the last 16 turns), page:{view, clientId, clientName, tab}, user:{firstName, role}, stream:true}
+        → a stream (content-type text/event-stream) of
+            event: delta    data: {"text":"…"}                       the next bit of the answer
+            event: actions  data: {"actions":[…]}                    navigate / confirm / draft (as in the JSON answer)
+            event: done     data: {"brain":"groq","tried":[…],"suggestions":[…]}
+            event: error    data: {"error":"…","needsKeys":true?,"status":429?}
+        → or the plain JSON answer {reply, actions, brain, tried, suggestions?} | {error, needsKeys:true}
    GET/POST /api/mc/ava/requests → {requests:[{id, at, by, text, status}]}; POST {action:'add', text} / {action:'done', id}
-   The local brain answers first (instant) — places, clients, numbers, the guide. Only what it isn't sure about goes to the
-   AI, with the last few turns and the page (never a prospect's name or email: addresses are taken out first). */
-const AVA_AI={off:null,offUntil:0,noted:false,brains:null};
+   AI first: when a brain is on, EVERY question goes to it — except a plain command ("open trials", "open Lakeview",
+   "go back", "settings"), which runs at once here. The local brain (avaThink) answers only when the AI can't (no key,
+   not updated, today's limit, down, offline) — and then says plainly that she is in basic mode. Email addresses are
+   taken out of what is sent. */
+const AVA_AI={off:null,offUntil:0,noted:false,brains:null,ready:null,readyAt:0,checking:null};
 const AVA_BRAIN_NAMES={groq:'Groq',gemini:'Gemini',google:'Gemini',cerebras:'Cerebras',openrouter:'OpenRouter',mistral:'Mistral',cloudflare:'Cloudflare',github:'GitHub Models',sambanova:'SambaNova',together:'Together',local:'this device'};
+const AVA_HISTORY=16;
 function avaBrainName(b){
   if(b&&typeof b==='object')b=b.name||b.id;b=String(b||'').trim();if(!b)return 'AI';
   const known=(AVA_AI.brains||[]).find(x=>x&&(x.id===b||x.name===b));if(known&&known.name)return String(known.name);
   return AVA_BRAIN_NAMES[b.toLowerCase()]||b.charAt(0).toUpperCase()+b.slice(1);
 }
 function avaScrub(s){return String(s||'').replace(/[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[a-z]{2,}/gi,'[email]').slice(0,1200)}
+function avaTrim(s,n){s=String(s||'');return s.length>n?s.slice(0,n-1).trimEnd()+'…':s}
+/* The conversation so far (the last 16 turns; long answers cut down), as the AI reads it. */
 function avaHistory(){
-  return AVA.log.filter(m=>(m.who==='you'||m.who==='ava')&&!m.notice&&m.text).slice(-10).map(m=>({role:m.who==='you'?'user':'assistant',content:avaScrub(m.text)}));
+  return AVA.log.filter(m=>(m.who==='you'||m.who==='ava')&&!m.notice&&!m.streaming&&m.text).slice(-AVA_HISTORY).map(m=>({role:m.who==='you'?'user':'assistant',content:avaTrim(avaScrub(m.text),m.who==='you'?1000:700)}));
 }
 function avaPage(){
   const v=typeof currentView!=='undefined'?currentView:'';
-  return {view:v,clientId:typeof currentTrialId!=='undefined'&&currentTrialId!=null?String(currentTrialId):null,tab:v==='clientSystem'&&typeof trialTab!=='undefined'?trialTab:null};
+  const id=typeof currentTrialId!=='undefined'&&currentTrialId!=null?String(currentTrialId):null;
+  const inClient=id&&['trial','clientSystem','trialPurchase'].includes(v);
+  return {view:v,clientId:id,clientName:inClient?avaClientName(id):null,tab:v==='clientSystem'&&typeof trialTab!=='undefined'?trialTab:null};
 }
-/* → {reply, actions, brain, ms} or {off:'keys'|'missing'|'net', error} */
-async function avaAi(){
-  if(typeof machineFetch!=='function')return {off:'net'};
+function avaUser(){const u=typeof authUser!=='undefined'&&authUser?authUser:null;return {firstName:u?avaFirst(u.name||u.email):'',role:avaOwner()?'owner':'team'}}
+/* Is the AI switched on? (GET /api/mc/ava/status — for anyone signed in, kept a minute.) Only a clear "not ready"
+   stops her asking it; not knowing (404, offline, not allowed) still lets her try. */
+function avaAiCheck(force){
+  if(typeof machineFetch!=='function')return Promise.resolve(null);
+  if(!force&&(AVA_AI.checking||(AVA_AI.readyAt&&Date.now()-AVA_AI.readyAt<60000)))return AVA_AI.checking||Promise.resolve(AVA_AI.ready);
+  AVA_AI.checking=Promise.resolve(machineFetch('/api/mc/ava/status',{timeout:8000})).then(r=>{
+    AVA_AI.checking=null;AVA_AI.readyAt=Date.now();const d=r&&r.ok&&r.data;
+    if(d&&Array.isArray(d.brains))AVA_AI.brains=d.brains;
+    if(d)AVA_AI.ready=d.ready!=null?!!d.ready:Array.isArray(d.brains)?d.brains.some(b=>b&&b.ready):null;
+    else AVA_AI.ready=null;
+    avaPaintHead();return AVA_AI.ready;
+  }).catch(()=>{AVA_AI.checking=null;return null;});
+  return AVA_AI.checking;
+}
+/* Server-sent events: split what has arrived into whole events ({event, data}); the rest waits for more. */
+function avaSseSplit(buf){
+  const events=[];buf=String(buf||'').replace(/\r\n/g,'\n');let i;
+  while((i=buf.indexOf('\n\n'))>=0){
+    const block=buf.slice(0,i);buf=buf.slice(i+2);
+    let ev='message';const data=[];
+    block.split('\n').forEach(line=>{if(!line||line[0]===':')return;const c=line.indexOf(':');const f=c<0?line:line.slice(0,c);let v=c<0?'':line.slice(c+1);if(v[0]===' ')v=v.slice(1);if(f==='event')ev=v.trim();else if(f==='data')data.push(v);});
+    if(!data.length)continue;
+    const raw=data.join('\n');let d=raw;try{d=JSON.parse(raw);}catch(e){d=raw;}
+    events.push({event:ev,data:d});
+  }
+  return {events,rest:buf};
+}
+/* POST to the machine asking for a stream; reads it as it comes (on.delta(fullText, newBit)) — or the usual JSON when
+   the machine answers with JSON. Same sign-in as machineFetch (tkToken). Never throws.
+   → {ok, status, data:{reply, actions, brain, tried, suggestions, …}, error, streamed?, cut?} */
+async function avaStreamFetch(path,body,on){
+  on=on||{};
+  const token=typeof tkToken==='function'?await tkToken():null;
+  if(!token)return {ok:false,status:0,data:null,error:'You are not signed in any more. Sign out, then sign in again.'};
+  const base=typeof tkMachineUrl==='function'?tkMachineUrl():'';
+  const url=base+path+(path.indexOf('?')>=0?'&':'?')+'stream=1';
+  const init={method:'POST',headers:{authorization:'Bearer '+token,accept:'text/event-stream, application/json','content-type':'application/json'},body:JSON.stringify(body)};
+  let ctrl=null,timer=null;
+  const arm=ms=>{if(!ctrl)return;clearTimeout(timer);timer=setTimeout(()=>{try{ctrl.abort();}catch(e){}},ms);};
+  if(typeof AbortController!=='undefined'){ctrl=new AbortController();init.signal=ctrl.signal;arm(on.timeout||30000);}
+  let res;
+  try{res=await fetch(url,init);}
+  catch(e){clearTimeout(timer);const to=e&&e.name==='AbortError';return {ok:false,status:0,data:null,error:to?'took too long':String((e&&e.message)||'fetch failed')};}
+  let type='';try{type=String((res.headers&&typeof res.headers.get==='function'&&res.headers.get('content-type'))||'');}catch(e){}
+  if(res.ok&&/text\/event-stream/i.test(type)&&res.body&&typeof res.body.getReader==='function'){
+    const d={reply:'',actions:[],brain:null,tried:null,suggestions:null};
+    const out={ok:true,status:res.status,streamed:true,data:d,error:null};
+    const dec=typeof TextDecoder==='function'?new TextDecoder():null;
+    const handle=x=>{
+      const v=x.data;const o=v&&typeof v==='object'?v:{};
+      if(x.event==='delta'||(x.event==='message'&&(typeof v==='string'||o.text!=null))){
+        const bit=typeof v==='string'?v:String(o.text!=null?o.text:o.delta!=null?o.delta:'');if(!bit)return;
+        d.reply+=bit;if(on.delta)try{on.delta(d.reply,bit);}catch(e){}return;}
+      if(x.event==='actions'){if(Array.isArray(o.actions))d.actions=d.actions.concat(o.actions);if(Array.isArray(o.suggestions))d.suggestions=o.suggestions;return;}
+      if(x.event==='suggestions'){if(Array.isArray(o.suggestions))d.suggestions=o.suggestions;else if(Array.isArray(v))d.suggestions=v;return;}
+      if(x.event==='done'){if(o.brain)d.brain=o.brain;if(o.tried)d.tried=o.tried;if(Array.isArray(o.suggestions))d.suggestions=o.suggestions;if(Array.isArray(o.actions))d.actions=d.actions.concat(o.actions);
+        if(!d.reply&&typeof o.reply==='string'){d.reply=o.reply;if(on.delta)try{on.delta(d.reply,o.reply);}catch(e){}}out.done=true;return;}
+      if(x.event==='error'){const msg=String(o.error||o.message||(typeof v==='string'?v:'')||'The AI stopped answering.');
+        if(d.reply){out.cut=true;out.error=msg;}else{out.ok=false;out.status=Number(o.status)||502;out.error=msg;if(o.needsKeys)d.needsKeys=true;d.error=msg;if(o.tried)d.tried=o.tried;}
+        out.done=true;}
+    };
+    try{
+      const reader=res.body.getReader();let buf='';
+      while(!out.done){
+        arm(on.idle||25000);
+        const r=await reader.read();if(!r||r.done)break;
+        const val=r.value;buf+=typeof val==='string'?val:dec?dec.decode(val,{stream:true}):String(val||'');
+        const sp=avaSseSplit(buf);buf=sp.rest;sp.events.forEach(handle);
+      }
+      if(!out.done){if(dec)buf+=dec.decode();if(buf.trim())avaSseSplit(buf+'\n\n').events.forEach(handle);}
+      if(out.done&&reader.cancel)try{reader.cancel();}catch(e){}
+    }catch(e){if(d.reply){out.cut=true;out.error='The connection dropped.';}else{out.ok=false;out.status=0;out.error=e&&e.name==='AbortError'?'took too long':String((e&&e.message)||'stream failed');}}
+    clearTimeout(timer);
+    return out;
+  }
+  clearTimeout(timer);
+  let text='';try{text=await res.text();}catch(e){text='';}
+  let data=null;if(text){try{data=JSON.parse(text);}catch(e){data=null;}}
+  if(!res.ok)return {ok:false,status:res.status,data,error:(data&&(data.error||data.message))||('HTTP '+res.status)};
+  if(data===null)return {ok:false,status:res.status,data:null,error:'unreadable'};
+  return {ok:true,status:res.status,data,error:null};
+}
+/* → {reply, actions, brain, tried, suggestions, ms, streamed, cut} or {off:'keys'|'missing'|'limit'|'net', error} */
+async function avaAi(on){
+  if(typeof tkToken!=='function'||typeof fetch!=='function')return {off:'net'};
   if(AVA_AI.off&&Date.now()<AVA_AI.offUntil)return {off:AVA_AI.off};
+  if(AVA_AI.ready===false&&Date.now()-AVA_AI.readyAt<60000)return {off:'keys'};
   const t0=Date.now();
-  let r;try{r=await machineFetch('/api/mc/ava/chat',{method:'POST',body:{messages:avaHistory(),page:avaPage()},timeout:25000});}catch(e){r={ok:false,status:0,error:String(e&&e.message||e)};}
+  let r;try{r=await avaStreamFetch('/api/mc/ava/chat',Object.assign({messages:avaHistory(),page:avaPage(),user:avaUser(),stream:true},on&&on.voice?{voice:true}:{}),on);}catch(e){r={ok:false,status:0,error:String(e&&e.message||e)};}
   const ms=Date.now()-t0;const d=(r&&r.data)||{};
-  if(r&&r.ok&&typeof d.reply==='string'&&d.reply.trim()){AVA_AI.off=null;return {reply:d.reply.trim(),actions:Array.isArray(d.actions)?d.actions:[],brain:d.brain,tried:d.tried,ms};}
-  // 503 {needsKeys}: no key yet · 404: the machine isn't updated · 429: today's limit · 502: no brain answered · network
-  if(d.needsKeys||(r&&r.status===404)){AVA_AI.off=d.needsKeys?'keys':'missing';AVA_AI.offUntil=Date.now()+5*60e3;return {off:AVA_AI.off};}
+  const reply=typeof d.reply==='string'?d.reply.trim():'';
+  if(r&&r.ok&&reply){AVA_AI.off=null;AVA_AI.ready=true;AVA_AI.noted=false;
+    return {reply,raw:d.reply,actions:Array.isArray(d.actions)?d.actions:[],brain:d.brain,tried:d.tried,suggestions:Array.isArray(d.suggestions)?d.suggestions.filter(x=>typeof x==='string'&&x.trim()).slice(0,4):null,ms,streamed:!!r.streamed,cut:!!r.cut};}
+  // 503 {needsKeys}: no key yet · 404: the machine isn't updated · 429: today's limit · 502: no brain answered · offline
+  if(d.needsKeys){AVA_AI.off='keys';AVA_AI.ready=false;AVA_AI.readyAt=Date.now();AVA_AI.offUntil=Date.now()+5*60e3;return {off:'keys'};}
+  if(r&&r.status===404){AVA_AI.off='missing';AVA_AI.offUntil=Date.now()+5*60e3;return {off:'missing'};}
   if(r&&r.status===429){AVA_AI.off='limit';AVA_AI.offUntil=Date.now()+10*60e3;return {off:'limit',error:d.error||''};}
-  return {off:'net',error:(r&&r.error)||d.error||''};
+  return {off:r&&r.status>=500?'down':'net',error:(r&&r.error)||d.error||''};
+}
+/* A plain command that runs at once without the AI: "open trials", "go to the calendar", "settings", "open Lakeview",
+   "show Lakeview's conversations", "go back". Anything with a question in it is not one. */
+const AVA_CMD_VERB=/^(?:(?:hey )?ava )?(?:please )?(open|show(?: me)?|go to|goto|take me to|switch to|bring up|jump to|navigate to|pull up)\b\s*/;
+function avaIsCommand(text){
+  let t=avaNorm(text).replace(/\s+please$/,'').replace(/^please\s+/,'');if(!t)return false;
+  if(/^(go )?back$|^go back( please)?$|^previous page$/.test(t))return true;
+  if(/\b(how|what|why|when|who|which|whose|did|does|do|is|are|was|were|can|could|should|would|will|many|much|if|and|then|tell|explain|summari[sz]e|draft|write|compare)\b|\d/.test(t.replace(AVA_CMD_VERB,'')))return false;
+  const m=t.match(AVA_CMD_VERB);const verb=!!m;const rem=(m?t.slice(m[0].length):t).replace(/^(the|my|our)\s+/,'').trim();
+  if(!rem)return false;
+  const fill=/\b(the|my|our|page|pages|tab|section|clients?|list|screen|settings|now)\b/g;
+  for(const p of AVA_PLACES){
+    const re=new RegExp(p[1].source,'g');if(!re.test(rem))continue;
+    if(!rem.replace(new RegExp(p[1].source,'g'),' ').replace(fill,' ').trim())return true;
+  }
+  if(!verb)return false;
+  const c=avaFindClient(rem);if(!c)return false;
+  return rem.split(' ').length<=avaNorm(c.name).split(' ').length+3;
 }
 function avaSecs(ms){return (Math.max(0,Number(ms)||0)/1000).toFixed(1)+' s'}
 const AVA_GO_WORDS=/\b(open|show|go to|go|take me|bring up|switch to|jump to|navigate|see)\b/;
@@ -854,22 +1076,32 @@ function avaFromAi(ai,text,ctx){
   });
   const conf=cards.filter(c=>c.kind==='confirm').pop();
   if(conf)AVA.pending={act:{label:conf.label,run:()=>avaCardDo(conf,true)},done:'Done.',card:conf};
-  return {say:ai.reply,actions:acts.slice(0,4),auto,cards,meta:'answered by '+avaBrainName(ai.brain)+' · '+avaSecs(ai.ms),ai:true,confirm:!!conf};
+  return {say:ai.reply,raw:ai.raw,actions:acts.slice(0,4),auto,cards,chips:ai.suggestions&&ai.suggestions.length?ai.suggestions:null,meta:'answered by '+avaBrainName(ai.brain)+' · '+avaSecs(ai.ms),ai:true,confirm:!!conf,cut:!!ai.cut,streamed:!!ai.streamed};
 }
-/* Local first (instant); the AI only for what the local brain isn't sure about; the local answer again when the AI is off. */
-async function avaAnswer(text,ctx){
-  const local=await avaThink(text,ctx);
-  if(!local||!(local.unknown||local.weak))return local;
-  const ai=await avaAi();
+/* AI first. A plain command (and a "yes" / "no" to Ava's own question) runs here at once; everything else goes to the
+   AI; the local brain answers only when the AI can't — marked as basic mode. `on.delta` gets the answer as it streams. */
+async function avaAnswer(text,ctx,on){
+  const t=avaNorm(text);
+  if((AVA.pending&&(AVA_YES.test(t)||AVA_NO.test(t)))||avaIsCommand(text)){
+    const r=await avaThink(text,ctx);if(r&&typeof r==='object'){r.local=true;if(!r.meta)r.meta='instant, on this device';}return r;
+  }
+  AVA.pending=null;
+  const ai=await avaAi(on);
   if(ai.reply)return avaFromAi(ai,text,ctx);
-  if((ai.off==='keys'||ai.off==='missing'||ai.off==='limit')&&AVA_AI.noted!==ai.off){AVA_AI.noted=ai.off;local.aiNote=ai.off;}
+  const local=(await avaThink(text,ctx))||avaReply("I'm not sure.",[]);
+  local.basic=ai.off||'net';local.meta='basic mode';
+  if(AVA_AI.noted!==local.basic){AVA_AI.noted=local.basic;local.aiNote=local.basic;}
   return local;
 }
+/* Basic mode, said plainly — and what to do about it. */
 function avaAiNoteMsg(kind,ctx){
-  if(kind==='limit')return {who:'ava',notice:true,text:"My smarter brain has reached its limit for now — I'll answer from what I know and try it again in a few minutes."};
-  if(kind==='missing')return {who:'ava',notice:true,text:"My smarter brain isn't available yet — your system needs an update first. I'll keep answering what I know."};
-  return ctx.owner?{who:'ava',notice:true,text:"My smarter brain isn't switched on yet — add a free key in Settings › Keys.",actions:[avaAct('Open Settings › Keys',()=>openSettings('keys'))]}
-    :{who:'ava',notice:true,text:"My smarter brain isn't switched on yet — the owner can add a free key in Settings › Keys."};
+  const lead="I'm in basic mode right now, so I can only answer simple things about the hub. ";
+  if(kind==='limit')return {who:'ava',notice:true,basic:kind,text:lead+"My AI brain has reached today's limit — I'll try it again in a few minutes."};
+  if(kind==='missing')return {who:'ava',notice:true,basic:kind,text:lead+"My AI brain needs your system to be updated first."};
+  if(kind==='down')return {who:'ava',notice:true,basic:kind,text:lead+"My AI brain didn't answer just now — ask again in a minute."};
+  if(kind==='net')return {who:'ava',notice:true,basic:kind,text:lead+"I couldn't reach my AI brain — check your internet. I'll try again with your next question."};
+  return ctx.owner?{who:'ava',notice:true,basic:kind,text:lead+"My AI brain isn't switched on yet — add a free key in Settings › Keys.",actions:[avaAct('Open Settings › Keys',()=>openSettings('keys'))]}
+    :{who:'ava',notice:true,basic:kind,text:lead+"My AI brain isn't switched on yet — the owner can add a free key in Settings › Keys."};
 }
 /* A confirm card's buttons: Do it runs the hub's own function; No does nothing. Each card answers once. */
 function avaCardDo(card,yes){
@@ -907,7 +1139,8 @@ async function avaLoadStatus(force){
   const st=AVA.st;if(!avaOwner()||typeof machineFetch!=='function')return null;
   if(!force&&(st.missing||(st.data&&Date.now()-(st.at||0)<60000)))return st;
   const r=await machineFetch('/api/mc/ava/status');
-  if(r.ok&&r.data&&Array.isArray(r.data.brains)){st.data=r.data;st.at=Date.now();st.err=null;st.missing=false;AVA_AI.brains=r.data.brains;}
+  if(r.ok&&r.data&&Array.isArray(r.data.brains)){st.data=r.data;st.at=Date.now();st.err=null;st.missing=false;AVA_AI.brains=r.data.brains;
+    AVA_AI.ready=r.data.ready!=null?!!r.data.ready:r.data.brains.some(b=>b&&b.ready);AVA_AI.readyAt=Date.now();}
   else if(r.status===404){st.missing=true;st.err=null;}
   else st.err=r.error||"Couldn't check Ava's brains. Try again.";
   return st;
@@ -921,7 +1154,29 @@ async function avaLoadRequests(force){
   else st.err=r.error||"Couldn't load the requests. Try again.";
   return st;
 }
-function avaLoadSettings(force){return Promise.all([avaLoadStatus(force),avaLoadRequests(force)])}
+/* Business facts (the owner's, ≤ 4 KB): what Ava should know about the business. GET/POST /api/mc/ava/facts {text}. */
+const AVA_FACTS_MAX=4000;
+async function avaLoadFacts(force){
+  const st=AVA.facts;if(!avaOwner()||typeof machineFetch!=='function')return null;
+  if(!force&&(st.missing||(st.text!=null&&Date.now()-(st.at||0)<60000)))return st;
+  const r=await machineFetch('/api/mc/ava/facts');
+  if(r.ok&&r.data){st.text=typeof r.data.text==='string'?r.data.text:'';st.at=Date.now();st.err=null;st.missing=false;}
+  else if(r.status===404){st.missing=true;st.err=null;}
+  else st.err=r.error||"Couldn't load the business facts. Try again.";
+  return st;
+}
+async function avaFactsSave(){
+  const st=AVA.facts;if(!avaOwner()||st.busy)return null;
+  const box=avaEl('avaFacts');const text=String(box&&box.value!=null?box.value:st.text||'').slice(0,AVA_FACTS_MAX);
+  st.busy=true;st.saved=null;st.err=null;avaSetRepaint();
+  const r=await machineFetch('/api/mc/ava/facts',{method:'POST',body:{text}});
+  st.busy=false;
+  if(r.ok){st.text=r.data&&typeof r.data.text==='string'?r.data.text:text;st.draft=null;st.at=Date.now();st.saved=Date.now();if(typeof toast==='function')toast('Saved — Ava uses these facts from now on');}
+  else if(r.status===404){st.missing=true;}
+  else st.err=r.error||'Not saved — try again.';
+  avaSetRepaint();return r;
+}
+function avaLoadSettings(force){return Promise.all([avaLoadStatus(force),avaLoadRequests(force),avaLoadFacts(force)])}
 function avaSetRepaint(){if(typeof currentView!=='undefined'&&currentView==='settings'&&typeof trialsRepaint==='function')trialsRepaint('settings',{soft:true});}
 async function avaSetRetry(){await avaLoadSettings(true);avaSetRepaint();}
 async function avaTest(){
@@ -929,7 +1184,7 @@ async function avaTest(){
   const t0=Date.now();
   let r;try{r=await machineFetch('/api/mc/ava/chat',{method:'POST',body:{messages:[{role:'user',content:'This is a test from Settings. Say hello in one short sentence.'}],page:avaPage()},timeout:25000});}catch(e){r={ok:false,error:String(e&&e.message||e)};}
   t.busy=false;const d=(r&&r.data)||{};
-  if(r.ok&&d.reply){t.result={reply:String(d.reply),brain:avaBrainName(d.brain),ms:Date.now()-t0};AVA_AI.off=null;AVA_AI.offUntil=0;}
+  if(r.ok&&d.reply){t.result={reply:String(d.reply),brain:avaBrainName(d.brain),ms:Date.now()-t0};AVA_AI.off=null;AVA_AI.offUntil=0;AVA_AI.ready=true;AVA_AI.noted=false;}
   else if(d.needsKeys)t.err="She has no brain switched on yet — add a free key in Settings › Keys, then test again.";
   else if(r.status===404)t.err="Your system hasn't been updated for Ava's brain yet.";
   else if(r.status===429)t.err=(d.error?avaSentence(d.error)+' ':'')+'Her brain has reached its limit for now — try again later.';
@@ -945,14 +1200,14 @@ async function avaReqDone(id){
   avaSetRepaint();return r;
 }
 function avaVoiceTest(){avaAudioUnlock();avaSpeak("Hi, I'm Ava. This is how I sound.");}
-function avaSettingsCtx(){return {status:AVA.st,reqs:AVA.reqs,test:AVA.test,voice:avaVoicePref(),kokoro:avaKokoroState(),hands:avaHandsFree()}}
+function avaSettingsCtx(){return {status:AVA.st,reqs:AVA.reqs,test:AVA.test,facts:AVA.facts,voice:avaVoicePref(),kokoro:avaKokoroState(),hands:avaHandsFree()}}
 function avaRenderSet(c){
   c=c||{};const e=typeof esc==='function'?esc:(s=>String(s));const at=typeof tkAttr==='function'?tkAttr:(s=>JSON.stringify(String(s)));
   const rel=v=>typeof tkRel==='function'?tkRel(v):String(v||'');
   const st=c.status||{};const brains=st.data&&Array.isArray(st.data.brains)?st.data.brains:null;
   const ready=brains?brains.filter(b=>b&&b.ready):[];const on=st.data&&st.data.ready!=null?!!st.data.ready:ready.length>0;
   const state=st.missing?'<span class="pill grey">Not available yet</span>':!brains?'':on?`<span class="pill green">On${ready[0]?' · '+e(avaBrainName(ready[0])):''}</span>`:'<span class="pill amber">Needs a key</span>';
-  const intro=`<p class="tk-set-text">Ava answers the simple things — pages, clients, numbers, how the hub works — right here, at once. For anything else she asks her smarter brain: a free AI service that switches on with a key.</p>`;
+  const intro=`<p class="tk-set-text">With a brain switched on, Ava sends every question to it — so you can ask her anything about the hub, your clients or anything else. Plain commands like “open trials” still run at once. Without a brain she works in basic mode: pages, clients, numbers and how the hub works.</p>`;
   let brainsHTML;
   if(st.missing)brainsHTML=`<p class="tk-note">Your system hasn't been updated for Ava's smarter brain yet. Until then she answers from what the hub knows.</p>`;
   else if(!brains)brainsHTML=st.err?`<p class="tk-note red">${e(st.err)} <button type="button" class="tk-textbtn" onclick="avaSetRetry()">Try again</button></p>`:(typeof renderLoading==='function'?renderLoading('Checking Ava’s brains…'):'<p class="tk-muted">Checking…</p>');
@@ -967,8 +1222,11 @@ function avaRenderSet(c){
   const open=list?list.filter(x=>x.status!=='done').length:0;
   const reqs=`<h4 class="ava-set-h">What people asked Ava to change${open?` <span class="pill amber">${open} open</span>`:''}</h4>`+(rq.missing?`<p class="tk-muted tk-small">Not available yet — your system needs an update first.</p>`:!list?(rq.err?`<p class="tk-note red">${e(rq.err)} <button type="button" class="tk-textbtn" onclick="avaSetRetry()">Try again</button></p>`:''):!list.length?`<p class="tk-muted tk-small">Nothing yet. Anyone can tell Ava “I'd like the hub to…” and it lands here.</p>`
     :`<ul class="ava-reqs">${list.slice(0,20).map(q=>`<li class="${q.status==='done'?'done':''}"><span><b>${e(q.text||'')}</b><small>${e(q.by||'Someone')}${q.at?' · '+e(rel(q.at)):''}</small></span>${q.status==='done'?'<span class="pill grey">Done</span>':`<button type="button" class="btn ghost" onclick="avaReqDone(${at(q.id)})">Done</button>`}</li>`).join('')}</ul>`);
+  const f=c.facts||{};
+  const facts=`<h4 class="ava-set-h">Business facts</h4>`+(f.missing?`<p class="tk-muted tk-small">Not available yet — your system needs an update first.</p>`:f.text==null&&!f.err?`<p class="tk-muted tk-small">Loading…</p>`
+    :`<p class="tk-muted tk-small">What Ava should always know about your business — what you offer, prices, hours, how you like things said. Up to ${avaNum(AVA_FACTS_MAX)} characters; her AI brain reads it with every question.</p><label class="ava-sr" for="avaFacts">Business facts</label><textarea id="avaFacts" class="ava-facts" rows="6" maxlength="${AVA_FACTS_MAX}" placeholder="e.g. We set up cold email for IT companies in the US. The trial is 30 days and free…" oninput="AVA.facts.draft=this.value">${e(f.draft!=null?f.draft:f.text||'')}</textarea><div class="tk-set-links"><button type="button" class="btn"${f.busy?' disabled':''} onclick="avaFactsSave()">${f.busy?'Saving…':'Save facts'}</button>${f.saved?'<span class="pill green">Saved</span>':''}</div>${f.err?`<p class="tk-note red">${e(f.err)} <button type="button" class="tk-textbtn" onclick="avaSetRetry()">Try again</button></p>`:''}`);
   const privacy=`<p class="ava-privacy">Your voice is turned into text by your browser (Chrome uses Google). Ava's AI only uses services that don't train on your data, and never sends your prospects' names or emails.</p>`;
-  return {state,body:intro+`<h4 class="ava-set-h">Her brains</h4>`+brainsHTML+btns+testLine+voice+reqs+privacy};
+  return {state,body:intro+`<h4 class="ava-set-h">Her brains</h4>`+brainsHTML+btns+testLine+facts+voice+reqs+privacy};
 }
 
 /* ===================== 9. ASKING: load what the question needs, think, show, say, do ===================== */
@@ -989,83 +1247,181 @@ async function avaPrime(text){
   if(c&&typeof loadTrial==='function'&&/\b(money|paid|invoice|bounce|bounces)\b/.test(t))await safe(loadTrial(c.id,false));
 }
 const AVA_LOOP_STOP=/^(stop( listening)?|that is all( for now)?|thanks? ava|thank you( ava)?|thanks|bye|goodbye|good bye|i am done|no more|never ?mind)\b/;
+/* Three follow-ups for the page you're on (when the AI gives none of its own); never the question just asked. */
+function avaFollowUps(ctx,asked){
+  ctx=ctx||avaCtx();const pg=avaPage();const v=pg.view;const q=avaNorm(asked||'');let xs;
+  const name=pg.clientName&&pg.clientId!==(typeof MY_STATS_ID!=='undefined'?MY_STATS_ID:'aviance')?pg.clientName:null;
+  if(name)xs=['How is '+name+' doing?','Summarise '+avaPossessive(name)+' latest replies','What does '+name+' need from me?'];
+  else if(v==='calendar')xs=["What's on tomorrow?",'Any call times waiting for my yes?','What needs me today?'];
+  else if(v==='paying')xs=ctx.owner?['How much came in this month?','Which paying clients need me?','How does a paid plan start?']:['Which paying clients need the owner?','How does a paid plan start?','What needs me today?'];
+  else if(v==='settings')xs=['Is everything running?','What does warm-up do?','How do I add a key?'];
+  else if(v==='team'||v==='people')xs=["Who's online?",'Who looks after '+avaExample()+'?','What needs me today?'];
+  else xs=['What needs me today?','How many trials are running?',"What's on my calendar today?",'How does a trial work?'];
+  return xs.filter(x=>avaNorm(x)!==q).slice(0,3);
+}
+function avaPossessive(n){return typeof tkPossessive==='function'?tkPossessive(n):n+"'s"}
+/* Ask: show the question, think (AI first — streamed in as it comes, said sentence by sentence), show, say, do. */
 async function avaAsk(text,opts){
   opts=opts||{};text=String(text||'').trim();if(!text)return null;
   avaOpen({listen:false,quiet:true});
-  avaHush();
-  avaPush({who:'you',text});
+  avaHush();AVA.recall=null;
+  avaPush({who:'you',text,at:Date.now(),voice:!!opts.voice});
   // hands-free: "stop" / "thanks Ava" ends the listening loop
   if(opts.voice&&avaHandsFree()&&!AVA.pending&&AVA_LOOP_STOP.test(avaNorm(text))){
     AVA.loopPaused=true;const r=avaReply("Okay — I'll stop listening. Tap the mic when you need me.",[]);
-    avaPush({who:'ava',text:r.say});avaSpeak(r.say);return r;
+    avaPush({who:'ava',text:r.say,at:Date.now()});avaSpeak(r.say);return r;
   }
-  AVA.busy=true;avaPaintLog();
+  AVA.busy=true;AVA.stage='thinking';avaPaintLog();
+  const live={msg:null,say:null,fed:0,raw:''};
+  const on={voice:!!opts.voice,delta:(full)=>{
+    if(!live.msg){AVA.busy=false;AVA.stage='answering';live.msg={who:'ava',text:'',streaming:true,at:Date.now()};AVA.log.push(live.msg);live.say=avaSayBegin();}
+    live.raw=full;live.msg.text=full;avaFeedSpeech(live,false);avaPaintLog();
+  }};
   let r;
-  try{await avaPrime(text);r=await avaAnswer(text,avaCtx());}
-  catch(e){r=avaReply("Something went wrong on my side. Try again, or ask it another way.",[]);}
-  AVA.busy=false;
-  avaPush({who:'ava',text:r.say,actions:r.actions||[],chips:r.chips||null,cards:r.cards&&r.cards.length?r.cards:null,meta:r.meta||null});
-  if(r.aiNote)avaPush(avaAiNoteMsg(r.aiNote,avaCtx()));
-  const talking=avaSpeak(r.say);
+  try{await avaPrime(text);r=await avaAnswer(text,avaCtx(),on);}
+  catch(e){r=avaReply("Something went wrong on my side — try again, or ask it another way.",[]);}
+  if(!r||typeof r!=='object')r=avaReply("I didn't get an answer — try again, or ask it another way.",[]);
+  AVA.busy=false;AVA.stage=null;
+  const ctx=avaCtx();
+  const chips=r.chips||(r.local&&r.auto?null:avaFollowUps(ctx,text));
+  const msg={who:'ava',text:r.say,actions:r.actions||[],chips:chips&&chips.length?chips:null,cards:r.cards&&r.cards.length?r.cards:null,meta:r.meta||null,at:Date.now(),basic:r.basic||null,streaming:false};
+  if(live.msg){Object.assign(live.msg,msg);avaSave();avaPaintLog();}else avaPush(msg);
+  if(r.aiNote)avaPush(Object.assign(avaAiNoteMsg(r.aiNote,ctx),{at:Date.now()}));
+  if(r.cut)avaPush({who:'ava',notice:true,at:Date.now(),text:'The connection dropped before I finished, so that answer may be cut short. Ask again to get the rest.'});
+  let talking;
+  if(live.say){live.raw=r.raw!=null?r.raw:live.raw;avaFeedSpeech(live,true);talking=avaSayEnd(live.say);}
+  else talking=avaSpeak((r.aiNote?"I'm in basic mode right now. ":'')+r.say);
   let away=false;
   if(r.auto&&typeof r.auto.run==='function'){try{r.auto.run();}catch(e){}
     // on a phone the panel covers the page it just opened: fold it away once the answer is said
     if(avaIsPhone()){away=true;setTimeout(()=>{if(!AVA.listening)avaClose({keepFocus:true});},1400);}}
   if(!talking&&!away)avaAfterAnswer();
+  avaPaintMic();
   return r;
+}
+/* While the answer streams in: every finished sentence (or line) goes to her voice at once. */
+function avaFeedSpeech(live,final){
+  if(!live.say||AVA.say!==live.say)return;
+  const raw=String(live.raw||'').slice(live.fed);if(!raw)return;
+  let cut=final?raw.length:-1;
+  if(!final){const re=/[.!?](?=\s)|\n/g;let m;while((m=re.exec(raw)))cut=m.index+m[0].length;}
+  if(cut<=0)return;
+  live.fed+=cut;avaSayAdd(live.say,raw.slice(0,cut));
 }
 function avaIsPhone(){try{return typeof window.matchMedia==='function'&&window.matchMedia('(max-width:860px)').matches}catch(e){return false}}
 
-/* ===================== 10. THE PANEL ===================== */
+/* ===================== 10. THE PANEL =====================
+   Desktop: a 440×640 panel bottom-right (Expand makes it full height). Phone: a full-screen sheet. The orb in the
+   header shows her state (listening — with the live level of your voice —, getting your words, thinking, speaking).
+   Answers are light markdown (bold, lists, line breaks, links; links to hub pages are buttons); everything else is
+   escaped. Each answer has Copy and a tiny "brain · time" line; the last one has follow-up chips. The conversation is
+   kept for this tab (sessionStorage) until New chat. */
 const AVA_IC={
   mic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>',
   stop:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg>',
-  send:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>',
+  send:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
   close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   sound:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
   muted:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>',
   loop:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  expand:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>',
+  shrink:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  tune:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
 };
+const AVA_CHAT_KEY='avianceAvaChat:v1';   // this tab's conversation (sessionStorage)
+const AVA_BIG_KEY='avianceAvaBig:v1';
+const AVA_TIP_KEY='avianceAvaTip:v1';
 function avaEl(id){return typeof document!=='undefined'&&document.getElementById?document.getElementById(id):null}
+function avaEsc(s){return typeof esc==='function'?esc(s):String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function avaHoldHint(){return avaIsPhone()?'Hold the mic to talk':'Hold <kbd>Space</kbd> to talk'}
 function avaMount(){
   const root=avaEl('avaRoot');if(!root||AVA.mounted)return;AVA.mounted=true;
-  root.innerHTML=`<button type="button" class="ava-fab" id="avaFab" aria-label="Ask Ava — your hub helper (Ctrl+J)" title="Ask Ava (Ctrl/⌘ J)" aria-expanded="false" aria-controls="avaPanel" onclick="avaFabTap()">${AVA_IC.mic}<span class="ava-fab-ring" aria-hidden="true"></span></button>
+  root.innerHTML=`<button type="button" class="ava-fab" aria-label="Ask Ava — hold Space to talk (Ctrl+J opens)" id="avaFab" title="Ask Ava — hold Space to talk · Ctrl/⌘ J" aria-expanded="false" aria-controls="avaPanel" onpointerdown="avaPointer(event,'fab')" onpointerup="avaPointerUp(event)" onpointercancel="avaPointerUp(event,1)" onclick="avaFabClick()"><span class="ava-fab-orb" aria-hidden="true"></span>${AVA_IC.mic}<span class="ava-fab-ring" aria-hidden="true"></span></button>
+  <div class="ava-tip" id="avaTip" role="status" hidden><b>Talk to Ava</b><span>${avaHoldHint()} — let go to send.</span><button type="button" class="ava-tip-x" onclick="avaTipSeen()" aria-label="Got it">${AVA_IC.close}</button></div>
   <section class="ava-panel" id="avaPanel" role="dialog" aria-modal="false" aria-labelledby="avaTitle" hidden>
-    <header class="ava-head"><span class="ava-av" id="avaAv" aria-hidden="true">A</span><span class="ava-name"><b id="avaTitle">Ava</b><small id="avaSub">Your hub helper</small></span>
+    <header class="ava-head"><span class="ava-orb" id="avaOrb" aria-hidden="true"><i></i><i></i><i></i></span><span class="ava-name"><b id="avaTitle">Ava</b><small id="avaSub">Ask me anything</small></span>
+      <button type="button" class="ava-ib" id="avaNew" onclick="avaNewChat()" aria-label="New chat" title="New chat">${AVA_IC.plus}</button>
       <button type="button" class="ava-ib" id="avaMute" onclick="avaSetMute(!avaMuted())"></button>
+      <button type="button" class="ava-ib ava-big-btn" id="avaBig" onclick="avaToggleBig()"></button>
       <button type="button" class="ava-ib" onclick="avaClose()" aria-label="Close Ava" title="Close (Esc)">${AVA_IC.close}</button></header>
     <div class="ava-vload" id="avaVload" role="status" hidden><span id="avaVloadText"></span><span class="ava-vbar"><i id="avaVbar"></i></span></div>
     <div class="ava-log" id="avaLog" role="log" aria-live="polite" aria-relevant="additions"></div>
-    <div class="ava-heard" id="avaHeard"><span class="ava-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="ava-heard-text" id="avaHeardText" aria-live="polite"></span></div>
+    <div class="ava-heard" id="avaHeard"><span class="ava-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="ava-heard-text" id="avaHeardText" aria-live="polite"></span><small class="ava-heard-hint" id="avaHeardHint"></small></div>
     <form class="ava-in" onsubmit="event.preventDefault();avaSubmit()">
       <label class="ava-sr" for="avaInput">Ask Ava</label>
-      <input id="avaInput" type="text" autocomplete="off" enterkeyhint="send" placeholder="Ask anything, or tap the mic…" maxlength="300">
-      <button type="button" class="ava-mic" id="avaMic" onclick="avaMicTap()"></button>
+      <textarea id="avaInput" rows="1" autocomplete="off" enterkeyhint="send" placeholder="Ask anything…" maxlength="2000" onkeydown="avaInputKey(event)" oninput="avaGrow(this)"></textarea>
+      <button type="button" class="ava-mic" id="avaMic" onpointerdown="avaPointer(event,'mic')" onpointerup="avaPointerUp(event)" onpointercancel="avaPointerUp(event,1)" onclick="avaMicClick()"></button>
       <button type="submit" class="ava-send" aria-label="Send">${AVA_IC.send}</button>
     </form>
     <div class="ava-opts">
+      <span class="ava-hint" id="avaHint">${avaHoldHint()}</span>
       <button type="button" class="ava-hands" id="avaHands" onclick="avaSetHandsFree(!avaHandsFree())" aria-pressed="false">${AVA_IC.loop}<span>Hands-free</span></button>
-      <label class="ava-voice"><span>Voice</span><select id="avaVoiceSel" onchange="avaSetVoice(this.value)" aria-label="Ava's voice"></select></label>
+      <details class="ava-vopts" id="avaVopts"><summary aria-label="Voice and speed">${AVA_IC.tune}<span>Voice</span></summary>
+        <div class="ava-vpop"><label class="ava-voice"><span>Voice</span><select id="avaVoiceSel" onchange="avaSetVoice(this.value)" aria-label="Ava's voice"></select></label>
+        <label class="ava-voice"><span>Speed</span><select id="avaSpeedSel" onchange="avaSetSpeed(this.value)" aria-label="How fast Ava talks"></select></label>
+        <small class="ava-vstate" id="avaVstate"></small></div></details>
     </div>
     <p class="ava-note" id="avaNote" role="status"></p>
   </section>`;
   avaPaintHead();avaPaintMic();avaPaintVoice();avaSync();
+}
+function avaUid(){return typeof authUser!=='undefined'&&authUser?String(authUser.uid||authUser.email||''):''}
+function avaSession(){try{return typeof sessionStorage!=='undefined'?sessionStorage:null}catch(e){return null}}
+/* The conversation for this tab: saved after every message, read back after a reload; another person's never shown. */
+function avaSave(){
+  const ss=avaSession();if(!ss)return false;
+  try{
+    const log=AVA.log.filter(m=>m&&!m.streaming&&(m.who==='you'||m.who==='ava')).slice(-AVA_MAX_LOG).map(m=>{
+      const o={who:m.who,text:String(m.text||'')};['meta','at','notice','basic','voice','greet'].forEach(k=>{if(m[k]!=null&&m[k]!==false&&m[k]!=='')o[k]=m[k];});
+      if(Array.isArray(m.guide))o.guide=m.guide.slice(0,6);if(Array.isArray(m.chips))o.chips=m.chips.slice(0,4).map(String);
+      const drafts=(m.cards||[]).filter(c=>c&&c.kind==='draft').map(c=>({kind:'draft',title:String(c.title||''),text:String(c.text||'')}));if(drafts.length)o.cards=drafts;
+      return o;});
+    ss.setItem(AVA_CHAT_KEY,JSON.stringify({v:1,uid:avaUid(),log}));return true;
+  }catch(e){return false}
+}
+function avaRestore(){
+  const ss=avaSession();if(!ss)return false;
+  try{
+    const raw=ss.getItem(AVA_CHAT_KEY);if(!raw)return false;const d=JSON.parse(raw);
+    if(!d||!Array.isArray(d.log)||!d.uid||d.uid!==avaUid())return false;
+    const log=d.log.filter(m=>m&&(m.who==='you'||m.who==='ava')&&typeof m.text==='string');if(!log.length)return false;
+    AVA.log=log;AVA.greeted=true;return true;
+  }catch(e){return false}
+}
+function avaForget(){const ss=avaSession();try{ss&&ss.removeItem(AVA_CHAT_KEY);}catch(e){}}
+/* New chat: forget this conversation and start again. */
+function avaNewChat(){
+  avaHush();if(AVA.listening)avaStopListening({discard:true});
+  AVA.log=[];AVA.pending=null;AVA.greeted=false;AVA.recall=null;AVA_AI.noted=false;avaForget();
+  avaGreet();avaPaintLog();avaNote('');avaFocusInput();
 }
 function avaSync(){
   const root=avaEl('avaRoot');if(!root)return;
   const on=!!(typeof authUser!=='undefined'&&authUser);
   root.hidden=!on;if(root.style)root.style.display=on?'':'none';
   try{document.body.classList.toggle('ava-on',on);}catch(e){}
-  if(!on){AVA.log=[];AVA.greeted=false;AVA.pending=null;AVA_AI.noted=false;avaClose({keepFocus:true});}
+  if(!on){AVA.log=[];AVA.greeted=false;AVA.pending=null;AVA.restoredFor=null;AVA_AI.noted=false;avaForget();avaClose({keepFocus:true});return;}
+  if(AVA.restoredFor!==avaUid()){AVA.restoredFor=avaUid();if(!AVA.log.length)avaRestore();}
+  avaTip();
 }
+/* The first time on a computer: "Hold Space to talk" beside the round button, for a few seconds. */
+function avaTip(){
+  if(AVA.tipShown||avaStore(AVA_TIP_KEY)==='1')return false;
+  const t=avaEl('avaTip');if(!t)return false;AVA.tipShown=true;
+  t.hidden=false;clearTimeout(AVA.tipTimer);AVA.tipTimer=setTimeout(avaTipSeen,9000);return true;
+}
+function avaTipSeen(){const t=avaEl('avaTip');if(t)t.hidden=true;clearTimeout(AVA.tipTimer);avaStore(AVA_TIP_KEY,'1');}
 function avaFabTap(){avaAudioUnlock();if(AVA.open){avaClose();return;}avaOpen({listen:true});}
 function avaMicTap(){avaAudioUnlock();return avaListen();}
 function avaToggle(){AVA.open?avaClose():avaOpen({listen:false})}
 function avaGreet(){
   if(AVA.greeted)return;AVA.greeted=true;
-  const ctx=avaCtx();const ex=avaExample();
-  const say='Hi'+(ctx.name?' '+ctx.name:'')+", I'm Ava. Ask me anything about the hub — like 'what needs me today' or 'open "+ex+"'.";
-  avaPush({who:'ava',text:say,chips:avaChipsFor(ctx)});
+  const ctx=avaCtx();
+  const say='Hi'+(ctx.name?' '+ctx.name:'')+", I'm Ava. Ask me anything — about your clients, the hub, or anything else. "+(avaIsPhone()?'Hold the mic to talk, or type.':'Hold Space to talk, or type.');
+  avaPush({who:'ava',text:say,chips:avaChipsFor(ctx),greet:true});
   return say;
 }
 function avaOpen(opts){
@@ -1073,86 +1429,277 @@ function avaOpen(opts){
   if(!AVA.mounted)avaMount();
   const p=avaEl('avaPanel'),f=avaEl('avaFab');
   const was=AVA.open;AVA.open=true;
-  if(p){p.hidden=false;if(p.classList)p.classList.add('open');}
+  if(p){p.hidden=false;if(p.classList){p.classList.add('open');p.classList.toggle('big',avaBig());}}
   if(f){f.setAttribute&&f.setAttribute('aria-expanded','true');if(f.classList)f.classList.add('on');}
+  try{document.body.classList.add('ava-open');}catch(e){}
+  if(!was)avaTipSeen();
   const greet=avaGreet();
-  if(!was){avaNote(avaCanListen()?(avaIsChrome()?'Your voice is turned into text by your browser (Chrome uses Google for that).':''):"Voice isn't available in this browser — type your question. (Voice works in Chrome, Edge and Safari.)");avaVoiceWarm();if(avaCanListen())avaMicCheck();}
-  avaPaintLog();avaPaintVoice();
+  if(!was){avaNote(avaCanListen()?'':"Voice isn't available in this browser — type your question. (Voice works in Chrome, Edge and Safari.)");avaVoiceWarm();if(avaCanListen())avaMicCheck();avaAiCheck();avaNaturalNote();}
+  avaPaintLog();avaPaintVoice();avaPaintHead();
   if(!was&&greet&&!opts.quiet&&!(opts.listen&&avaCanListen()))avaSpeak(greet);
   if(opts.listen&&avaCanListen())avaListen();else if(!opts.quiet)avaFocusInput();
 }
 function avaIsChrome(){try{return /Chrome\//.test(navigator.userAgent||'')&&!/Edg\//.test(navigator.userAgent||'')}catch(e){return false}}
 function avaClose(opts){
   opts=opts||{};const p=avaEl('avaPanel'),f=avaEl('avaFab');
-  if(AVA.listening)avaStopListening();avaHush();clearTimeout(AVA.loopTimer);
+  if(AVA.ptt)AVA.ptt=null;
+  if(AVA.listening)avaStopListening({discard:true});avaCaptureKill();avaHush();clearTimeout(AVA.loopTimer);
   const was=AVA.open;AVA.open=false;
   if(p){p.hidden=true;if(p.classList)p.classList.remove('open');}
+  try{document.body.classList.remove('ava-open');}catch(e){}
   if(f){f.setAttribute&&f.setAttribute('aria-expanded','false');if(f.classList)f.classList.remove('on');if(was&&!opts.keepFocus)try{f.focus();}catch(e){}}
 }
-function avaFocusInput(){const i=avaEl('avaInput');if(i)setTimeout(()=>{try{i.focus();}catch(e){}},40);}
-function avaSubmit(){avaAudioUnlock();const i=avaEl('avaInput');const v=i?i.value:'';if(i)i.value='';return avaAsk(v);}
+function avaBig(){if(AVA.big==null)AVA.big=avaStore(AVA_BIG_KEY)==='1';return AVA.big}
+function avaToggleBig(){AVA.big=!avaBig();avaStore(AVA_BIG_KEY,AVA.big?'1':'0');const p=avaEl('avaPanel');if(p&&p.classList)p.classList.toggle('big',AVA.big);avaPaintHead();}
+function avaFocusInput(){if(avaIsPhone())return;const i=avaEl('avaInput');if(i)setTimeout(()=>{try{i.focus();}catch(e){}},40);}
+function avaGrow(i){if(!i||!i.style)return;try{i.style.height='auto';i.style.height=Math.min(160,Math.max(44,i.scrollHeight||0))+'px';}catch(e){}}
+function avaSubmit(){avaAudioUnlock();const i=avaEl('avaInput');const v=i?i.value:'';if(i){i.value='';avaGrow(i);}return avaAsk(v);}
+/* The box: Enter sends, Shift+Enter is a new line, ↑ in an empty box brings back your last question (again: the one before). */
+function avaInputKey(e){
+  if(!e)return;const i=e.target&&'value' in e.target?e.target:avaEl('avaInput');
+  if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault&&e.preventDefault();avaSubmit();return;}
+  if(e.key==='ArrowUp'&&!e.shiftKey&&!e.altKey&&i){
+    const qs=AVA.log.filter(m=>m.who==='you').map(m=>m.text);if(!qs.length)return;
+    const atStart=!i.value||(i.selectionStart===0&&i.selectionEnd===0)||(AVA.recall!=null&&i.value===qs[AVA.recall]);
+    if(!atStart)return;
+    const n=AVA.recall==null||i.value!==qs[AVA.recall]?qs.length-1:Math.max(0,AVA.recall-1);
+    AVA.recall=n;i.value=qs[n];avaGrow(i);e.preventDefault&&e.preventDefault();
+    try{i.setSelectionRange(i.value.length,i.value.length);}catch(x){}
+  }
+}
 function avaChip(i){avaAudioUnlock();const c=(AVA.chipList||[])[i];if(c)return avaAsk(c);}
 function avaRun(i){const a=AVA.acts[i];if(!a||typeof a.run!=='function')return;avaHush();try{a.run();}catch(e){}
-  if(a.yes||a.no){avaPush({who:'ava',text:a.no?"Okay, I won't.":'Done.'});}
+  if(a.yes||a.no){avaPush({who:'ava',text:a.no?"Okay, I won't.":'Done.',at:Date.now()});}
   if(!a.no&&avaIsPhone())avaClose({keepFocus:true});}
 function avaNote(s){const n=avaEl('avaNote');if(n)n.textContent=s||'';}
-function avaPush(m){AVA.log.push(m);if(AVA.log.length>AVA_MAX_LOG)AVA.log.splice(0,AVA.log.length-AVA_MAX_LOG);avaPaintLog();}
-function avaPaintHead(){const b=avaEl('avaMute');if(!b)return;const m=avaMuted();b.innerHTML=m?AVA_IC.muted:AVA_IC.sound;b.setAttribute&&b.setAttribute('aria-label',m?'Ava is quiet — turn her voice on':'Turn Ava’s voice off');b.setAttribute&&b.setAttribute('aria-pressed',m?'true':'false');b.title=m?'Voice off':'Voice on';}
-function avaPaintMic(){
-  const b=avaEl('avaMic'),f=avaEl('avaFab');const can=avaCanListen();
-  if(b){b.innerHTML=AVA.listening?AVA_IC.stop:AVA_IC.mic;b.setAttribute&&b.setAttribute('aria-label',AVA.listening?'Stop listening':AVA.speaking?'Interrupt Ava and speak':can?'Speak to Ava':'Voice is not available in this browser');b.setAttribute&&b.setAttribute('aria-pressed',AVA.listening?'true':'false');if(b.classList){b.classList.toggle('on',AVA.listening);b.classList.toggle('off',!can);}}
-  if(f&&f.classList){f.classList.toggle('listening',AVA.listening);f.classList.toggle('speaking',!!AVA.speaking&&!AVA.listening);}
-  const p=avaEl('avaPanel');if(p&&p.classList){p.classList.toggle('listening',AVA.listening);p.classList.toggle('speaking',!!AVA.speaking);}
-  const s=avaEl('avaSub');if(s)s.textContent=AVA.listening?'Listening…':AVA.busy?'Thinking…':AVA.speaking?'Speaking — tap the mic to interrupt':'Your hub helper';
+function avaPush(m){AVA.log.push(m);if(AVA.log.length>AVA_MAX_LOG)AVA.log.splice(0,AVA.log.length-AVA_MAX_LOG);avaSave();avaPaintLog();}
+function avaPaintHead(){
+  const b=avaEl('avaMute');if(b){const m=avaMuted();b.innerHTML=m?AVA_IC.muted:AVA_IC.sound;b.setAttribute&&b.setAttribute('aria-label',m?'Ava is quiet — turn her voice on':'Turn Ava’s voice off');b.setAttribute&&b.setAttribute('aria-pressed',m?'true':'false');b.title=m?'Voice off':'Voice on';}
+  const g=avaEl('avaBig');if(g){const big=avaBig();g.innerHTML=big?AVA_IC.shrink:AVA_IC.expand;g.setAttribute&&g.setAttribute('aria-label',big?'Make Ava smaller':'Make Ava full height');g.setAttribute&&g.setAttribute('aria-pressed',big?'true':'false');g.title=big?'Smaller':'Full height';}
 }
-function avaPaintHeard(){const h=avaEl('avaHeard'),t=avaEl('avaHeardText');if(!h)return;
-  if(t)t.textContent=AVA.listening?(AVA.interim?'“'+AVA.interim+'”':'Listening… speak now'):'';
-  if(h.classList)h.classList.toggle('show',!!AVA.listening);}
+/* Her state, in the header line and the orb: listening → getting your words → thinking → speaking. */
+function avaState(){return AVA.listening?'listening':AVA.stage==='transcribing'?'transcribing':AVA.busy?'thinking':AVA.speaking?'speaking':AVA.stage==='answering'?'thinking':'idle'}
+function avaPaintMic(){
+  const b=avaEl('avaMic'),f=avaEl('avaFab');const can=avaCanListen();const st=avaState();
+  if(b){b.innerHTML=AVA.listening?AVA_IC.stop:AVA_IC.mic;b.setAttribute&&b.setAttribute('aria-label',AVA.listening?'Stop listening':AVA.speaking?'Interrupt Ava and speak':can?'Speak to Ava (tap, or hold and let go)':'Voice is not available in this browser');b.setAttribute&&b.setAttribute('aria-pressed',AVA.listening?'true':'false');if(b.classList){b.classList.toggle('on',AVA.listening);b.classList.toggle('off',!can);}}
+  if(f&&f.classList){f.classList.toggle('listening',AVA.listening);f.classList.toggle('speaking',!!AVA.speaking&&!AVA.listening);}
+  const p=avaEl('avaPanel');if(p&&p.classList){['listening','speaking','thinking','transcribing'].forEach(k=>p.classList.toggle(k,st===k||(k==='speaking'&&!!AVA.speaking&&st!=='listening')));}
+  const s=avaEl('avaSub');if(s)s.textContent=st==='listening'?'Listening…':st==='transcribing'?'Getting your words…':st==='thinking'?'Thinking…':st==='speaking'?(avaIsPhone()?'Speaking — tap the mic to stop':'Speaking — Space or Esc stops her'):avaBasicNow()?'Basic mode':'Ask me anything';
+}
+function avaBasicNow(){return AVA_AI.ready===false||(!!AVA_AI.off&&Date.now()<AVA_AI.offUntil)}
+function avaPaintHeard(){const h=avaEl('avaHeard'),t=avaEl('avaHeardText'),n=avaEl('avaHeardHint');if(!h)return;
+  if(t)t.textContent=AVA.listening?(AVA.interim?'“'+AVA.interim+'”':'Listening… speak now'):AVA.stage==='transcribing'?'Getting your words…':'';
+  if(n)n.textContent=AVA.listening?(AVA.ptting?(AVA.ptt&&AVA.ptt.src==='space'?'Let go of Space to send':'Let go to send'):'Stops when you do'):'';
+  if(h.classList)h.classList.toggle('show',!!AVA.listening||AVA.stage==='transcribing');}
 function avaPaintVoice(){
-  const k=AVA.k;const box=avaEl('avaVload');const st=avaKokoroState();
+  const box=avaEl('avaVload');const st=avaKokoroState();
   if(box){const on=st==='loading';box.hidden=!on;if(on){const l=avaVoiceLoadingLine();const t=avaEl('avaVloadText');if(t)t.textContent=l.text+(l.pct!=null?' '+l.pct+'%':'');const bar=avaEl('avaVbar');if(bar&&bar.style)bar.style.width=(l.pct!=null?Math.max(4,l.pct):8)+'%';}}
-  const sel=avaEl('avaVoiceSel');
-  if(sel){const v=avaVoicePref();const e=typeof esc==='function'?esc:(s=>String(s));
+  const sel=avaEl('avaVoiceSel');const e=avaEsc;
+  if(sel){const v=avaVoicePref();
     const nat=st==='loading'?' (getting ready)':st==='unsupported'&&avaIsPhone()?' (computer)':st==='slow'||st==='failed'||st==='unsupported'?' (unavailable)':' — natural';
     sel.innerHTML=AVA_VOICES.map(x=>`<option value="${e(x[0])}"${v===x[0]?' selected':''}>${e(x[1])}${e(nat)}</option>`).join('')+`<option value="browser"${v==='browser'?' selected':''}>${avaIsPhone()?'Phone voice':'Browser voice'}</option>`;
     sel.title=avaVoiceLabel();}
+  const sp=avaEl('avaSpeedSel');if(sp){const cur=avaSpeed();sp.innerHTML=[0.9,1,1.1,1.2].map(x=>`<option value="${x}"${Math.abs(cur-x)<0.01?' selected':''}>${x===1?'Normal':x+'×'}</option>`).join('');}
+  const vs=avaEl('avaVstate');if(vs)vs.textContent=avaVoiceLabel();
   const h=avaEl('avaHands');if(h){const on=avaHandsFree();h.setAttribute&&h.setAttribute('aria-pressed',on?'true':'false');if(h.classList)h.classList.toggle('on',on);h.title=on?'Hands-free is on: after she answers, she listens again. Say “stop” or “thanks Ava” to end.':'Hands-free: after she answers, she listens again';}
 }
+function avaTime(at){if(!at)return '';try{return new Date(at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});}catch(e){return ''}}
+
+/* ---- light markdown: **bold**, *italic*, `code`, lists, headings, line breaks, links. Everything is escaped first;
+   a link to a hub page (#system/<id>, #trial/<id>, #settings/keys, #calendar …) is a button that opens it here. ---- */
+const AVA_ROUTE=/^#(?:system|trial|settings|calendar|trials|paying|inquiries|stats|alerts|team|mystats|activity|behind)(?:\/[A-Za-z0-9_.:-]+){0,2}$/;
+function avaMd(src){
+  const lines=String(src==null?'':src).replace(/\r\n?/g,'\n').split('\n');
+  let html='',list=null,para=[],code=null;
+  const flush=()=>{if(para.length){html+='<p>'+para.map(avaInline).join('<br>')+'</p>';para=[];}};
+  const close=()=>{if(list){html+='</'+list+'>';list=null;}};
+  lines.forEach(line=>{
+    if(/^\s*```/.test(line)){if(code==null){flush();close();code=[];}else{html+='<pre><code>'+avaEsc(code.join('\n'))+'</code></pre>';code=null;}return;}
+    if(code!=null){code.push(line);return;}
+    if(!line.trim()){flush();close();return;}
+    const ul=line.match(/^\s*[-*•]\s+(.*)$/),ol=line.match(/^\s*\d{1,3}[.)]\s+(.*)$/),h=line.match(/^\s{0,3}#{1,6}\s+(.*)$/);
+    if(ul||ol){flush();const tag=ul?'ul':'ol';if(list!==tag){close();html+='<'+tag+'>';list=tag;}html+='<li>'+avaInline((ul||ol)[1])+'</li>';return;}
+    close();
+    if(h){flush();html+='<p class="ava-h">'+avaInline(h[1])+'</p>';return;}
+    para.push(line.trim());
+  });
+  if(code!=null)html+='<pre><code>'+avaEsc(code.join('\n'))+'</code></pre>';
+  flush();close();return html;
+}
+function avaFmt(e){   // on escaped text only
+  return e.replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/__([^_]+)__/g,'<b>$1</b>')
+    .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,!?;:]|$)/g,'$1<i>$2</i>');
+}
+function avaInline(s){
+  s=String(s||'');let out='',last=0;
+  const re=/\[([^\]\n]{1,160})\]\(([^()\s]{1,400})\)|(https?:\/\/[^\s<>"'()]+[^\s<>"'().,!?;:])|(#(?:system|trial|settings|calendar|trials|paying|inquiries|stats|alerts)(?:\/[A-Za-z0-9_.:-]+){0,2})(?![\w/])/g;
+  let m;
+  while((m=re.exec(s))){
+    out+=avaFmt(avaEsc(s.slice(last,m.index)));last=m.index+m[0].length;
+    if(m[1]!=null){const url=m[2];const label=avaFmt(avaEsc(m[1]));
+      if(AVA_ROUTE.test(url)){const n=(AVA.links||(AVA.links=[])).push(url)-1;out+=`<button type="button" class="ava-link" onclick="avaGo(${n})">${label}</button>`;}
+      else if(/^https?:\/\/[^\s"'<>]+$/i.test(url))out+=`<a href="${avaEsc(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+      else out+=label;}
+    else if(m[3]!=null)out+=`<a href="${avaEsc(m[3])}" target="_blank" rel="noopener noreferrer">${avaEsc(m[3].replace(/^https?:\/\//,''))}</a>`;
+    else{const url=m[4];const n=(AVA.links||(AVA.links=[])).push(url)-1;out+=`<button type="button" class="ava-link" onclick="avaGo(${n})">${avaEsc(avaRouteLabel(url))}</button>`;}
+  }
+  return out+avaFmt(avaEsc(s.slice(last)));
+}
+/* A hub link → the place it opens ({view, id?, tab?} as the AI's navigate action), or null. */
+function avaRoute(url){
+  const h=String(url||'').replace(/^#/,'');const bits=h.split('/');const v=bits[0];
+  if(v==='system')return bits[1]?{view:'client',id:bits[1],tab:bits[2]||'overview'}:null;
+  if(v==='trial')return bits[1]?{view:'client',id:bits[1]}:null;
+  if(v==='settings')return {view:'settings',tab:bits[1]||null};
+  if(v==='alerts')return {view:'settings',tab:'alerts'};
+  if(v==='stats')return {view:'mystats'};
+  if(v==='calendar'&&bits[1])return {view:'calendar',id:bits[1]};
+  return {view:v};
+}
+function avaRouteLabel(url){
+  const r=avaRoute(url);const a=r?avaNavAct(r,avaCtx()):null;if(!a)return 'Open it';
+  if(r.view==='client'&&/^#system\/[^/]+$/.test(String(url)))return 'Open '+avaPossessive(avaClientName(r.id))+' email system';
+  return a.label;
+}
+function avaGo(n){
+  const url=(AVA.links||[])[n];const r=avaRoute(url);if(!r)return false;
+  if(r.view==='calendar'&&r.id){if(typeof openCalendar==='function')openCalendar(r.id);else render('calendar');}
+  else{const a=avaNavAct(r,avaCtx());if(!a){if(typeof toast==='function')toast("That page is only for the owner.");return false;}avaHush();try{a.run();}catch(e){}}
+  if(avaIsPhone())avaClose({keepFocus:true});
+  return true;
+}
+/* Copy one answer (as plain words). */
+async function avaCopyMsg(i){
+  const m=AVA.log[i];if(!m)return false;
+  try{await navigator.clipboard.writeText(String(m.text||''));m.copied=true;avaPaintLog();setTimeout(()=>{m.copied=false;avaPaintLog();},1600);if(typeof toast==='function')toast('Copied');return true;}
+  catch(e){if(typeof toast==='function')toast("Couldn't copy — select the text and copy it");return false;}
+}
 function avaPaintLog(){
-  const l=avaEl('avaLog');if(!l)return;AVA.acts=[];AVA.chipList=[];AVA.cardList=[];
-  const e=typeof esc==='function'?esc:(s=>String(s));
-  const last=AVA.log.length-1;
+  const l=avaEl('avaLog');if(!l)return;AVA.acts=[];AVA.chipList=[];AVA.cardList=[];AVA.links=[];
+  const e=avaEsc;
+  // the follow-ups sit under the newest answer (a basic-mode notice after it doesn't hide them)
+  let last=AVA.log.length-1;while(last>0&&AVA.log[last].notice&&!AVA.log[last].chips)last--;
   l.innerHTML=AVA.log.map((m,i)=>{
-    if(m.who==='you')return `<div class="ava-msg you"><p>${e(m.text)}</p></div>`;
+    if(m.who==='you')return `<div class="ava-msg you"><p>${e(m.text).replace(/\n/g,'<br>')}</p></div>`;
     const acts=(m.actions||[]).map(a=>{const n=AVA.acts.push(a)-1;return `<button type="button" class="ava-act${a.yes?' yes':''}" onclick="avaRun(${n})">${e(a.label)}</button>`}).join('');
-    const chips=i===last&&m.chips?`<div class="ava-chips">${m.chips.map(c=>{const n=AVA.chipList.push(c)-1;return `<button type="button" class="ava-chip" onclick="avaChip(${n})">${e(c)}</button>`}).join('')}</div>`:'';
+    const chips=i===last&&m.chips&&!AVA.busy?`<div class="ava-chips">${m.chips.map(c=>{const n=AVA.chipList.push(c)-1;return `<button type="button" class="ava-chip" onclick="avaChip(${n})">${e(c)}</button>`}).join('')}</div>`:'';
     const guide=m.guide?`<ol class="ava-guide">${m.guide.map(g=>`<li>${e(g)}</li>`).join('')}</ol>`:'';
     const cards=(m.cards||[]).map(c=>{const n=AVA.cardList.push(c)-1;
       if(c.kind==='draft')return `<div class="ava-card draft"><div class="ava-card-head"><b>${e(c.title)}</b><button type="button" class="ava-act" onclick="avaCopy(${n})">${c.copied?'Copied':'Copy'}</button></div><div class="ava-draft">${e(c.text)}</div></div>`;
       const done=c.state==='done'?'<p class="ava-card-state">Done.</p>':c.state==='no'?'<p class="ava-card-state">Okay, I won’t.</p>':c.state==='failed'?'<p class="ava-card-state tk-red">That didn’t work — try it from the page.</p>':'';
       return `<div class="ava-card confirm"><p class="ava-card-q"><small>Ava wants to</small><b>${e(c.label)}</b></p>${c.state?done:`<div class="ava-acts"><button type="button" class="ava-act yes" onclick="avaCard(${n},1)">Do it</button><button type="button" class="ava-act" onclick="avaCard(${n},0)">No</button></div>`}</div>`;}).join('');
-    const meta=m.meta?`<small class="ava-meta">${e(m.meta)}</small>`:'';
-    return `<div class="ava-msg ava${m.notice?' notice':''}"><p>${e(m.text)}</p>${guide}${cards}${acts?`<div class="ava-acts">${acts}</div>`:''}${meta}${chips}</div>`;
-  }).join('')+(AVA.busy?'<div class="ava-msg ava busy" aria-hidden="true"><p><span class="ava-dots"><i></i><i></i><i></i></span></p></div>':'');
+    const tm=m.notice?'':avaTime(m.at);
+    const metaText=[m.meta,tm].filter(Boolean).join(' · ');
+    const copy=!m.notice&&!m.greet&&!m.streaming&&m.text?`<button type="button" class="ava-copy" onclick="avaCopyMsg(${i})" aria-label="Copy this answer" title="Copy">${m.copied?AVA_IC.check:AVA_IC.copy}</button>`:'';
+    const foot=metaText||copy?`<div class="ava-mfoot">${metaText?`<small class="ava-meta">${e(metaText)}</small>`:''}${copy}</div>`:'';
+    const caret='<span class="ava-caret" aria-hidden="true"></span>';
+    const md=avaMd(m.text);const body=!m.streaming?md:/<\/(?:p|li)>(?:<\/(?:ul|ol)>)?$/.test(md)?md.replace(/(<\/(?:p|li)>)((?:<\/(?:ul|ol)>)?)$/,caret+'$1$2'):md+caret;
+    return `<div class="ava-msg ava${m.notice?' notice':''}${m.streaming?' streaming':''}"><div class="ava-bub">${body}</div>${guide}${cards}${acts?`<div class="ava-acts">${acts}</div>`:''}${foot}${chips}</div>`;
+  }).join('')+(AVA.busy?'<div class="ava-msg ava busy" aria-hidden="true"><div class="ava-bub ava-think"><span class="ava-dots"><i></i><i></i><i></i></span><span class="ava-shimmer">Thinking…</span></div></div>':'');
   try{l.scrollTop=l.scrollHeight;}catch(e){}
   avaPaintMic();
 }
 
+/* ---- while you hold to talk: a live level meter, and — when the machine has it — a recording for sharper words
+   (POST /api/mc/ava/hear, audio ≤ 2 MB → {text}; 404 / 503 = not there, asked again in 10 minutes). The browser's
+   own words stay as the live caption and the fallback. ---- */
+const AVA_HEAR={ok:null,at:0};
+function avaMediaOk(){try{return typeof navigator!=='undefined'&&!!navigator.mediaDevices&&typeof navigator.mediaDevices.getUserMedia==='function'&&typeof window.MediaRecorder==='function'}catch(e){return false}}
+function avaHearOn(){return avaMediaOk()&&!(AVA_HEAR.ok===false&&Date.now()-AVA_HEAR.at<10*60e3)}
+function avaLevel(v){const p=avaEl('avaPanel');if(p&&p.style&&typeof p.style.setProperty==='function')p.style.setProperty('--lvl',String(Math.round((v||0)*100)/100));}
+function avaCaptureStart(){
+  const cap={stream:null,rec:null,chunks:[],ac:null,raf:null,stopped:false};AVA.cap=cap;
+  if(!avaMediaOk())return cap;
+  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}}).then(stream=>{
+    cap.stream=stream;if(cap.stopped){avaCaptureKill(cap);return;}
+    try{const C=avaAudioClass();if(C){const ac=new C();const an=ac.createAnalyser();an.fftSize=256;ac.createMediaStreamSource(stream).connect(an);cap.ac=ac;const data=new Uint8Array(an.frequencyBinCount);
+      const tick=()=>{if(cap.stopped)return;an.getByteTimeDomainData(data);let sum=0;for(let i=0;i<data.length;i++){const x=(data[i]-128)/128;sum+=x*x;}avaLevel(Math.min(1,Math.sqrt(sum/data.length)*5));cap.raf=requestAnimationFrame(tick);};tick();}}catch(e){}
+    if(avaHearOn()){try{const type=['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'].find(t=>typeof MediaRecorder.isTypeSupported==='function'&&MediaRecorder.isTypeSupported(t))||'';
+      cap.rec=new MediaRecorder(stream,type?{mimeType:type,audioBitsPerSecond:32000}:undefined);cap.rec.ondataavailable=ev=>{if(ev.data&&ev.data.size)cap.chunks.push(ev.data);};cap.rec.start(250);}catch(e){cap.rec=null;}}
+  }).catch(()=>{});
+  return cap;
+}
+function avaCaptureKill(cap){
+  cap=cap||AVA.cap;if(!cap)return;cap.stopped=true;
+  try{if(cap.raf)cancelAnimationFrame(cap.raf);}catch(e){}
+  try{if(cap.rec&&cap.rec.state!=='inactive')cap.rec.stop();}catch(e){}
+  try{if(cap.stream)cap.stream.getTracks().forEach(t=>t.stop());}catch(e){}
+  try{if(cap.ac&&cap.ac.close)cap.ac.close();}catch(e){}
+  if(AVA.cap===cap)AVA.cap=null;avaLevel(0);
+}
+function avaCaptureStop(cap){
+  return new Promise(res=>{
+    if(!cap||!cap.rec||cap.rec.state==='inactive'){avaCaptureKill(cap);res(null);return;}
+    let fin=false;const done=()=>{if(fin)return;fin=true;let b=null;try{b=cap.chunks.length?new Blob(cap.chunks,{type:cap.rec.mimeType||'audio/webm'}):null;}catch(e){}avaCaptureKill(cap);res(b);};
+    cap.rec.onstop=done;try{cap.rec.stop();}catch(e){done();}setTimeout(done,1200);
+  });
+}
+async function avaHear(blob){
+  if(!blob||!blob.size||blob.size<1500||blob.size>2e6||typeof tkToken!=='function')return null;
+  const token=await tkToken();if(!token)return null;
+  const init={method:'POST',headers:{authorization:'Bearer '+token,'content-type':blob.type||'audio/webm',accept:'application/json'},body:blob};
+  let timer=null;if(typeof AbortController!=='undefined'){const c=new AbortController();init.signal=c.signal;timer=setTimeout(()=>c.abort(),7000);}
+  try{
+    const r=await fetch(tkMachineUrl()+'/api/mc/ava/hear',init);clearTimeout(timer);
+    if(r.status===404||r.status===503){AVA_HEAR.ok=false;AVA_HEAR.at=Date.now();return null;}
+    if(!r.ok)return null;const d=await r.json().catch(()=>null);AVA_HEAR.ok=true;
+    const t=d&&typeof d.text==='string'?d.text.trim():'';return t||null;
+  }catch(e){clearTimeout(timer);return null;}
+}
+/* Let go after a hold with a recording: the machine's words (sharper), else the browser's. */
+async function avaHoldSend(cap,rec){
+  const web=rec?new Promise(res=>{rec._deferRes=res;}):Promise.resolve('');
+  if(rec){rec._defer=true;}
+  avaStopListening({});
+  AVA.stage='transcribing';avaPaintHeard();avaPaintMic();
+  const blob=await avaCaptureStop(cap);
+  const heard=await avaHear(blob);
+  const said=heard||(await Promise.race([web,new Promise(r=>setTimeout(()=>r(''),1500))])||'').trim()||(rec&&rec._said)||'';
+  AVA.stage=null;avaPaintHeard();avaPaintMic();
+  if(said)return avaAsk(said,{voice:true});
+  avaNote(avaCanListen()?(avaIsPhone()?"I didn't hear anything — hold the mic while you talk, then let go.":"I didn't hear anything — hold Space while you talk, then let go."):"I couldn't make out any words — try again, or type your question.");
+  return null;
+}
+
 /* ===================== 11. SHELL HOOKS (no edits to the other files) =====================
-   Ctrl/⌘+J opens and closes Ava; Esc closes her; "Ask Ava" is in ⌘K; she shows only while someone is signed in
-   (the shell's enterApp / showLogin are wrapped, not changed). */
+   Hold Space (not in a text box) to talk, let go to send; a tap on Space opens / closes her. Ctrl/⌘+J opens and closes
+   Ava; Esc stops her talking, then closes her; "Ask Ava" is in ⌘K; she shows only while someone is signed in (the
+   shell's enterApp / showLogin are wrapped, not changed). */
+function avaIsSpace(e){return e&&(e.code==='Space'||e.key===' '||e.key==='Spacebar')}
 function avaKey(e){
   if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey&&String(e.key||'').toLowerCase()==='j'){
     if(typeof authUser!=='undefined'&&!authUser)return;e.preventDefault&&e.preventDefault();
     if(AVA.open)avaClose();else{avaOpen({listen:false});}return;
   }
-  if(e.key==='Escape'&&AVA.open){const w=avaEl('modalWrap');if(w&&w.classList&&w.classList.contains('open'))return;avaClose();}
+  if(avaIsSpace(e)&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.shiftKey&&!e.isComposing){
+    if(typeof authUser!=='undefined'&&!authUser)return;
+    if(avaEditable(e.target)||avaEditable(typeof document!=='undefined'?document.activeElement:null)||avaModalOpen())return;
+    e.preventDefault&&e.preventDefault();
+    if(e.repeat||AVA.ptt)return;
+    avaHush();avaHoldStart('space');return;
+  }
+  if(e.key==='Escape'&&AVA.open){
+    if(avaModalOpen())return;
+    if(AVA.speaking){avaHush();return;}
+    avaClose();
+  }
 }
+function avaKeyUp(e){
+  if(!avaIsSpace(e)||!AVA.ptt||AVA.ptt.src!=='space')return;
+  e.preventDefault&&e.preventDefault();
+  avaHoldEnd();
+}
+/* The window lost focus while holding: let go. */
+function avaBlur(){if(AVA.ptt)avaHoldEnd();}
 function avaHook(){
-  if(typeof document!=='undefined'&&typeof document.addEventListener==='function')document.addEventListener('keydown',avaKey,true);
+  if(typeof document!=='undefined'&&typeof document.addEventListener==='function'){
+    document.addEventListener('keydown',avaKey,true);document.addEventListener('keyup',avaKeyUp,true);
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)avaBlur();});
+  }
+  if(typeof window!=='undefined'&&typeof window.addEventListener==='function')window.addEventListener('blur',avaBlur);
   if(typeof enterApp==='function'&&!enterApp._ava){const orig=enterApp;enterApp=function(){const r=orig.apply(this,arguments);try{avaMount();avaSync();}catch(e){}return r};enterApp._ava=true;}
   if(typeof showLogin==='function'&&!showLogin._ava){const orig=showLogin;showLogin=function(){const r=orig.apply(this,arguments);try{avaSync();}catch(e){}return r};showLogin._ava=true;}
-  if(typeof cmdkActions==='function'&&!cmdkActions._ava){const orig=cmdkActions;cmdkActions=function(){const a=orig.apply(this,arguments);a.unshift({type:'Ava',label:'Ask Ava',icon:AVA_IC.mic,sub:'Your hub helper — talk or type (Ctrl/⌘ J)',kw:'ask ava voice help helper assistant talk speak question how do i',run:()=>{closeCmdk();avaOpen({listen:false});}});return a};cmdkActions._ava=true;}
+  if(typeof cmdkActions==='function'&&!cmdkActions._ava){const orig=cmdkActions;cmdkActions=function(){const a=orig.apply(this,arguments);a.unshift({type:'Ava',label:'Ask Ava',icon:AVA_IC.mic,sub:'Your helper — hold Space to talk, or type (Ctrl/⌘ J)',kw:'ask ava voice help helper assistant talk speak question how do i',run:()=>{closeCmdk();avaOpen({listen:false});}});return a};cmdkActions._ava=true;}
   try{avaMount();avaSync();}catch(e){}
   try{if(avaCanSpeak()&&window.speechSynthesis.addEventListener)window.speechSynthesis.addEventListener('voiceschanged',()=>{AVA.voice=null;});}catch(e){}
 }
