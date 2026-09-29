@@ -2197,7 +2197,7 @@ const TK_MAIL_PAGE=200;
 const TK_MAIL_MISSING="This isn't available yet — your system hasn't been updated to show these emails.";
 /* reply type → [words, pill colour] */
 const TK_REPLY_KIND={interested:['Interested','green'],question:['Question','q'],referral:['Referral','green'],not_now:['Not now','grey'],out_of_office:['Out of office','grey'],
-  unclear:['Needs a look','amber'],unsubscribe:['Unsubscribe','red'],not_interested:['Not interested','red'],bounce:['Bounced','red']};
+  unclear:['Needs a look','amber'],unsubscribe:['Unsubscribe','red'],not_interested:['Not interested','red'],bounce:['Bounced','red'],legal:['Legal threat','red'],angry:['Angry','red']};
 const TK_MAIL_STATUS={sent:['Sent','grey'],replied:['Replied','green'],bounced:['Bounced','red'],failed:["Didn't send",'red']};
 const TK_MAIL_KIND={first:'First email',followup:'Follow-up',bot:'Reply bot',owner:'You',client:'The client'};
 function tkMailOwn(id){return id==='aviance'||id==='_test'||(typeof MY_STATS_ID!=='undefined'&&id===MY_STATS_ID)}
