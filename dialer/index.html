@@ -3,8 +3,8 @@
 <title>Dialer · Aviance Hub</title><meta name="theme-color" content="#0A0A0C">
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCI+PHBvbHlnb24gcG9pbnRzPSIyNiw5NiAxMDAsMTMyIDE3NCw5NiAxNzQsMTUyIDEwMCwxODggMjYsMTUyIiBmaWxsPSIjMTAxMDE1Ii8+PHBvbHlnb24gcG9pbnRzPSIyNiw5NiAxMDAsMTMyIDEwMCwxODggMjYsMTUyIiBmaWxsPSIjMUMxQzIyIi8+PHBvbHlnb24gcG9pbnRzPSIxMDAsMTMyIDE3NCw5NiAxNzQsMTUyIDEwMCwxODgiIGZpbGw9IiMwQTBBMEMiLz48cG9seWdvbiBwb2ludHM9IjI0LDY4IDEwMCwxMDQgMTc2LDY4IDEwMCwzMiIgZmlsbD0iI0UwMjkwRiIvPjxnIHRyYW5zZm9ybT0ibWF0cml4KDAuMzgsLTAuMTgsMC4zOCwwLjE4LDI0LDY4KSI+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMTAwIDE4IEwxNTYgMTcyIEwxMjggMTcyIEwxMTcgMTQwIEw4MyAxNDAgTDcyIDE3MiBMNDQgMTcyIFogTTkxIDExNCBMMTA5IDExNCBMMTAwIDg0IFoiIGZpbGw9IiNGRkZGRkYiLz48L2c+PC9zdmc+">
 <meta name="robots" content="noindex"><script>
-/* Aviance Hub: only signed-in people get the dialer. */
-(function(){try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(/^sb-.*-auth-token$/.test(k)&&localStorage.getItem(k)){window.AVD_HUB=true;return;}}}catch(e){}location.replace('/');})();
+/* Aviance Hub: the dialer opens for anyone, no sign-in (practice mode only). */
+window.AVD_HUB=true;
 </script>
 <style>/* Aviance Dialer - Swiss system: white, black rules, one red. Inter Tight + JetBrains Mono. */
 :root {
