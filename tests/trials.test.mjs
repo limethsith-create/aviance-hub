@@ -116,7 +116,7 @@ test('shell: the owner and approved team members get in (a team member read-only
   assert.equal(authUser.role, 'employee'); assert.equal(el('app').style.display, 'grid');
   assert.ok(document.body._classes.has('ro'), 'read-only');
   assert.ok(trialsIsAdmin() && !hubIsOwner());
-  assert.deepEqual(navItems().map((i) => i.view), ['trials', 'paying', 'calendar', 'team', 'mystats'], 'no Settings, no Activity');
+  assert.deepEqual(navItems().map((i) => i.view), ['trials', 'paying', 'calendar', 'team', 'dialer', 'mystats'], 'no Settings, no Activity');
   assert.ok(viewSettings().includes('Only the owner can open this.'));
   authUser = null;
   supa.session = { access_token: 'test-token' };

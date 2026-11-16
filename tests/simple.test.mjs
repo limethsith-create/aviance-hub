@@ -65,13 +65,13 @@ const top = (d, meta) => between(renderTrialDetail(d, 'overview', Object.assign(
 const BANNED = /\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|dns|jwt|config|payload|mission control|cron|redis|endpoint|webhook)\b/i;
 
 /* ───────────── 1. four places only ───────────── */
-test('navigation: Trials, Paying clients, Calendar, Team, My stats, Activity, Settings — the same in the sidebar and the phone tab bar', () => {
+test('navigation: Trials, Paying clients, Calendar, Team, Dialer, My stats, Activity, Settings — the same in the sidebar and the phone tab bar', () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
-  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['paying', 'Paying clients'], ['calendar', 'Calendar'], ['team', 'Team'], ['mystats', 'My stats'], ['people', 'Activity'], ['settings', 'Settings']]);
+  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['trials', 'Trials'], ['paying', 'Paying clients'], ['calendar', 'Calendar'], ['team', 'Team'], ['dialer', 'Dialer'], ['mystats', 'My stats'], ['people', 'Activity'], ['settings', 'Settings']]);
   render('trials');
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
-    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 7, id + ': seven buttons');
+    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 8, id + ': eight buttons');
     assert.ok(!/Machine|Behind the scenes|Phone alerts|Mission Control|Log out|alerts/i.test(visibleText(nav)), id + ': nothing else in the navigation');
     assert.ok(nav.includes(`<button class="${id === 'navArea' ? 'nav-item' : 'tab'} active" type="button" onclick="render('trials')" aria-label="Trials" aria-current="page">`), id + ': Trials is the current place');
   }
@@ -389,7 +389,7 @@ test('navigation badges: Trials = how many need you (red) · Paying clients = ne
   trialsIngestHub(Object.assign({}, simpleHub, { inquiries: inquirySummaryOf(inquiryRecords) }));
   cal.reqs = calRequestsOf(calWeek);
   const items = navItems();
-  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'red', '2 need you'], [2, 'amber', '2 waiting for your yes'], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', '']]);
+  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[3, 'red', '3 need you'], [2, 'red', '2 need you'], [2, 'amber', '2 waiting for your yes'], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', ''], ['', '', '']]);
   renderNav();
   const nav = el('tabBar').innerHTML;
   assert.ok(nav.includes('<span class="badge red" title="3 need you" aria-hidden="true">3</span>'));

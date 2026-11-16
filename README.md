@@ -21,6 +21,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | File | What it is |
 | --- | --- |
 | `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, the four-place navigation (sidebar on a computer, tab bar on a phone), ⌘K, notifications, theme. |
+| `dialer/index.html` | The **Dialer** (sidebar › Dialer): the cold-calling power dialer — three lines at once, the call scripts and objection answers, one-key outcomes, meetings with BANT, call log and analytics. Built from `limethsith-create/cold-calling-for-aviance` (`npm run build:demo -- --hub`, then copy `demo/hub-dialer.html` here); do not edit it by hand. Runs entirely in the browser in **practice mode**: calls are simulated and the practice data stays in that browser (IndexedDB). Opens only for someone signed in to the hub. Real calling needs the dialer's phone server (see that repo's `docs/DEPLOY.md` and `docs/TWILIO_SETUP.md`). |
 | `trials.js` | Trials (the list, one client's page and their email system, Buy & paste, Behind the scenes) and Settings. Talks to the machine. |
 | `calendar.js`, `calendar.css` | The Calendar: requests waiting for your yes, the week, meetings, each confirmed call's Google Meet (see `email-distributor/docs/CALENDAR.md`). |
 | `messages.js` | Messages on every trial page (the whole conversation, how each email we sent went, the reply box, the reply-bot switch), Settings › Google Meet and Settings › Reply bot (see `email-distributor/docs/REPLYBOT-MEET.md` and HUB-API "Delivery monitoring"). Styles in `trials.css`. |
