@@ -324,7 +324,9 @@ export const inquiryRecords = [
     name: 'Dana Stone', email: 'dana@stoneroofing.com', company: 'Stone Roofing', website: 'stoneroofing.com',
     sells: 'Roof replacement and storm-damage repair for homeowners around Dallas–Fort Worth.', plan: 'growth',
     slotStart: '2026-10-20T14:00:00Z', slotEnd: '2026-10-20T14:15:00Z', theirTz: 'America/Chicago',
-    whenTheirs: 'Tuesday, October 20, 2026 at 9:00 AM', whenHost: 'Tuesday, October 20, 2026 at 7:30 PM', page: '/' },
+    whenTheirs: 'Tuesday, October 20, 2026 at 9:00 AM', whenHost: 'Tuesday, October 20, 2026 at 7:30 PM', page: '/',
+    role: 'Founder / CEO', dealSize: '$5,000 – $25,000', channel: 'Mostly referrals', capacity: 'Around 10', timing: 'As soon as possible',
+    meetingId: 'msales1stone', meetLink: 'https://meet.google.com/abc-defg-hij', confirmationSentAt: '2026-10-17T10:00:05Z', reminded_tomorrow: null, reminded_soon: null },
   { id: 'qmgu9birch', at: '2026-10-16T09:30:00Z', source: 'website', status: 'new', statusAt: '2026-10-16T09:30:00Z', notes: [],
     name: 'Omar Birch', email: 'omar@birchlegal.co.uk', company: 'Birch Legal', website: 'https://birchlegal.co.uk',
     sells: 'Employment law for small UK businesses', plan: null,
@@ -336,7 +338,7 @@ export const inquiryRecords = [
     sells: 'Commercial HVAC maintenance contracts', plan: 'starter',
     slotStart: '2026-10-15T10:30:00Z', slotEnd: '2026-10-15T10:45:00Z', theirTz: 'Asia/Dubai',
     whenTheirs: 'Thursday, October 15, 2026 at 2:30 PM', whenHost: 'Thursday, October 15, 2026 at 4:00 PM', clientId: 'cedar-hvac', trialOutcome: 'queued' },
-  { id: 'qmgn1harbor', at: '2026-10-12T07:00:00Z', source: 'website', status: 'contacted', statusAt: '2026-10-15T09:00:00Z',
+  { id: 'qmgn1harbor', at: '2026-10-12T07:00:00Z', source: 'website', status: 'proposal', statusAt: '2026-10-16T08:00:00Z',
     notes: [{ at: '2026-10-15T09:00:00Z', text: 'Called. They want a proposal for 3 clinics — send by Monday.' }, { at: '2026-10-16T08:00:00Z', text: 'Proposal drafted.' }],
     name: 'Grace Lee', email: 'grace@harbordental.com', company: 'Harbor Dental Group', website: 'https://harbordental.com',
     sells: 'Dental implants and Invisalign across three clinics in San Diego', plan: 'scale',
@@ -354,21 +356,28 @@ export const inquiryRecords = [
     sells: '<b>Brand design</b> for startups', plan: 'growth',
     slotStart: null, slotEnd: null, theirTz: null, whenTheirs: null, whenHost: null },
 ];
-export const inquiryCounts = { new: 2, contacted: 2, won: 1, lost: 1 };
-/* Mirrors inquirySummary() + the to-dos hubBoard() adds for each new one. */
+export const inquiryCounts = { new: 2, held: 0, no_show: 0, contacted: 1, proposal: 1, won: 1, lost: 1 };
+/* Mirrors inquirySummary() + the to-dos hubBoard() adds for each new (Booked) one. */
+const IQ_OPEN_STAGES = ['new', 'held', 'no_show', 'contacted', 'proposal'];
 export function inquirySummaryOf(list) {
-  const counts = { new: 0, contacted: 0, won: 0, lost: 0 }; for (const q of list) counts[q.status]++;
-  const open = list.filter((q) => q.status === 'new' || q.status === 'contacted');
+  const counts = { new: 0, held: 0, no_show: 0, contacted: 0, proposal: 0, won: 0, lost: 0 }; for (const q of list) counts[q.status]++;
+  const open = list.filter((q) => IQ_OPEN_STAGES.includes(q.status));
   return { counts, open: open.length, latest: open.slice(0, 5).map((q) => ({ id: q.id, at: q.at, name: q.name, company: q.company, plan: q.plan, status: q.status, slotStart: q.slotStart, whenHost: q.whenHost })) };
 }
 export function inquiryTodosOf(summary) {
-  return (summary.latest || []).filter((x) => x.status === 'new').map((q) => ({ id: `inquiry:${q.id}`, clientId: null, clientName: q.company, text: `New plan inquiry from ${q.company} — call them back`,
-    detail: `${q.name}${q.plan ? ` · ${q.plan[0].toUpperCase()}${q.plan.slice(1)}` : ''}${q.whenHost ? ` · booked for ${q.whenHost}` : ''}`,
-    urgent: true, since: q.at, action: { type: 'view', view: 'inquiry', inquiryId: q.id } }));
+  // hubview.js: a call still ahead is a calm "is booked"; once it has passed (or with no time) it is urgent.
+  const nowMs = Date.parse('2026-10-17T12:00:00Z');
+  return (summary.latest || []).filter((x) => x.status === 'new').map((q) => {
+    const at = Date.parse(q.slotStart || ''); const ahead = Number.isFinite(at) && at + 20 * 60e3 > nowMs; const passed = Number.isFinite(at) && !ahead;
+    return { id: `inquiry:${q.id}`, clientId: null, clientName: q.company,
+      text: ahead ? `Sales call with ${q.company} is booked` : passed ? `How did the call with ${q.company} go? Move them to the next stage` : `New plan inquiry from ${q.company} — call them back`,
+      detail: `${q.name}${q.plan ? ` · ${q.plan[0].toUpperCase()}${q.plan.slice(1)}` : ''}${q.whenHost ? ` · ${ahead ? '' : 'booked for '}${q.whenHost}` : ''}`,
+      urgent: !ahead, since: q.at, action: { type: 'view', view: 'inquiry', inquiryId: q.id } };
+  });
 }
 const inquiryHubSummary = inquirySummaryOf(inquiryRecords);
 export const hubWithInquiries = Object.assign({}, fullHub, { inquiries: inquiryHubSummary, todos: inquiryTodosOf(inquiryHubSummary).concat(fullHub.todos) });
-export const noInquiries = { inquiries: [], counts: { new: 0, contacted: 0, won: 0, lost: 0 } };
+export const noInquiries = { inquiries: [], counts: { new: 0, held: 0, no_show: 0, contacted: 0, proposal: 0, won: 0, lost: 0 } };
 
 /* ───── Onboarding call + the simple Trials list (email-distributor docs/ONBOARD-CALL.md) ─────
    `simple` on every board row, `onboardCall` on the trial detail. NOW is Sat 17 Oct 2026 12:00 UTC. */
