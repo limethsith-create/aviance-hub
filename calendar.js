@@ -41,9 +41,9 @@ const CAL_STATUS={
 const CAL_ZONE_NAMES={'Asia/Colombo':'Sri Lanka','America/New_York':'US Eastern','America/Detroit':'US Eastern','America/Indiana/Indianapolis':'US Eastern','America/Kentucky/Louisville':'US Eastern','America/Chicago':'US Central','America/Denver':'US Mountain','America/Boise':'US Mountain','America/Phoenix':'Arizona','America/Los_Angeles':'US Pacific','America/Anchorage':'Alaska','Pacific/Honolulu':'Hawaii'};
 const CAL_WHAT={requested:'Asked for this time',confirmed:'Confirmed',moved:'Moved to a new time',suggested:'Another time suggested',declined:'Declined',held:'Call done',no_show:"Marked: they didn't show",cancelled:'Cancelled',blocked:'Time blocked',unblocked:'Unblocked',added:'Added'};
 const CAL_BY={them:'by them',owner:'by you',machine:'automatically'};
-const CAL_SOURCE={booking_page:'They picked it on your booking page',owner:'You added it',inbox:'Found in your inbox (a calendar invite)',onboard_card:'Marked booked on the onboarding card',launch_card:'Marked booked on the launch-call card'};
+const CAL_SOURCE={website:'They booked it on your website',booking_page:'They picked it on your booking page',owner:'You added it',inbox:'Found in your inbox (a calendar invite)',onboard_card:'Marked booked on the onboarding card',launch_card:'Marked booked on the launch-call card'};
 /* The two kinds of call the machine books (docs/ONBOARD-CALL.md, docs/LAUNCH-CALL.md), in the owner's words. */
-const CAL_KINDS={onboarding:'Onboarding call',launch:'Launch call'};
+const CAL_KINDS={onboarding:'Onboarding call',launch:'Launch call',sales:'Sales call'};
 const CAL_DAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 /* The small camera beside a call that has its Google Meet link (decoration: the words say it too). */
 const CAL_CAM='<svg class="cal-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><rect x="2.5" y="6.5" width="13" height="11"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/></svg>';
@@ -388,7 +388,7 @@ function renderCalMeeting(m,st,meta){
   const asked=status==='requested'&&m.proposed&&calHeldAt(m)!==m.start?calWhen(m.start,st,m.theirZone):null;
   const mail=calEmail(m.email);
   const kv=[];
-  if(status!=='blocked'&&(m.company||m.person))kv.push(['Who',`${m.company?`<b>${esc(m.company)}</b>`:''}${m.company&&m.person?' — ':''}${esc(m.person||'')}${calTestTag(m)}${m.clientId!=null&&m.clientId!==''?` <button type="button" class="tk-textbtn cal-trial-link" onclick="closeModal();openTrial(${tkAttr(m.clientId)})">Open their trial</button>`:''}`]);
+  if(status!=='blocked'&&(m.company||m.person))kv.push(['Who',`${m.company?`<b>${esc(m.company)}</b>`:''}${m.company&&m.person?' — ':''}${esc(m.person||'')}${calTestTag(m)}${m.clientId!=null&&m.clientId!==''?` <button type="button" class="tk-textbtn cal-trial-link" onclick="closeModal();openTrial(${tkAttr(m.clientId)})">Open their trial</button>`:''}${m.inquiryId?` <button type="button" class="tk-textbtn cal-trial-link" onclick="closeModal();openInquiry(${tkAttr(m.inquiryId)})">Open their inquiry</button>`:''}`]);
   if(mail)kv.push(['Email',`<a href="mailto:${esc(mail)}">${esc(mail)}</a>`]);
   const rest=long===S.short?'':long.indexOf(S.short+' — ')===0?long.charAt(S.short.length+3).toUpperCase()+long.slice(S.short.length+4):long;   // the pill already says the first words
   kv.push(['Status',`<span class="pill ${S.pill}">${esc(S.short)}</span> ${esc(rest)}`]);

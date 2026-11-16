@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NOW, acme, bright, fern, fernApplication, fernDetail, stagesWith, fullHub, emptyHub, detail, tinyGrowth, makeGrowth, research, researchBrief, deepV4, shoppingV2, brightPurchase, inquiryRecords, inquiryCounts, inquirySummaryOf, hubWithInquiries, noInquiries, simpleRows, simpleHub, onboardCall, ecreekDetail } from './fixtures.mjs';
+import { NOW, inquiryTodosOf, acme, bright, fern, fernApplication, fernDetail, stagesWith, fullHub, emptyHub, detail, tinyGrowth, makeGrowth, research, researchBrief, deepV4, shoppingV2, brightPurchase, inquiryRecords, inquiryCounts, inquirySummaryOf, hubWithInquiries, noInquiries, simpleRows, simpleHub, onboardCall, ecreekDetail } from './fixtures.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1189,17 +1189,25 @@ test('inquiries: call times read "call in 3 h" / "call is now" / "was 2 days ago
   assert.deepEqual(iqCountsOf(inquiryRecords), inquiryCounts);
 });
 
-test('inquiries list: four filter chips (no second row of count boxes), newest-first cards with plan, call time, what they sell, and a New marker', () => {
+test('inquiries list: Open / All chips, a pipeline tile per stage, calls ahead first, cards with stage, plan, call time, answers and what was emailed', () => {
   const html = renderInquiries(inquiryRecords, inquiryCounts, 'open', { now: NOW });
-  assert.ok(!html.includes('iq-counts') && !html.includes('iq-count '), 'the counts live on the chips only');
-  for (const chip of ['Open · 4', 'Won · 1', 'Lost · 1', 'All · 6']) assert.ok(html.includes(chip), chip);
-  assert.ok(!html.includes('New · 2') && !html.includes('Contacted · 2'), 'New and Contacted are inside Open (each card says its status)');
-  assert.ok(renderInquiries(inquiryRecords, inquiryCounts, 'contacted', { now: NOW }).includes('aria-pressed="true" onclick="inquiriesSetFilter(\'contacted\')">Contacted · 2'), 'a filter from elsewhere still shows as a chip');
-  const order = ['Stone Roofing', 'Birch Legal', 'Cedar HVAC', 'Harbor Dental Group'].map((c) => html.indexOf(c));
-  assert.ok(order.every((x, i) => x > 0 && (i === 0 || x > order[i - 1])), 'open ones, newest first');
+  for (const chip of ['Open · 4', 'All · 6']) assert.ok(html.includes(chip), chip);
+  // the pipeline: every stage with its count, in order
+  assert.ok(html.includes('class="iq-pipe"'));
+  const tiles = ['<b>2</b><span>Booked</span>', '<b>0</b><span>Call done</span>', '<b>0</b><span>No-show</span>', '<b>1</b><span>Following up</span>', '<b>1</b><span>Proposal sent</span>', '<b>1</b><span>Won</span>', '<b>1</b><span>Lost</span>'].map((t) => html.indexOf(t));
+  assert.ok(tiles.every((x, i) => x > 0 && (i === 0 || x > tiles[i - 1])), 'one tile per stage, in pipeline order');
+  assert.ok(renderInquiries(inquiryRecords, inquiryCounts, 'proposal', { now: NOW }).includes('aria-pressed="true" onclick="inquiriesSetFilter(\'proposal\')"><b>1</b><span>Proposal sent</span>'), 'a stage tile is the filter');
+  const order = ['Birch Legal', 'Stone Roofing', 'Cedar HVAC', 'Harbor Dental Group'].map((c) => html.indexOf(c));
+  assert.ok(order.every((x, i) => x > 0 && (i === 0 || x > order[i - 1])), 'calls still ahead first (soonest first), then newest first');
   assert.ok(!html.includes('Northwind') && !html.includes('Pixel'), 'won/lost hidden under Open');
-  assert.equal(count(html, /class="card iq-card iq-new"/g), 2, 'two New markers');
-  assert.equal(count(html, /<span class="pill red">New<\/span>/g), 2);
+  assert.equal(count(html, /class="card iq-card iq-new"/g), 0, 'no call has passed without an outcome');
+  assert.equal(count(html, /<span class="pill blue">Booked<\/span>/g), 2);
+  assert.ok(html.includes('<span class="pill amber">Proposal sent</span>'));
+  assert.ok(html.includes('Founder / CEO · $5,000 – $25,000 deals · Around 10 calls a month'), 'their answers in one line');
+  assert.ok(html.includes('<span class="iq-mail on">✓ Confirmation</span><span class="iq-mail">· Day before</span><span class="iq-mail">· 1 hour before</span>'), 'what was emailed');
+  // a booked call whose time has passed: red edge and "How did the call go?"
+  const late = renderInquiries([Object.assign(Q('qmgu9birch'), { slotStart: '2026-10-17T10:00:00Z', slotEnd: '2026-10-17T10:15:00Z' })], null, 'open', { now: NOW });
+  assert.ok(late.includes('class="card iq-card iq-new"') && late.includes('How did the call go? Move them on'));
   assert.ok(html.includes('Growth plan') && html.includes('Scale plan') && html.includes('No plan picked'));
   assert.ok(html.includes('<b>Saturday, October 17, 2026 at 8:30 PM</b> <span class="muted">your time</span>') && html.includes('call in 3 h'));
   assert.ok(html.includes('was 2 days ago'), 'Harbor: the call already happened');
@@ -1210,7 +1218,7 @@ test('inquiries list: four filter chips (no second row of count boxes), newest-f
   assert.ok(lost.includes('Pixel &amp; Co') && lost.includes('&lt;b&gt;Brand design&lt;/b&gt;') && !lost.includes('<b>Brand design'), 'escaped');
   assert.ok(lost.includes('No call booked'));
   assert.equal(count(renderInquiries(inquiryRecords, inquiryCounts, 'all', { now: NOW }), /class="card iq-card/g), 6);
-  const none = renderInquiries(inquiryRecords.filter((q) => q.status === 'won'), { new: 0, contacted: 0, won: 1, lost: 0 }, 'open', { now: NOW });
+  const none = renderInquiries(inquiryRecords.filter((q) => q.status === 'won'), null, 'open', { now: NOW });
   assert.ok(none.includes('Nothing open. Every inquiry has been answered.') && none.includes("inquiriesSetFilter('all')"));
   const empty = renderInquiries(noInquiries.inquiries, noInquiries.counts, 'open', { now: NOW });
   assert.ok(empty.includes('No inquiries yet') && empty.includes("When someone books a call from your website's Book a call form, it shows up here and on your phone.") && !empty.includes('iq-card'));
@@ -1219,19 +1227,24 @@ test('inquiries list: four filter chips (no second row of count boxes), newest-f
 test('inquiry detail: reply by email, their time, website, notes, status moves, and Start a trial instead', () => {
   const s = renderInquiry(Q('qmgv1stone'), { now: NOW });
   assert.ok(!s.includes('iq-company') && s.includes('Dana Stone') && s.includes('Growth plan'), 'the company is the page title (top bar), not repeated');
-  assert.equal(count(s, /<span class="pill red">New<\/span>/g), 1, 'the status is said once ("Where it stands")');
+  assert.ok(s.includes('<span class="pill blue">Booked</span>'), 'the stage');
+  assert.ok(s.includes('href="https://meet.google.com/abc-defg-hij" target="_blank" rel="noopener">Join the call</a>') && s.includes('inquiryOpenCalendar(&quot;qmgv1stone&quot;)'), 'join + see it in the Calendar');
+  assert.ok(s.includes('<h3>Their answers</h3>') && s.includes('<small>Sales calls a month they can take</small><span>Around 10</span>'));
+  assert.ok(s.includes('<h3>Emails to them</h3>') && s.includes('with a calendar invite') && s.includes('Goes an hour before the call'));
+  assert.ok(s.includes('<li class="cur">Booked</li>'), 'the stepper');
   assert.ok(!s.includes('← All inquiries'), 'Back is in the top bar');
   assert.ok(s.includes('href="mailto:dana@stoneroofing.com?subject=Your%20Aviance%20call">Reply by email</a>'));
   assert.ok(s.includes('Tuesday, October 20, 2026 at 7:30 PM') && s.includes('call in 3 days'));
   assert.ok(s.includes('Tuesday, October 20, 2026 at 9:00 AM <span class="muted">(America/Chicago)</span>'), 'their time + zone');
   assert.ok(s.includes('href="https://stoneroofing.com"') && s.includes('>stoneroofing.com</a>'));
   assert.ok(s.includes('No notes yet.') && s.includes('id="iqNoteText"') && s.includes('Add note'));
-  assert.ok(s.includes('>Mark contacted</button>') && s.includes('>Mark won</button>') && s.includes('>Mark lost</button>') && !s.includes('Back to New'), 'moves away from New');
+  assert.ok(s.includes('Move them to:') && s.includes('<button class="btn" onclick="inquirySetStatus(&quot;qmgv1stone&quot;,\'held\')">Call done</button>') && s.includes('>No-show</button>'), 'next from Booked: Call done (big) or No-show');
+  assert.ok(s.includes('<summary>Another stage</summary>') && s.includes('>Following up</button>') && s.includes('>Proposal sent</button>') && s.includes('>Won</button>') && s.includes('>Lost</button>') && !s.includes('>Booked</button>'), 'every other stage, never the one they are at');
   assert.ok(s.includes('id="iqStatusNote"') && s.includes('Note with the change (optional)'));
   assert.ok(s.includes('>Start a free trial and email them</button>') && s.includes('inquiryToTrial(&quot;qmgv1stone&quot;)'));
   const c = renderInquiry(Q('qmgp2cedar'), { now: NOW });
   assert.ok(c.includes('<b>Now a trial</b> — on the waiting list') && c.includes('openTrial(&quot;cedar-hvac&quot;)') && c.includes('Open the trial →'));
-  assert.ok(!c.includes('Start a free trial') && c.includes('Back to New') && !c.includes('>Mark contacted<'));
+  assert.ok(!c.includes('Start a free trial') && c.includes('>Booked</button>') && !c.includes('>Following up</button>') && c.includes('<li class="cur">Following up</li>'));
   assert.ok(c.includes('Good call. Not ready to pay yet'));
   const h = renderInquiry(Q('qmgn1harbor'), { now: NOW });
   assert.ok(h.indexOf('Proposal drafted.') < h.indexOf('Called. They want a proposal'), 'newest note first');
@@ -1242,24 +1255,30 @@ test('inquiry detail: reply by email, their time, website, notes, status moves, 
   assert.ok(renderInquiry(null).includes('Inquiry not found'));
 });
 
-test('inquiries on the board: a strip ("2 new inquiries — Birch Legal, call Sat 8:30 PM"), to-dos open the inquiry, bell and ⌘K include them', () => {
+test('inquiries on the board: a strip ("2 booked calls — Birch Legal, call Sat 8:30 PM"), to-dos open the inquiry, a passed call rings the bell, ⌘K includes them', () => {
   asOwner(); trialsIngestHub(hubWithInquiries); iq.list = null; iq.counts = null; iq.at = 0;
   const board = renderBoard(hubWithInquiries, { now: NOW });
-  assert.ok(board.includes('<b>2 new inquiries — Birch Legal, call Sat 8:30 PM</b>'), 'the soonest upcoming call');
+  assert.ok(board.includes('<b>2 booked calls — Birch Legal, call Sat 8:30 PM</b>'), 'the soonest upcoming call');
   assert.ok(board.includes('2 more in progress') && board.includes('onclick="render(\'inquiries\')"'));
-  assert.ok(board.includes('New plan inquiry from Stone Roofing — call them back') && board.includes('>Open the inquiry</button>'));
+  assert.ok(board.includes('Sales call with Stone Roofing is booked') && board.includes('>Open the inquiry</button>'));
   assert.ok(board.includes('<span class="tk-client" onclick="openInquiry(&quot;qmgv1stone&quot;)">Stone Roofing</span>'), 'the company opens the inquiry, not a trial');
   assert.ok(!renderBoard(fullHub, { now: NOW }).includes('iq-strip'), 'an older machine without inquiries: no strip');
   const quiet = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'won' || q.status === 'lost'));
   assert.equal(renderInquiryStrip(quiet, { now: NOW }), '', 'nothing open: no strip');
-  const contactedOnly = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'contacted'));
+  const contactedOnly = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'contacted' || q.status === 'proposal'));
   assert.ok(renderInquiryStrip(contactedOnly, { now: NOW }).includes('2 open inquiries'));
   assert.equal(inquiriesNavCount(), 2); renderNav();
   // the menu: new call requests count on Paying clients (they live inside it now)
   assert.ok(el('navArea').innerHTML.includes('aria-label="Paying clients — 2 need you"') && el('navArea').innerHTML.includes('<span class="badge red" title="2 need you" aria-hidden="true">2</span>'));
-  const bell = trialsNotifs().filter((n) => /plan inquiry/.test(n.t));
-  assert.equal(bell.length, 2); bell[0].go();
-  assert.equal(currentView, 'inquiry'); assert.ok(['qmgv1stone', 'qmgu9birch'].includes(currentInquiryId));
+  // Booked calls still ahead are calm to-dos: not in the bell. Once a call's time has passed, it is urgent there.
+  assert.equal(trialsNotifs().filter((n) => /Stone Roofing|Birch Legal/.test(n.t)).length, 0, 'calls still ahead: no bell');
+  const passedRecs = inquiryRecords.map((q) => (q.id === 'qmgu9birch' ? Object.assign({}, q, { slotStart: '2026-10-17T10:00:00Z', slotEnd: '2026-10-17T10:15:00Z' }) : q));
+  const passedSum = inquirySummaryOf(passedRecs);
+  trialsIngestHub(Object.assign({}, fullHub, { inquiries: passedSum, todos: inquiryTodosOf(passedSum).concat(fullHub.todos) }));
+  const bell = trialsNotifs().filter((n) => /How did the call with/.test(n.t));
+  assert.equal(bell.length, 1); assert.equal(bell[0].t, 'How did the call with Birch Legal go? Move them to the next stage'); bell[0].go();
+  assert.equal(currentView, 'inquiry'); assert.equal(currentInquiryId, 'qmgu9birch');
+  trialsIngestHub(hubWithInquiries);
   trialsTodoAction('inquiry:qmgu9birch'); assert.equal(currentInquiryId, 'qmgu9birch');
   const ents = trialsCmdkEntities().filter((e) => e.type === 'Inquiry');
   assert.deepEqual(ents.map((e) => e.label), ['Stone Roofing', 'Birch Legal', 'Cedar HVAC', 'Harbor Dental Group']);
@@ -1293,13 +1312,13 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
     location.hash = '#inquiry/qmgv1stone'; winListeners.hashchange.forEach((f) => f()); location.hash = '';
     assert.equal(currentView, 'inquiry'); assert.equal(currentInquiryId, 'qmgv1stone');
     await loadInquiries(true); trialsRepaint('inquiry');
-    assert.ok(el('tkHost').innerHTML.includes('Dana Stone') && el('ptitle').textContent === 'Stone Roofing' && el('psub').textContent === 'Plan inquiry · New');
+    assert.ok(el('tkHost').innerHTML.includes('Dana Stone') && el('ptitle').textContent === 'Stone Roofing' && el('psub').textContent === 'Plan inquiry · Booked');
     assert.equal(el('backBtn').style.display, 'grid', 'a Back button to the list');
     // status with a note
     el('iqStatusNote').value = 'Called, sending a proposal';
     await inquirySetStatus('qmgv1stone', 'contacted');
     assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'contacted', note: 'Called, sending a proposal' });
-    assert.ok(el('toast').innerHTML.includes('Marked contacted'));
+    assert.ok(el('toast').innerHTML.includes('Moved to Following up'));
     assert.ok(calls.filter((c) => c[1] === '/api/mc/hub').length >= 1, 'the board (badge, to-dos) is refreshed too');
     el('iqStatusNote').value = '';
     await inquirySetStatus('qmgv1stone', 'new');
