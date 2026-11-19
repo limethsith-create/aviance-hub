@@ -99,7 +99,7 @@ function iqMailLine(q) {
   if (q.confirmationError) return `<span class="iq-mail bad">Confirmation email failed — write to them</span>`;
   if (!q.confirmationSentAt) return '';
   const tick = (on, w) => `<span class="iq-mail${on ? ' on' : ''}">${on ? '✓' : '·'} ${w}</span>`;
-  return tick(true, 'Confirmation') + tick(Boolean(q.reminded_tomorrow), 'Day before') + tick(Boolean(q.reminded_soon), '1 hour before');
+  return tick(true, 'Confirmation') + tick(Boolean(q.reminded_tomorrow), 'Day before') + tick(Boolean(q.reminded_soon), '1 hour before') + tick(Boolean(q.reminded_now), '5 min before');
 }
 function renderInquiryCard(q, now) {
   const needs = iqNeedsOutcome(q, now);
@@ -168,6 +168,7 @@ function renderInquiry(q, meta) {
     <small>Confirmation</small><span>${q.confirmationSentAt ? `Sent ${esc(tkRel(q.confirmationSentAt, now))}, with a calendar invite` : q.confirmationError ? `<b class="iq-bad">Did not send</b> — ${esc(q.confirmationError)}. Write to them.` : 'Not sent'}</span>
     <small>Day-before reminder</small><span>${q.reminded_tomorrow ? 'Sent ' + esc(tkRel(q.reminded_tomorrow, now)) : q.status === 'new' ? 'Goes the day before (if they booked more than a day ahead)' : 'Stopped — they moved on'}</span>
     <small>1-hour reminder</small><span>${q.reminded_soon ? 'Sent ' + esc(tkRel(q.reminded_soon, now)) : q.status === 'new' ? 'Goes an hour before the call' : 'Stopped — they moved on'}</span>
+    <small>5-minute reminder</small><span>${q.reminded_now ? 'Sent ' + esc(tkRel(q.reminded_now, now)) : q.status === 'new' ? 'Goes 5 minutes before the call' : 'Stopped — they moved on'}</span>
   </div></div>`;
   const trial = q.clientId
     ? `<div class="iq-trial-done"><b>Now a trial</b>${q.trialOutcome && iqTrialOutcomeText(q.trialOutcome) ? ' — ' + esc(iqTrialOutcomeText(q.trialOutcome)) : ''}. <span class="tk-linkish" onclick="openTrial(${tkAttr(q.clientId)})">Open the trial →</span></div>`
