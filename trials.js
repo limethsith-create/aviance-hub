@@ -1688,7 +1688,7 @@ function renderFitScore(r){
   return `<h4>Fit score</h4>
   <div class="tk-score">
     <div class="tk-score-head">
-      <div class="tk-score-num ${cls}"><b>${f.score!=null?esc(f.score):'—'}</b><small>/100</small></div>
+      <div class="tk-score-num ${cls}">${f.score!=null?`<b>${esc(f.score)}</b><small>/100</small>`:`<small>Too little<br>to score</small>`}</div>
       <div class="tk-score-words"><div><span class="pill ${cls}">${esc(f.label)}</span>${f.grade?` <span class="tk-muted">Grade ${esc(f.grade)}</span>`:''}</div><p>${esc(f.summary||'')}</p></div>
     </div>
     <div class="tk-score-conf"><small>How much we could check: <b>${esc(f.confidence)}</b> of 100 points</small>${bar(f.confidence,'grey')}</div>
