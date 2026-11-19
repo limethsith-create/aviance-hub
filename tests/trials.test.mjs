@@ -1255,6 +1255,29 @@ test('inquiry detail: reply by email, their time, website, notes, status moves, 
   assert.ok(renderInquiry(null).includes('Inquiry not found'));
 });
 
+test('where they came from (?utm_source=cold_call / ref): a tag on the list row and "Came from" under About them', () => {
+  const stone = Object.assign(Q('qmgv1stone'), { utm: { source: 'cold_call', medium: null, campaign: 'nov-roofers', content: null }, ref: null, cameFrom: 'Cold call (campaign: nov-roofers)' });
+  const list = renderInquiries([stone], null, 'open', { now: NOW });
+  assert.ok(list.includes('<span class="pill grey iq-src" title="Came from">Cold call</span>'), 'a short tag on the row, no campaign detail');
+  const d = renderInquiry(stone, { now: NOW });
+  const about = d.slice(d.indexOf('<h3>About them</h3>'));
+  assert.ok(d.indexOf('<h3>About them</h3>') > 0 && d.indexOf('Came from') > d.indexOf('<h3>About them</h3>'), 'under About them');
+  assert.ok(about.includes('<small>Came from</small><span>Cold call (campaign: nov-roofers)</span>'));
+  // an older record with only utm/ref: the same friendly words, worked out here
+  const li = Object.assign(Q('qmgv1stone'), { utm: { source: 'linkedin' }, ref: 'rehan' });
+  assert.ok(renderInquiries([li], null, 'open', { now: NOW }).includes('>LinkedIn</span>'));
+  assert.ok(renderInquiry(li, { now: NOW }).includes('<small>Came from</small><span>LinkedIn (ref: rehan)</span>'));
+  assert.ok(renderInquiry(Object.assign(Q('qmgv1stone'), { ref: 'email' }), { now: NOW }).includes('<small>Came from</small><span>Email</span>'));
+  const odd = Object.assign(Q('qmgv1stone'), { utm: { source: '<img src=x onerror=alert(1)>' } });
+  const oddHtml = renderInquiries([odd], null, 'open', { now: NOW }) + renderInquiry(odd, { now: NOW });
+  assert.ok(!oddHtml.includes('<img src=x') && oddHtml.includes('&lt;img'), 'an unknown source is shown as sent, escaped');
+  // nothing tracked: no tag, no row
+  const plain = renderInquiries([Q('qmgv1stone')], null, 'open', { now: NOW }) + renderInquiry(Q('qmgv1stone'), { now: NOW });
+  assert.ok(!plain.includes('iq-src') && !plain.includes('Came from'));
+  // "I don't have one yet" ticked on the booking form
+  assert.ok(renderInquiry(Object.assign(Q('qmgv1stone'), { website: '', noWebsite: true }), { now: NOW }).includes('<small>Website</small><span><span class="muted">Doesn\'t have one yet</span></span>'));
+});
+
 test('inquiries on the board: a strip ("2 booked calls — Birch Legal, call Sat 8:30 PM"), to-dos open the inquiry, a passed call rings the bell, ⌘K includes them', () => {
   asOwner(); trialsIngestHub(hubWithInquiries); iq.list = null; iq.counts = null; iq.at = 0;
   const board = renderBoard(hubWithInquiries, { now: NOW });

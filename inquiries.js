@@ -42,6 +42,21 @@ function iqClip(s, n) { s = String(s || '').trim(); return s.length > n ? s.slic
 function iqEmail(e) { e = String(e || '').trim(); return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']{2,}$/.test(e) ? e : ''; }
 /* The website stores what they typed ("stoneroofing.com" or a full URL) — link only http(s). */
 function iqSiteUrl(w) { w = String(w || '').trim(); if (!w) return ''; if (!/^https?:\/\//i.test(w) && /^[a-z0-9.-]+\.[a-z]{2,}(\/\S*)?$/i.test(w)) w = 'https://' + w; return tkSafeUrl(w); }
+/* Where they came from (the booking link's ?utm_source=cold_call or ?ref=…). The machine sends `cameFrom`
+   ("Cold call (campaign: nov)"); older records only have utm/ref, so the same friendly words are worked out here. */
+const IQ_SOURCE_WORDS = { cold_call: 'Cold call', coldcall: 'Cold call', call: 'Cold call', phone: 'Cold call', linkedin: 'LinkedIn', li: 'LinkedIn', email: 'Email', cold_email: 'Email', newsletter: 'Email', google: 'Google', facebook: 'Facebook', fb: 'Facebook', instagram: 'Instagram', ig: 'Instagram', x: 'X (Twitter)', twitter: 'X (Twitter)', referral: 'Referral', website: 'Website' };
+function iqSourceWord(v) { v = String(v == null ? '' : v).trim().slice(0, 100); if (!v) return ''; return IQ_SOURCE_WORDS[v.toLowerCase().replace(/[\s-]+/g, '_')] || v; }
+/* The short tag for the list row: "Cold call", "LinkedIn" (no campaign detail). */
+function iqSourceTag(q) { const u = (q && q.utm && typeof q.utm === 'object') ? q.utm : {}; return iqSourceWord(u.source) || iqSourceWord(q && q.ref) || iqSourceWord(u.medium); }
+/* The full line for "About them": the machine's own words, else the tag plus any campaign / ref. */
+function iqCameFrom(q) {
+  if (!q) return '';
+  if (q.cameFrom) return String(q.cameFrom).slice(0, 300);
+  const main = iqSourceTag(q); if (!main) return '';
+  const u = (q.utm && typeof q.utm === 'object') ? q.utm : {};
+  const bits = [u.campaign ? 'campaign: ' + u.campaign : '', u.content ? 'content: ' + u.content : '', q.ref && iqSourceWord(q.ref) !== main ? 'ref: ' + q.ref : ''].filter(Boolean);
+  return bits.length ? main + ' (' + bits.join(', ') + ')' : main;
+}
 function iqMailto(q) { const e = iqEmail(q && q.email); return e ? 'mailto:' + e + '?subject=' + encodeURIComponent('Your Aviance call') : ''; }
 function iqDur(sec) { sec = Math.abs(sec); if (sec < 90) return '1 min'; if (sec < 3600) return Math.round(sec / 60) + ' min'; if (sec < 36 * 3600) return Math.round(sec / 3600) + ' h'; const d = Math.round(sec / 86400); return d + (d === 1 ? ' day' : ' days'); }
 /* "call in 3 h" · "call is now" · "was 2 days ago" */
@@ -104,9 +119,9 @@ function iqMailLine(q) {
 function renderInquiryCard(q, now) {
   const needs = iqNeedsOutcome(q, now);
   const go = `openInquiry(${tkAttr(q.id)})`;
-  const ans = iqAnswersLine(q), mail = iqMailLine(q);
+  const ans = iqAnswersLine(q), mail = iqMailLine(q), src = iqSourceTag(q);
   return `<div class="card iq-card${needs ? ' iq-new' : ''}" role="button" tabindex="0" onclick="${go}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${go}}">
-    <div class="iq-card-head"><b class="iq-company">${esc(q.company || '—')}</b>${iqStatusPill(q.status)}${iqPlanChip(q.plan)}</div>
+    <div class="iq-card-head"><b class="iq-company">${esc(q.company || '—')}</b>${iqStatusPill(q.status)}${iqPlanChip(q.plan)}${src ? `<span class="pill grey iq-src" title="Came from">${esc(iqClip(src, 40))}</span>` : ''}</div>
     ${needs ? '<div class="iq-needs">How did the call go? Move them on</div>' : ''}
     <div class="iq-who">${esc(q.name || '')}${q.at ? `<span class="muted"> · asked <span title="${esc(tkFull(q.at))}">${esc(tkRel(q.at, now))}</span></span>` : ''}</div>
     ${renderInquiryCall(q, now)}
@@ -154,13 +169,15 @@ function renderInquiry(q, meta) {
     ${renderInquiryCall(q, now, 'iq-call iq-call-big')}
     ${mail || join || q.meetingId ? `<div class="tk-inline iq-head-act">${join ? `<a class="btn" href="${esc(join)}" target="_blank" rel="noopener">Join the call</a>` : ''}${mail ? `<a class="btn${join ? ' ghost' : ''}" href="${esc(mail)}">Reply by email</a>` : ''}${q.meetingId ? `<button class="btn ghost" onclick="inquiryOpenCalendar(${tkAttr(id)})">See it in the Calendar</button>` : ''}</div>` : ''}
   </div>`;
+  const came = iqCameFrom(q);
   const theirs = q.whenTheirs ? esc(q.whenTheirs) + (q.theirTz ? ` <span class="muted">(${esc(q.theirTz)})</span>` : '') : q.theirTz ? `<span class="muted">${esc(q.theirTz)}</span>` : '—';
   const facts = `<div class="section-head tk-section"><h3>About them</h3></div><div class="card tk-pad"><div class="tk-kv">
     <small>Their time</small><span>${theirs}</span>
     <small>Email</small><span>${email ? `<a href="${esc(mail)}">${esc(email)}</a>` : esc(q.email || '—')}</span>
-    <small>Website</small><span>${site ? tkLink(site, q.website) : esc(q.website || '—')}</span>
+    <small>Website</small><span>${site ? tkLink(site, q.website) : q.website ? esc(q.website) : q.noWebsite ? '<span class="muted">Doesn\'t have one yet</span>' : '—'}</span>
     <small>What they sell</small><span class="iq-pre">${esc(q.sells || '—')}</span>
     <small>Plan</small><span>${esc(iqPlanName(q.plan) || 'Not picked')}</span>
+    ${came ? `<small>Came from</small><span>${esc(came)}</span>` : ''}
   </div></div>`;
   const answers = [['Their role', q.role], ['Average deal size', q.dealSize], ['How they win customers today', q.channel], ['Sales calls a month they can take', q.capacity], ['When they want calls', q.timing], ['Tried cold email or an agency before', q.tried], ['What they want from the call', q.goal]].filter(([, v]) => v);
   const answersHtml = answers.length ? `<div class="section-head tk-section"><h3>Their answers</h3></div><div class="card tk-pad"><div class="tk-kv">${answers.map(([k, v]) => `<small>${esc(k)}</small><span>${esc(v)}</span>`).join('')}</div></div>` : '';
