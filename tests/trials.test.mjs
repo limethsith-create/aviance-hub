@@ -1761,3 +1761,12 @@ test('an employee (read-only) opens a client\'s email system too — both sides,
     assert.ok(!/class="[^"]*\bbtn\b[^"]*"[^>]*id="tkSysBtn"/.test(renderTrialDetail(tk.detail['cobalt-hvac'], 'overview', {})) && renderTrialDetail(tk.detail['cobalt-hvac'], 'overview', {}).includes('class="tk-sysbtn"'), 'the big system button is not a hidden .btn: they can open it');
   } finally { document.body.classList.remove('ro'); asOwner(); trialsStopTimer(); }
 });
+
+test('revenue: one answer that says how sure it is (about / at least / unknown); a floor never reads as the size', () => {
+  const at = (estimate, revenue = []) => renderDeep(Object.assign({}, deepV4, { money: { federal: null, sec: null, revenue, estimate } }));
+  const floor = at({ sure: 'at least', low: 1470000, high: null, basis: ['“Trusted by 2,500+ contractors” × their cheapest plan (Starter, $49/mo) = $588 a year each'] }, [{ low: 560000, high: 1000000, floor: true, basis: '4+ people × …' }]);
+  assert.ok(floor.includes('<b>Revenue</b>: at least <b>$1.5M</b> a year'), floor);
+  assert.ok(floor.includes('at least <b>$560k</b>') && !floor.includes('$560k–$1M'), 'the team-page floor is "at least", not a range');
+  assert.ok(at({ sure: 'about', low: 3000000, high: 5000000, basis: ['20 people × …'] }).includes('<b>Revenue</b>: about <b>$3M–$5M</b> a year'));
+  assert.ok(at({ sure: 'unknown', low: null, high: null, basis: ['no headcount, payroll or customer count found'] }).includes('<b>Revenue</b>: <b>unknown</b>'));
+});
