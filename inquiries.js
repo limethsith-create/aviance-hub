@@ -162,7 +162,7 @@ function renderInquiry(q, meta) {
     <small>What they sell</small><span class="iq-pre">${esc(q.sells || '—')}</span>
     <small>Plan</small><span>${esc(iqPlanName(q.plan) || 'Not picked')}</span>
   </div></div>`;
-  const answers = [['Their role', q.role], ['Average deal size', q.dealSize], ['How they win customers today', q.channel], ['Sales calls a month they can take', q.capacity], ['When they want calls', q.timing]].filter(([, v]) => v);
+  const answers = [['Their role', q.role], ['Average deal size', q.dealSize], ['How they win customers today', q.channel], ['Sales calls a month they can take', q.capacity], ['When they want calls', q.timing], ['Tried cold email or an agency before', q.tried], ['What they want from the call', q.goal]].filter(([, v]) => v);
   const answersHtml = answers.length ? `<div class="section-head tk-section"><h3>Their answers</h3></div><div class="card tk-pad"><div class="tk-kv">${answers.map(([k, v]) => `<small>${esc(k)}</small><span>${esc(v)}</span>`).join('')}</div></div>` : '';
   const mails = !q.slotStart ? '' : `<div class="section-head tk-section"><h3>Emails to them</h3></div><div class="card tk-pad"><div class="tk-kv">
     <small>Confirmation</small><span>${q.confirmationSentAt ? `Sent ${esc(tkRel(q.confirmationSentAt, now))}, with a calendar invite` : q.confirmationError ? `<b class="iq-bad">Did not send</b> — ${esc(q.confirmationError)}. Write to them.` : 'Not sent'}</span>
