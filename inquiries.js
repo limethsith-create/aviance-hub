@@ -57,6 +57,8 @@ function iqCameFrom(q) {
   const bits = [u.campaign ? 'campaign: ' + u.campaign : '', u.content ? 'content: ' + u.content : '', q.ref && iqSourceWord(q.ref) !== main ? 'ref: ' + q.ref : ''].filter(Boolean);
   return bits.length ? main + ' (' + bits.join(', ') + ')' : main;
 }
+/* A phone number made safe for a tel: link (digits, + and an ext only); '' when it isn't one. */
+function iqTel(p) { const t = String(p || '').trim(); if (!/^[+\d\s().\-]+((\s*(ext|x)\.?\s*)\d{1,6})?$/i.test(t)) return ''; const m = t.match(/^(.*?)(?:\s*(?:ext|x)\.?\s*(\d{1,6}))?$/i); const main = m[1].replace(/[^\d+]/g, ''); return main.replace(/\D/g, '').length >= 7 ? main + (m[2] ? ',' + m[2] : '') : ''; }
 function iqMailto(q) { const e = iqEmail(q && q.email); return e ? 'mailto:' + e + '?subject=' + encodeURIComponent('Your Aviance call') : ''; }
 function iqDur(sec) { sec = Math.abs(sec); if (sec < 90) return '1 min'; if (sec < 3600) return Math.round(sec / 60) + ' min'; if (sec < 36 * 3600) return Math.round(sec / 3600) + ' h'; const d = Math.round(sec / 86400); return d + (d === 1 ? ' day' : ' days'); }
 /* "call in 3 h" · "call is now" · "was 2 days ago" */
@@ -161,6 +163,7 @@ function renderInquiry(q, meta) {
   meta = meta || {}; const now = meta.now;
   if (!q) return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'Inquiry not found', 'It may have been removed.', 'All inquiries', "render('inquiries')");
   const id = q.id, mail = iqMailto(q), email = iqEmail(q.email), site = iqSiteUrl(q.website);
+  const tel = iqTel(q.phone);
   const needs = iqNeedsOutcome(q, now);
   const join = q.meetLink ? tkSafeUrl(q.meetLink) : '';
   const head = `<div class="card tk-pad iq-head${needs ? ' iq-new' : ''}">
@@ -174,6 +177,7 @@ function renderInquiry(q, meta) {
   const facts = `<div class="section-head tk-section"><h3>About them</h3></div><div class="card tk-pad"><div class="tk-kv">
     <small>Their time</small><span>${theirs}</span>
     <small>Email</small><span>${email ? `<a href="${esc(mail)}">${esc(email)}</a>` : esc(q.email || '—')}</span>
+    ${tel ? `<small>Phone</small><span><a href="tel:${esc(tel)}">${esc(q.phone)}</a></span>` : q.phone ? `<small>Phone</small><span>${esc(q.phone)}</span>` : ''}
     <small>Website</small><span>${site ? tkLink(site, q.website) : q.website ? esc(q.website) : q.noWebsite ? '<span class="muted">Doesn\'t have one yet</span>' : '—'}</span>
     <small>What they sell</small><span class="iq-pre">${esc(q.sells || '—')}</span>
     <small>Plan</small><span>${esc(iqPlanName(q.plan) || 'Not picked')}</span>

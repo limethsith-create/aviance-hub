@@ -1278,6 +1278,15 @@ test('where they came from (?utm_source=cold_call / ref): a tag on the list row 
   assert.ok(renderInquiry(Object.assign(Q('qmgv1stone'), { website: '', noWebsite: true }), { now: NOW }).includes('<small>Website</small><span><span class="muted">Doesn\'t have one yet</span></span>'));
 });
 
+test('phone number on the booking form: a tap-to-call row under About them, escaped, absent when not given', () => {
+  const d = renderInquiry(Object.assign(Q('qmgv1stone'), { phone: '+1 (512) 555-0142' }), { now: NOW });
+  assert.ok(d.includes('<small>Phone</small><span><a href="tel:+15125550142">+1 (512) 555-0142</a></span>'));
+  assert.ok(renderInquiry(Object.assign(Q('qmgv1stone'), { phone: '512 555 0142 ext 12' }), { now: NOW }).includes('href="tel:5125550142,12"'));
+  const odd = renderInquiry(Object.assign(Q('qmgv1stone'), { phone: '<b>x</b>' }), { now: NOW });
+  assert.ok(!odd.includes('tel:') && !odd.includes('<b>x</b>') && odd.includes('&lt;b&gt;'));
+  assert.ok(!renderInquiry(Q('qmgv1stone'), { now: NOW }).includes('<small>Phone</small>'));
+});
+
 test('inquiries on the board: a strip ("2 booked calls — Birch Legal, call Sat 8:30 PM"), to-dos open the inquiry, a passed call rings the bell, ⌘K includes them', () => {
   asOwner(); trialsIngestHub(hubWithInquiries); iq.list = null; iq.counts = null; iq.at = 0;
   const board = renderBoard(hubWithInquiries, { now: NOW });
