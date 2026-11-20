@@ -6,7 +6,7 @@
 <title>Aviance Hub</title>
 <link rel="stylesheet" href="trials.css">
 <link rel="stylesheet" href="calendar.css">
-<!-- Installable app (Add to Home Screen) — needed for phone alerts on iPhone -->
+<!-- Installable app (Add to Home Screen) -->
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -515,8 +515,16 @@ function renderNav(){
   if(tab)tab.innerHTML=items.map(it=>`<button class="tab${on(it)?' active':''}" ${attrs(it)}><span class="tab-ic">${it.icon}${badge(it)}</span><span class="tab-t">${esc(it.short||it.label)}</span></button>`).join('');
 }
 /* The sidebar is always on screen on a computer and hidden on a phone (the tab bar takes over), so there is
-   nothing to close; kept because render() and push.js call it. */
+   nothing to close; kept because render() calls it. */
 function closeSidebar(){}
+/* Phone alerts are gone (alerts show only in the hub). A phone that turned them on earlier: forget its old helper once. */
+function tkDropOldPhoneAlerts(){
+  if(typeof navigator==='undefined'||!navigator.serviceWorker||!navigator.serviceWorker.getRegistrations)return;
+  navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>{
+    try{if(r.pushManager&&r.pushManager.getSubscription)r.pushManager.getSubscription().then(s=>s&&s.unsubscribe()).catch(()=>{});}catch(e){}
+    try{r.unregister();}catch(e){}
+  })).catch(()=>{});
+}
 
 /* ---- Auth (Supabase): only an approved profile with role 'admin' gets in ---- */
 async function getProfile(uid){const {data}=await sb.from('profiles').select('*').eq('id',uid).maybeSingle();return data;}
@@ -563,7 +571,7 @@ function enterApp(){
   document.getElementById('whoEmail').textContent=authUser.email;
   if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('paying');
   try{if(typeof peopleSignedIn==='function')peopleSignedIn();}catch(e){}
-  try{phoneAlertsBoot();}catch(e){}
+  try{tkDropOldPhoneAlerts();}catch(e){}
 }
 function showLogin(){
   document.getElementById('app').style.display='none';
@@ -622,7 +630,6 @@ function cmdkActions(){const a=[];
   if(typeof trialsCmdkActions==='function')a.push(...trialsCmdkActions());
   if(typeof calendarCmdkActions==='function')a.push(...calendarCmdkActions());
   MACHINE_PAGES.forEach(([path,icon,label])=>a.push({type:'Advanced',label,icon,sub:'Opens the full control panel in a new tab',kw:'advanced machine mission control control panel '+label,run:()=>{closeCmdk();openMachine(path);}}));
-  a.push({type:'Command',label:'Phone alerts',icon:I.bellRing,sub:'Get a message on your phone when something needs you',kw:'phone alerts push notifications iphone',run:()=>{closeCmdk();openPhoneAlerts();}});
   a.push({type:'Command',label:'Switch light / dark',icon:I.moon,sub:'How the hub looks',kw:'theme dark light mode toggle',run:()=>{closeCmdk();toggleTheme();}});
   a.push({type:'Command',label:'Log out',icon:I.logout,sub:'End your session',kw:'log out sign out logout',run:()=>{closeCmdk();logout();}});
   return a;}
@@ -683,7 +690,6 @@ boot();
 <script src="autobuy.js"></script>
 <script src="warmup.js"></script>
 <script src="keys.js"></script>
-<script src="push.js"></script>
 <script src="people.js"></script>
 <div id="avaRoot" hidden></div>
 <script src="ava.js"></script>

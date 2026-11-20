@@ -78,7 +78,7 @@ export const fullHub = {
     heartbeat: { lastTickAt: '2026-10-17T11:59:18Z', ageSec: 42, source: 'cronjob', lastSendAt: '2026-10-17T11:45:00Z' },
     activeClients: 3, openAlerts: 2,
     usage: { redis: { used: 123, limit: 500000, pct: 0 }, places: { used: 120, limit: 1000, pct: 12 }, reoon: { used: 8, limit: 20, pct: 40, remaining: 12 } },
-    setup: { migrated: true, encKey: true, cronSecret: true, telegram: false, healthchecks: false, ownerInbox: true },
+    setup: { migrated: true, encKey: true, cronSecret: true, healthchecks: false, ownerInbox: true },
     others: [{ id: 'aviance', name: 'Aviance', state: 'sending', stateLabel: 'Sending', health: 'green', five: { sent: 5000, replies: 80, positive: 20, booked: 6, qualified: 4 }, todo: [], systems: [] }],
   },
   stages: stagesWith({ intake: [fern], setup: [bright], live: [acme], won: [cobalt] }),
@@ -92,7 +92,7 @@ export const fullHub = {
     { id: 'a2', at: '2026-10-16T08:00:00Z', key: 'dispute', clientId: 'acme-plumbing', title: 'Dispute on a booked call', urgent: false, delivered: false },
   ],
 };
-export const emptyHub = { machine: { ok: true, heartbeat: { lastTickAt: null, ageSec: null, source: null, lastSendAt: null }, activeClients: 0, openAlerts: 0, usage: {}, setup: { migrated: true, encKey: true, cronSecret: true, telegram: true, healthchecks: true, ownerInbox: true }, others: [] }, stages: stagesWith({}), todos: [], alerts: [] };
+export const emptyHub = { machine: { ok: true, heartbeat: { lastTickAt: null, ageSec: null, source: null, lastSendAt: null }, activeClients: 0, openAlerts: 0, usage: {}, setup: { migrated: true, encKey: true, cronSecret: true, healthchecks: true, ownerInbox: true }, others: [] }, stages: stagesWith({}), todos: [], alerts: [] };
 
 export const detail = {
   row: acme,
@@ -328,7 +328,7 @@ export const inquiryRecords = [
     sells: 'Commercial HVAC maintenance contracts', plan: 'starter',
     slotStart: '2026-10-15T10:30:00Z', slotEnd: '2026-10-15T10:45:00Z', theirTz: 'Asia/Dubai',
     whenTheirs: 'Thursday, October 15, 2026 at 2:30 PM', whenHost: 'Thursday, October 15, 2026 at 4:00 PM', clientId: 'cedar-hvac' },
-  { id: 'qmgn1harbor', at: '2026-10-12T07:00:00Z', source: 'website', status: 'proposal', statusAt: '2026-10-16T08:00:00Z',
+  { id: 'qmgn1harbor', at: '2026-10-12T07:00:00Z', source: 'website', status: 'agreement_sent', statusAt: '2026-10-16T08:00:00Z',
     notes: [{ at: '2026-10-15T09:00:00Z', text: 'Called. They want a proposal for 3 clinics — send by Monday.' }, { at: '2026-10-16T08:00:00Z', text: 'Proposal drafted.' }],
     name: 'Grace Lee', email: 'grace@harbordental.com', company: 'Harbor Dental Group', website: 'https://harbordental.com',
     sells: 'Dental implants and Invisalign across three clinics in San Diego', plan: 'scale',
@@ -346,11 +346,11 @@ export const inquiryRecords = [
     sells: '<b>Brand design</b> for startups', plan: 'growth',
     slotStart: null, slotEnd: null, theirTz: null, whenTheirs: null, whenHost: null },
 ];
-export const inquiryCounts = { new: 2, held: 0, no_show: 0, contacted: 1, proposal: 1, won: 1, lost: 1 };
+export const inquiryCounts = { new: 2, held: 0, no_show: 0, contacted: 1, agreement_sent: 1, won: 1, lost: 1 };
 /* Mirrors inquirySummary() + the to-dos hubBoard() adds for each new (Booked) one. */
-const IQ_OPEN_STAGES = ['new', 'held', 'no_show', 'contacted', 'proposal'];
+const IQ_OPEN_STAGES = ['new', 'held', 'no_show', 'contacted', 'agreement_sent'];
 export function inquirySummaryOf(list) {
-  const counts = { new: 0, held: 0, no_show: 0, contacted: 0, proposal: 0, won: 0, lost: 0 }; for (const q of list) counts[q.status]++;
+  const counts = { new: 0, held: 0, no_show: 0, contacted: 0, agreement_sent: 0, won: 0, lost: 0 }; for (const q of list) counts[q.status]++;
   const open = list.filter((q) => IQ_OPEN_STAGES.includes(q.status));
   return { counts, open: open.length, latest: open.slice(0, 5).map((q) => ({ id: q.id, at: q.at, name: q.name, company: q.company, plan: q.plan, status: q.status, slotStart: q.slotStart, whenHost: q.whenHost })) };
 }
@@ -367,7 +367,7 @@ export function inquiryTodosOf(summary) {
 }
 const inquiryHubSummary = inquirySummaryOf(inquiryRecords);
 export const hubWithInquiries = Object.assign({}, fullHub, { inquiries: inquiryHubSummary, todos: inquiryTodosOf(inquiryHubSummary).concat(fullHub.todos) });
-export const noInquiries = { inquiries: [], counts: { new: 0, held: 0, no_show: 0, contacted: 0, proposal: 0, won: 0, lost: 0 } };
+export const noInquiries = { inquiries: [], counts: { new: 0, held: 0, no_show: 0, contacted: 0, agreement_sent: 0, won: 0, lost: 0 } };
 
 /* ───── Onboarding call + the simple Trials list (email-distributor docs/ONBOARD-CALL.md) ─────
    `simple` on every board row, `onboardCall` on the trial detail. NOW is Sat 17 Oct 2026 12:00 UTC. */
@@ -688,7 +688,7 @@ export const keysStates = {
 /* GET /api/mc/config as the machine lists it: one row per top-level setting, the fields inside (the hub's eight
    details live in OWNER, ONBOARDCALL, CALENDAR, PAYMENT and REVIEW). */
 const cfgRow = (key, def, value) => ({ key, default: def, value, overridden: JSON.stringify(def) !== JSON.stringify(value), toSet: JSON.stringify(value).includes('null') });
-const OWNER_DEF = { usHours: ['09:00', '17:00'], signerName: null, address: null, email: null, telegramChatId: null };
+const OWNER_DEF = { usHours: ['09:00', '17:00'], signerName: null, address: null, email: null };
 const ONB_DEF = { inbox: null, bookingUrl: null, callMinutes: 30, minNoticeHours: 12, daysAhead: 14 };
 const CAL_DEF = { hours: ['09:00', '17:00'], days: [1, 2, 3, 4, 5], slotMinutes: 30, meetingLink: null, ownerZone: 'Asia/Colombo', usZone: 'America/New_York' };
 export const configStates = {

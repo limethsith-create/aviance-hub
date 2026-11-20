@@ -45,7 +45,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'push.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 
@@ -332,7 +332,7 @@ test('Settings › Your details: Save (Enter too) and Clear post the right bodie
     assert.equal(el('ydSave-OWNER_address').textContent, 'Saving…'); assert.equal(el('ydSave-OWNER_address').disabled, true);
     await p;
     const [, , body] = st.posts(CFG).pop();
-    assert.deepEqual(body, { action: 'set', key: 'OWNER', value: { usHours: ['09:00', '17:00'], signerName: 'Limeth Sith', address: '12 Main St\nAustin, TX 78701', email: 'owner@example.com', telegramChatId: null } });
+    assert.deepEqual(body, { action: 'set', key: 'OWNER', value: { usHours: ['09:00', '17:00'], signerName: 'Limeth Sith', address: '12 Main St\nAustin, TX 78701', email: 'owner@example.com' } });
     assert.equal(typeof JSON.parse(JSON.stringify(body)).value.address, 'string', 'the value travels as JSON text, line breaks kept');
     assert.equal(toastText(), 'Saved — your postal address');
     assert.equal(el('ydMsg-OWNER_address').innerHTML, 'Saved.'); assert.equal(el('ydMsg-OWNER_address').className, 'tk-yd-msg green');
@@ -354,10 +354,10 @@ test('Settings › Your details: Save (Enter too) and Clear post the right bodie
     assert.deepEqual(st.posts(CFG).pop()[2], { action: 'set', key: 'PAYMENT', value: { paypalMe: 'https://paypal.me/aviance', wiseDetails: null } });
     // an empty box saves as "back to the default" (the field's default back in the row); Clear does the same
     el('ydIn-OWNER_email').value = ''; await ydSave('OWNER.email');
-    assert.deepEqual(st.posts(CFG).pop()[2], { action: 'set', key: 'OWNER', value: { usHours: ['09:00', '17:00'], signerName: 'Limeth Sith', address: '12 Main St\nAustin, TX 78701', email: null, telegramChatId: null } });
+    assert.deepEqual(st.posts(CFG).pop()[2], { action: 'set', key: 'OWNER', value: { usHours: ['09:00', '17:00'], signerName: 'Limeth Sith', address: '12 Main St\nAustin, TX 78701', email: null } });
     assert.equal(toastText(), 'Cleared — your email address');
     await ydReset('OWNER.signerName');
-    assert.deepEqual(st.posts(CFG).pop()[2], { action: 'set', key: 'OWNER', value: { usHours: ['09:00', '17:00'], signerName: null, address: '12 Main St\nAustin, TX 78701', email: null, telegramChatId: null } });
+    assert.deepEqual(st.posts(CFG).pop()[2], { action: 'set', key: 'OWNER', value: { usHours: ['09:00', '17:00'], signerName: null, address: '12 Main St\nAustin, TX 78701', email: null } });
     assert.ok(el('ydField-OWNER_signerName').outerHTML.includes('tk-yd-field need') && el('ydField-OWNER_signerName').outerHTML.includes('needed before the first client'), 'cleared: needed again');
     // the reason when the machine says no
     st.cfgErr = 'OWNER.email: expected text'; el('ydIn-OWNER_email').value = 'x@y.co'; await ydSave('OWNER.email');
@@ -382,10 +382,10 @@ test('Settings › Your details: Save (Enter too) and Clear post the right bodie
 });
 
 /* ───────────── 4. in Settings, deep links, ⌘K, "Is everything running?" ───────────── */
-test('Settings: Your details and Keys sit after Phone alerts with their folded labels; #settings/keys and #settings/details open them; ⌘K lists them; "Is everything running?" points to what is still missing; signing out forgets', async () => {
+test('Settings: Your details and Keys sit after Alerts with their folded labels; #settings/keys and #settings/details open them; ⌘K lists them; "Is everything running?" points to what is still missing; signing out forgets', async () => {
   const s = renderSettings({ hub: fullHub, alerts: [], open: {}, keys: { data: keysStates.mixed }, owner: { data: configStates.some }, left: { keys: 1, details: 4 }, now: NOW });
   const titles = [...s.matchAll(/<span class="tk-set-title">([^<]+)<\/span>/g)].map((m) => m[1]);
-  assert.deepEqual(titles.slice(0, 5), ['Alerts', 'Phone alerts', 'Your details', 'Keys', 'Google Meet']);
+  assert.deepEqual(titles.slice(0, 5), ['Alerts', 'Your details', 'Keys', 'Google Meet', 'Inboxes &amp; domains']);
   assert.ok(s.includes('<details class="tk-set" id="tkSet-details" ontoggle="trialsSettingsToggle(&quot;details&quot;,this.open)"><summary><span class="tk-set-head"><span class="tk-set-title">Your details</span><span class="tk-set-sub">Your name, address and links — what the emails say about you.</span></span><span class="pill amber" id="ydPill">4 still to fill in</span></summary>'));
   assert.ok(s.includes('<details class="tk-set" id="tkSet-keys" ontoggle="trialsSettingsToggle(&quot;keys&quot;,this.open)"><summary><span class="tk-set-head"><span class="tk-set-title">Keys</span><span class="tk-set-sub">The keys for the free services the system uses. Paste each one once.</span></span><span class="pill red" id="kyPill">4 of 5 set — 1 problem</span></summary>'));
   assert.ok(TK_SETTINGS.includes('keys') && TK_SETTINGS.includes('details'));
@@ -429,8 +429,8 @@ test('Settings: Your details and Keys sit after Phone alerts with their folded l
 });
 
 /* ───────────── 5. files, touch targets, the phone ───────────── */
-test('files: keys.js is loaded after warmup.js and before push.js and syntax-checked; touch targets 44 px+; 16 px in the boxes; nothing wider than a phone; the readability floor', () => {
-  assert.ok(html.indexOf('<script src="warmup.js"></script>') < html.indexOf('<script src="keys.js"></script>') && html.indexOf('<script src="keys.js"></script>') < html.indexOf('<script src="push.js"></script>'));
+test('files: keys.js is loaded after warmup.js and before people.js and syntax-checked; touch targets 44 px+; 16 px in the boxes; nothing wider than a phone; the readability floor', () => {
+  assert.ok(html.indexOf('<script src="warmup.js"></script>') < html.indexOf('<script src="keys.js"></script>') && html.indexOf('<script src="keys.js"></script>') < html.indexOf('<script src="people.js"></script>'));
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.ok(pkg.scripts.check.includes('node --check keys.js'));
   const css = fs.readFileSync(path.join(root, 'trials.css'), 'utf8');

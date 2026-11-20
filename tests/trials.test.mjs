@@ -57,7 +57,6 @@ vm.runInThisContext(fs.readFileSync(path.join(root, 'trials.js'), 'utf8'), { fil
 vm.runInThisContext(fs.readFileSync(path.join(root, 'inquiries.js'), 'utf8'), { filename: 'inquiries.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'messages.js'), 'utf8'), { filename: 'messages.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'autobuy.js'), 'utf8'), { filename: 'autobuy.js' });
-vm.runInThisContext(fs.readFileSync(path.join(root, 'push.js'), 'utf8'), { filename: 'push.js' });
 supa.session = { access_token: 'test-token' }; // boot() has already seen "no session" and shown the login screen
 after(() => trialsStopTimer());
 const asOwner = () => { authUser = { uid: 'u1', name: 'Owner', role: 'admin', email: 'owner@example.com' }; };
@@ -261,7 +260,7 @@ test('renderBoard: full board with clients across stages, sparklines only where 
   assert.ok(html.includes('Sending — Day 12') && html.includes('Waiting for you to buy'));
   assert.ok(html.includes('Buy bright-team.com and 2 inboxes, then paste the logins'));
   assert.ok(!html.includes('tk-bar') && !html.includes('Heartbeat') && !html.includes('Machine setup'), 'how the system is running moved to Settings');
-  assert.ok(renderSystemStatus(fullHub.machine, { now: NOW }).includes('Setup is not finished. Still to set: Telegram messages, the uptime check (Healthchecks).'));
+  assert.ok(renderSystemStatus(fullHub.machine, { now: NOW }).includes('Setup is not finished. Still to set: the uptime check (Healthchecks).'));
   assert.ok(html.includes('<h3>All clients by stage</h3>') && html.includes('<h3>Every to-do</h3>'));
   assert.ok(!html.includes('<b>Ended</b>'), 'empty Ended column is skipped');
   assert.ok(!html.includes('Waiting list') && !/trial/i.test(visibleText(html)), 'no waiting list, no trial words');
@@ -323,7 +322,7 @@ test('Clients list: one row per client — company, person, the journey (bar + "
   assert.ok(html.includes('onclick="openTrial(&quot;acme-plumbing&quot;)"') && html.includes("onclick=\"openTrial(&quot;fern-it&quot;,null,'application')\""));
   // kept: adding a client yourself (at the bottom); gone: the old links row, the inquiry strip
   assert.ok(html.indexOf('onclick="openNewPayingClient()">+ Add a paying client yourself</button>') > html.indexOf('tkDoneGroup'));
-  assert.ok(!html.includes('tk-more') && !html.includes('iq-strip') && !html.includes('openPhoneAlerts'), 'phone alerts, alerts and behind the scenes live in Settings now');
+  assert.ok(!html.includes('tk-more') && !html.includes('iq-strip') && !html.includes('openPhoneAlerts'), 'alerts and behind the scenes live in Settings now');
   assert.ok(!/\btrial\b/i.test(visibleText(html)), 'no trial words');
   const calm = renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({ live: [simpleRows.acme] }) }), {});
   assert.ok(calm.includes("Nothing needs you right now. We'll tell you when something does.") && !calm.includes('Needs you</h3>') && !calm.includes('id="tkDoneGroup"'));
@@ -893,7 +892,6 @@ test('new-client modal posts the contract body (with the plan), shows 400 {error
 const css = fs.readFileSync(path.join(root, 'trials.css'), 'utf8');
 const shellCss = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
 const trialsJs = fs.readFileSync(path.join(root, 'trials.js'), 'utf8');
-const pushJs = fs.readFileSync(path.join(root, 'push.js'), 'utf8');
 const calendarCss = fs.readFileSync(path.join(root, 'calendar.css'), 'utf8');
 const calendarJs = fs.readFileSync(path.join(root, 'calendar.js'), 'utf8');
 const messagesJs = fs.readFileSync(path.join(root, 'messages.js'), 'utf8');
@@ -903,7 +901,7 @@ const varsIn = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*(
 const rootVars = varsIn(shellCss.match(/:root\{[\s\S]*?\n\}/)[0]);
 const darkVars = Object.assign({}, rootVars, varsIn(shellCss.match(/body\.dark\{[^}]*\}/)[0]));
 const noComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '');
-const allStyle = { 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'messages.js': messagesJs, 'autobuy.js': autobuyJs, 'warmup.js': warmupJs, 'push.js': pushJs };
+const allStyle = { 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'messages.js': messagesJs, 'autobuy.js': autobuyJs, 'warmup.js': warmupJs, };
 
 test('font: one plain system font family, no web fonts, no capitals-only labels, no letter-spacing, weights 400/600', () => {
   assert.equal(rootVars.font, '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif');
@@ -961,7 +959,7 @@ test('Day-1 limits follow the machine settings (deliverability.gates)', () => {
   assert.equal(tkSpamVerdict({ score: 8.5 }).level, 'pass');
 });
 
-/* ───────────── deep links + phone alerts (push.js) ───────────── */
+/* ───────────── deep links ───────────── */
 test('deep links: #trial/{id}, #alerts (Settings › Alerts), #settings and #trials parse; anything else (incl. Supabase auth hashes) does not', () => {
   assert.deepEqual(parseDeepLink('#trial/acme-plumbing'), { view: 'trial', id: 'acme-plumbing' });
   assert.deepEqual(parseDeepLink('/#trial/acme-plumbing'), { view: 'trial', id: 'acme-plumbing' }, 'the push payload url form');
@@ -974,7 +972,7 @@ test('deep links: #trial/{id}, #alerts (Settings › Alerts), #settings and #tri
     assert.equal(parseDeepLink(bad), null, JSON.stringify(bad));
 });
 
-test('deep links: signed out → kept until sign-in, then lands there; hashchange and a notification tap also navigate', async () => {
+test('deep links: signed out → kept until sign-in, then lands there; hashchange also navigates', async () => {
   const replaced = []; history.replaceState = (s, t, u) => replaced.push(u);
   authUser = null; pendingDeepLink = null;
   assert.equal(goDeepLink({ view: 'trial', id: 'acme-plumbing' }), false, 'signed out: nothing happens yet');
@@ -988,175 +986,11 @@ test('deep links: signed out → kept until sign-in, then lands there; hashchang
   tk.setOpen = {}; location.hash = '#alerts'; winListeners.hashchange.forEach((f) => f());
   assert.equal(currentView, 'settings', 'hashchange #alerts → Settings'); assert.equal(tk.setOpen.alerts, true, '… with Alerts open');
   assert.ok(el('content').innerHTML.includes('<details class="tk-set" id="tkSet-alerts" open'));
-  paOnMessage({ data: { type: 'aviance:open', url: '/#trial/fern-it' } });
-  assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'fern-it');
-  paOnMessage({ data: { type: 'something-else', url: '/#alerts' } });
-  assert.equal(currentView, 'trial', 'other messages are ignored');
-  paOnMessage({ data: { type: 'aviance:open', url: 'https://evil.example/' } });
-  assert.equal(currentView, 'paying', 'an unknown url falls back to Clients');
   location.hash = ''; history.replaceState = () => {};
   trialsStopTimer();
 });
 
-test('push: urlBase64ToUint8Array decodes base64url (no padding, - and _) and a real 65-byte P-256 key', async () => {
-  assert.deepEqual([...urlBase64ToUint8Array('AQID')], [1, 2, 3]);
-  assert.deepEqual([...urlBase64ToUint8Array('-_8')], [251, 255]);
-  assert.deepEqual([...urlBase64ToUint8Array('AQ')], [1]);
-  const { createECDH } = await import('node:crypto');
-  const ecdh = createECDH('prime256v1'); const pub = ecdh.generateKeys();
-  const b64url = pub.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  const bytes = urlBase64ToUint8Array(b64url);
-  assert.equal(bytes.length, 65); assert.equal(bytes[0], 4, 'uncompressed point'); assert.deepEqual(Buffer.from(bytes), pub);
-});
-
-const UA = {
-  iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
-  iphoneApp: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
-  ipadDesktop: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15',
-  macChrome: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
-  android: 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36',
-};
-const fakeWin = ({ push = true, permission = 'default', standalone = false, secure = true } = {}) => ({
-  PushManager: push ? function PushManager() {} : undefined, Notification: { permission }, isSecureContext: secure,
-  matchMedia: (q) => ({ matches: standalone && q === '(display-mode: standalone)' }),
-});
-
-test('push: device detection → the panel state (not installed on iOS / installed / on / denied / unsupported / no keys)', () => {
-  const sw = { serviceWorker: {} };
-  let env = paEnv({ ...sw, userAgent: UA.iphone, platform: 'iPhone' }, fakeWin());
-  assert.deepEqual([env.ios, env.standalone, env.device, env.browser], [true, false, 'iPhone', 'Safari']);
-  assert.equal(paModeFor(env, { checked: true }), 'install', 'iPhone Safari tab: add to Home Screen first');
-  env = paEnv({ ...sw, userAgent: UA.iphoneApp, platform: 'iPhone', standalone: true }, fakeWin());
-  assert.equal(paModeFor(env, { checked: true }), 'off', 'home-screen app with push: ready to turn on');
-  assert.equal(paDeviceName(env), 'iPhone · Safari');
-  assert.equal(paModeFor(env, { checked: false }), 'checking');
-  assert.equal(paModeFor(env, { checked: true, on: true }), 'on');
-  assert.equal(paModeFor(env, { checked: true, busy: 'on' }), 'busy');
-  assert.equal(paModeFor(env, { checked: true, keyStatus: 503 }), 'nokeys');
-  assert.equal(paModeFor(env, { checked: true, error: 'x' }), 'error');
-  env = paEnv({ ...sw, userAgent: UA.iphoneApp, standalone: true }, fakeWin({ standalone: true, permission: 'denied' }));
-  assert.equal(paModeFor(env, { checked: true, on: true }), 'denied', 'blocked in Settings wins over everything');
-  env = paEnv({ ...sw, userAgent: UA.iphoneApp, standalone: true }, fakeWin({ push: false }));
-  assert.equal(paModeFor(env, { checked: true }), 'unsupported', 'iOS older than 16.4: no PushManager');
-  env = paEnv({ ...sw, userAgent: UA.ipadDesktop, platform: 'MacIntel', maxTouchPoints: 5 }, fakeWin());
-  assert.deepEqual([env.ios, env.device, paModeFor(env, { checked: true })], [true, 'iPad', 'install'], 'iPadOS reports a Mac user agent');
-  env = paEnv({ ...sw, userAgent: UA.macChrome, platform: 'MacIntel', maxTouchPoints: 0 }, fakeWin());
-  assert.deepEqual([env.ios, env.supported, paDeviceName(env), paModeFor(env, { checked: true })], [false, true, 'Mac · Chrome', 'off'], 'desktop Chrome: no install step');
-  env = paEnv({ ...sw, userAgent: UA.android }, fakeWin());
-  assert.equal(paDeviceName(env), 'Android phone · Chrome');
-  env = paEnv({ ...sw, userAgent: UA.android, platform: 'MacIntel', maxTouchPoints: 5 }, fakeWin());
-  assert.deepEqual([env.ios, env.device], [false, 'Android phone'], 'a touch-emulating desktop browser is not an iPad');
-  env = paEnv({ userAgent: UA.macChrome }, fakeWin());
-  assert.equal(paModeFor(env, { checked: true }), 'unsupported', 'no service worker support');
-  env = paEnv({ ...sw, userAgent: UA.macChrome }, fakeWin({ secure: false }));
-  assert.deepEqual([env.secure, paModeFor(env, { checked: true })], [false, 'unsupported']);
-});
-
-test('push: the panel says the right thing in plain words for every state', () => {
-  const r = (v) => renderPhoneAlerts(Object.assign({ device: 'iPhone', ios: true }, v));
-  const install = r({ mode: 'install' });
-  assert.equal(count(install, /<li>/g), 4);
-  for (const s of ['Tap the Share button', 'square with an arrow pointing up', 'Add to Home Screen', 'Open Aviance Hub from your home screen', 'and tap Turn on', 'iOS 16.4']) assert.ok(install.includes(s), s);
-  assert.ok(!install.includes('phoneAlertsOn'), 'no Turn on button until installed');
-  const off = r({ mode: 'off' });
-  assert.ok(off.includes('Off on this iPhone') && off.includes('>Turn on phone alerts</button>') && off.includes('onclick="phoneAlertsOn()"') && off.includes('Tap <b>Allow</b>'));
-  const on = r({ mode: 'on', count: 1 });
-  assert.ok(on.includes('On for this iPhone') && on.includes('>Send a test</button>') && on.includes('>Turn off</button>') && !on.includes('devices in total'));
-  assert.ok(r({ mode: 'on', count: 3 }).includes('Alerts go to 3 devices in total.'));
-  assert.ok(r({ mode: 'on', busy: 'test' }).includes('Sending…') && r({ mode: 'on', busy: 'off' }).includes('Turning off…'));
-  const denied = r({ mode: 'denied' });
-  for (const s of ['Alerts are blocked on this iPhone', '<b>Settings</b>', '<b>Notifications</b>, then <b>Aviance</b>', 'Allow Notifications', 'Check again']) assert.ok(denied.includes(s), s);
-  assert.ok(r({ mode: 'denied', ios: false, device: 'Mac' }).includes('left of the address bar'));
-  assert.ok(r({ mode: 'unsupported' }).includes('needs iOS 16.4 or later') && r({ mode: 'unsupported' }).includes('Software Update'));
-  assert.ok(r({ mode: 'unsupported', ios: false, device: 'Mac' }).includes("This browser can't show alerts."));
-  assert.ok(r({ mode: 'nokeys' }).includes("Phone alerts aren't switched on at our end yet") && r({ mode: 'nokeys' }).includes('phoneAlertsCheck()'));
-  assert.ok(install.includes('(Settings → Phone alerts)'), 'the steps point at Settings');
-  for (const mode of ['install', 'unsupported', 'denied', 'checking', 'busy', 'nokeys', 'error', 'on', 'off']) assert.ok(!/\bmachine\b/i.test(r({ mode }).replace(/<[^>]*>/g, ' ')), 'plain words: ' + mode);
-  const err = r({ mode: 'error', error: '<b>boom</b>' });
-  assert.ok(err.includes('&lt;b&gt;boom&lt;/b&gt;') && err.includes('Try again'), 'errors are escaped');
-  assert.ok(r({ mode: 'off', note: "You didn't allow notifications." }).includes('pa-note'));
-  assert.ok(r({ mode: 'busy' }).includes('disabled'));
-});
-
-test('push: Turn on asks permission first, subscribes with the machine key, and posts {subscription, device}; test + Turn off post the endpoint', async () => {
-  const realNav = globalThis.navigator;
-  const calls = [];
-  const key = 'BAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4_QA';
-  let sub = null, unsubscribed = 0, permAsked = 0, registered;
-  const makeSub = (opts) => ({ endpoint: 'https://push.example/ep1', options: { applicationServerKey: opts.applicationServerKey.buffer }, toJSON: () => ({ endpoint: 'https://push.example/ep1', keys: { p256dh: 'p', auth: 'a' } }), unsubscribe: async () => { unsubscribed++; sub = null; return true; } });
-  const reg = { active: {}, pushManager: { getSubscription: async () => sub, subscribe: async (o) => { assert.equal(o.userVisibleOnly, true); assert.deepEqual([...o.applicationServerKey], [...urlBase64ToUint8Array(key)]); sub = makeSub(o); return sub; } } };
-  Object.defineProperty(globalThis, 'navigator', { value: { userAgent: UA.iphoneApp, platform: 'iPhone', standalone: true, serviceWorker: { register: async (u, o) => { calls.push(['register', u, o.scope, o.updateViaCache]); registered = reg; return reg; }, getRegistration: async (scope) => { calls.push(['getRegistration', scope]); return registered; }, ready: Promise.resolve(reg) } }, configurable: true });
-  globalThis.PushManager = function PushManager() {};
-  globalThis.Notification = { permission: 'default', requestPermission: async () => { permAsked++; globalThis.Notification.permission = 'granted'; return 'granted'; } };
-  let machine = { key: { status: 200, body: { publicKey: key } } };
-  globalThis.fetch = async (url, init) => {
-    const u = new URL(url); const body = init.body ? JSON.parse(init.body) : null;
-    calls.push([init.method, u.pathname + u.search, body, init.headers.authorization]);
-    const reply = u.pathname === '/api/mc/push/key' ? machine.key
-      : u.pathname === '/api/mc/push/subscribe' ? { status: 200, body: { ok: true, count: 2 } }
-      : u.pathname === '/api/mc/push/status' ? { status: 200, body: { subscribed: true, count: 2 } }
-      : u.pathname === '/api/mc/push/test' ? { status: 200, body: { ok: true, sent: 1, failed: 0 } }
-      : u.pathname === '/api/mc/push/unsubscribe' ? { status: 200, body: { ok: true } } : { status: 404, body: {} };
-    return { ok: reply.status < 400, status: reply.status, text: async () => JSON.stringify(reply.body) };
-  };
-  try {
-    asOwner(); paRegP = null; Object.assign(pa, { checked: false, on: false, sub: null, count: null, key: null, keyStatus: 0, busy: '', error: '', note: '' });
-    openPhoneAlerts();
-    assert.ok(el('modalWrap').classList.contains('open'));
-    await new Promise((r) => setTimeout(r, 10));
-    assert.equal(paView().mode, 'off'); assert.ok(el('paPanel').innerHTML.includes('Turn on phone alerts'));
-    assert.ok(calls.some((c) => c[1] === '/api/mc/push/key' && c[3] === 'Bearer test-token'), 'the key is fetched when the panel opens, with the hub token');
-    assert.ok(!calls.some((c) => c[0] === 'register'), 'looking at the panel registers nothing');
-    await phoneAlertsOn();
-    assert.equal(permAsked, 1);
-    assert.deepEqual(calls.find((c) => c[0] === 'register'), ['register', '/sw.js', '/', 'none'], 'Turn on registers /sw.js for the whole site, never from the HTTP cache');
-    const subCall = calls.find((c) => c[1] === '/api/mc/push/subscribe');
-    assert.deepEqual(subCall[2], { subscription: { endpoint: 'https://push.example/ep1', keys: { p256dh: 'p', auth: 'a' } }, device: 'iPhone · Safari' });
-    assert.equal(paView().mode, 'on'); assert.equal(pa.count, 2);
-    assert.ok(el('paPanel').innerHTML.includes('On for this iPhone') && el('paPanel').innerHTML.includes('Alerts go to 2 devices'));
-    assert.equal(phoneAlertsNavNote(), 'On');
-    assert.equal(el('toast').innerHTML.includes('Phone alerts are on for this iPhone'), true);
-    await phoneAlertsTest();
-    assert.deepEqual(calls.find((c) => c[1] === '/api/mc/push/test')[2], { endpoint: 'https://push.example/ep1' });
-    assert.ok(el('toast').innerHTML.includes('Test sent'));
-    // a reload: the quiet re-post of the (maybe rotated) subscription
-    Object.assign(pa, { on: false, sub: null }); const before = calls.filter((c) => c[1] === '/api/mc/push/subscribe').length;
-    await phoneAlertsBoot();
-    assert.equal(calls.filter((c) => c[1] === '/api/mc/push/subscribe').length, before + 1); assert.equal(pa.on, true);
-    await phoneAlertsOff();
-    assert.deepEqual(calls.find((c) => c[1] === '/api/mc/push/unsubscribe')[2], { endpoint: 'https://push.example/ep1' });
-    assert.equal(unsubscribed, 1); assert.equal(paView().mode, 'off'); assert.equal(phoneAlertsNavNote(), '');
-    // the machine has no VAPID keys yet
-    machine.key = { status: 503, body: { error: 'no VAPID keys' } }; pa.key = null;
-    await phoneAlertsCheck();
-    assert.equal(paView().mode, 'nokeys'); assert.ok(el('paPanel').innerHTML.includes("aren't switched on at our end"));
-    // no network
-    globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
-    await phoneAlertsCheck();
-    assert.equal(paView().mode, 'error'); assert.ok(el('paPanel').innerHTML.includes("Couldn't reach the system"));
-    // the owner says Don't Allow
-    globalThis.Notification = { permission: 'default', requestPermission: async () => { globalThis.Notification.permission = 'denied'; return 'denied'; } };
-    pa.error = '';
-    await phoneAlertsOn();
-    assert.equal(paView().mode, 'denied'); assert.ok(el('paPanel').innerHTML.includes('Allow Notifications'));
-    // dismissed the prompt without choosing
-    globalThis.Notification = { permission: 'default', requestPermission: async () => 'default' };
-    await phoneAlertsOn();
-    assert.ok(el('paPanel').innerHTML.includes("You didn't allow notifications"));
-    // iPhone in a Safari tab: instructions only, and Turn on does nothing
-    Object.defineProperty(globalThis, 'navigator', { value: { userAgent: UA.iphone, platform: 'iPhone', serviceWorker: navigator.serviceWorker }, configurable: true });
-    const n = calls.length; await phoneAlertsOn(); await phoneAlertsCheck();
-    assert.equal(calls.length, n); assert.equal(paView().mode, 'install'); assert.ok(el('paPanel').innerHTML.includes('Add to Home Screen'));
-  } finally {
-    closeModal();
-    Object.defineProperty(globalThis, 'navigator', { value: realNav, configurable: true });
-    delete globalThis.PushManager; delete globalThis.Notification;
-    globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
-    Object.assign(pa, { checked: false, on: false, sub: null, count: null, key: null, keyStatus: 0, busy: '', error: '', note: '' }); paRegP = null;
-  }
-});
-
-test('push: the home-screen app shows "First time in the app? Sign in once here." on the login screen', () => {
+test('the home-screen app shows "First time in the app? Sign in once here." on the login screen', () => {
   assert.ok(html.includes('<div id="loginAppNote" class="login-app-note" style="display:none">First time in the app? Sign in once here.</div>'));
   assert.equal(hubStandalone(), false, 'a normal browser tab');
   const realNav = globalThis.navigator;
@@ -1185,20 +1019,29 @@ test('inquiries: call times read "call in 3 h" / "call is now" / "was 2 days ago
   assert.deepEqual(iqCountsOf(inquiryRecords), inquiryCounts);
 });
 
+test('inquiries: old records saying "proposal" or "proposal_sent" show as Agreement and invoice sent', () => {
+  const old = inquiryRecords.map((q) => (q.status === 'agreement_sent' ? { ...q, status: 'proposal_sent' } : q));
+  const oldCounts = { ...inquiryCounts, proposal: inquiryCounts.agreement_sent }; delete oldCounts.agreement_sent;
+  const html = renderInquiries(old, oldCounts, 'open', { now: NOW });
+  assert.ok(html.includes('<span class="pill amber">Agreement and invoice sent</span>'));
+  assert.ok(html.includes('<b>1</b><span>Agreement and invoice sent</span>'));
+  assert.ok(!html.includes('Proposal sent'));
+});
+
 test('inquiries list: Open / All chips, a pipeline tile per stage, calls ahead first, cards with stage, plan, call time, answers and what was emailed', () => {
   const html = renderInquiries(inquiryRecords, inquiryCounts, 'open', { now: NOW });
   for (const chip of ['Open · 4', 'All · 6']) assert.ok(html.includes(chip), chip);
   // the pipeline: every stage with its count, in order
   assert.ok(html.includes('class="iq-pipe"'));
-  const tiles = ['<b>2</b><span>Booked</span>', '<b>0</b><span>Call done</span>', '<b>0</b><span>No-show</span>', '<b>1</b><span>Following up</span>', '<b>1</b><span>Proposal sent</span>', '<b>1</b><span>Won</span>', '<b>1</b><span>Lost</span>'].map((t) => html.indexOf(t));
+  const tiles = ['<b>2</b><span>Booked</span>', '<b>0</b><span>Call done</span>', '<b>0</b><span>No-show</span>', '<b>1</b><span>Following up</span>', '<b>1</b><span>Agreement and invoice sent</span>', '<b>1</b><span>Won</span>', '<b>1</b><span>Lost</span>'].map((t) => html.indexOf(t));
   assert.ok(tiles.every((x, i) => x > 0 && (i === 0 || x > tiles[i - 1])), 'one tile per stage, in pipeline order');
-  assert.ok(renderInquiries(inquiryRecords, inquiryCounts, 'proposal', { now: NOW }).includes('aria-pressed="true" onclick="inquiriesSetFilter(\'proposal\')"><b>1</b><span>Proposal sent</span>'), 'a stage tile is the filter');
+  assert.ok(renderInquiries(inquiryRecords, inquiryCounts, 'agreement_sent', { now: NOW }).includes('aria-pressed="true" onclick="inquiriesSetFilter(\'agreement_sent\')"><b>1</b><span>Agreement and invoice sent</span>'), 'a stage tile is the filter');
   const order = ['Birch Legal', 'Stone Roofing', 'Cedar HVAC', 'Harbor Dental Group'].map((c) => html.indexOf(c));
   assert.ok(order.every((x, i) => x > 0 && (i === 0 || x > order[i - 1])), 'calls still ahead first (soonest first), then newest first');
   assert.ok(!html.includes('Northwind') && !html.includes('Pixel'), 'won/lost hidden under Open');
   assert.equal(count(html, /class="card iq-card iq-new"/g), 0, 'no call has passed without an outcome');
   assert.equal(count(html, /<span class="pill blue">Booked<\/span>/g), 2);
-  assert.ok(html.includes('<span class="pill amber">Proposal sent</span>'));
+  assert.ok(html.includes('<span class="pill amber">Agreement and invoice sent</span>'));
   assert.ok(html.includes('Founder / CEO · $5,000 – $25,000 deals · Around 10 calls a month'), 'their answers in one line');
   assert.ok(html.includes('<span class="iq-mail on">✓ Confirmation</span><span class="iq-mail">· Day before</span><span class="iq-mail">· 1 hour before</span>'), 'what was emailed');
   // a booked call whose time has passed: red edge and "How did the call go?"
@@ -1217,7 +1060,7 @@ test('inquiries list: Open / All chips, a pipeline tile per stage, calls ahead f
   const none = renderInquiries(inquiryRecords.filter((q) => q.status === 'won'), null, 'open', { now: NOW });
   assert.ok(none.includes('Nothing open. Every inquiry has been answered.') && none.includes("inquiriesSetFilter('all')"));
   const empty = renderInquiries(noInquiries.inquiries, noInquiries.counts, 'open', { now: NOW });
-  assert.ok(empty.includes('No inquiries yet') && empty.includes("When someone books a call from your website's Book a call form, it shows up here and on your phone.") && !empty.includes('iq-card'));
+  assert.ok(empty.includes('No inquiries yet') && empty.includes("When someone books a call from your website's Book a call form, it shows up here.") && !empty.includes('iq-card'));
 });
 
 test('booking detail: reply by email, their time, website, notes, status moves, and what Won does', () => {
@@ -1235,9 +1078,9 @@ test('booking detail: reply by email, their time, website, notes, status moves, 
   assert.ok(s.includes('href="https://stoneroofing.com"') && s.includes('>stoneroofing.com</a>'));
   assert.ok(s.includes('No notes yet.') && s.includes('id="iqNoteText"') && s.includes('Add note'));
   assert.ok(s.includes('Move them to:') && s.includes('<button class="btn" onclick="inquirySetStatus(&quot;qmgv1stone&quot;,\'held\')">Call done</button>') && s.includes('>No-show</button>'), 'next from Booked: Call done (big) or No-show');
-  assert.ok(s.includes('<summary>Another stage</summary>') && s.includes('>Following up</button>') && s.includes('>Proposal sent</button>') && s.includes('>Won</button>') && s.includes('>Lost</button>') && !s.includes('>Booked</button>'), 'every other stage, never the one they are at');
+  assert.ok(s.includes('<summary>Another stage</summary>') && s.includes('>Following up</button>') && s.includes('>Send the agreement and invoice</button>') && s.includes('>Won</button>') && s.includes('>Lost</button>') && !s.includes('>Booked</button>'), 'every other stage, never the one they are at');
   assert.ok(s.includes('id="iqStatusNote"') && s.includes('Note with the change (optional)'));
-  assert.ok(visibleText(s).includes('After the call, press Won and they become a client') && !/trial/i.test(visibleText(s)), 'what Won does; no trial');
+  assert.ok(visibleText(s).includes('Send the agreement and invoice') && visibleText(s).includes('both are emailed to them straight away') && visibleText(s).includes('Won and the onboarding email goes out') && !/trial/i.test(visibleText(s)), 'what Won does; no trial');
   const c = renderInquiry(Q('qmgp2cedar'), { now: NOW });
   assert.ok(c.includes('openTrial(&quot;cedar-hvac&quot;)') && c.includes('What we found before the call →'), 'the record held for the call');
   assert.ok(c.includes('>Booked</button>') && !c.includes('>Following up</button>') && c.includes('<li class="cur">Following up</li>'));
@@ -1297,7 +1140,7 @@ test('inquiries on the board: a strip ("2 booked calls — Birch Legal, call Sat
   assert.ok(!renderBoard(fullHub, { now: NOW }).includes('iq-strip'), 'an older machine without inquiries: no strip');
   const quiet = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'won' || q.status === 'lost'));
   assert.equal(renderInquiryStrip(quiet, { now: NOW }), '', 'nothing open: no strip');
-  const contactedOnly = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'contacted' || q.status === 'proposal'));
+  const contactedOnly = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'contacted' || q.status === 'agreement_sent'));
   assert.ok(renderInquiryStrip(contactedOnly, { now: NOW }).includes('2 open inquiries'));
   assert.equal(inquiriesNavCount(), 2); renderNav();
   // the menu: new bookings count on Clients (they live inside it)
@@ -1336,6 +1179,8 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
       const q = recs.find((r) => r.id === body.id);
       if (body.action === 'status' && body.status === 'won' && wonReply) reply = wonReply;
       else if (body.action === 'status') { q.status = body.status; if (body.status === 'won') q.clientId = q.clientId || 'stone-roofing'; if (body.note) q.notes.push({ at: NOW.toISOString(), text: body.note }); reply = { status: 200, body: { ok: true, inquiry: q } }; }
+      if (body.action === 'status' && body.status === 'agreement_sent') q.invoice = { number: 'AV-202611-qmgv1stone', sentAt: NOW.toISOString() };
+      if (body.action === 'paid') { q.status = 'won'; q.clientId = 'stone-roofing'; q.invoice.paidAt = NOW.toISOString(); reply = { status: 200, body: { ok: true, paid: true, first: true, inquiry: q } }; }
       if (body.action === 'note') { q.notes.push({ at: NOW.toISOString(), text: body.text }); reply = { status: 200, body: { ok: true, inquiry: q } }; }
     }
     return { ok: reply.status < 400, status: reply.status, text: async () => JSON.stringify(reply.body) };
@@ -1363,12 +1208,18 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
     el('iqNoteText').value = 'Wants to start in November';
     await inquiryAddNote('qmgv1stone');
     assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'note', id: 'qmgv1stone', text: 'Wants to start in November' });
-    // Won: asks first, says what it does, the page links to the new client
+    // The yes: asks first, says both emails go now, posts agreement_sent
     let asked = ''; globalThis.confirm = (m) => { asked = m; return true; };
+    await inquirySetStatus('qmgv1stone', 'agreement_sent');
+    assert.equal(asked, 'Send Stone Roofing the agreement and the invoice now? Both are emailed to them straight away.');
+    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'agreement_sent' });
+    assert.ok(el('toast').innerHTML.includes('Agreement and invoice sent to Stone Roofing'));
+    // They paid the invoice sent after the yes: the big button says so, asks first, posts 'paid'
+    assert.ok(el('tkHost').innerHTML.includes(">They paid</button>"), 'after the yes the big button is They paid');
     await inquirySetStatus('qmgv1stone', 'won');
-    assert.equal(asked, 'Mark Stone Roofing as Won? They become a paying client and get an email asking them to book the onboarding call.');
-    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'won' });
-    assert.ok(el('toast').innerHTML.includes('Won — Stone Roofing is a client now and was emailed'));
+    assert.equal(asked, 'Mark Stone Roofing as paid? They move to Won, become a paying client and get the email to book the onboarding call.');
+    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'paid', id: 'qmgv1stone' });
+    assert.ok(el('toast').innerHTML.includes('Stone Roofing paid — onboarding started'));
     assert.ok(el('tkHost').innerHTML.includes('Open their page →') && el('tkHost').innerHTML.includes('openTrial(&quot;stone-roofing&quot;)'), 'links to the new client');
     // the machine refuses (no website): the reason, nothing moved
     wonReply = { status: 400, body: { error: 'This booking has no website. Add them with “Add a paying client” instead, with their website.' } };
@@ -1725,7 +1576,7 @@ test('everything that used to scroll the client page lands on the right side and
 test('no code opens a tab that is gone: every tab key the hub passes (trialsSetTab, tkOpenSystem, openTrial, the repaints) is one of the nine', () => {
   const keys = new Set(tkSysTabs().map(([k]) => k));
   assert.deepEqual([...keys], ['overview', 'conversations', 'sent', 'calls', 'messages', 'money', 'health', 'leads', 'setup']);
-  const files = ['trials.js', 'messages.js', 'autobuy.js', 'warmup.js', 'calendar.js', 'inquiries.js', 'keys.js', 'people.js', 'push.js', 'index.html'];
+  const files = ['trials.js', 'messages.js', 'autobuy.js', 'warmup.js', 'calendar.js', 'inquiries.js', 'keys.js', 'people.js', 'index.html'];
   const lit = `(?:'(\\w+)'|"(\\w+)"|\\$\\{tkAttr\\('(\\w+)'\\)\\}|&quot;(\\w+)&quot;)`;
   const pats = [new RegExp(`trialsSetTab\\(${lit}`, 'g'), new RegExp(`trialsRepaintTab\\(${lit}`, 'g'), new RegExp(`tkOpenSystem\\([^,()]+(?:\\([^()]*\\))?\\s*,\\s*${lit}`, 'g'),
     new RegExp(`openTrial\\([^,()]+(?:\\([^()]*\\))?\\s*,\\s*${lit}`, 'g'), new RegExp(`trialTab\\)?\\s*===?\\s*${lit}`, 'g'), new RegExp(`\\bt===${lit}(?:\\|\\|t===${lit})?\\)(?:trials|tk)`, 'g')];

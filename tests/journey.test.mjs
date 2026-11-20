@@ -52,7 +52,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'push.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 const asOwner = () => { authUser = { uid: 'u1', name: 'Owner', role: 'admin', email: 'owner@example.com' }; };
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -771,11 +771,11 @@ test('Settings on the journey: 00 the first setup (the automatic check-in is not
   let o = drawStep(byStep('00'));
   const run = flat(between(o.settings, 'id="tkSet-status"', 'id="tkSet-behind"'));
   assert.ok(run.includes("Not yet. The automatic check-in isn't running yet."));
-  assert.ok(flat(between(o.settings, 'id="tkSet-alerts"', 'id="tkSet-phone"')).includes('No new alerts. Nothing needs you.'));
+  assert.ok(flat(between(o.settings, 'id="tkSet-alerts"', 'id="tkSet-details"')).includes('No new alerts. Nothing needs you.'));
   o = drawStep(byStep('10'));
   const ib = flat(between(o.settings, 'id="tkSet-inboxes"', 'id="tkSet-warmup"'));
   assert.ok(ib.includes('Connected') && ib.includes('Connected as Aviance Outreach') && ib.includes('A card is on file.'));
-  const al = flat(between(o.settings, 'id="tkSet-alerts"', 'id="tkSet-phone"'));
+  const al = flat(between(o.settings, 'id="tkSet-alerts"', 'id="tkSet-details"'));
   assert.ok(al.includes('We found getridgelineit.com — connecting it to Ridgeline IT'));
 });
 
@@ -845,7 +845,7 @@ function stepReport(s) {
   }
   if (o.settings) {
     out.push('', 'SETTINGS');
-    const secs = s.step === '00-owner-setup' ? [['alerts', 'phone'], ['status', 'behind']] : s.extra.cheapinboxes ? [['inboxes', 'warmup']] : [['warmup', 'replybot']];
+    const secs = s.step === '00-owner-setup' ? [['alerts', 'details'], ['status', 'behind']] : s.extra.cheapinboxes ? [['inboxes', 'warmup']] : [['warmup', 'replybot']];
     for (const [a, b] of secs) out.push(indent(between(o.settings, 'id="tkSet-' + a + '"', '<details class="tk-set" id="tkSet-' + b + '"').replace(/^[^>]*>/, '').replace(/<div class="tk-wu-add"[\s\S]*$/, '').replace(/<details class="tk-ab-how"[\s\S]*$/, ''), 4).split('\n').slice(0, 14).join('\n'));
   }
   return out.join('\n');

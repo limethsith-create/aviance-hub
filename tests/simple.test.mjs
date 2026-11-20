@@ -3,7 +3,7 @@
    Run with:  npm test   (= node --test tests/*.test.mjs)
 
    Same set-up as trials.test.mjs / calendar.test.mjs: the shell's inline script, then trials.js,
-   inquiries.js, calendar.js and push.js, exactly like the browser, with a tiny fake DOM and a fake
+   inquiries.js, calendar.js exactly like the browser, with a tiny fake DOM and a fake
    Supabase client. No network. */
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,7 +44,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 /* ───────────── load the shell, then the section scripts ───────────── */
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
-const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'push.js', 'people.js'];
+const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'people.js'];
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 for (const f of FILES) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
@@ -488,9 +488,6 @@ test('deep links still work: #trial/{id}, #calendar, #calendar/{id}, #inquiry/{i
   go('#inquiry/qmgv1stone'); assert.equal(currentView, 'inquiry');
   go('#settings'); assert.equal(currentView, 'settings');
   go('#trials'); assert.equal(currentView, 'paying', 'the old Trials link opens Clients');
-  // a phone alert tapped while the hub is open
-  paOnMessage({ data: { type: 'aviance:open', url: '/#alerts' } }); assert.equal(currentView, 'settings');
-  paOnMessage({ data: { type: 'aviance:open', url: '/#calendar' } }); assert.equal(currentView, 'calendar');
   // signed out: kept until sign-in
   authUser = null; pendingDeepLink = null; assert.equal(goDeepLink({ view: 'settings', section: 'alerts' }), false); assert.deepEqual(pendingDeepLink, { view: 'settings', section: 'alerts' });
   supa.user = { id: 'u1', email: 'owner@example.com' }; supa.profile = { id: 'u1', name: 'Owner', approved: true, role: 'admin', email: 'owner@example.com' };
@@ -546,23 +543,22 @@ test('buttons say exactly what happens', () => {
 });
 
 /* ───────────── 7. Settings: everything else, as named sections ───────────── */
-test('Settings: Alerts, Phone alerts, Your details, Keys, Google Meet, Inboxes & domains, Warm-up, Reply bot, Is everything running?, Behind the scenes, Advanced, Light or dark, Your account — each folds open, each says its state in one word', () => {
+test('Settings: Alerts, Your details, Keys, Google Meet, Inboxes & domains, Warm-up, Reply bot, Is everything running?, Behind the scenes, Advanced, Light or dark, Your account — each folds open, each says its state in one word', () => {
   const ctx = { hub: fullHub, at: Date.now(), alerts: fullHub.alerts, alertsAt: Date.now(), filter: 'open', open: {}, phone: '', dark: false, email: 'owner@example.com', now: NOW };
   const out = renderSettings(ctx);
-  assert.deepEqual([...out.matchAll(/<span class="tk-set-title">([^<]+)<\/span>/g)].map((m) => m[1]), ['Alerts', 'Phone alerts', 'Your details', 'Keys', 'Google Meet', 'Inboxes &amp; domains', 'Warm-up', 'Reply bot', 'Is everything running?', 'Behind the scenes', 'Advanced', 'Light or dark', 'Your account']);
-  assert.equal(count(out, /<details class="tk-set" id="tkSet-[a-z]+" ontoggle=/g), 13, 'all folded to begin with');
-  assert.ok(between(out, 'tkSet-alerts', 'tkSet-phone').includes('<span class="pill amber">2 not seen</span>'));
-  assert.ok(between(out, 'tkSet-phone', 'tkSet-google').includes('<span class="pill grey">Off</span>') && between(renderSettings(Object.assign({}, ctx, { phone: 'On' })), 'tkSet-phone', 'tkSet-google').includes('<span class="pill green">On</span>'));
+  assert.deepEqual([...out.matchAll(/<span class="tk-set-title">([^<]+)<\/span>/g)].map((m) => m[1]), ['Alerts', 'Your details', 'Keys', 'Google Meet', 'Inboxes &amp; domains', 'Warm-up', 'Reply bot', 'Is everything running?', 'Behind the scenes', 'Advanced', 'Light or dark', 'Your account']);
+  assert.equal(count(out, /<details class="tk-set" id="tkSet-[a-z]+" ontoggle=/g), 12, 'all folded to begin with');
+  assert.ok(between(out, 'tkSet-alerts', 'tkSet-details').includes('<span class="pill amber">2 not seen</span>'));
   assert.ok(between(out, 'tkSet-status', 'tkSet-behind').includes('<span class="pill green">Yes</span>'));
   // Alerts (the old alerts page): not seen first, "Mark as seen", no system keys
   const al = renderSettings(Object.assign({}, ctx, { open: { alerts: true } }));
   assert.ok(al.includes('<details class="tk-set" id="tkSet-alerts" open'));
-  const alerts = between(al, 'tkSet-alerts', 'tkSet-phone');
-  assert.ok(alerts.includes('Not seen · 2') && alerts.includes('Shopping list unanswered for 14 h') && alerts.includes('>Mark as seen</button>') && alerts.includes('not sent to your phone or email'));
+  const alerts = between(al, 'tkSet-alerts', 'tkSet-details');
+  assert.ok(alerts.includes('Not seen · 2') && alerts.includes('Shopping list unanswered for 14 h') && alerts.includes('>Mark as seen</button>'));
   assert.ok(!alerts.includes('purchase_reminder') && !alerts.includes('Acknowledge') && !alerts.includes('Mission Control'), 'no raw keys, no old words');
   assert.ok(renderAlerts([], 'open', {}).includes('No new alerts. Nothing needs you.'));
-  // Phone alerts, Behind the scenes, Advanced, Light or dark, Your account
-  assert.ok(out.includes('onclick="openPhoneAlerts()">Set up phone alerts</button>'));
+  // Behind the scenes, Advanced, Light or dark, Your account
+  assert.ok(!out.includes('openPhoneAlerts') && !out.includes('tkSet-phone'), 'no phone alerts section');
   assert.ok(out.includes('onclick="render(\'trialsBoard\')">Open behind the scenes</button>'));
   assert.ok(out.includes('onclick="setTheme(\'dark\')">Dark</button>') && out.includes('<span class="pill grey">Light</span>'));
   assert.ok(out.includes('Signed in as <b>owner@example.com</b>.') && out.includes('onclick="logout()">Log out</button>'));
@@ -575,7 +571,7 @@ test('Settings: Alerts, Phone alerts, Your details, Keys, Google Meet, Inboxes &
   assert.ok(renderSystemStatus({ heartbeat: { ageSec: 600 } }).includes('Mostly.'));
   // loading and errors never block the rest of Settings
   const bare = renderSettings({ hubErr: 'Offline', alertsErr: 'Offline', open: { alerts: true, status: true } });
-  assert.ok(bare.includes('Offline') && bare.includes('Set up phone alerts') && bare.includes('Log out'));
+  assert.ok(bare.includes('Offline') && bare.includes('Log out'));
   // everything is escaped
   const evil = renderSettings({ hub: { machine: { ok: false, error: '<img src=x onerror=alert(1)>' } }, alerts: [{ id: 'a"1', title: '<script>x</script>', clientId: 'c"1', urgent: true }], open: { alerts: true, status: true }, email: '<b>me</b>' });
   assert.ok(!evil.includes('<img src=x') && !evil.includes('<script>x') && !evil.includes('<b>me</b>') && evil.includes('trialsAckAlert(&quot;a\\&quot;1&quot;)'));

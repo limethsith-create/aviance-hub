@@ -2,7 +2,7 @@
    email-distributor/docs/REPLYBOT-MEET.md §4. Run with:  npm test   (= node --test tests/*.test.mjs)
 
    Same set-up as simple.test.mjs: the shell's inline script, then trials.js, inquiries.js, calendar.js,
-   messages.js and push.js, exactly like the browser, with a tiny fake DOM and a fake Supabase client.
+   messages.js exactly like the browser, with a tiny fake DOM and a fake Supabase client.
    The machine is a fake fetch that answers like the contract. No network. */
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,7 +45,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'keys.js', 'push.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'keys.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 
@@ -488,8 +488,8 @@ test('Settings › Reply bot: what it answers, in plain words; where to switch i
 });
 
 /* ───────────── 7. files, touch targets ───────────── */
-test('files: messages.js is loaded by index.html (after calendar.js, before push.js) and syntax-checked; touch targets are 44 px or more', () => {
-  assert.ok(html.indexOf('<script src="calendar.js"></script>') < html.indexOf('<script src="messages.js"></script>') && html.indexOf('<script src="messages.js"></script>') < html.indexOf('<script src="push.js"></script>'));
+test('files: messages.js is loaded by index.html (after calendar.js, before people.js) and syntax-checked; touch targets are 44 px or more', () => {
+  assert.ok(html.indexOf('<script src="calendar.js"></script>') < html.indexOf('<script src="messages.js"></script>') && html.indexOf('<script src="messages.js"></script>') < html.indexOf('<script src="people.js"></script>'));
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.ok(pkg.scripts.check.includes('node --check messages.js'));
   const css = fs.readFileSync(path.join(root, 'trials.css'), 'utf8');
