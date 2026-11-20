@@ -13,35 +13,18 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Aviance">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" content="#FFFFFF" id="themeColor">
+<meta name="theme-color" content="#FAFAF9" id="themeColor">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCI+PGRlZnM+PC9kZWZzPjxwb2x5Z29uIHBvaW50cz0iMjgsODggMTAwLDEyOCAxNzIsODggMTcyLDE1MCAxMDAsMTkwIDI4LDE1MCIgZmlsbD0iIzEwMTAxNSIgLz48cG9seWdvbiBwb2ludHM9IjI4LDg4IDEwMCwxMjggMTAwLDE5MCAyOCwxNTAiIGZpbGw9IiMxQzFDMjIiIC8+PHBvbHlnb24gcG9pbnRzPSIxMDAsMTI4IDE3Miw4OCAxNzIsMTUwIDEwMCwxOTAiIGZpbGw9IiMwQTBBMEMiIC8+PHBvbHlnb24gcG9pbnRzPSIzMCw3MiAxMDAsMTEwIDE3MCw3MiAxMDAsMzQiIGZpbGw9IiNFMDI5MEYiIC8+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMC4zNSwtMC4xOSwwLjM1LDAuMTksMzAsNzIpIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg0LDQpIHNjYWxlKDAuOTIpIj48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0xMDAgMTggTDE1NiAxNzIgTDEyOCAxNzIgTDExNyAxNDAgTDgzIDE0MCBMNzIgMTcyIEw0NCAxNzIgWiBNOTEgMTE0IEwxMDkgMTE0IEwxMDAgODQgWiIgZmlsbD0iI0ZGRkZGRiIvPjwvZz48L2c+PC9zdmc+">
 <!-- Pinned to one exact version with an integrity hash (checked against the npm package): a changed file on the CDN will not run. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
 <style>
 /* ===================== AVIANCE HUB — shell styles =====================
-   Black/white, one plain system font (--font), sentence case, weights 400/600,
-   square corners. Calm: soft borders, lots of room. One accent for "needs you"
-   (--red); pills: green = good, amber = waiting, red = needs you, grey = done.
+   Layout and behaviour of the shell; the look (tokens, radii, type) is in theme.css.
+   Sentence case. One brand colour for the primary action and "needs you"; pills: green = good, amber = waiting, red = needs you, grey = done.
    A few places only: Clients, Calendar, Team, Activity, Settings — a sidebar on a
    computer, a tab bar along the bottom on a phone.
    The screens themselves are styled in trials.css and calendar.css on top of these. */
-:root{
-  --bg:#FFFFFF;--surface:#FFFFFF;--surface-2:#F4F4F4;--surface-3:#EAEAEA;
-  --border:#000000;--border-soft:rgba(0,0,0,.16);
-  --text:#000000;--muted:#3A3A3A;--muted-2:#555555;
-  --accent:#000000;--accent-d:#1a1a1a;--accent-soft:rgba(0,0,0,.06);
-  /* status text colours (AA on --bg and on their own --*-bg pill fill) */
-  --green:#17662F;--amber:#8A5300;--red:#B01F06;--blue:#3A3A3A;
-  --green-bg:#E2F0E6;--amber-bg:#F8EBD6;--red-bg:#FBE3DE;--blue-bg:#EAEAEA;--urgent-row:#FCF3F1;
-  --red-brand:#E0290F;--red-deep:#C42408;--red-bright:#FF5C3D;
-  --brand:#000000;
-  /* one plain UI font for everything (no web font to load) */
-  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  /* chart marks (≥3:1 on the surface; validated with the dataviz palette checker) */
-  --c1:#2a78d6;--c2:#eb6834;--c3:#4a3aa7;--c-none:#8f8f8f;--grid:#e3e3e3;--g-a:#0d366b;--g-b:#1c5cab;--g-c:#3987e5;
-  /* type scale — readability floor: nothing below --fs-min (13px); body text 16px. See README. */
-  --fs-min:13px;--fs-small:15px;--fs-base:16px;--fs-strong:17px;--fs-h3:19px;--fs-h2:24px;--fs-num:19px;--fs-num-lg:26px;
-}
+/* All colours, radii, shadows and type sizes (--bg, --surface, --border, --brand, --fs-*, …) live in theme.css. */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{font-family:var(--font);font-size:var(--fs-base);line-height:1.5;background:var(--bg)!important;color:var(--text);-webkit-font-smoothing:antialiased;overflow:hidden}
@@ -251,20 +234,6 @@ h1,h2,h3,h4{font-weight:600}
 }
 
 /* DARK */
-body.dark{--bg:#000000;--surface:#000000;--surface-2:#121212;--surface-3:#1D1D1D;--border:rgba(255,255,255,.4);--border-soft:rgba(255,255,255,.18);--text:#FFFFFF;--muted:#C8C8C8;--muted-2:#A3A3A3;--accent:#FF5C3D;--accent-d:#FF7A5E;--accent-soft:rgba(255,92,61,.14);--green:#5CCB83;--amber:#E6B03A;--red:#FF6A4D;--red-deep:#FF6A4D;--blue:#C8C8C8;--green-bg:#0F2A18;--amber-bg:#2E2206;--red-bg:#3A120A;--blue-bg:#262626;--urgent-row:#1A0704;--c1:#3987e5;--c2:#d95926;--c3:#9085e9;--c-none:#6b6b6b;--grid:#262626;--g-a:#cde2fb;--g-b:#6da7ec;--g-c:#256abf;background:#000!important}
-body.dark .btn{background:#fff;color:#000;border-color:#fff}
-body.dark .btn:hover{background:#000;color:#fff}
-body.dark .btn.ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.4)}
-body.dark .btn.ghost:hover{background:#fff;color:#000}
-body.dark .badge.red{background:var(--red);color:#000}
-body.dark .seg button.active{background:#fff;color:#000}
-body.dark .toast{background:#fff;color:#000;border-color:#fff}
-body.dark .toast .tdot{background:#E0290F}
-body.dark .tb-dot{background:var(--red);color:#000}
-body.dark .login-screen{background:#000}
-body.dark .login-aside{border-right:1px solid rgba(255,255,255,.2)}
-body.dark ::selection{background:#FF5C3D;color:#000}
-body.dark .avatar{box-shadow:inset 0 0 0 1px rgba(255,255,255,.28)}
 /* JS writes brand-black into a few inline styles — flip those in dark */
 body.dark [style*="color:#000000"]{color:#fff!important}
 body.dark [style*="background:#0000001f"]{background:rgba(255,255,255,.12)!important}
@@ -332,7 +301,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
   <aside class="sidebar" id="sidebar">
     <div class="brand">
       <div class="logo">A</div>
-      <div><h1>Aviance Hub</h1><span>For the Aviance team</span></div>
+      <div><h1>Aviance</h1></div>
     </div>
     <nav class="nav-area" id="navArea" aria-label="Main"></nav>
     <div class="sidebar-foot">
@@ -410,7 +379,7 @@ function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'
 function val(id){const e=document.getElementById(id);return e?e.value.trim():''}
 function errEl(id,msg){const e=document.getElementById(id);if(e)e.textContent=msg;return false}
 function emptyState(icon,title,sub,btn,action){return `<div class="card"><div class="empty"><div class="empty-ic">${icon}</div><h3>${title}</h3><p>${sub}</p>${btn?`<button class="btn" onclick="${action}">${btn}</button>`:''}</div></div>`}
-function toast(msg){const t=document.getElementById('toast');t.innerHTML=`<span class="tdot"></span><span>${esc(msg)}</span>`;t.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),3600);}
+function toast(msg){const t=document.getElementById('toast');t.innerHTML=`<span class="tdot"></span><span>${esc(msg)}</span>`;t.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),4000);}
 function openModal(html){document.getElementById('modal').innerHTML=html;document.getElementById('modalWrap').classList.add('open');}
 function closeModal(){document.getElementById('modalWrap').classList.remove('open');}
 document.getElementById('modalWrap').addEventListener('click',e=>{if(e.target.id==='modalWrap')closeModal();});
@@ -667,7 +636,7 @@ function runNotif(i){const x=(window._notifs||[])[i];document.getElementById('no
 document.addEventListener('click',e=>{const p=document.getElementById('notifPop');if(p&&p.classList.contains('open')&&!e.target.closest('#notifPop')&&!e.target.closest('#notifBtn'))p.classList.remove('open');});
 
 /* ---- Theme + shortcuts ---- */
-function themeColorMeta(){const m=document.getElementById('themeColor');if(m&&typeof m.setAttribute==='function')m.setAttribute('content',document.body.classList.contains('dark')?'#000000':'#FFFFFF');}
+function themeColorMeta(){const d=document.body.classList.contains('dark');const m=document.getElementById('themeColor');if(m&&typeof m.setAttribute==='function')m.setAttribute('content',d?'#0E0F11':'#FAFAF9');try{document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}}
 function toggleTheme(){setTheme(document.body.classList.contains('dark')?'light':'dark');}
 /* Settings › Light or dark (and ⌘K). Remembered on this device. */
 function setTheme(mode){const d=mode==='dark';document.body.classList.toggle('dark',d);try{localStorage.setItem('avianceTheme',d?'dark':'light');}catch(e){}themeColorMeta();if(currentView==='settings'&&typeof trialsRepaint==='function')trialsRepaint('settings');}

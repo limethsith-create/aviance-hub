@@ -898,37 +898,40 @@ const messagesJs = fs.readFileSync(path.join(root, 'messages.js'), 'utf8');
 const autobuyJs = fs.readFileSync(path.join(root, 'autobuy.js'), 'utf8');
 const warmupJs = fs.readFileSync(path.join(root, 'warmup.js'), 'utf8');
 const varsIn = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*([^;}]+)/g)].map((m) => [m[1], m[2].trim()]));
-const rootVars = varsIn(shellCss.match(/:root\{[\s\S]*?\n\}/)[0]);
-const darkVars = Object.assign({}, rootVars, varsIn(shellCss.match(/body\.dark\{[^}]*\}/)[0]));
+const themeCss = fs.readFileSync(path.join(root, 'theme.css'), 'utf8');
+const rootVars = varsIn(themeCss.match(/:root\{[\s\S]*?\n\}/)[0]);
+const darkVars = Object.assign({}, rootVars, varsIn(themeCss.match(/body\.dark,:root\[data-theme="dark"\]\{[^}]*\}/)[0]));
 const noComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '');
-const allStyle = { 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'messages.js': messagesJs, 'autobuy.js': autobuyJs, 'warmup.js': warmupJs, };
+const allStyle = { 'theme.css': noComments(themeCss), 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'messages.js': messagesJs, 'autobuy.js': autobuyJs, 'warmup.js': warmupJs, };
 
-test('font: one plain system font family, no web fonts, no capitals-only labels, no letter-spacing, weights 400/600', () => {
-  assert.equal(rootVars.font, '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif');
-  assert.ok(!/fonts\.googleapis|fonts\.gstatic|@import|@font-face/i.test(html + css), 'no web font is loaded');
-  assert.ok(!/JetBrains|Inter Tight|var\(--mono\)|var\(--display\)/.test(noComments(html) + noComments(css) + noComments(calendarCss) + trialsJs + calendarJs + messagesJs + autobuyJs + warmupJs), 'no second family');
+test('font: one UI family (Inter, then the system font) plus a mono for ids; labels may be capitals; weights 400-700', () => {
+  assert.equal(rootVars.font, '"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif');
+  assert.ok(/ui-monospace/.test(rootVars.mono), 'a mono stack for ids and numbers');
+  assert.ok(!/@import|@font-face/i.test(html + css + themeCss), 'no web font is fetched from inside the CSS (the CSP only allows our own origin)');
   for (const [name, src] of Object.entries(allStyle)) {
-    for (const m of src.matchAll(/font-family:\s*([^;"'}]+)/g)) assert.ok(['var(--font)', 'inherit'].includes(m[1].trim()), `${name}: font-family ${m[1]}`);
-    assert.ok(!/text-transform:\s*uppercase/.test(src), `${name}: no capitals-only text`);
-    assert.ok(!/letter-spacing/.test(src), `${name}: no letter-spacing`);
-    for (const m of src.matchAll(/font-weight:\s*([^;"'}!]+)/g)) assert.ok(['400', '600', 'normal'].includes(m[1].trim()), `${name}: font-weight ${m[1]}`);
+    for (const m of src.matchAll(/font-family:\s*([^;"'}]+)/g)) assert.ok(['var(--font)', 'var(--mono)', 'inherit'].includes(m[1].trim()), `${name}: font-family ${m[1]}`);
+    if (name !== 'theme.css') {
+      assert.ok(!/text-transform:\s*uppercase/.test(src), `${name}: capitals-only labels are set in theme.css only`);
+      assert.ok(!/letter-spacing/.test(src), `${name}: letter-spacing is set in theme.css only`);
+    }
+    for (const m of src.matchAll(/font-weight:\s*([^;"'}!]+)/g)) assert.ok(['400', '500', '600', '650', '700', 'normal'].includes(m[1].trim()), `${name}: font-weight ${m[1]}`);
   }
   assert.ok(/b,strong,th,h5,summary\{font-weight:600\}/.test(shellCss) && /h1,h2,h3,h4\{font-weight:600\}/.test(shellCss), 'browser-bold elements capped at 600');
 });
 
-test('readability: no font size below 13px anywhere (CSS, shell styles, inline styles in JS)', () => {
+test('readability: no font size below 12px anywhere (CSS, shell styles, inline styles in JS)', () => {
   const fs_ = Object.entries(rootVars).filter(([k]) => k.startsWith('fs-'));
   assert.ok(fs_.length >= 6);
-  for (const [k, v] of fs_) assert.ok(parseFloat(v) >= 13, `--${k} is ${v}`);
+  for (const [k, v] of fs_) assert.ok(parseFloat(v) >= 12, `--${k} is ${v}`);
   let checked = 0;
   for (const [name, src] of Object.entries(allStyle)) {
     for (const m of src.matchAll(/font-size:\s*([^;"'}]+)/g)) {
-      const v = m[1].trim(); checked++;
+      const v = m[1].trim().replace(/\s*!important$/, ''); checked++;
       if (v === 'inherit') continue;
       const tok = /^var\(--(fs-[\w-]+)\)$/.exec(v);
-      if (tok) { assert.ok(parseFloat(rootVars[tok[1]]) >= 13, `${name}: ${v}`); continue; }
+      if (tok) { assert.ok(parseFloat(rootVars[tok[1]]) >= 12, `${name}: ${v}`); continue; }
       assert.match(v, /^\d+(\.\d+)?px$/, `${name}: font-size must be a --fs-* token or px, got "${v}"`);
-      assert.ok(parseFloat(v) >= 13, `${name}: font-size ${v} is below the 13px floor`);
+      assert.ok(parseFloat(v) >= 12, `${name}: font-size ${v} is below the 12px floor`);
     }
   }
   assert.ok(checked > 150, 'scanned the real rules (' + checked + ')');
