@@ -486,7 +486,7 @@ function renderSpark(values,o){
 function tkEmptyChart(msg){return `<div class="card tk-chart-empty">${esc(msg)}</div>`}
 
 /* ===================== 5. PURE RENDERERS (data → HTML) ===================== */
-function renderLoading(msg){return `<div class="tk-loading" role="status">${esc(msg||'Loading…')}</div>`}
+function renderLoading(msg){return `<div class="tk-loading" role="status"><div class="sk" aria-hidden="true"><i></i><i></i><i></i></div><span>${esc(msg||'Loading…')}</span></div>`}
 function renderMachineError(reason,retryFn){
   return `<div class="card tk-err" role="alert"><b>We can't reach the system right now</b><p>${esc(reason||'No answer.')}</p>
     <div class="tk-inline"><button class="btn" onclick="${esc(retryFn||'trialsRetry()')}">Try again</button></div></div>`;

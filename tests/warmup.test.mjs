@@ -496,8 +496,10 @@ test('files: warmup.js is loaded after autobuy.js and before people.js and synta
     assert.ok(rule && new RegExp('min-height:' + px + 'px').test(rule[1]), sel + ' ≥ ' + px + ' px');
   }
   assert.match(css, /\.tk-wu-form \.field input\{[^}]*font-size:var\(--fs-base\)/, '16 px in the boxes (no iPhone zoom)');
-  assert.match(html, /--fs-base:16px/);
-  assert.match(html, /\.btn\{[^}]*min-height:44px/, 'Test and Remove are ordinary buttons: 44 px');
+  const themeCss = fs.readFileSync(new URL('../theme.css', import.meta.url), 'utf8');
+  assert.match(themeCss, /--fs-base:14px/);
+  assert.match(themeCss, /@media\(max-width:860px\)\{[^]*?input,select,textarea[^{]*\{font-size:16px!important\}/, 'phones: 16 px in every box (no iPhone zoom)');
+  assert.match(themeCss, /@media\(max-width:860px\)\{[^]*?\.btn,[^{]*\{min-height:44px\}/, 'Test and Remove are ordinary buttons: 44 px on a phone');
   assert.ok(/@media\(max-width:560px\)\{\.tk-wu\{padding:16px 14px\}/.test(css), 'phone padding');
   assert.ok(!/\.tk-wu[^{]*\{[^}]*(?<![-\w])(min-)?width:\s*\d{3,}px/.test(css), 'nothing wider than a phone (a max-width is fine)');
   assert.match(css, /\.tk-wu-provs\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(140px,1fr\)\)/, 'the kinds wrap: two across on a phone');
