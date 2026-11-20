@@ -174,6 +174,14 @@ h1,h2,h3,h4{font-weight:600}
 .login-app-note{font-size:var(--fs-small);color:var(--text);background:var(--surface-2);border-left:3px solid var(--red-brand);padding:9px 11px;margin:-10px 0 18px;line-height:1.5}
 .login-hint{margin-top:18px;padding-top:15px;border-top:1px solid var(--border-soft);font-size:var(--fs-small);color:var(--muted);line-height:1.7}
 .login-ok{font-size:var(--fs-small);color:var(--green);background:var(--green-bg);border:1px solid var(--green);padding:9px 11px;margin:2px 0 12px;line-height:1.5}
+/* Client mode (a client signed in to their portal): only Channels and Numbers; nothing of the owner's. Join page: #join={token}. */
+#joinBox{display:none}
+#login.joining #joinBox{display:block}
+#login.joining .login-std{display:none}
+.client-only{display:none!important}
+body.client-mode .client-only{display:inline-flex!important}
+body.client-mode .search,body.client-mode #notifBtn{display:none!important}
+.client-loading{padding:16px 20px;color:var(--muted);font-size:var(--fs-small)}
 .forgot-link{display:block;text-align:right;font-size:var(--fs-min);color:var(--muted);margin:-4px 0 12px;cursor:pointer}
 .forgot-link:hover{color:var(--red-deep);text-decoration:underline}
 @media(max-width:760px){.login-wrap{grid-template-columns:1fr;width:430px}.login-aside{padding:26px 26px 22px}.la-hero{margin:24px 0 20px}.la-hero h2{font-size:24px}.la-points{display:none}.login-card{padding:30px 26px}}
@@ -264,18 +272,29 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
       <div class="la-guarantee">Live in 3 weeks — <b>guaranteed</b></div>
     </div>
     <div class="login-card">
-      <div class="login-eyebrow">Aviance Hub</div>
-      <div class="login-title">Sign in</div>
-      <div class="login-desc">Your email and password.</div>
+      <div id="joinBox">
+        <div class="login-eyebrow">Aviance</div>
+        <div id="joinTitle" class="login-title">Set up your Aviance account</div>
+        <div id="joinDesc" class="login-desc">Use the email address this invite was sent to, and choose a password.</div>
+        <div class="field"><label for="joinEmail">Email</label><input id="joinEmail" type="email" placeholder="you@email.com" autocomplete="username" onkeydown="if(event.key==='Enter')doJoin()"></div>
+        <div class="field"><label for="joinPass" id="joinPassLabel">Choose a password</label><input id="joinPass" type="password" placeholder="At least 8 characters" autocomplete="new-password" onkeydown="if(event.key==='Enter')doJoin()"></div>
+        <div id="joinErr" class="login-err" role="alert"></div>
+        <div id="joinOk" class="login-ok" style="display:none"></div>
+        <button id="joinBtn" class="btn" style="width:100%;justify-content:center;padding:11px" onclick="doJoin()">Set up my account</button>
+        <div class="login-hint"><button type="button" id="joinSwitch" class="login-link" onclick="joinSwitch()">I already have an account</button></div>
+      </div>
+      <div class="login-eyebrow login-std">Aviance Hub</div>
+      <div class="login-title login-std">Sign in</div>
+      <div class="login-desc login-std">Your email and password.</div>
       <div id="loginAppNote" class="login-app-note" style="display:none">First time in the app? Sign in once here.</div>
-      <div class="field"><label>Email</label><input id="loginEmail" type="email" placeholder="you@email.com" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()"></div>
-      <div class="field"><label>Password</label><input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
-      <a class="forgot-link" onclick="forgotPassword()">Forgot password?</a>
-      <div id="loginErr" class="login-err"></div>
-      <div id="resetOk" class="login-ok" style="display:none">Recovery link sent — check your inbox.</div>
-      <button class="btn" style="width:100%;justify-content:center;padding:11px" onclick="doLogin()">Sign in</button>
-      <div class="login-hint">This hub is for the Aviance team. New here? <button type="button" class="login-link" onclick="openSignUp()">Create an account</button> — the owner approves it.</div>
-      <div id="signUpBox" style="display:none;margin-top:16px">
+      <div class="field login-std"><label>Email</label><input id="loginEmail" type="email" placeholder="you@email.com" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <div class="field login-std"><label>Password</label><input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <a class="forgot-link login-std" onclick="forgotPassword()">Forgot password?</a>
+      <div id="loginErr" class="login-err login-std"></div>
+      <div id="resetOk" class="login-ok login-std" style="display:none">Recovery link sent — check your inbox.</div>
+      <button class="btn login-std" style="width:100%;justify-content:center;padding:11px" onclick="doLogin()">Sign in</button>
+      <div class="login-hint login-std">This hub is for the Aviance team. New here? <button type="button" class="login-link" onclick="openSignUp()">Create an account</button> — the owner approves it.</div>
+      <div id="signUpBox" class="login-std" style="display:none;margin-top:16px">
         <div class="field"><label>Your name</label><input id="suName" placeholder="Your full name" autocomplete="name"></div>
         <div class="field"><label>Email</label><input id="suEmail" type="email" placeholder="you@email.com" autocomplete="email"></div>
         <div class="field"><label>Password</label><input id="suPass" type="password" placeholder="At least 8 characters" autocomplete="new-password"></div>
@@ -316,6 +335,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
     <header class="topbar">
       <button type="button" class="back-btn" id="backBtn" onclick="goBack()" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15 5l-7 7 7 7"/></svg></button>
       <div class="page-title"><h2 id="ptitle">Clients</h2><p id="psub"></p></div>
+      <button type="button" class="btn ghost client-only" id="clientOut" onclick="logout()">Sign out</button>
       <div class="search" onclick="openCmdk()" title="Find anything (Ctrl/⌘ K)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
         <input placeholder="Find…" readonly aria-label="Find a client">
@@ -406,8 +426,12 @@ const views={
   team:{fn:()=>teamPageView(),title:'Team',sub:'Who is working on what, and which clients each person looks after'},
   trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every client by stage, every to-do',back:()=>render('settings')},
 };
+function clientLoading(){return '<div class="card client-loading" role="status">Loading…</div>';}
+function hubIsClient(){return !!(authUser&&authUser.role==='client');}
+const CLIENT_VIEWS=['channels','numbers'];
 function render(v){
   if(views[v]&&views[v].alias)v=views[v].alias;
+  if(hubIsClient()&&!CLIENT_VIEWS.includes(v))v='channels';   // a client never reaches an owner screen
   const view=views[v];if(!view||!authUser)return;
   currentView=v;
   document.getElementById('content').innerHTML=`<div class="view${view.wide?' wide':''}">${view.fn()}</div>`;
@@ -415,6 +439,8 @@ function render(v){
   document.getElementById('psub').textContent=view.sub;
   const back=document.getElementById('backBtn');if(back)back.style.display=view.back?'grid':'none';
   renderNav();document.getElementById('content').scrollTop=0;closeSidebar();
+  if(hubIsClient()){try{if(view.after)view.after();}catch(e){}return;}   // client mode: no owner timers, counts or presence
+  try{if(view.after)view.after();}catch(e){}
   try{updateNotifBadge();}catch(e){}
   try{trialsOnRender(v);}catch(e){}
   try{calendarOnRender(v);}catch(e){}
@@ -432,6 +458,8 @@ function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('
    Honoured on load and on hashchange; when signed out, kept until sign-in. */
 function parseDeepLink(h){
   h=String(h||'');const at=h.indexOf('#');if(at<0)return null;h=h.slice(at+1).replace(/^\/+/,'').replace(/\/+$/,'');
+  if(h==='numbers')return {view:'numbers'};
+  if(h==='channels')return {view:'channels'};
   if(h==='trials'||h==='clients')return {view:'paying'};
   if(h==='alerts')return {view:'settings',section:'alerts'};
   if(h==='settings')return {view:'settings'};
@@ -460,6 +488,7 @@ function goDeepLink(d){
   if(!d)return false;
   if(!authUser){pendingDeepLink=d;return false;}
   pendingDeepLink=null;
+  if(hubIsClient()){try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}closeModal();render(CLIENT_VIEWS.includes(d.view)?d.view:'channels');return true;}
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same alert can open it again
   closeModal();closeCmdk();
   if(d.view==='trial')openTrial(d.id);else if(d.view==='clientSystem')tkOpenSystem(d.id,d.tab||'overview');else if(d.view==='inquiry')openInquiry(d.id);else if(d.view==='calendar'&&d.id)openCalendar(d.id);
@@ -475,6 +504,10 @@ function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.s
 /* ---- Navigation: the places in the sidebar. Badges: Clients = how many need you + new bookings (red), Calendar = call
    times waiting for your yes (amber). The same items fill the sidebar and the phone's tab bar. ---- */
 function navItems(){
+  if(hubIsClient())return [
+    {view:'channels',icon:I.inquiry,label:'Channels',badge:''},
+    {view:'numbers',icon:I.chart,label:'Numbers',badge:''},
+  ];
   const pn=typeof peopleNavCount==='function'?peopleNavCount():'';
   const q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'',ch=typeof chvNavCount==='function'?chvNavCount():'';
   return [
@@ -534,13 +567,16 @@ async function routeUser(errId){
   let prof=await getProfile(user.id);
   if(!prof){await new Promise(r=>setTimeout(r,800));prof=await getProfile(user.id);}
   // the owner (role admin) or an approved team member (role employee: sees everything, changes nothing)
-  if(!prof||!prof.approved||(prof.role!=='admin'&&prof.role!=='employee')){
+  const isClient=!!(prof&&prof.approved&&prof.role==='client'&&prof.client_id);
+  if(!isClient&&(!prof||!prof.approved||(prof.role!=='admin'&&prof.role!=='employee'))){
     try{await sb.auth.signOut();}catch(e){}
     authUser=null;showLogin();
     return errEl(errId,prof&&!prof.approved?'Your account is waiting for the owner to approve it. Try again once they have.':'This hub is for the Aviance team.');
   }
-  authUser={uid:prof.id,name:prof.name||(prof.role==='admin'?'Owner':'Team member'),role:prof.role==='admin'?'admin':'employee',email:prof.email||user.email||''};
-  try{document.body.classList.toggle('ro',authUser.role!=='admin');}catch(e){}
+  authUser=isClient
+    ?{uid:prof.id,name:prof.name||'You',role:'client',clientId:String(prof.client_id),email:prof.email||user.email||''}
+    :{uid:prof.id,name:prof.name||(prof.role==='admin'?'Owner':'Team member'),role:prof.role==='admin'?'admin':'employee',email:prof.email||user.email||''};
+  try{document.body.classList.toggle('ro',authUser.role!=='admin');document.body.classList.toggle('client-mode',isClient);}catch(e){}
   document.getElementById('loginPass').value='';
   enterApp();
 }
@@ -549,6 +585,10 @@ function enterApp(){
   document.getElementById('whoAvatar').textContent=(authUser.name||'A').trim().charAt(0).toUpperCase()||'A';
   document.getElementById('whoName').textContent=authUser.name;
   document.getElementById('whoEmail').textContent=authUser.email;
+  if(hubIsClient()){   // client mode: their own channel and numbers only; nothing of the owner's is started or fetched
+    if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('channels');
+    return;
+  }
   if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('paying');
   try{if(typeof peopleSignedIn==='function')peopleSignedIn();}catch(e){}
   try{tkDropOldPhoneAlerts();}catch(e){}
@@ -561,7 +601,7 @@ function showLogin(){
   try{calendarStopTimer();}catch(e){}
   try{if(typeof channelsStopTimer==='function')channelsStopTimer();}catch(e){}
 }
-async function logout(){try{if(typeof peopleSignOut==='function')await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}errEl('loginErr','');showLogin();}
+async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}errEl('loginErr','');showLogin();}
 /* ---- Password recovery ---- */
 async function forgotPassword(){
   const email=val('loginEmail').toLowerCase();
@@ -595,8 +635,58 @@ async function submitNewPassword(){
     closeModal();toast('Password updated — use it next time you sign in');
   }catch(e){errEl('npwErr','Could not update the password — try again.');}
 }
+/* ---- Join: https://aviance.store/#join={token} — a client's invite. Set up the account (or sign in), claim the invite, reload into client mode. ---- */
+const JOIN_KEY='avianceJoin';
+function parseJoinToken(h){const m=/[#&]join=([A-Za-z0-9_-]{16,200})(?:&|$)/.exec(String(h||''));return m?m[1]:'';}
+let joinToken=parseJoinToken(INITIAL_HASH),joinMode='new';
+if(joinToken){try{sessionStorage.setItem(JOIN_KEY,joinToken);}catch(e){}}
+else{try{joinToken=sessionStorage.getItem(JOIN_KEY)||'';}catch(e){joinToken='';}}
+function showJoin(){
+  const l=document.getElementById('login');if(l&&l.classList)l.classList.add('joining');
+  joinSetMode('new');
+}
+function joinSetMode(mode){
+  joinMode=mode;
+  const set=(id,t)=>{const e=document.getElementById(id);if(e)e.textContent=t;};
+  const pw=document.getElementById('joinPass');
+  if(mode==='new'){set('joinTitle','Set up your Aviance account');set('joinDesc','Use the email address this invite was sent to, and choose a password.');set('joinPassLabel','Choose a password');set('joinBtn','Set up my account');set('joinSwitch','I already have an account');if(pw){pw.placeholder='At least 8 characters';pw.autocomplete='new-password';}}
+  else{set('joinTitle','Sign in to join');set('joinDesc','Sign in with the email address this invite was sent to.');set('joinPassLabel','Password');set('joinBtn','Sign in and join');set('joinSwitch','I need to set up an account');if(pw){pw.placeholder='Your password';pw.autocomplete='current-password';}}
+  errEl('joinErr','');
+}
+function joinSwitch(){joinSetMode(joinMode==='new'?'existing':'new');}
+function joinDone(){
+  joinToken='';try{sessionStorage.removeItem(JOIN_KEY);}catch(e){}
+  try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}
+  try{location.reload();}catch(e){}
+}
+async function doJoin(){
+  const email=val('joinEmail').toLowerCase(),pass=(document.getElementById('joinPass')||{}).value||'';
+  errEl('joinErr','');const ok=document.getElementById('joinOk');if(ok)ok.style.display='none';
+  if(!joinToken)return errEl('joinErr','This invite link is not valid any more. Ask Aviance for a new one.');
+  if(!/.+@.+\..+/.test(email))return errEl('joinErr','Enter the email address this invite was sent to.');
+  if(joinMode==='new'&&pass.length<8)return errEl('joinErr','Use a password of at least 8 characters.');
+  if(!pass)return errEl('joinErr','Enter your password.');
+  let r;
+  if(joinMode==='new'){
+    r=await sb.auth.signUp({email,password:pass});
+    if(r.error)return errEl('joinErr',/already|registered/i.test(r.error.message||'')?'There is already an account with this email. Choose “I already have an account”.':(r.error.message||'That did not go through. Try again.'));
+    if(!r.data||!r.data.session){if(ok){ok.textContent='Check your inbox and confirm your email, then open your invite link again.';ok.style.display='block';}return;}
+  }else{
+    r=await sb.auth.signInWithPassword({email,password:pass});
+    if(r.error)return errEl('joinErr','Incorrect email or password.');
+  }
+  const c=await sb.rpc('claim_portal_invite',{p_token:joinToken});
+  if(c.error){
+    const m=String(c.error.message||'');
+    errEl('joinErr',/invite link/i.test(m)||/team account/i.test(m)?m:'That did not go through. Try again, or ask Aviance for a new link.');
+    try{await sb.auth.signOut();}catch(e){}
+    return;
+  }
+  joinDone();
+}
 async function boot(){
   if(hubStandalone()){const n=document.getElementById('loginAppNote');if(n)n.style.display='block';}
+  if(joinToken){showLogin();showJoin();return;}   // an invite link: the set-up page first, whoever was signed in before
   try{const {data:{session}}=await sb.auth.getSession();if(session)await routeUser('loginErr');}catch(e){}
   if(!authUser)showLogin();
   if(authUser&&INITIAL_HASH.indexOf('type=recovery')>-1){
@@ -615,7 +705,7 @@ function cmdkActions(){const a=[];
   a.push({type:'Command',label:'Log out',icon:I.logout,sub:'End your session',kw:'log out sign out logout',run:()=>{closeCmdk();logout();}});
   return a;}
 function cmdkEntities(){return typeof trialsCmdkEntities==='function'?trialsCmdkEntities():[]}
-function openCmdk(){if(!authUser)return;const w=document.getElementById('cmdkWrap');w.classList.add('open');const inp=document.getElementById('cmdkInput');inp.value='';renderCmdk('');setTimeout(()=>inp.focus(),30);}
+function openCmdk(){if(!authUser||hubIsClient())return;const w=document.getElementById('cmdkWrap');w.classList.add('open');const inp=document.getElementById('cmdkInput');inp.value='';renderCmdk('');setTimeout(()=>inp.focus(),30);}
 function closeCmdk(){document.getElementById('cmdkWrap').classList.remove('open');}
 function renderCmdk(q){q=(q||'').toLowerCase().trim();
   let items=[...cmdkEntities(),...cmdkActions()];
@@ -639,7 +729,7 @@ document.getElementById('cmdkInput').addEventListener('keydown',e=>{
 });
 
 /* ---- Notifications: client to-dos + open urgent machine alerts + calendar requests waiting for a yes ---- */
-function computeNotifs(){if(!authUser)return [];let n=[];try{n=typeof trialsNotifs==='function'?trialsNotifs():[];}catch(e){n=[];}try{if(typeof calendarNotifs==='function')n=n.concat(calendarNotifs());}catch(e){}return n;}
+function computeNotifs(){if(!authUser||hubIsClient())return [];let n=[];try{n=typeof trialsNotifs==='function'?trialsNotifs():[];}catch(e){n=[];}try{if(typeof calendarNotifs==='function')n=n.concat(calendarNotifs());}catch(e){}return n;}
 function updateNotifBadge(){const dot=document.getElementById('notifDot');if(!dot)return;const n=computeNotifs();if(n.length){dot.style.display='grid';dot.textContent=n.length>9?'9+':n.length;}else{dot.style.display='none';}}
 function toggleNotif(e){e.stopPropagation();const pop=document.getElementById('notifPop');if(pop.classList.contains('open')){pop.classList.remove('open');return;}const n=computeNotifs();window._notifs=n;
   pop.innerHTML=`<div class="notif-head">What needs you</div>`+(n.length?`<div class="notif-list">${n.map((x,i)=>`<div class="notif-item" onclick="runNotif(${i})"><span class="nd" style="background:${x.dot}"></span><div style="min-width:0"><b>${esc(x.t)}</b>${x.s?`<small>${esc(x.s)}</small>`:''}</div></div>`).join('')}</div>`:`<div class="notif-empty">Nothing needs you right now.</div>`);
@@ -655,9 +745,9 @@ function setTheme(mode){const d=mode==='dark';document.body.classList.toggle('da
 function initTheme(){try{if(localStorage.getItem('avianceTheme')==='dark')document.body.classList.add('dark');}catch(e){}themeColorMeta();}
 document.addEventListener('keydown',e=>{
   const typing=/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName||''))||e.target.isContentEditable;
-  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(!authUser)return;const w=document.getElementById('cmdkWrap');w.classList.contains('open')?closeCmdk():openCmdk();return;}
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(!authUser||hubIsClient())return;const w=document.getElementById('cmdkWrap');w.classList.contains('open')?closeCmdk():openCmdk();return;}
   if(e.key==='Escape'){closeModal();return;}
-  if(typing||!authUser)return;
+  if(typing||!authUser||hubIsClient())return;
   if(e.key==='/'){e.preventDefault();openCmdk();}
   else if(e.key.toLowerCase()==='n'){openNewPayingClient();}
 });

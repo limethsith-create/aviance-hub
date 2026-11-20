@@ -557,3 +557,8 @@ body.ro .tk-saved-btns,body.ro .tk-access-add{display:none}
 .pill.green:not(:has(.pdot))::before,.pill.amber:not(:has(.pdot))::before,.pill.red:not(:has(.pdot))::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
 /* the older "q" blue maps onto the info colour */
 body,body.dark{--q:var(--blue);--q-bg:var(--blue-bg)}
+/* Invite to their portal (inside "Who can see this") */
+.tk-portal{display:grid;gap:10px;margin-top:6px;padding-top:14px;border-top:1px solid var(--border)}
+.tk-portal h4,.tk-portal p{margin:0}
+.tk-portal-out{display:grid;gap:8px}
+.tk-portal-out input[readonly]{font-family:var(--mono,ui-monospace,monospace);font-size:13px}

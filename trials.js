@@ -2113,7 +2113,45 @@ function renderClientAccess(d,id){
   const acc=(d&&d.dashboardAccess)||{};const list=acc.sharedWith||[];const ro=typeof hubIsOwner==='function'&&!hubIsOwner()&&document.body&&document.body.classList&&document.body.classList.contains('ro');
   return `<div class="card tk-pad tk-access" id="tkAccess"><div><h4>Who can see this</h4><p class="tk-muted tk-small">Add someone from their business by email. They get a private link to their own live page — emails sent, replies and booked calls. Nothing else.</p></div>
     ${list.length?`<ul class="tk-access-list">${list.map(x=>`<li><b>${esc(x.email)}</b> <span class="tk-muted tk-small">since ${esc(tkDate(x.at))}</span></li>`).join('')}</ul>`:'<p class="tk-small tk-muted">Nobody yet.</p>'}
-    ${ro?'':`<div class="tk-access-add"><input type="email" id="tkAccessEmail" data-tk-form placeholder="name@theirbusiness.com" onkeydown="if(event.key==='Enter')clientShare(${tkAttr(id)})"><button class="btn" onclick="clientShare(${tkAttr(id)})">Give access</button>${list.length?`<button class="btn ghost danger" onclick="clientUnshare(${tkAttr(id)})">Stop all access</button>`:''}</div>`}</div>`;
+    ${ro?'':`<div class="tk-access-add"><input type="email" id="tkAccessEmail" data-tk-form placeholder="name@theirbusiness.com" onkeydown="if(event.key==='Enter')clientShare(${tkAttr(id)})"><button class="btn" onclick="clientShare(${tkAttr(id)})">Give access</button>${list.length?`<button class="btn ghost danger" onclick="clientUnshare(${tkAttr(id)})">Stop all access</button>`:''}</div>`}
+    ${ro?'':`<div class="tk-portal" id="tkPortal"><h4>Invite to their portal</h4><p class="tk-muted tk-small">A portal login of their own: their Channels (message us) and their Numbers. We email the link, and you can copy it too. It works for 14 days.</p>
+      <div class="tk-access-add"><input type="email" id="tkPortalEmail" data-tk-form aria-label="Their email address" placeholder="name@theirbusiness.com" onkeydown="if(event.key==='Enter')clientInvitePortal(${tkAttr(id)})"><button class="btn" onclick="clientInvitePortal(${tkAttr(id)})">Invite to their portal</button></div>
+      <div id="tkPortalOut">${tkPortalOut(id)}</div></div>`}</div>`;
+}
+/* ---- Invite to their portal: a secret link (32 random bytes) the hub makes itself. Only its sha-256 is stored (Supabase portal_invites,
+   14 days); the machine emails the link; the link is shown here to copy. The person opens it, sets up an account and joins as that client. ---- */
+function tkB64url(bytes){let s='';for(let i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+function tkPortalToken(){const b=new Uint8Array(32);crypto.getRandomValues(b);return tkB64url(b);}
+async function tkSha256Hex(text){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return Array.from(new Uint8Array(d)).map(x=>x.toString(16).padStart(2,'0')).join('');}
+function tkPortalOut(id){
+  const r=(tk.portalInvite||{})[id];if(!r)return '';
+  return `<div class="tk-portal-out" role="status"><p class="tk-small"><b>${r.sent?'Sent to '+esc(r.email):'Not emailed yet'}</b>${r.sent?'':' — '+esc(r.error||'the email did not go out')+'. Copy the link and send it yourself.'}</p>
+    <div class="tk-access-add"><input type="text" readonly id="tkPortalLink" aria-label="Invite link" value="${esc(r.link)}" onfocus="this.select()"><button class="btn ghost" onclick="clientCopyPortalLink()">Copy link</button></div>
+    <p class="tk-muted tk-small">Only works with ${esc(r.email)}, for 14 days.</p></div>`;
+}
+async function clientInvitePortal(id){
+  if(typeof hubIsOwner==='function'&&!hubIsOwner()){toast('Only the owner can invite someone.');return;}
+  const el=document.getElementById('tkPortalEmail');const email=(el?el.value.trim():'').toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Type their email address first');return;}
+  if(tk.busy){toast('Still working on the last action…');return;}
+  tk.busy=true;
+  try{
+    const token=tkPortalToken();const hash=await tkSha256Hex(token);
+    const ins=await sb.from('portal_invites').insert({client_id:id,email,token_hash:hash,created_by:(authUser&&authUser.uid)||null,expires_at:new Date(Date.now()+14*86400000).toISOString()});
+    if(ins&&ins.error){toast('Could not make the invite: '+(ins.error.message||'try again'));return;}
+    const link=location.origin+'/#join='+token;
+    const r=await machineFetch('/api/mc/clients/'+encodeURIComponent(id),{method:'POST',body:{action:'invitePortal',email,link}});
+    tk.portalInvite=tk.portalInvite||{};
+    tk.portalInvite[id]={email,link,sent:!!(r.ok&&r.data&&r.data.sent),error:r.ok?'':(r.error||'')};
+    if(el)el.value='';
+    const out=document.getElementById('tkPortalOut');if(out)out.innerHTML=tkPortalOut(id);
+    toast(tk.portalInvite[id].sent?'Invite sent to '+email:'The invite is ready, but the email did not send');
+  }catch(e){toast('Could not make the invite: try again');}
+  finally{tk.busy=false;}
+}
+function clientCopyPortalLink(){
+  const el=document.getElementById('tkPortalLink');if(!el)return;
+  try{navigator.clipboard.writeText(el.value).then(()=>toast('Link copied'),()=>{if(el.select)el.select();toast('Press Ctrl+C to copy');});}catch(e){if(el.select)el.select();toast('Press Ctrl+C to copy');}
 }
 async function clientShare(id){
   const el=document.getElementById('tkAccessEmail');const email=el?el.value.trim():'';
@@ -2481,7 +2519,7 @@ async function trialsKick(view,force){
   if(view==='trials'||view==='trialsBoard'||view==='paying'){if(typeof teamKick==='function'&&typeof tm!=='undefined'&&!tm.data)teamKick(false);r=await loadHub(force);if(view==='paying')tkMoneyKick();}
   else if(view==='trial'||view==='clientSystem')r=await loadTrial(currentTrialId,force);   // their stats and mail: trialsEnsureTab, on the owner's own clicks
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
-  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null,typeof avaLoadSettings==='function'?avaLoadSettings(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
+  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
   trialsRepaint(view,{soft:true});
   return r;
@@ -2903,7 +2941,7 @@ function trialsOnRender(v){
 function trialsForget(){
   trialsStopTimer();
   Object.assign(tk,{outreach:null,outreachAt:0,outreachErr:null,hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{},moneyTried:{},mail:{},threads:{},mailView:null});
-  currentTrialId=null;trialTab='overview';tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;tk.sysTab=null;tk.focusReply=false;
+  tk.portalInvite={};currentTrialId=null;trialTab='overview';tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;tk.sysTab=null;tk.focusReply=false;
   try{localStorage.removeItem(TK_SYS_TAB_KEY);}catch(e){}
   try{inquiriesForget();}catch(e){}
   try{messagesForget();}catch(e){}
