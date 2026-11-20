@@ -22,7 +22,7 @@
 /* ===================== 0. CONSTANTS + CACHE ===================== */
 const CAL_API='/api/mc/calendar';
 const CAL_DEFAULTS={hours:['09:00','17:00'],days:[1,2,3,4,5],slotMinutes:30,ownerZone:'Asia/Colombo',usZone:'America/New_York',meetingLink:null};
-const CAL_PX=0.8;              // week grid: pixels per minute — an hour is 48 px, so your call hours fit on one screen
+const CAL_PX=1.3;              // week grid: pixels per minute — an hour is 78 px, so every call has room for who, when and what
 const CAL_GAP_PX=24;           // the folded band for the hours with no calls (Sri Lanka daytime)
 const CAL_FRESH_MS=15000;      // a week answer younger than this is not fetched again on navigation
 const CAL_PEEK_MS=60000;       // other screens ask for the requests waiting (sidebar badge, trial rows) at most once a minute
@@ -287,14 +287,14 @@ function calWeekModel(monday,meetings,st,opts){
 /* ===================== 4. RENDERERS (pure: data → HTML) ===================== */
 function renderCalBlock(x,model){
   const st=model.st,m=x.m,S=calStatusOf(m),d=new Date(x.t);
-  const top=model.yOf(x.s);const h=Math.max(Math.round(((x.e-x.s)*CAL_PX-2)*10)/10,20);
+  const top=model.yOf(x.s);const h=Math.max(Math.round(((x.e-x.s)*CAL_PX-2)*10)/10,36);
   const w=100/(x.lanes||1),left=w*(x.lane||0);
   const who=calWho(m),ty=calType(m);
   const meet=!!calMeetLink(m);const launch=calIsLaunch(m);
   const aria=calTitle(m)+(m.person&&m.status!=='blocked'?' with '+m.person:'')+'. '+calDay(d,st.ownerZone)+', '+calTime(d,st.ownerZone)+' '+calOwnerName(st)+' time ('+calWeekdayName(d,st.usZone)+' '+calTime(d,st.usZone)+' '+calZoneName(st.usZone)+'). '+x.mins+' minutes. '+S.short+'.'+(meet?' Google Meet link ready.':'');
   // who first (the row already says the time); the time and the status word on the second line when there is room —
   // a launch call says so first on that line (drawn like an onboarding call otherwise)
-  return `<button type="button" class="cal-ev ${S.cls} ty-${ty}${x.mins<=15?' short':''}${launch?' launch':''}" style="top:${top}px;height:${h}px;left:calc(${Math.round(left*100)/100}% + 2px);width:calc(${Math.round(w*100)/100}% - 4px)" onclick="calOpenMeeting(${tkAttr(m.id)})" title="${esc(aria)}" aria-label="${esc(aria)}"><span class="cal-ev-t">${meet?CAL_CAM:''}${esc(who)}</span>${x.mins>15?`<span class="cal-ev-s">${esc(calTime(d,st.ownerZone))} · ${esc(CAL_TYPES[ty])}${m.status==='confirmed'?'':' · '+esc(S.short)}</span>`:''}</button>`;
+  return `<button type="button" class="cal-ev ${S.cls} ty-${ty}${x.mins<=15?' short':''}${launch?' launch':''}" style="top:${top}px;height:${h}px;left:calc(${Math.round(left*100)/100}% + 2px);width:calc(${Math.round(w*100)/100}% - 4px)" onclick="calOpenMeeting(${tkAttr(m.id)})" title="${esc(aria)}" aria-label="${esc(aria)}"><span class="cal-ev-t">${meet?CAL_CAM:''}${esc(who)}</span>${`<span class="cal-ev-s">${esc(calTime(d,st.ownerZone))}${m.status==='confirmed'?'':' · '+esc(S.short)}</span>`}</button>`;
 }
 function renderCalGrid(model){
   const st=model.st,H=model.height;
