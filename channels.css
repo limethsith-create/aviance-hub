@@ -154,3 +154,13 @@
   .chv-newpill{bottom:140px}
   .chv-side{position:fixed;left:0;right:0;bottom:0;max-height:80dvh;z-index:30;border:0;border-top:1px solid var(--border-strong,#CFCFCA);border-radius:var(--r,8px) var(--r,8px) 0 0;padding-bottom:env(safe-area-inset-bottom);box-shadow:0 8px 24px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.08)}
 }
+
+/* layout fixes from the screen check (1280px with the Numbers panel open) */
+.chv-head{flex-wrap:wrap;row-gap:8px}
+.chv-title{flex:1 1 180px}
+.chv.chv-panel-open:not(.chv-solo){grid-template-columns:240px minmax(0,1fr) 360px}
+.chv.chv-solo.chv-panel-open{grid-template-columns:minmax(0,1fr) 360px}
+.chv .chv-cbox textarea,.chv .chv-cbox textarea:focus,.chv .chv-cbox textarea:focus-visible{outline:0!important;box-shadow:none!important;border-color:transparent!important}
+.chv-side .nm-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+.chv-side .nm-table{display:block;overflow-x:auto;white-space:nowrap}
+.chv-solo .chv-list{display:none}

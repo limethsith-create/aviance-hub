@@ -417,7 +417,7 @@ const views={
   paying:{fn:()=>viewPaying(),title:'Clients',sub:'Booked sales calls, and every client'},
   trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins',back:()=>currentTrialId?openTrial(currentTrialId):render('paying')},
   calendar:{fn:()=>viewCalendar(),title:'Calendar',sub:'Every call, in Sri Lanka time'},
-  channels:{fn:()=>typeof viewChannels==='function'?viewChannels():clientLoading(),title:'Channels',sub:'Talk with your team and your clients',wide:true},
+  channels:{fn:()=>typeof viewChannels==='function'?viewChannels():clientLoading(),title:'Channels',sub:()=>hubIsClient()?'Message the Aviance team':'Talk with your team and your clients',wide:true},
   inquiries:{fn:()=>viewInquiries(),title:'Bookings',sub:'Sales calls booked from the website — mark each one Won or Lost',back:()=>render('paying')},
   inquiry:{fn:()=>viewInquiry(),title:'Booking',sub:'',back:()=>render('inquiries')},
   settings:{fn:()=>viewSettings(),title:'Settings',sub:'Your details, keys, alerts, Google Meet, warm-up helpers, the reply bot, and how everything is running'},
@@ -436,10 +436,15 @@ function render(v){
   currentView=v;
   document.getElementById('content').innerHTML=`<div class="view${view.wide?' wide':''}">${view.fn()}</div>`;
   document.getElementById('ptitle').textContent=view.title;
-  document.getElementById('psub').textContent=view.sub;
+  document.getElementById('psub').textContent=typeof view.sub==='function'?view.sub():view.sub;
   const back=document.getElementById('backBtn');if(back)back.style.display=view.back?'grid':'none';
   renderNav();document.getElementById('content').scrollTop=0;closeSidebar();
-  if(hubIsClient()){try{if(view.after)view.after();}catch(e){}return;}   // client mode: no owner timers, counts or presence
+  if(hubIsClient()){   // client mode: no owner timers, counts or presence — only their channel and their numbers
+    try{if(view.after)view.after();}catch(e){}
+    try{if(typeof channelsOnRender==='function')channelsOnRender(v);}catch(e){}
+    try{if(typeof numbersOnRender==='function')numbersOnRender(v);}catch(e){}
+    return;
+  }
   try{if(view.after)view.after();}catch(e){}
   try{updateNotifBadge();}catch(e){}
   try{trialsOnRender(v);}catch(e){}
