@@ -77,7 +77,6 @@ const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is ope
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
 const TK_GROWTH_FRESH_MS=5*60000;     // Growth tab: reuse an answer this young
-const TK_OVERVIEW_FRESH_MS=15*60000;  // Overview sparklines (14 days)
 const TK_SPARK_FRESH_MS=6*3600000;    // board-card sparklines — kept across reloads to spare the machine's Redis
 const TK_SPARK_KEY='avianceGrowth14:v1';
 /* States with nothing to chart yet (no warm-up, no sending): no sparkline fetch. */
@@ -753,7 +752,6 @@ function tkListRows(hub){const out=[],seen={};((hub&&hub.stages)||[]).forEach(st
    trials, so every row is a paying client and lives in Clients. */
 const TK_PAID_PLANS=['starter','growth','scale'];
 function tkIsPaidRow(r){return !!r}
-function tkIsPaidId(id){if(id==null)return false;const r=tkFindRow(id);if(r)return tkIsPaidRow(r);const d=tk.detail[id];return !!(d&&d.row&&tkIsPaidRow(d.row))}
 function tkPlanName(p){p=String(p||'').toLowerCase();return TK_PAID_PLANS.includes(p)?p[0].toUpperCase()+p.slice(1):'Starter'}
 /* ---- Money (owner only): the machine keeps ONE invoice per client — the month-one invoice (HUB-API.md `invoice` on
    GET /api/mc/hub/{id}: number, amount, issuedAt, paidAt, status sent|paid|blocked, plan). An `invoices` list is read
@@ -2106,10 +2104,6 @@ function tkClientGrowthKick(id){
   const c=tk.growth[id];if(c&&Date.now()-c.at<TK_GROWTH_FRESH_MS)return;if(tk.growthBusy[id])return;
   tk.growthBusy[id]=true;
   loadGrowth(id,tk.growthDays,true).then(()=>{delete tk.growthBusy[id];tkSysRepaintIf(id,['overview','health']);});
-}
-function tkClientStatsKick(id){
-  tkMailKick(id);   // their conversations and every email sent (5 minutes each)
-  tkClientGrowthKick(id);
 }
 function renderClientAccess(d,id){
   const acc=(d&&d.dashboardAccess)||{};const list=acc.sharedWith||[];const ro=typeof hubIsOwner==='function'&&!hubIsOwner()&&document.body&&document.body.classList&&document.body.classList.contains('ro');
