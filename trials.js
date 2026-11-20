@@ -2130,18 +2130,36 @@ async function clientInvitePortal(id){
   if(tk.busy){toast('Still working on the last action…');return;}
   tk.busy=true;
   try{
-    const token=tkPortalToken();const hash=await tkSha256Hex(token);
-    const ins=await sb.from('portal_invites').insert({client_id:id,email,token_hash:hash,created_by:(authUser&&authUser.uid)||null,expires_at:new Date(Date.now()+14*86400000).toISOString()});
-    if(ins&&ins.error){toast('Could not make the invite: '+(ins.error.message||'try again'));return;}
-    const link=location.origin+'/#join='+token;
-    const r=await machineFetch('/api/mc/clients/'+encodeURIComponent(id),{method:'POST',body:{action:'invitePortal',email,link}});
-    tk.portalInvite=tk.portalInvite||{};
-    tk.portalInvite[id]={email,link,sent:!!(r.ok&&r.data&&r.data.sent),error:r.ok?'':(r.error||'')};
+    const r=await portalInvite(id,email,{auto:false});
+    if(r.error){toast('Could not make the invite: '+r.error);return;}
     if(el)el.value='';
     const out=document.getElementById('tkPortalOut');if(out)out.innerHTML=tkPortalOut(id);
-    toast(tk.portalInvite[id].sent?'Invite sent to '+email:'The invite is ready, but the email did not send');
+    toast(r.sent?'Invite sent to '+email:'The invite is ready, but the email did not send');
   }catch(e){toast('Could not make the invite: try again');}
   finally{tk.busy=false;}
+}
+/* One invite for both ways in: the owner's button (auto false) and the automatic one when a booking pays (auto true).
+   Auto skips when they already have a login or a live unused invite. Returns {ok, sent, link, skipped?, error?}. */
+async function portalInvite(clientId,email,opts){
+  const auto=!!(opts&&opts.auto);email=String(email||'').trim().toLowerCase();
+  try{
+    if(auto){
+      if(!clientId||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return {ok:false,skipped:'no email or client'};
+      const p=await sb.from('profiles').select('id').eq('email',email).maybeSingle();
+      if(p&&p.data)return {ok:true,skipped:'has an account'};
+      const u=await sb.from('portal_invites').select('id').eq('email',email).is('used_at',null).gt('expires_at',new Date().toISOString()).limit(1);
+      if(u&&u.data&&u.data.length)return {ok:true,skipped:'already invited'};
+    }
+    const token=tkPortalToken();const hash=await tkSha256Hex(token);
+    const ins=await sb.from('portal_invites').insert({client_id:clientId,email,token_hash:hash,created_by:(authUser&&authUser.uid)||null,expires_at:new Date(Date.now()+14*86400000).toISOString()});
+    if(ins&&ins.error)return {ok:false,error:ins.error.message||'try again'};
+    const link=location.origin+'/#join='+token;
+    const r=await machineFetch('/api/mc/clients/'+encodeURIComponent(clientId),{method:'POST',body:{action:'invitePortal',email,link}});
+    tk.portalInvite=tk.portalInvite||{};
+    const sent=!!(r.ok&&r.data&&r.data.sent);
+    tk.portalInvite[clientId]={email,link,sent,error:r.ok?'':(r.error||'')};
+    return {ok:true,sent,link};
+  }catch(e){return {ok:false,error:'try again'};}
 }
 function clientCopyPortalLink(){
   const el=document.getElementById('tkPortalLink');if(!el)return;
