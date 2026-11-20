@@ -1702,6 +1702,8 @@ function renderFitScore(r){
   </div>`;
 }
 /* The full company file (machine Research v3): the whole site, documents, money on the public record, offers, history. */
+/** The one revenue answer with how sure it is: about a range, at least a floor, or unknown (never a floor read as the size). */
+function tkRevenueEstimate(e){const b=(e.basis||[]).filter(Boolean);const head=e.sure==='about'?`about <b>${tkBig(e.low)}–${tkBig(e.high)}</b> a year`:e.sure==='at least'?`at least <b>${tkBig(e.low)}</b> a year <span class="tk-muted">(a floor — the real figure may be well above)</span>`:'<b>unknown</b> <span class="tk-muted">— ask them on the call</span>';return `<div class="tk-file-note"><b>Revenue</b>: ${head}${b.length?`<br><span class="tk-muted">${esc(b.join(' · '))}</span>`:''}</div>`}
 function tkBig(n){n=Number(n);if(!isFinite(n))return '—';return '$'+(n>=1e6?(Math.round(n/1e5)/10)+'M':n>=1e4?Math.round(n/1e3)+'k':n.toLocaleString())}
 function tkGroup(title,count,body,open){if(!body)return '';return `<details class="tk-file-group"${open?' open':''}><summary><span class="tk-file-title">${esc(title)}</span>${count!=null?`<span class="tk-file-count">${esc(count)}</span>`:''}</summary><div class="tk-file-body">${body}</div></details>`}
 function tkList(items,fn){items=(items||[]).filter(Boolean);return items.length?`<ul class="tk-file-list">${items.map(x=>`<li>${fn(x)}</li>`).join('')}</ul>`:''}
@@ -1815,7 +1817,8 @@ function renderDeep(d,site){
   if(!d||typeof d!=='object')return '';
   const m=d.money||{};const fed=m.federal||null;const sec=m.sec||null;const o=d.offers||{};const e=d.emailSetup||null;const h=d.history||null;
   const money=[
-    (m.revenue||[]).length?`<div class="tk-file-note"><b>Estimated revenue</b> (a range from public facts, not their books):${tkList(m.revenue,r=>`<b>${tkBig(r.low)}–${tkBig(r.high)}</b>${r.floor?' <span class="tk-muted">(at least)</span>':''}${r.year?` <span class="tk-muted">in ${esc(r.year)}</span>`:''}<br><span class="tk-muted">${esc(r.basis)}</span>`)}</div>`:'',
+    m.estimate&&m.estimate.sure?tkRevenueEstimate(m.estimate):'',
+    (m.revenue||[]).length?`<div class="tk-file-note"><b>Estimated revenue</b> (a range from public facts, not their books):${tkList(m.revenue,r=>`${r.floor?`at least <b>${tkBig(r.low)}</b>`:`<b>${tkBig(r.low)}–${tkBig(r.high)}</b>`}${r.year?` <span class="tk-muted">in ${esc(r.year)}</span>`:''}<br><span class="tk-muted">${esc(r.basis)}</span>`)}</div>`:'',
     fed&&fed.payroll?`<div class="tk-file-note"><b>Payroll ${tkBig(fed.payroll.annual)} a year (2019)</b><br><span class="tk-muted">${esc(fed.payroll.basis)}</span></div>`:'',
     fed&&(fed.ppp||[]).length?`<div class="tk-file-note"><b>PPP loans</b>${tkList(fed.ppp,l=>`${tkBig(l.amount)} · ${esc(l.date||'')}${l.forgiven?' · forgiven':''} <span class="tk-muted">(${esc(l.recipient||'')})</span>`)}</div>`:'',
     fed&&((fed.contracts||[]).length||(fed.grants||[]).length)?`<div class="tk-file-note"><b>Federal contracts and grants</b>${fed.federalTotal?` — ${tkBig(fed.federalTotal)} in total`:''}${tkList([...(fed.contracts||[]),...(fed.grants||[])],a=>`${tkBig(a.amount)} · ${esc(a.agency||'')} · ${esc(a.date||'')}${a.what?`<br><span class="tk-muted">${esc(a.what)}</span>`:''}`)}</div>`:'',

@@ -1255,6 +1255,38 @@ test('inquiry detail: reply by email, their time, website, notes, status moves, 
   assert.ok(renderInquiry(null).includes('Inquiry not found'));
 });
 
+test('where they came from (?utm_source=cold_call / ref): a tag on the list row and "Came from" under About them', () => {
+  const stone = Object.assign(Q('qmgv1stone'), { utm: { source: 'cold_call', medium: null, campaign: 'nov-roofers', content: null }, ref: null, cameFrom: 'Cold call (campaign: nov-roofers)' });
+  const list = renderInquiries([stone], null, 'open', { now: NOW });
+  assert.ok(list.includes('<span class="pill grey iq-src" title="Came from">Cold call</span>'), 'a short tag on the row, no campaign detail');
+  const d = renderInquiry(stone, { now: NOW });
+  const about = d.slice(d.indexOf('<h3>About them</h3>'));
+  assert.ok(d.indexOf('<h3>About them</h3>') > 0 && d.indexOf('Came from') > d.indexOf('<h3>About them</h3>'), 'under About them');
+  assert.ok(about.includes('<small>Came from</small><span>Cold call (campaign: nov-roofers)</span>'));
+  // an older record with only utm/ref: the same friendly words, worked out here
+  const li = Object.assign(Q('qmgv1stone'), { utm: { source: 'linkedin' }, ref: 'rehan' });
+  assert.ok(renderInquiries([li], null, 'open', { now: NOW }).includes('>LinkedIn</span>'));
+  assert.ok(renderInquiry(li, { now: NOW }).includes('<small>Came from</small><span>LinkedIn (ref: rehan)</span>'));
+  assert.ok(renderInquiry(Object.assign(Q('qmgv1stone'), { ref: 'email' }), { now: NOW }).includes('<small>Came from</small><span>Email</span>'));
+  const odd = Object.assign(Q('qmgv1stone'), { utm: { source: '<img src=x onerror=alert(1)>' } });
+  const oddHtml = renderInquiries([odd], null, 'open', { now: NOW }) + renderInquiry(odd, { now: NOW });
+  assert.ok(!oddHtml.includes('<img src=x') && oddHtml.includes('&lt;img'), 'an unknown source is shown as sent, escaped');
+  // nothing tracked: no tag, no row
+  const plain = renderInquiries([Q('qmgv1stone')], null, 'open', { now: NOW }) + renderInquiry(Q('qmgv1stone'), { now: NOW });
+  assert.ok(!plain.includes('iq-src') && !plain.includes('Came from'));
+  // "I don't have one yet" ticked on the booking form
+  assert.ok(renderInquiry(Object.assign(Q('qmgv1stone'), { website: '', noWebsite: true }), { now: NOW }).includes('<small>Website</small><span><span class="muted">Doesn\'t have one yet</span></span>'));
+});
+
+test('phone number on the booking form: a tap-to-call row under About them, escaped, absent when not given', () => {
+  const d = renderInquiry(Object.assign(Q('qmgv1stone'), { phone: '+1 (512) 555-0142' }), { now: NOW });
+  assert.ok(d.includes('<small>Phone</small><span><a href="tel:+15125550142">+1 (512) 555-0142</a></span>'));
+  assert.ok(renderInquiry(Object.assign(Q('qmgv1stone'), { phone: '512 555 0142 ext 12' }), { now: NOW }).includes('href="tel:5125550142,12"'));
+  const odd = renderInquiry(Object.assign(Q('qmgv1stone'), { phone: '<b>x</b>' }), { now: NOW });
+  assert.ok(!odd.includes('tel:') && !odd.includes('<b>x</b>') && odd.includes('&lt;b&gt;'));
+  assert.ok(!renderInquiry(Q('qmgv1stone'), { now: NOW }).includes('<small>Phone</small>'));
+});
+
 test('inquiries on the board: a strip ("2 booked calls — Birch Legal, call Sat 8:30 PM"), to-dos open the inquiry, a passed call rings the bell, ⌘K includes them', () => {
   asOwner(); trialsIngestHub(hubWithInquiries); iq.list = null; iq.counts = null; iq.at = 0;
   const board = renderBoard(hubWithInquiries, { now: NOW });
@@ -1737,4 +1769,13 @@ test('an employee (read-only) opens a client\'s email system too — both sides,
     assert.ok(css.includes('body.ro .content .btn:not(.ro-ok)'), 'every button that changes something is hidden for them');
     assert.ok(!/class="[^"]*\bbtn\b[^"]*"[^>]*id="tkSysBtn"/.test(renderTrialDetail(tk.detail['cobalt-hvac'], 'overview', {})) && renderTrialDetail(tk.detail['cobalt-hvac'], 'overview', {}).includes('class="tk-sysbtn"'), 'the big system button is not a hidden .btn: they can open it');
   } finally { document.body.classList.remove('ro'); asOwner(); trialsStopTimer(); }
+});
+
+test('revenue: one answer that says how sure it is (about / at least / unknown); a floor never reads as the size', () => {
+  const at = (estimate, revenue = []) => renderDeep(Object.assign({}, deepV4, { money: { federal: null, sec: null, revenue, estimate } }));
+  const floor = at({ sure: 'at least', low: 1470000, high: null, basis: ['“Trusted by 2,500+ contractors” × their cheapest plan (Starter, $49/mo) = $588 a year each'] }, [{ low: 560000, high: 1000000, floor: true, basis: '4+ people × …' }]);
+  assert.ok(floor.includes('<b>Revenue</b>: at least <b>$1.5M</b> a year'), floor);
+  assert.ok(floor.includes('at least <b>$560k</b>') && !floor.includes('$560k–$1M'), 'the team-page floor is "at least", not a range');
+  assert.ok(at({ sure: 'about', low: 3000000, high: 5000000, basis: ['20 people × …'] }).includes('<b>Revenue</b>: about <b>$3M–$5M</b> a year'));
+  assert.ok(at({ sure: 'unknown', low: null, high: null, basis: ['no headcount, payroll or customer count found'] }).includes('<b>Revenue</b>: <b>unknown</b>'));
 });
