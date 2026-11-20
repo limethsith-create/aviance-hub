@@ -49,10 +49,10 @@ globalThis.supabase = { createClient: () => fakeSb };
 
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
-const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'people.js', 'ava.js'];
+const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'people.js', 'numbers.js'];
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 for (const f of FILES) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
-after(() => { trialsStopTimer(); calendarStopTimer(); if (pp.beat) clearInterval(pp.beat); clearTimeout(window._tt); try { avaStopListening({ discard: true }); } catch (e) {} });
+after(() => { trialsStopTimer(); calendarStopTimer(); if (pp.beat) clearInterval(pp.beat); clearTimeout(window._tt); });
 const tick = () => new Promise((r) => setTimeout(r, 5));
 const TOKEN = 'abcDEF0123456789_-abcDEF0123456789_-xyz';
 
@@ -91,23 +91,16 @@ test('client mode: nothing of the owner\'s is fetched or started', async () => {
   // ⌘K / "/" / "n" shortcuts do nothing
   openCmdk(); assert.ok(!el('cmdkWrap')._classes.has('open'));
   assert.equal(peopleNavCount(), '', 'no approvals count');
-  // Ava is not for clients
-  avaSync(); assert.ok(el('avaRoot').hidden === true || el('avaRoot').style.display === 'none');
-  avaOpen({ quiet: true }); assert.equal(AVA.open, false);
 });
 
-test('client mode: Numbers hands the client\'s own id to renderClientNumbers; "Loading…" while that script is missing', async () => {
+test('client mode: Numbers hands the client\'s own id to renderClientNumbers', async () => {
   await signInAsClient();
   render('numbers');
-  assert.ok(el('content').innerHTML.includes('id="clientNumbers"') && el('content').innerHTML.includes('Loading…'));
-  const seen = [];
-  globalThis.renderClientNumbers = (box, clientId) => { seen.push(clientId); };
-  render('numbers');
-  assert.deepEqual(seen, ['stone-roofing']);
+  assert.ok(el('content').innerHTML.includes('data-nm-client="stone-roofing"'), 'the Numbers view is for their own client id');
   globalThis.viewChannels = () => '<p>channels screen</p>';
   render('channels');
   assert.ok(el('content').innerHTML.includes('channels screen'));
-  delete globalThis.renderClientNumbers; delete globalThis.viewChannels;
+  delete globalThis.viewChannels;
 });
 
 test('client mode: a link to an owner screen, or to a client, stays inside Channels / Numbers; sign-out leaves client mode', async () => {
@@ -130,11 +123,11 @@ test('sign-in: a client profile without a client id, or not approved, is still r
   authUser = null; supa.session = { access_token: 't' }; supa.profile = { id: 'u2', name: 'Emp', approved: true, role: 'employee', email: 'e@x.c' };
   await routeUser('loginErr');
   assert.equal(authUser.role, 'employee'); assert.ok(!document.body._classes.has('client-mode'));
-  assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'team']);
+  assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'channels', 'team']);
   authUser = null; supa.session = { access_token: 't' }; supa.profile = { id: 'u1', name: 'Owner', approved: true, role: 'admin', email: 'o@x.c' };
   await routeUser('loginErr');
   assert.equal(authUser.role, 'admin');
-  assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'team', 'people', 'settings']);
+  assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'channels', 'team', 'people', 'settings']);
   trialsStopTimer(); calendarStopTimer();
 });
 

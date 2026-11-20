@@ -5,6 +5,8 @@
    colour used with intent (primary button, active marker, focus ring), small radii, dense type (Inter 14px).
    Light is the default; dark = body.dark (the hub's own switch) or [data-theme="dark"] on <html>. */
 
+/* Inter (variable, latin), served from our own site so the strict CSP stays as it is. OFL-1.1, see fonts/Inter-LICENSE.txt. */
+@font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url("/fonts/inter-latin.woff2") format("woff2")}
 :root{
   /* surfaces + text */
   --bg:#FAFAF9;--surface:#FFFFFF;--surface-2:#F4F4F2;--surface-3:#EAEAE7;
@@ -561,4 +563,4 @@ body,body.dark{--q:var(--blue);--q-bg:var(--blue-bg)}
 .tk-portal{display:grid;gap:10px;margin-top:6px;padding-top:14px;border-top:1px solid var(--border)}
 .tk-portal h4,.tk-portal p{margin:0}
 .tk-portal-out{display:grid;gap:8px}
-.tk-portal-out input[readonly]{font-family:var(--mono,ui-monospace,monospace);font-size:13px}
+.tk-portal-out input[readonly]{font-family:var(--mono);font-size:13px}

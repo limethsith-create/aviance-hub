@@ -907,14 +907,15 @@ const allStyle = { 'theme.css': noComments(themeCss), 'trials.css': noComments(c
 test('font: one UI family (Inter, then the system font) plus a mono for ids; labels may be capitals; weights 400-700', () => {
   assert.equal(rootVars.font, '"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif');
   assert.ok(/ui-monospace/.test(rootVars.mono), 'a mono stack for ids and numbers');
-  assert.ok(!/@import|@font-face/i.test(html + css + themeCss), 'no web font is fetched from inside the CSS (the CSP only allows our own origin)');
+  assert.ok(!/@import/i.test(html + css + themeCss), 'no CSS is imported from elsewhere');
+  for (const m of (html + css + themeCss).matchAll(/@font-face\{[^}]*\}/gi)) assert.ok(/url\("\/fonts\/[a-z0-9-]+\.woff2"\)/.test(m[0]) && !/https?:/.test(m[0]), 'fonts come only from our own /fonts/ folder (the CSP only allows our own origin)');
   for (const [name, src] of Object.entries(allStyle)) {
     for (const m of src.matchAll(/font-family:\s*([^;"'}]+)/g)) assert.ok(['var(--font)', 'var(--mono)', 'inherit'].includes(m[1].trim()), `${name}: font-family ${m[1]}`);
     if (name !== 'theme.css') {
       assert.ok(!/text-transform:\s*uppercase/.test(src), `${name}: capitals-only labels are set in theme.css only`);
       assert.ok(!/letter-spacing/.test(src), `${name}: letter-spacing is set in theme.css only`);
     }
-    for (const m of src.matchAll(/font-weight:\s*([^;"'}!]+)/g)) assert.ok(['400', '500', '600', '650', '700', 'normal'].includes(m[1].trim()), `${name}: font-weight ${m[1]}`);
+    for (const m of src.replace(/@font-face\{[^}]*\}/g, '').matchAll(/font-weight:\s*([^;"'}!]+)/g)) assert.ok(['400', '500', '600', '650', '700', 'normal'].includes(m[1].trim()), `${name}: font-weight ${m[1]}`);
   }
   assert.ok(/b,strong,th,h5,summary\{font-weight:600\}/.test(shellCss) && /h1,h2,h3,h4\{font-weight:600\}/.test(shellCss), 'browser-bold elements capped at 600');
 });

@@ -80,6 +80,6 @@ test('renderClientNumbers: skeleton, fetch with the client id, draw; error then 
 test('index.html wires it up and package.json checks it', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   assert.ok(html.includes('<script src="numbers.js"></script>') && html.includes('href="numbers.css"'));
-  assert.ok(/numbers:\{fn:\(\)=>numbersView\(\)/.test(html) && html.includes("h==='numbers'"));
+  assert.ok(/numbers:\{fn:\(\)=>(typeof numbersView==='function'\?)?numbersView\(\)/.test(html) && html.includes("h==='numbers'"));
   assert.ok(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts.check.includes('node --check numbers.js'));
 });
