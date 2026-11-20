@@ -222,14 +222,14 @@ test('the grid draws each call sized by its minutes, coloured by status (green /
   const block = (id) => { const i = g.indexOf(`calOpenMeeting(&quot;${id}&quot;)`); return i < 0 ? '' : g.slice(g.lastIndexOf('<button', i), g.indexOf('</button>', i)); };
   assert.match(block('mconf'), /class="cal-ev confirmed ty-onboarding" style="top:192px;height:22px;left:calc\(0% \+ 2px\);width:calc\(100% - 4px\)"/, '30 min = 22 px, green');
   assert.ok(block('mconf').includes('<span class="cal-ev-t">Ann Lee</span><span class="cal-ev-s">6:30 pm · Onboarding</span>'), 'who first, then the time and the status in words');
-  assert.match(block('mreq2'), /class="cal-ev requested short" style="top:72px;height:20px;/, '15 min = 20 px (the smallest a call is drawn), amber, 1:30 am');
+  assert.match(block('mreq2'), /class="cal-ev requested ty-onboarding short" style="top:72px;height:20px;/, '15 min = 20 px (the smallest a call is drawn), amber, 1:30 am');
   assert.ok(!block('mreq2').includes('cal-ev-s') && block('mreq2').includes('<span class="cal-ev-t">Mia Gale</span>'), 'a 15-minute block has one line: who');
-  assert.match(block('mheld'), /class="cal-ev held"/); assert.match(block('mblocked'), /class="cal-ev blocked" style="top:\d+(\.\d)?px;height:46px;/); assert.ok(block('mblocked').includes('<span class="cal-ev-t">Busy</span><span class="cal-ev-s">8:30 pm · Busy</span>'));
-  assert.match(block('mnoshow'), /class="cal-ev noshow short"/);
+  assert.match(block('mheld'), /class="cal-ev held ty-/); assert.match(block('mblocked'), /class="cal-ev blocked ty-other" style="top:\d+(\.\d)?px;height:46px;/); assert.ok(block('mblocked').includes('<span class="cal-ev-t">Busy</span><span class="cal-ev-s">8:30 pm · Other · Busy</span>'));
+  assert.match(block('mnoshow'), /class="cal-ev noshow ty-other short"/);
   assert.ok(block('mconf').includes('aria-label="Onboarding call — Acme Plumbing with Ann Lee. Tue 29 Sep, 6:30 pm Sri Lanka time (Tue 9:00 am US Eastern). 30 minutes. Confirmed."'));
   assert.equal(block('mcancelled'), '', 'cancelled is hidden'); assert.equal(block('mdeclined'), '');
   const gone = renderCalGrid(model('2026-09-28', calWeek.meetings, { showGone: true }));
-  assert.ok(/class="cal-ev gone"[^>]*onclick="calOpenMeeting\(&quot;mcancelled&quot;\)"/.test(gone), '"Show cancelled" shows them, struck through');
+  assert.ok(/class="cal-ev gone[^"]*"[^>]*onclick="calOpenMeeting\(&quot;mcancelled&quot;\)"/.test(gone), '"Show cancelled" shows them, struck through');
   // columns: the call hours are white (cal-open), the rest grey; Sunday has none
   const cols = g.split('<div class="cal-col');
   assert.equal(cols.length, 8);
@@ -431,7 +431,7 @@ test('Add a meeting (client from the trials list or none, Sri Lanka date + time 
 test('week buttons: ◀ ▶ and Today ask the machine for that week; while a new week loads the requests stay on screen', async () => {
   fresh(); const mc = fakeMachine();
   try {
-    render('calendar'); await tick(); cal.at = {}; delete cal.weeks['2026-10-05'];   // the Upcoming list also fetched next week: forget it, so the move really loads
+    render('calendar'); await tick(); await calLoadUpcoming(); cal.at = {}; delete cal.weeks['2026-10-05']; cal.lastWeek = '2026-09-28';   // the Upcoming list also fetched next week: forget it, so the move really loads
     const p = calWeekMove(1);
     assert.ok(el('calHost').innerHTML.includes('Loading this week…') && el('calHost').innerHTML.includes('Waiting for your yes'), 'the requests stay while the next week loads');
     assert.ok(el('calHost').innerHTML.includes('<b class="cal-range">5 Oct – 11 Oct 2026</b>'));

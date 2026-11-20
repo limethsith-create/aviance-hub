@@ -338,12 +338,12 @@ test('Calendar: a kind:launch meeting is labelled "Launch call" (the machine\'s 
   asOwner(); trialsForget(); withCalendar(); asOwner();
   const st = calSettings(calLaunchWeek.settings); const now = new Date('2026-10-17T12:00:00Z');
   const wk = renderCalendar(clone(calLaunchWeek), { now, week: '2026-10-19' });
-  const blk = between(wk, '<button type="button" class="cal-ev confirmed launch"', '</button>');
-  assert.ok(blk && blk.includes('Gale Roofing</span><span class="cal-ev-s">Launch call · 8:30 pm · Confirmed</span>'), 'the grid block says what it is');
+  const blk = between(wk, '<button type="button" class="cal-ev confirmed ty-launch launch"', '</button>');
+  assert.ok(blk && blk.includes('Mia Gale</span><span class="cal-ev-s">8:30 pm · Launch</span>'), 'the grid block says what it is');
   assert.ok(blk.includes('aria-label="Launch call — Gale Roofing with Mia Gale. Tue 20 Oct, 8:30 pm Sri Lanka time (Tue 11:00 am US Eastern). 30 minutes. Confirmed. Google Meet link ready."'));
-  const onb = between(wk, '<button type="button" class="cal-ev confirmed"', '</button>');
-  assert.ok(onb.includes('Delta Roofing</span><span class="cal-ev-s">7:30 pm · Confirmed</span>') && !onb.includes('launch'), 'an onboarding call as before');
-  assert.ok(wk.includes('class="cal-aitem confirmed launch"') && wk.includes('<span class="cal-astatus">Launch call · Confirmed · 30 min · Google Meet</span>'), 'the phone list too');
+  const onb = between(wk, '<button type="button" class="cal-ev confirmed ty-onboarding"', '</button>');
+  assert.ok(onb.includes('Sam Ito</span><span class="cal-ev-s">7:30 pm · Onboarding</span>') && !onb.includes('launch'), 'an onboarding call as before');
+  assert.ok(wk.includes('class="cal-aitem confirmed ty-launch launch"') && wk.includes('<span class="cal-astatus">Launch · Confirmed · 30 min · Google Meet</span>'), 'the phone list too');
   assert.equal(calTitle(calLaunch.held), 'Launch call — Gale Roofing', 'no title from the machine: the hub still says what it is');
   assert.equal(calTitle(calLaunch.confirmed), 'Launch call — Gale Roofing'); assert.equal(calTitle({ company: 'X Co', kind: 'onboarding' }), 'Call — X Co', 'unchanged for the rest');
   assert.equal(calSourceText('launch_card'), 'Marked booked on the launch-call card');

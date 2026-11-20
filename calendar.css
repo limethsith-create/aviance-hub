@@ -47,7 +47,7 @@
 .cal-sw{display:inline-block;width:16px;height:14px;border:1px solid var(--border-soft);border-left-width:4px}
 .cal-sw{background:var(--ty-bg);border-left-color:var(--ty)}
 .cal-sw.dashed{background:var(--surface);border:1px dashed var(--amber);border-left:4px solid var(--muted-2)}
-.cal-legend b{font-size:var(--fs-min);text-transform:uppercase;letter-spacing:.04em}
+.cal-legend b{font-size:var(--fs-min)}
 .cal-sw.open{background:var(--surface);border-left-width:1px}
 .cal-empty{font-size:var(--fs-base);color:var(--muted);line-height:1.55;margin-bottom:10px}
 .cal-foot{display:flex;align-items:center;gap:14px;margin-top:10px}
@@ -165,7 +165,7 @@
 
 /* ── upcoming (side list) ── */
 .cal-upcoming{margin-top:24px}
-.cal-up-day{font-size:var(--fs-min);text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:12px 0 6px}
+.cal-up-day{font-size:var(--fs-min);color:var(--muted);margin:12px 0 6px}
 .cal-up-list{list-style:none;display:flex;flex-direction:column;gap:4px}
 .cal-up{display:grid;grid-template-columns:64px 1fr;gap:8px;align-items:baseline;width:100%;min-height:44px;padding:6px 10px;text-align:left;border:1px solid var(--border);border-left:4px solid var(--ty,var(--muted-2));background:var(--surface);color:var(--text);font:inherit;font-size:var(--fs-base);cursor:pointer;font-variant-numeric:tabular-nums}
 .cal-up:hover{background:var(--surface-2)}
