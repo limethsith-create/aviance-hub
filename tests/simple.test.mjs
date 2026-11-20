@@ -67,12 +67,12 @@ const BANNED = /\b(states?|pipeline|tick|heartbeat|machine|systems|smtp|imap|dns
 /* ───────────── 1. four places only ───────────── */
 test('navigation: Clients, Calendar, Team, Activity, Settings — the same in the sidebar and the phone tab bar (no Trials, no Dialer, no My stats)', () => {
   asOwner(); trialsForget(); calendarForget(); asOwner();
-  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['paying', 'Clients'], ['calendar', 'Calendar'], ['team', 'Team'], ['people', 'Activity'], ['settings', 'Settings']]);
+  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['paying', 'Clients'], ['calendar', 'Calendar'], ['channels', 'Channels'], ['team', 'Team'], ['people', 'Activity'], ['settings', 'Settings']]);
   render('trials');
   assert.equal(currentView, 'paying', 'the old Trials place opens Clients');
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
-    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 5, id + ': five buttons');
+    assert.equal(count(nav, /<button class="(nav-item|tab)/g), 6, id + ': six buttons');
     assert.ok(!/Machine|Behind the scenes|Phone alerts|Mission Control|Log out|alerts|Trials|Dialer|My stats/i.test(visibleText(nav)), id + ': nothing else in the navigation');
     assert.ok(nav.includes(`<button class="${id === 'navArea' ? 'nav-item' : 'tab'} active" type="button" onclick="render('paying')" aria-label="Clients" aria-current="page">`), id + ': Clients is the current place');
   }
@@ -293,7 +293,7 @@ test('navigation badges: Clients = who needs you + new bookings (red) · Calenda
   trialsIngestHub(Object.assign({}, simpleHub, { inquiries: inquirySummaryOf(inquiryRecords) }));
   cal.reqs = calRequestsOf(calWeek);
   const items = navItems();
-  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[4, 'red', '4 need you'], [2, 'amber', '2 waiting for your yes'], ['', '', ''], ['', '', ''], ['', '', '']]);
+  assert.deepEqual(items.map((i) => [i.badge, i.tone || '', i.badgeTitle || '']), [[4, 'red', '4 need you'], [2, 'amber', '2 waiting for your yes'], ['', 'red', ''], ['', '', ''], ['', '', ''], ['', '', '']]);
   renderNav();
   const nav = el('tabBar').innerHTML;
   assert.ok(nav.includes('<span class="badge red" title="4 need you" aria-hidden="true">4</span>'));

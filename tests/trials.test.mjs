@@ -66,8 +66,8 @@ const ok = (body) => async () => ({ ok: true, status: 200, text: async () => JSO
 /* ───────────── shell ───────────── */
 test('shell: title, router knows the four places (and the pages inside them), nothing from the old workspace remains', () => {
   assert.ok(html.includes('<title>Aviance Hub</title>'));
-  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'clientSystem', 'paying', 'trialPurchase', 'calendar', 'inquiries', 'inquiry', 'settings', 'people', 'team', 'trialsBoard']);
-  assert.deepEqual(Object.keys(views).filter((v) => !views[v].back), ['trials', 'paying', 'calendar', 'settings', 'people', 'team'], 'the places have no Back button; every page inside one has (plan call requests sit inside Paying clients)');
+  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'clientSystem', 'paying', 'trialPurchase', 'calendar', 'channels', 'inquiries', 'inquiry', 'settings', 'people', 'team', 'trialsBoard']);
+  assert.deepEqual(Object.keys(views).filter((v) => !views[v].back), ['trials', 'paying', 'calendar', 'channels', 'settings', 'people', 'team'], 'the places have no Back button; every page inside one has (plan call requests sit inside Paying clients)');
   for (const gone of ['viewDashboard', 'viewProjects', 'viewTeam', 'viewClients', 'viewCRM', 'viewProposals', 'viewInvoices', 'viewMyDay', 'viewDirectory', 'workspace_shared', 'workspace_admin', 'loadData', 'saveDB', 'openNewProject', 'composeGmail', 'submitJoin', 'approveJoin', 'applyRole', 'employeePersona', 'printDoc', 'crmStages', 'phases', 'Request to join', 'joinPane', 'roleMenu']) {
     assert.ok(!html.includes(gone), gone + ' is gone');
   }
@@ -115,7 +115,7 @@ test('shell: the owner and approved team members get in (a team member read-only
   assert.equal(authUser.role, 'employee'); assert.equal(el('app').style.display, 'grid');
   assert.ok(document.body._classes.has('ro'), 'read-only');
   assert.ok(trialsIsAdmin() && !hubIsOwner());
-  assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'team'], 'no Settings, no Activity');
+  assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'channels', 'team'], 'no Settings, no Activity');
   assert.ok(viewSettings().includes('Only the owner can open this.'));
   authUser = null;
   supa.session = { access_token: 'test-token' };
