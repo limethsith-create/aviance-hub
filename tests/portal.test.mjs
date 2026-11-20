@@ -40,7 +40,7 @@ const fakeSb = {
     signOut: async () => { supa.signOuts++; supa.session = null; }, resetPasswordForEmail: async () => ({ error: null }), updateUser: async () => ({ error: null }),
   },
   from: (table) => ({
-    select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: supa.profile }) }) }),
+    select: () => { const c = { eq: () => c, is: () => c, gt: () => c, limit: () => c, maybeSingle: async () => ({ data: supa.profile }), then: (res, rej) => Promise.resolve({ data: supa.liveInvites || [] }).then(res, rej) }; return c; },
     insert: async (row) => { supa.inserts.push({ table, row }); return { error: supa.insertError }; },
   }),
   rpc: async (name, args) => { supa.rpcCalls.push({ name, args }); return supa.rpc ? supa.rpc(name, args) : { data: 'stone-roofing', error: null }; },
@@ -49,7 +49,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
-const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'people.js', 'numbers.js'];
+const FILES = ['trials.js', 'inquiries.js', 'feed.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'people.js', 'numbers.js'];
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 for (const f of FILES) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 after(() => { trialsStopTimer(); calendarStopTimer(); if (pp.beat) clearInterval(pp.beat); clearTimeout(window._tt); });
@@ -64,15 +64,15 @@ async function signInAsClient() {
   await routeUser('loginErr');
 }
 
-test('client mode: an approved client profile gets in with clientId, and sees only Channels and Numbers', async () => {
+test('client mode: an approved client profile gets in with clientId, and sees only Channels, Numbers and People', async () => {
   await signInAsClient();
   assert.equal(authUser.role, 'client'); assert.equal(authUser.clientId, 'stone-roofing');
   assert.equal(el('app').style.display, 'grid');
   assert.ok(document.body._classes.has('client-mode') && document.body._classes.has('ro'));
-  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['channels', 'Channels'], ['numbers', 'Numbers']]);
+  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['channels', 'Channels'], ['numbers', 'Numbers'], ['clientPeople', 'People']]);
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
-    assert.equal((nav.match(/<button class="(nav-item|tab)/g) || []).length, 2, id);
+    assert.equal((nav.match(/<button class="(nav-item|tab)/g) || []).length, 3, id);
     assert.ok(!/Clients|Calendar|Team|Activity|Settings/.test(nav.replace(/<[^>]*>/g, ' ')), id + ': nothing of the owner\'s');
   }
   assert.equal(currentView, 'channels', 'lands on Channels');
@@ -263,4 +263,23 @@ test('invite to their portal: token + sha-256 hash + 14-day invite row, machine 
   authUser = { uid: 'e1', name: 'Emp', role: 'employee', email: 'e@x.c' }; const n = supa.inserts.length;
   el('tkPortalEmail').value = 'y@stone.test'; await clientInvitePortal('stone-roofing');
   assert.equal(supa.inserts.length, n);
+});
+
+/* ── the automatic invite when a booking is marked paid ── */
+test('paid: invites the booking to their portal; skipped when they already have a login or a live invite', async () => {
+  authUser = { uid: 'owner-1', name: 'Owner', role: 'admin', email: 'o@x.c' }; supa.session = { access_token: 'owner-token' };
+  iq.list = [{ id: 'q1', company: 'Stone', email: 'Dana@Stone.test', status: 'agreement_sent', invoice: { number: 'A1' } }];
+  const posts = []; const toasts = [];
+  globalThis.toast = (m) => toasts.push(m);
+  globalThis.fetch = async (url, init = {}) => { posts.push({ url: String(url), body: init.body ? JSON.parse(init.body) : null }); const paid = /inquiries$/.test(String(url)); return { ok: true, status: 200, text: async () => JSON.stringify(paid ? { ok: true, clientId: 'stone-roofing' } : { ok: true, sent: true }) }; };
+  supa.profile = null; supa.liveInvites = []; supa.inserts.length = 0;
+  await inquirySetStatus('q1', 'won');
+  assert.equal(supa.inserts.length, 1); assert.equal(supa.inserts[0].row.client_id, 'stone-roofing'); assert.equal(supa.inserts[0].row.email, 'dana@stone.test');
+  assert.ok(posts.some((c) => /clients\/stone-roofing$/.test(c.url) && c.body.action === 'invitePortal'));
+  assert.ok(toasts.includes('Portal invite sent to dana@stone.test'));
+  // they already have a login: nothing new
+  supa.profile = { id: 'u7' }; await inquirySetStatus('q1', 'won'); assert.equal(supa.inserts.length, 1);
+  // a live unused invite exists: nothing new
+  supa.profile = null; supa.liveInvites = [{ id: 'i1' }]; await inquirySetStatus('q1', 'won'); assert.equal(supa.inserts.length, 1);
+  supa.liveInvites = [];
 });

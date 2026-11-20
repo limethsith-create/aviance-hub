@@ -275,7 +275,16 @@ function inquirySetStatus(id, status) {
       : { done: 'Moved to ' + (IQ_STATUS[status] ? IQ_STATUS[status][1] : label), fail: 'Not changed' };
   // The invoice sent after the yes is paid: the machine records it, tells you in the hub, and starts onboarding.
   if (status === 'won' && q && q.status === 'agreement_sent' && q.invoice) {
-    return trialPost('/api/mc/inquiries', { action: 'paid', id }, { confirm: 'Mark ' + name + ' as paid? They move to Won, become a paying client and get the email to book the onboarding call.', done: name + ' paid — onboarding started', fail: 'Not changed' });
+    return trialPost('/api/mc/inquiries', { action: 'paid', id }, { confirm: 'Mark ' + name + ' as paid? They move to Won, become a paying client and get the email to book the onboarding call.', done: name + ' paid — onboarding started', fail: 'Not changed' }).then(async (r) => {
+      // paid: invite them to their portal straight away (skipped if they already have a login or a live invite)
+      const cid = (r && r.data && (r.data.clientId || (r.data.inquiry && r.data.inquiry.clientId) || (r.data.client && r.data.client.id))) || (q && q.clientId);   // the machine answers { paid, first, inquiry: { clientId } }
+      if (r && r.ok && cid && q && q.email && typeof portalInvite === 'function') {
+        const p = await portalInvite(cid, q.email, { auto: true, plan: q.plan || '' });
+        if (p && p.ok && !p.skipped && p.sent) toast('Portal invite sent to ' + String(q.email).toLowerCase());
+        else if (p && p.ok && !p.skipped) toast('Portal invite ready, but the email did not send — see their page');
+      }
+      return r;
+    });
   }
   return trialPost('/api/mc/inquiries', Object.assign({ action: 'status', id, status }, note ? { note } : {}), opts);
 }

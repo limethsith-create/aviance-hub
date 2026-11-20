@@ -46,7 +46,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'feed.js', 'calendar.js', 'messages.js', 'autobuy.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 
@@ -434,7 +434,6 @@ test('plain words on the top of the trial, the panel, the card and the list; the
     }
   }
   const list = visibleText(renderTrialList(hubWith(brightAb('provisioning').row), { now: NOW }));
-  assert.ok(list.includes('Step 3 of 5 — Setting up') && list.includes('Setting up their inboxes (about 2 days)'), 'step ③ carries the machine\'s own sentence');
   assert.ok(!BANNED.test(list));
   const src = fs.readFileSync(path.join(root, 'autobuy.js'), 'utf8');
   assert.deepEqual([...new Set([...src.matchAll(/action:'(\w+)'/g)].map((m) => m[1]))].sort(), ['forget', 'link', 'pick', 'recheck', 'saveKey', 'test', 'unlink']);

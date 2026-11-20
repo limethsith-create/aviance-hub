@@ -22,7 +22,7 @@
 /* ===================== 0. CONSTANTS + CACHE ===================== */
 const CAL_API='/api/mc/calendar';
 const CAL_DEFAULTS={hours:['09:00','17:00'],days:[1,2,3,4,5],slotMinutes:30,ownerZone:'Asia/Colombo',usZone:'America/New_York',meetingLink:null};
-const CAL_PX=0.8;              // week grid: pixels per minute — an hour is 48 px, so your call hours fit on one screen
+const CAL_PX=1.3;              // week grid: pixels per minute — an hour is 78 px, so every call has room for who, when and what
 const CAL_GAP_PX=24;           // the folded band for the hours with no calls (Sri Lanka daytime)
 const CAL_FRESH_MS=15000;      // a week answer younger than this is not fetched again on navigation
 const CAL_PEEK_MS=60000;       // other screens ask for the requests waiting (sidebar badge, trial rows) at most once a minute
@@ -132,6 +132,29 @@ function calSettings(s){
 }
 function calSettingsNow(){return calSettings(cal.settings)}
 function calMinutes(m){const n=Math.round(Number(m&&m.minutes));return n>=5&&n<=480?n:30}
+/* The kind of call, for colour and words: Sales call / Onboarding / Launch / Other. A call with no kind that came from the
+   website or the booking page is a sales call; anything the owner added or blocked himself is Other. */
+const CAL_TYPES={sales:'Sales call',onboarding:'Onboarding',launch:'Launch',other:'Other'};
+function calType(m){
+  m=m||{};if(m.status==='blocked')return 'other';
+  const k=String(m.kind||'').toLowerCase();if(CAL_TYPES[k]&&k!=='other')return k;
+  if(m.source==='onboard_card'||/^onboarding/i.test(m.title||''))return 'onboarding';if(m.source==='launch_card'||/^launch/i.test(m.title||''))return 'launch';
+  return !k&&(m.source==='website'||m.source==='booking_page')?'sales':'other';
+}
+function calWho(m){m=m||{};return m.status==='blocked'?calTitle(m):String(m.person||m.company||calTitle(m))}
+function renderCalLegend(){return `<div class="cal-legend" aria-label="Colours"><b>Colours</b>${Object.keys(CAL_TYPES).map(k=>`<span><i class="cal-sw ty-${k}"></i>${esc(CAL_TYPES[k])}</span>`).join('')}<span><i class="cal-sw dashed"></i>Dashed: waiting for a yes</span></div>`}
+/* Next 7 days from now, every call that is still to happen, grouped by Sri Lanka day. */
+function calUpcomingList(meetings,st,now){
+  const t0=now.getTime(),t1=t0+7*864e5,seen={};
+  return (Array.isArray(meetings)?meetings:[]).filter(m=>calVisible(m,false)&&!seen[m.id]&&(seen[m.id]=1)&&!['blocked','held','no_show'].includes(String(m.status))).map(m=>({m,d:tkParseDate(calHeldAt(m))})).filter(x=>x.d.getTime()>=t0-30*60000&&x.d.getTime()<t1).sort((a,b)=>a.d-b.d);
+}
+function renderCalUpcoming(meetings,st,now){
+  const list=calUpcomingList(meetings,st,now),today=calDayKey(now,st.ownerZone),tmr=calAddDays(today,1);
+  const head='<div class="section-head tk-section cal-up-head"><h3>Upcoming</h3><span class="count">'+list.length+'</span></div>';
+  if(!list.length)return `<div class="cal-upcoming">${head}<p class="cal-anone">Nothing in the next 7 days.</p></div>`;
+  const groups=[];list.forEach(x=>{const k=calDayKey(x.d,st.ownerZone);let g=groups[groups.length-1];if(!g||g.k!==k){g={k,items:[]};groups.push(g);}g.items.push(x);});
+  return `<div class="cal-upcoming">${head}${groups.map(g=>`<h4 class="cal-up-day">${g.k===today?'Today':g.k===tmr?'Tomorrow':esc(calKeyDay(g.k))}</h4><ul class="cal-up-list">${g.items.map(x=>{const m=x.m,ty=calType(m),S=calStatusOf(m);return `<li><button type="button" class="cal-up ty-${ty}" onclick="calOpenMeeting(${tkAttr(m.id)})"><b>${esc(calTime(x.d,st.ownerZone))}</b><span><i>${esc(calWho(m))}</i><small>${esc(CAL_TYPES[ty])}${m.status==='confirmed'?'':' · '+esc(S.short)}</small></span></button></li>`}).join('')}</ul>`).join('')}</div>`;
+}
 function calIsLaunch(m){return CAL_KINDS[String((m&&m.kind)||'').toLowerCase()]==='Launch call'}
 /* The machine's title ("Launch call — Ridgeline IT"); without one, the launch call still says what it is. */
 function calTitle(m){m=m||{};if(m.status==='blocked')return String(m.title||'Busy');if(m.title)return String(m.title);return calIsLaunch(m)&&m.company?'Launch call — '+m.company:m.company?'Call — '+m.company:'Meeting'}
@@ -264,14 +287,14 @@ function calWeekModel(monday,meetings,st,opts){
 /* ===================== 4. RENDERERS (pure: data → HTML) ===================== */
 function renderCalBlock(x,model){
   const st=model.st,m=x.m,S=calStatusOf(m),d=new Date(x.t);
-  const top=model.yOf(x.s);const h=Math.max(Math.round(((x.e-x.s)*CAL_PX-2)*10)/10,20);
+  const top=model.yOf(x.s);const h=Math.max(Math.round(((x.e-x.s)*CAL_PX-2)*10)/10,36);
   const w=100/(x.lanes||1),left=w*(x.lane||0);
-  const who=m.status==='blocked'?calTitle(m):String(m.company||calTitle(m));
+  const who=calWho(m),ty=calType(m);
   const meet=!!calMeetLink(m);const launch=calIsLaunch(m);
   const aria=calTitle(m)+(m.person&&m.status!=='blocked'?' with '+m.person:'')+'. '+calDay(d,st.ownerZone)+', '+calTime(d,st.ownerZone)+' '+calOwnerName(st)+' time ('+calWeekdayName(d,st.usZone)+' '+calTime(d,st.usZone)+' '+calZoneName(st.usZone)+'). '+x.mins+' minutes. '+S.short+'.'+(meet?' Google Meet link ready.':'');
   // who first (the row already says the time); the time and the status word on the second line when there is room —
   // a launch call says so first on that line (drawn like an onboarding call otherwise)
-  return `<button type="button" class="cal-ev ${S.cls}${x.mins<=15?' short':''}${launch?' launch':''}" style="top:${top}px;height:${h}px;left:calc(${Math.round(left*100)/100}% + 2px);width:calc(${Math.round(w*100)/100}% - 4px)" onclick="calOpenMeeting(${tkAttr(m.id)})" title="${esc(aria)}" aria-label="${esc(aria)}"><span class="cal-ev-t">${meet?CAL_CAM:''}${esc(who)}</span>${x.mins>15?`<span class="cal-ev-s">${launch?'Launch call · ':''}${esc(calTime(d,st.ownerZone))} · ${esc(S.short)}</span>`:''}</button>`;
+  return `<button type="button" class="cal-ev ${S.cls} ty-${ty}${x.mins<=15?' short':''}${launch?' launch':''}" style="top:${top}px;height:${h}px;left:calc(${Math.round(left*100)/100}% + 2px);width:calc(${Math.round(w*100)/100}% - 4px)" onclick="calOpenMeeting(${tkAttr(m.id)})" title="${esc(aria)}" aria-label="${esc(aria)}"><span class="cal-ev-t">${meet?CAL_CAM:''}${esc(who)}</span>${`<span class="cal-ev-s">${esc(calTime(d,st.ownerZone))}${m.status==='confirmed'?'':' · '+esc(S.short)}</span>`}</button>`;
 }
 function renderCalGrid(model){
   const st=model.st,H=model.height;
@@ -292,8 +315,8 @@ function renderCalAgenda(model){
   const st=model.st;
   if(model.empty)return `<div class="cal-agenda"><p class="cal-anone">Nothing booked this week.</p></div>`;
   return `<div class="cal-agenda">${model.days.map(d=>`<section class="cal-aday${d.today?' today':''}"><h4>${esc(d.label)}${d.today?'<span class="cal-today-tag">Today</span>':''}</h4>${d.items.length
-    ?`<ol class="cal-alist">${d.items.slice().sort((a,b)=>a.t-b.t).map(x=>{const m=x.m,S=calStatusOf(m),t=new Date(x.t);const who=m.status==='blocked'?calTitle(m):String(m.company||calTitle(m));
-      return `<li><button type="button" class="cal-aitem ${S.cls}${calIsLaunch(m)?' launch':''}" onclick="calOpenMeeting(${tkAttr(m.id)})"><span class="cal-atime"><b>${esc(calTime(t,st.ownerZone))}</b><small>${esc(calWeekdayName(t,st.usZone)+' '+calTime(t,st.usZone))} ET</small></span><span class="cal-amain"><b>${calMeetLink(m)?CAL_CAM:''}${esc(who)}</b>${m.person&&m.status!=='blocked'?`<small>${esc(m.person)}</small>`:''}<span class="cal-astatus">${calIsLaunch(m)?'Launch call · ':''}${esc(S.short)} · ${x.mins} min${calMeetLink(m)?' · Google Meet':''}</span></span></button></li>`}).join('')}</ol>`
+    ?`<ol class="cal-alist">${d.items.slice().sort((a,b)=>a.t-b.t).map(x=>{const m=x.m,S=calStatusOf(m),t=new Date(x.t),ty=calType(m);const who=calWho(m);
+      return `<li><button type="button" class="cal-aitem ${S.cls} ty-${ty}${calIsLaunch(m)?' launch':''}" onclick="calOpenMeeting(${tkAttr(m.id)})"><span class="cal-atime"><b>${esc(calTime(t,st.ownerZone))}</b><small>${esc(calWeekdayName(t,st.usZone)+' '+calTime(t,st.usZone))} ET</small></span><span class="cal-amain"><b>${calMeetLink(m)?CAL_CAM:''}${esc(who)}</b>${m.company&&m.person&&m.status!=='blocked'?`<small>${esc(m.company)}</small>`:''}<span class="cal-astatus">${esc(CAL_TYPES[ty])} · ${esc(S.short)} · ${x.mins} min${calMeetLink(m)?' · Google Meet':''}</span></span></button></li>`}).join('')}</ol>`
     :'<p class="cal-anone">Nothing booked</p>'}</section>`).join('')}</div>`;
 }
 function renderCalRequest(m,st,meta){
@@ -347,8 +370,8 @@ function renderCalendar(data,meta){
   }
   const foot=`<div class="cal-foot">${meta.at?tkUpdatedStamp(meta.at):''}<button type="button" class="tk-textbtn" onclick="calRefresh()">Refresh</button><label class="cal-check"><input type="checkbox"${meta.showGone?' checked':''} onchange="calToggleGone(this.checked)">Show cancelled</label></div>${renderCalIntro(st,monday)}`;
   // a computer: the week on the left, who is waiting for your yes in a narrow column on the right — one screen
-  return `<div class="cal-layout"><aside class="cal-side">${renderCalRequests(reqs,st,{now,focus:meta.focus})}</aside>`+
-    `<div class="cal-main"><div class="section-head tk-section cal-week-head"><h3>This week</h3></div>${bar}${week}${foot}</div></div>`;
+  return `<div class="cal-layout"><aside class="cal-side">${renderCalRequests(reqs,st,{now,focus:meta.focus})}${renderCalUpcoming(meta.upcoming||data.meetings,st,now)}</aside>`+
+    `<div class="cal-main"><div class="section-head tk-section cal-week-head"><h3>This week</h3></div>${bar}${renderCalLegend()}${week}${foot}</div></div>`;
 }
 function renderCalHistory(h,st){
   const ms=x=>{const d=tkParseDate(x.at);return d?d.getTime():0};
@@ -544,7 +567,7 @@ async function calPost(body,opts){
 /* ===================== 6. VIEW (the shell router calls viewCalendar) ===================== */
 function calHostHTML(){
   const wk=cal.weeks[cal.week],err=cal.err[cal.week];
-  const meta={week:cal.week,showGone:cal.showGone,at:cal.at[cal.week],focus:cal.focus};
+  const meta={week:cal.week,showGone:cal.showGone,at:cal.at[cal.week],focus:cal.focus,upcoming:[].concat(...Object.keys(cal.weeks).map(k=>cal.weeks[k]&&cal.weeks[k].meetings||[]))};
   if(wk)return (err?`<div class="tk-note red">Couldn't refresh — showing what we had ${esc(tkRel(new Date(cal.at[cal.week]||Date.now())))}. ${esc(err)} <button type="button" class="tk-textbtn" onclick="calRetry()">Try again</button></div>`:'')+renderCalendar(wk,meta);
   const last=cal.lastWeek&&cal.weeks[cal.lastWeek];
   if(last&&!err)return renderCalendar(last,Object.assign(meta,{loading:true,at:cal.at[cal.lastWeek]}));
@@ -564,11 +587,17 @@ function viewCalendar(){
   if(!trialsIsAdmin())return trialsNotAdminHTML();
   if(!calKeyOk(cal.week))cal.week=calMonday(calDayKey(calNow(),calSettingsNow().ownerZone));
   calLoad(cal.week).then(()=>{calRepaint();calOpenFocus();});
+  calLoadUpcoming();
   loadHub(false).then(()=>{try{renderNav();}catch(e){}});   // the client list for "Add a meeting"
   return `<div id="calHost">${calHostHTML()}</div>`;
 }
 /* #calendar/{id} or a trial's "say yes in the Calendar": a request is highlighted at the top; any other
    meeting opens in its panel. */
+/* The Upcoming list needs the next 7 days even when another week is on show: fetch this week and the next. */
+function calLoadUpcoming(){
+  const st=calSettingsNow(),mon=calMonday(calDayKey(calNow(),st.ownerZone));
+  return Promise.all([mon,calAddDays(mon,7)].filter(w=>w!==cal.week).map(w=>calLoad(w).catch(()=>null))).then(()=>calRepaint());
+}
 function calOpenFocus(){
   if(!cal.focus||currentView!=='calendar')return;
   const m=calFind(cal.focus);if(!m)return;
