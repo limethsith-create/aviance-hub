@@ -64,15 +64,15 @@ async function signInAsClient() {
   await routeUser('loginErr');
 }
 
-test('client mode: an approved client profile gets in with clientId, and sees only Channels and Numbers', async () => {
+test('client mode: an approved client profile gets in with clientId, and sees only Channels, Numbers and People', async () => {
   await signInAsClient();
   assert.equal(authUser.role, 'client'); assert.equal(authUser.clientId, 'stone-roofing');
   assert.equal(el('app').style.display, 'grid');
   assert.ok(document.body._classes.has('client-mode') && document.body._classes.has('ro'));
-  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['channels', 'Channels'], ['numbers', 'Numbers']]);
+  assert.deepEqual(navItems().map((i) => [i.view, i.label]), [['channels', 'Channels'], ['numbers', 'Numbers'], ['clientPeople', 'People']]);
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
-    assert.equal((nav.match(/<button class="(nav-item|tab)/g) || []).length, 2, id);
+    assert.equal((nav.match(/<button class="(nav-item|tab)/g) || []).length, 3, id);
     assert.ok(!/Clients|Calendar|Team|Activity|Settings/.test(nav.replace(/<[^>]*>/g, ' ')), id + ': nothing of the owner\'s');
   }
   assert.equal(currentView, 'channels', 'lands on Channels');

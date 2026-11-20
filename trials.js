@@ -2131,7 +2131,7 @@ async function clientInvitePortal(id){
   tk.busy=true;
   try{
     const r=await portalInvite(id,email,{auto:false});
-    if(r.error){toast('Could not make the invite: '+r.error);return;}
+    if(r.error){toast(r.limit?r.error:'Could not make the invite: '+r.error);return;}
     if(el)el.value='';
     const out=document.getElementById('tkPortalOut');if(out)out.innerHTML=tkPortalOut(id);
     toast(r.sent?'Invite sent to '+email:'The invite is ready, but the email did not send');
@@ -2150,9 +2150,13 @@ async function portalInvite(clientId,email,opts){
       const u=await sb.from('portal_invites').select('id').eq('email',email).is('used_at',null).gt('expires_at',new Date().toISOString()).limit(1);
       if(u&&u.data&&u.data.length)return {ok:true,skipped:'already invited'};
     }
+    // their plan's people limit first (Starter 2, Growth 4, Scale 6): the database refuses invites past it
+    const row=typeof tkFindRow==='function'?tkFindRow(clientId):null;
+    const seatErr=typeof seatsUpsert==='function'?await seatsUpsert(clientId,(opts&&opts.plan)||(row&&row.plan)||''):'';
+    if(seatErr)return {ok:false,error:'Could not set their plan limit: '+seatErr};
     const token=tkPortalToken();const hash=await tkSha256Hex(token);
     const ins=await sb.from('portal_invites').insert({client_id:clientId,email,token_hash:hash,created_by:(authUser&&authUser.uid)||null,expires_at:new Date(Date.now()+14*86400000).toISOString()});
-    if(ins&&ins.error)return {ok:false,error:ins.error.message||'try again'};
+    if(ins&&ins.error)return {ok:false,error:ins.error.message||'try again',limit:String(ins.error.message||'').indexOf("You've reached the limit")>=0};
     const link=location.origin+'/#join='+token;
     const r=await machineFetch('/api/mc/clients/'+encodeURIComponent(clientId),{method:'POST',body:{action:'invitePortal',email,link}});
     tk.portalInvite=tk.portalInvite||{};

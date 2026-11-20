@@ -426,10 +426,11 @@ const views={
   numbers:{fn:()=>typeof numbersView==='function'?numbersView():clientLoading(),title:'Numbers',sub:'How your emails are doing'},
   team:{fn:()=>teamPageView(),title:'Team',sub:'Who is working on what, and which clients each person looks after'},
   trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every client by stage, every to-do',back:()=>render('settings')},
+  clientPeople:{fn:()=>typeof peopleClientView==='function'?peopleClientView():clientLoading(),title:'People',sub:'Who from your business can sign in',after:()=>{try{peopleClientLoad();}catch(e){}}},
 };
 function clientLoading(){return '<div class="card client-loading" role="status">Loading…</div>';}
 function hubIsClient(){return !!(authUser&&authUser.role==='client');}
-const CLIENT_VIEWS=['channels','numbers'];
+const CLIENT_VIEWS=['channels','numbers','clientPeople'];
 function render(v){
   if(views[v]&&views[v].alias)v=views[v].alias;
   if(hubIsClient()&&!CLIENT_VIEWS.includes(v))v='channels';   // a client never reaches an owner screen
@@ -513,6 +514,7 @@ function navItems(){
   if(hubIsClient())return [
     {view:'channels',icon:I.inquiry,label:'Channels',badge:''},
     {view:'numbers',icon:I.chart,label:'Numbers',badge:''},
+    {view:'clientPeople',icon:I.people,label:'People',badge:''},
   ];
   const pn=typeof peopleNavCount==='function'?peopleNavCount():'';
   const q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'',ch=typeof chvNavCount==='function'?chvNavCount():'';
@@ -607,7 +609,7 @@ function showLogin(){
   try{calendarStopTimer();}catch(e){}
   try{if(typeof channelsStopTimer==='function')channelsStopTimer();}catch(e){}
 }
-async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}errEl('loginErr','');showLogin();}
+async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}try{if(typeof peopleForgetClient==='function')peopleForgetClient();}catch(e){}errEl('loginErr','');showLogin();}
 /* ---- Password recovery ---- */
 async function forgotPassword(){
   const email=val('loginEmail').toLowerCase();
@@ -771,5 +773,6 @@ boot();
 <script src="keys.js"></script>
 <script src="people.js"></script>
 <script src="numbers.js"></script>
+<script src="seats.js"></script>
 </body>
 </html>
