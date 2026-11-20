@@ -69,7 +69,7 @@ const YD_FIELDS=[
   {key:'PAYMENT.wiseDetails',label:'Your Wise details',help:'As text: what a client needs to pay you by Wise.',type:'textarea'},
   {key:'REVIEW.clutchUrl',label:'Your Clutch review page',help:'The link a happy client gets when we ask for a review.',type:'url'},
 ];
-const YD_NEEDED='needed before the first trial';
+const YD_NEEDED='needed before the first client';
 /* The rows, their error and what each field last said; `busy` = the key being saved. */
 const ydState={s:null,sAt:0,sErr:null,sBusy:null,busy:null,msg:{}};
 
@@ -233,7 +233,7 @@ function renderKeysSet(c){
 }
 
 /* -- Settings › Your details -- */
-/* One field: the label (amber "needed before the first trial" while a required one is empty), the helper line,
+/* One field: the label (amber "needed before the first client" while a required one is empty), the helper line,
    the box with what is set now, Save (Enter saves too), Clear when he changed it, and what it last said. */
 function renderDetailField(f,rows,busyKey,m){
   const v=ydValueOf(rows,f.key);const id=ydId(f.key);const need=!!f.required&&!v.value;
@@ -255,7 +255,7 @@ function renderDetailField(f,rows,busyKey,m){
 function renderDetailsBody(c){
   c=c||{};const rows=ydRows(c.data);const missing=ydMissing(rows);const msgs=c.msg||{};
   const need=missing.filter(f=>f.required);
-  const say=missing.length?'Still to fill in: '+missing.length+' — '+missing.map(f=>f.label).join(', ')+'.'+(need.length?' The first trial cannot start without '+(need.length===1?need[0].label.toLowerCase():'your name and address')+'.':''):'Everything is filled in.';
+  const say=missing.length?'Still to fill in: '+missing.length+' — '+missing.map(f=>f.label).join(', ')+'.'+(need.length?' The first client cannot start without '+(need.length===1?need[0].label.toLowerCase():'your name and address')+'.':''):'Everything is filled in.';
   return `<p class="tk-set-text">What the emails and agreements say about you. Each box saves by itself — press Save (or Enter) after you change one.</p>
     <p class="tk-status ${missing.length?'amber':'green'}">${esc(say)}</p>
     <div class="tk-yd-form">${YD_FIELDS.map(f=>renderDetailField(f,rows,c.busy,msgs[f.key])).join('')}</div>`;

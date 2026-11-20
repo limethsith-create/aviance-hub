@@ -189,7 +189,7 @@ test('their email system: the Launch call card (Only you › Setup & history) co
     assert.ok(part(h, '<div id="tkLcHost">').includes('id="tkSec-launchcall"'), st + ': the card');
     assert.ok(part(h, '<div id="tkOcHost">').startsWith('<div id="tkOcHost"><details class="tk-appbox tk-oc-done" id="tkSec-onboardcall">'), st + ': the onboarding call is history');
     const t = top(h);
-    assert.ok(t.includes('aria-label="The trial journey, step 3 of 5"') && t.includes('<li class="now" aria-current="step"><span class="tk-j-dot" aria-hidden="true">3</span><span class="tk-j-name">Setting up</span>'), st + ': step ③');
+    assert.ok(t.includes('aria-label="The client journey, step 3 of 5"') && t.includes('<li class="now" aria-current="step"><span class="tk-j-dot" aria-hidden="true">3</span><span class="tk-j-name">Setting up</span>'), st + ': step ③');
     assert.ok(t.includes('<p class="tk-q-big">' + esc(launchSimple[st].label) + '</p>'), st + ': the machine\'s sentence');
     assert.ok(!h.includes('<h3>Also on your list</h3>'), st + ': the launch to-do is the big button, not a second list');
     assert.ok(!/approval link sent|no click yet|approve on the page to start|click the approval link/i.test(hubText(noRecords(h))), st + ': nothing implies the OK is a page click only');
@@ -351,7 +351,7 @@ test('Calendar: a kind:launch meeting is labelled "Launch call" (the machine\'s 
   const past = new Date('2026-10-20T16:00:00Z');
   let p = renderCalMeeting(clone(calLaunch.confirmed), st, { now: past });
   assert.ok(p.includes('<h3>Launch call — Gale Roofing</h3><p>Confirmed — did the call happen? If they said yes to their list and emails, press Approved on the call</p>'));
-  assert.ok(p.includes('<small>Their OK</small><span>Not in yet. On the call, go through the list and the emails together; when they say yes, press Approved on the call (on their trial).</span>'));
+  assert.ok(p.includes('<small>Their OK</small><span>Not in yet. On the call, go through the list and the emails together; when they say yes, press Approved on the call (on their page).</span>'));
   assert.ok(between(p, '<div class="modal-foot cal-acts">', '</div>').startsWith('<div class="modal-foot cal-acts"><button class="btn" onclick="calLaunchApprove(&quot;mlaunch&quot;)">Approved on the call</button><button class="btn ghost" onclick="calHeld(&quot;mlaunch&quot;)">Call done</button>'));
   assert.ok(p.includes('Join Google Meet'));
   // still ahead: the shortcut is there too (he may hold the call early), Call done stays ghost

@@ -1,5 +1,4 @@
-/* Tests for a client's mail on Stats: Conversations, Every email sent (with Show more), the thread viewer, and
-   Trials with a made-up (test run) trial at step 4.
+/* Tests for a client's mail on Stats: Conversations, Every email sent (with Show more) and the thread viewer.
    Run with:  npm test   (= node --test tests/*.test.mjs)
 
    Same set-up as money.test.mjs: the shell's inline script, then the section scripts, with a tiny fake DOM. No network. */
@@ -193,11 +192,3 @@ test('an employee sees every conversation and every email, and can open them', a
   } finally { offline(); trialsStopTimer(); reset(); }
 });
 
-test('Trials: a made-up (test run) trial at step 4 "Sending" shows with its Test tag and the journey', () => {
-  reset();
-  const demo = Object.assign({}, simpleRows.acme, { id: 'demo-trial', name: 'Maple Test Ltd', demo: true, simple: Object.assign({}, simpleRows.acme.simple, { company: 'Maple Test Ltd', person: 'Tom Demo' }) });
-  const hub = Object.assign({}, fullHub, { stages: stagesWith({ live: [demo] }) });
-  const h = renderTrialList(hub, {}); const t = visibleText(h);
-  assert.ok(h.includes('Maple Test Ltd</span><span class="pill tk-test"'), 'the Test tag');
-  assert.ok(t.includes('Step 4 of 5 — Sending emails'), t.slice(0, 400));
-});

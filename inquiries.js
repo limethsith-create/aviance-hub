@@ -1,12 +1,14 @@
-/* ===================== AVIANCE HUB — Inquiries (paid plans, no trial) =====================
-   People who want Starter / Growth / Scale without a trial book a call from the website's
-   "Book a call" form. The machine saves each one, puts the call in the Calendar, emails them
+/* ===================== AVIANCE HUB — Inquiries (the website's bookings) =====================
+   People who want Starter / Growth / Scale book a sales call from the website's
+   "Book a call" form — the only way in. The machine saves each one, puts the call in the Calendar, emails them
    the confirmation and the reminders, and pops it up on the owner's phone (push url
    /#inquiry/{id}); here he sees every person's stage and moves them along: Booked → Call done
-   (or No-show) → Following up → Proposal sent → Won / Lost, adds notes, or turns one into a trial. Contract: email-distributor/docs/HUB-API.md "## Plan inquiries".
+   (or No-show) → Following up → Proposal sent → Won / Lost, and adds notes. Won makes them a paying client (the
+   onboarding email goes out); Lost closes the record held for the call. Contract: email-distributor/docs/HUB-API.md
+   "Changes on 2026-11-20" and "## Plan inquiries".
      GET  /api/mc/hub        → inquiries: {counts, open, latest:[…]} + a to-do per new one
      GET  /api/mc/inquiries  → {inquiries:[record…] newest first, counts}
-     POST /api/mc/inquiries  {action:'status', id, status, note?} · {action:'note', id, text} · {action:'toTrial', id}
+     POST /api/mc/inquiries  {action:'status', id, status, note?} · {action:'note', id, text}
    Loaded after trials.js: it reuses the machine client, the host/repaint plumbing and trialPost. */
 
 const IQ_HOST_TZ = 'Asia/Colombo';   // the owner's time (the website books calls in it; whenHost is written in it)
@@ -81,22 +83,6 @@ function iqWhenHost(q) {
   const d = tkParseDate(q.slotStart); if (!d) return '';
   try { return new Intl.DateTimeFormat('en-US', { timeZone: IQ_HOST_TZ, weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d); } catch (e) { return tkDateTime(d); }
 }
-function iqTrialOutcomeText(o) {
-  return { onboarding: 'the welcome email was sent', queued: 'on the waiting list', declined: 'it was turned down automatically', manual: 'needs you to finish it by hand', review: 'waiting for your yes or no', received: 'already applied' }[String(o || '').toLowerCase()] || '';
-}
-/* What to tell the owner after "Start a trial instead". */
-function iqTrialToast(d, name) {
-  d = d || {}; const o = String(d.outcome || '').toLowerCase(); name = name || 'them';
-  if (d.already) return 'This inquiry is already a trial';
-  if (d.duplicate || o === 'received') return name + ' already applied for a trial moments ago. Nothing new was sent';
-  if (o === 'onboarding') return 'Trial started. ' + name + ' was emailed the welcome link';
-  if (o === 'queued') { const pos = d.position != null ? d.position : null; return 'Trial started. On the waiting list' + (pos != null ? ' at number ' + pos : '') + '; the welcome link goes out when a spot opens'; }
-  if (o === 'declined') return 'The trial was turned down automatically' + (d.reason ? ' (' + String(d.reason).replace(/_/g, ' ') + ')' : '');
-  if (o === 'review') return 'Trial saved and waiting for your yes or no';
-  if (o === 'manual') return 'Trial saved, but something went wrong. Open the trial to finish it';
-  return 'Trial started';
-}
-
 /* ---------- renderers (pure: data → HTML) ---------- */
 function renderInquiryCall(q, now, cls) {
   const when = iqWhenHost(q);
@@ -130,7 +116,7 @@ function renderInquiryCard(q, now) {
     ${q.sells ? `<p class="iq-sells">${esc(iqClip(q.sells, 160))}</p>` : ''}
     ${ans ? `<div class="iq-ans">${esc(ans)}</div>` : ''}
     ${mail ? `<div class="iq-mails">${mail}</div>` : ''}
-    ${q.clientId ? '<div class="iq-trial-tag">Now a trial</div>' : ''}
+    ${q.clientId && q.status === 'won' ? '<div class="iq-trial-tag">Now a client</div>' : ''}
   </div>`;
 }
 /* The pipeline: one tile per stage with how many are in it; a tile filters the list. */
@@ -191,9 +177,12 @@ function renderInquiry(q, meta) {
     <small>1-hour reminder</small><span>${q.reminded_soon ? 'Sent ' + esc(tkRel(q.reminded_soon, now)) : q.status === 'new' ? 'Goes an hour before the call' : 'Stopped — they moved on'}</span>
     <small>5-minute reminder</small><span>${q.reminded_now ? 'Sent ' + esc(tkRel(q.reminded_now, now)) : q.status === 'new' ? 'Goes 5 minutes before the call' : 'Stopped — they moved on'}</span>
   </div></div>`;
-  const trial = q.clientId
-    ? `<div class="iq-trial-done"><b>Now a trial</b>${q.trialOutcome && iqTrialOutcomeText(q.trialOutcome) ? ' — ' + esc(iqTrialOutcomeText(q.trialOutcome)) : ''}. <span class="tk-linkish" onclick="openTrial(${tkAttr(q.clientId)})">Open the trial →</span></div>`
-    : `<p class="tk-small muted">Not ready for a paid plan? We email them the free-trial welcome link, or add them to the waiting list if three trials are already running.</p><div class="tk-inline"><button class="btn ghost" onclick="inquiryToTrial(${tkAttr(id)})">Start a free trial and email them</button></div>`;
+  // Won makes them a paying client: the record held for the call (with what we found) when they gave a website
+  const trial = q.clientId && q.status === 'won'
+    ? `<div class="iq-trial-done"><b>Now a client</b> — they were emailed to book the onboarding call. <span class="tk-linkish" onclick="openTrial(${tkAttr(q.clientId)})">Open their page →</span></div>`
+    : q.clientId || q.website
+      ? `<p class="tk-small muted">After the call, press <b>Won</b> and they become a client (the onboarding email goes out), or <b>Lost</b> (nothing is emailed).${q.clientId ? ` <span class="tk-linkish" onclick="openTrial(${tkAttr(q.clientId)})">What we found before the call →</span>` : ''}</p>`
+      : `<p class="tk-small muted">No website on this booking, so Won can't make them a client from here. Add them with their website instead.</p><div class="tk-inline"><button class="btn ghost" onclick="inquiryAddClient(${tkAttr(id)})">Add them as a paying client</button></div>`;
   const next = IQ_NEXT[q.status] || [];
   const moveBtn = (s, main) => `<button class="btn${main ? '' : ' ghost'}" onclick="inquirySetStatus(${tkAttr(id)},'${s}')">${esc(IQ_STATUS[s][1])}</button>`;
   const others = IQ_STATUSES.filter((s) => s !== q.status && !next.includes(s));
@@ -213,7 +202,7 @@ function renderInquiry(q, meta) {
     <div class="tk-inline"><button class="btn ghost" onclick="inquiryAddNote(${tkAttr(id)})">Add note</button></div></div>`;
   return head + status + answersHtml + mails + facts + notesHtml;
 }
-/* The small line on the Trials board: "2 new inquiries — Stone Roofing, call Tue 7:30 PM". */
+/* The small line on Behind the scenes: "2 new inquiries — Stone Roofing, call Tue 7:30 PM". */
 function renderInquiryStrip(summary, meta) {
   meta = meta || {};
   if (!summary || !summary.counts) return '';
@@ -270,20 +259,23 @@ function inquiryOpenCalendar(id) {
 function inquirySetStatus(id, status) {
   const n = document.getElementById('iqStatusNote'); const note = n && n.value ? n.value.trim() : '';
   const label = IQ_STATUS[status] ? IQ_STATUS[status][1].toLowerCase() : status;
-  return trialPost('/api/mc/inquiries', Object.assign({ action: 'status', id, status }, note ? { note } : {}), { done: 'Moved to ' + (IQ_STATUS[status] ? IQ_STATUS[status][1] : label), fail: 'Not changed' });
+  const q = iqFind(id); const name = (q && (q.company || q.name)) || 'them';
+  // Won makes them a paying client and emails them; the machine says why when it can't (no website, say)
+  const opts = status === 'won'
+    ? { confirm: 'Mark ' + name + ' as Won? They become a paying client and get an email asking them to book the onboarding call.', done: 'Won — ' + name + ' is a client now and was emailed', fail: 'Not marked Won' }
+    : status === 'lost' && q && q.clientId ? { confirm: 'Mark ' + name + ' as Lost? Nothing is emailed to them.', done: 'Moved to Lost', fail: 'Not changed' }
+      : { done: 'Moved to ' + (IQ_STATUS[status] ? IQ_STATUS[status][1] : label), fail: 'Not changed' };
+  return trialPost('/api/mc/inquiries', Object.assign({ action: 'status', id, status }, note ? { note } : {}), opts);
 }
 function inquiryAddNote(id) {
   const t = document.getElementById('iqNoteText'); const text = t && t.value ? t.value.trim() : '';
   if (!text) { toast('Write the note first'); return Promise.resolve({ ok: false }); }
   return trialPost('/api/mc/inquiries', { action: 'note', id, text }, { done: 'Note added', fail: 'Note not saved' });
 }
-function inquiryToTrial(id) {
-  const q = iqFind(id); const name = (q && (q.name || q.company)) || 'them';
-  return trialPost('/api/mc/inquiries', { action: 'toTrial', id }, {
-    confirm: 'Start a free trial for ' + name + '? They get the welcome email now.',
-    done: (data) => { if (q && data && data.clientId) Object.assign(q, { clientId: data.clientId, trialOutcome: data.outcome || q.trialOutcome || null }); return iqTrialToast(data, name); },
-    fail: 'Trial not started',
-  });
+/* A booking without a website: the "Add a paying client" form, filled in from the booking (they add the website). */
+function inquiryAddClient(id) {
+  const q = iqFind(id) || {};
+  if (typeof openNewPayingClient === 'function') openNewPayingClient({ companyName: q.company || '', contactName: q.name || '', contactEmail: q.email || '', website: q.website || '', plan: q.plan || 'starter' });
 }
 function inquiriesForget() { Object.assign(iq, { list: null, counts: null, at: 0, err: null, filter: 'open' }); currentInquiryId = null; }
 

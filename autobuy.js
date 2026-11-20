@@ -75,7 +75,7 @@ function abPath(id){return '/api/mc/clients/'+encodeURIComponent(id)+'/autobuy'}
 function renderAutobuyBuy(d){
   d=d||{};const row=d.row||{};const id=row.id;const ab=tkAutobuy(d);
   const close='<div class="modal-foot"><button type="button" class="btn ghost" onclick="abCloseBuy()">Close</button></div>';
-  if(!ab||!ab.toBuy)return `<div class="modal-head"><div><h3>Nothing to buy right now</h3><p>This trial isn't waiting for a domain.</p></div></div>${close}`;
+  if(!ab||!ab.toBuy)return `<div class="modal-head"><div><h3>Nothing to buy right now</h3><p>This client isn't waiting for a domain.</p></div></div>${close}`;
   const buy=ab.buy;const inb=abInboxes(ab.count);const prov=abProvider(buy.provider);const company=tkSimple(row).company;
   const copy=(v,what)=>`<button type="button" class="btn ghost tk-abb-copy" onclick="abCopy(${tkAttr(v)})" aria-label="${esc('Copy '+what)}">Copy</button>`;
   // a long address may wrap on a phone: after the "@", never in the middle of a word
@@ -142,13 +142,13 @@ function renderAutobuyCard(d,meta){
 function renderAutobuyUnmatched(list,trials){
   list=(Array.isArray(list)?list:[]).filter(u=>u&&typeof u==='object'&&String(u.domain||'').trim());if(!list.length)return '';
   trials=Array.isArray(trials)?trials:[];
-  return `<h4 class="tk-set-h4">Bought, but not matched to a trial</h4>
-    <p class="tk-set-text">We couldn't tell which trial these are for. Pick the trial and press Link it — we set it up for them.</p>
+  return `<h4 class="tk-set-h4">Bought, but not matched to a client</h4>
+    <p class="tk-set-text">We couldn't tell which client these are for. Pick the client and press Link it — we set it up for them.</p>
     <ul class="tk-ab-un">${list.map((u,i)=>{
       const n=tkNorm(u.mailboxes);const facts=[n!=null?abInboxes(n):'',u.boughtAt?'bought '+tkDayName(u.boughtAt):''].filter(Boolean).join(' · ');
       const sid='abUn'+i;
-      const pick=trials.length?`<div class="tk-ab-pick"><label for="${sid}">This is for…</label><div class="tk-ab-pickrow"><select id="${sid}" data-tk-form><option value="">Pick a trial</option>${trials.map(t=>`<option value="${esc(t.id)}">${esc(t.company)}</option>`).join('')}</select><button type="button" class="btn" onclick="abLink(${tkAttr(u.domain)},${tkAttr(sid)},this)">Link it</button></div></div>`
-        :'<p class="tk-ab-none">No trial is waiting for a domain right now.</p>';
+      const pick=trials.length?`<div class="tk-ab-pick"><label for="${sid}">This is for…</label><div class="tk-ab-pickrow"><select id="${sid}" data-tk-form><option value="">Pick a client</option>${trials.map(t=>`<option value="${esc(t.id)}">${esc(t.company)}</option>`).join('')}</select><button type="button" class="btn" onclick="abLink(${tkAttr(u.domain)},${tkAttr(sid)},this)">Link it</button></div></div>`
+        :'<p class="tk-ab-none">No client is waiting for a domain right now.</p>';
       return `<li><p><b class="tk-break">${esc(u.domain)}</b>${facts?` <span class="tk-ab-facts">· ${esc(facts)}</span>`:''}</p>${pick}</li>`;
     }).join('')}</ul>`;
 }
@@ -156,7 +156,7 @@ function renderAutobuyUnmatched(list,trials){
 function renderAutobuySteps(data){
   data=data||{};const st=String(data.status||'');const saved=st==='connected'||st==='broken';
   return `<ol class="tk-gm-steps">
-    <li><b>Make an account at CheapInboxes.</b> Open ${tkLink(AB_HOME,'cheapinboxes.com')} and sign up. It's the shop where you buy each trial's domain and inboxes.</li>
+    <li><b>Make an account at CheapInboxes.</b> Open ${tkLink(AB_HOME,'cheapinboxes.com')} and sign up. It's the shop where you buy each client's domain and inboxes.</li>
     <li><b>Add a card.</b> In your CheapInboxes account, open Billing and add a card. What you buy there is charged to it — we never buy anything ourselves.</li>
     <li><b>Create an API key.</b> In your CheapInboxes account, open API keys and create a new key. It starts with <b>ci_live_</b>. Copy it.</li>
     <li><b>Paste it here.</b>${saved?'<span class="tk-gm-saved">Yours is saved (hidden). Paste a new one only to replace it.</span>':''}
@@ -174,7 +174,7 @@ function renderAutobuySet(c){
   const st=String(data.status||'');const acct=String(data.account||'').trim();const on=st==='connected'||st==='broken';
   const reason=String(data.problem||data.error||'').trim().replace(/[.\s]+$/,'');
   const say={
-    not_set_up:"Not set up. Do the steps below once — about 10 minutes. After that you buy each trial's domain and inboxes on CheapInboxes, and we set up the rest by ourselves.",
+    not_set_up:"Not set up. Do the steps below once — about 10 minutes. After that you buy each client's domain and inboxes on CheapInboxes, and we set up the rest by ourselves.",
     connected:'Connected'+(acct?' as '+acct:'')+'. When you buy a domain and inboxes there, we find them and set everything up by ourselves.',
     broken:'Problem — '+(reason||"CheapInboxes doesn't accept your key any more")+'. Paste a new key in step 4 and press Save.',
   }[st]||"We couldn't tell whether CheapInboxes is set up.";
@@ -236,7 +236,7 @@ async function abPost(id,body,opts,btn){
 /* -- the "what to buy" panel -- */
 function abOpenBuy(id){
   id=String(id);const ab=tkAutobuy(tk.detail[id]);
-  if(!ab||!ab.toBuy){toast("This trial isn't waiting for a domain right now");return;}
+  if(!ab||!ab.toBuy){toast("This client isn't waiting for a domain right now");return;}
   abState.open=id;openModal(renderAutobuyBuy(tk.detail[id]));
 }
 function abCloseBuy(){abState.open=null;closeModal();}
@@ -295,10 +295,10 @@ async function abForget(btn){
   if(r&&r.ok){abState.test=null;await abSetAfter();}
   return r;
 }
-/* A purchase we couldn't match: this domain is that trial's. */
+/* A purchase we couldn't match: this domain is that client's. */
 async function abLink(domain,selId,btn){
   domain=String(domain||'');const s=document.getElementById(selId);const id=String((s&&s.value)||'');
-  if(!id){toast('Pick the trial it is for first');return {ok:false};}
+  if(!id){toast('Pick the client it is for first');return {ok:false};}
   const name=tkSimple(tkFindRow(id)||{id}).company;
   const r=await abSend(abPath(id),{action:'link',domain},{confirm:'Link '+domain+' to '+name+'? We start setting it up for them right away.',done:'Linked. We set up '+domain+' for '+name+' now',fail:'Not linked'},btn);
   if(r&&r.ok){abStore(id,r.data);tk.setOpen.inboxes=true;await Promise.all([loadCheapInboxes(true),loadHub(true)]);trialsRepaint('settings');try{renderNav();updateNotifBadge();}catch(e){}}

@@ -277,7 +277,7 @@ test('Settings › Your details: the eight boxes with plain labels and helper li
   const s = renderDetailsSet({ data: configStates.some });
   assert.equal(s.state, '<span class="pill amber" id="ydPill">4 still to fill in</span>');
   const b = s.body;
-  assert.ok(b.includes('<p class="tk-status amber">Still to fill in: 4 — Your postal address, Your PayPal.me link, Your Wise details, Your Clutch review page. The first trial cannot start without your postal address.</p>'));
+  assert.ok(b.includes('<p class="tk-status amber">Still to fill in: 4 — Your postal address, Your PayPal.me link, Your Wise details, Your Clutch review page. The first client cannot start without your postal address.</p>'));
   const labels = [...b.matchAll(/<label for="ydIn-[A-Za-z_]+">([^<]+)/g)].map((m) => m[1]);
   assert.deepEqual(labels, ['Your full name', 'Your postal address', 'Your email address', 'The onboarding inbox', 'Your call link', 'Your PayPal.me link', 'Your Wise details', 'Your Clutch review page']);
   for (const h of ['Signs the agreements and the emails.', 'Goes at the bottom of every email — US law requires one.', 'Where the system emails you.', 'Which inbox sends the onboarding emails and receives the replies. It must be an inbox the system can log into. Left empty, the first Aviance inbox is used.', 'Your Zoom or Google Meet link — used until Google Meet is connected.', 'How a client pays you by PayPal.', 'As text: what a client needs to pay you by Wise.', 'The link a happy client gets when we ask for a review.'])
@@ -288,7 +288,7 @@ test('Settings › Your details: the eight boxes with plain labels and helper li
   assert.ok(name.includes('<input id="ydIn-OWNER_signerName" data-tk-form type="text" autocomplete="name" autocapitalize="words" spellcheck="false" value="Limeth Sith" onkeydown="ydKey(event,&quot;OWNER.signerName&quot;)">'));
   assert.ok(name.includes('<button type="button" class="btn" id="ydSave-OWNER_signerName" onclick="ydSave(&quot;OWNER.signerName&quot;,this)">Save</button>') && name.includes('onclick="ydReset(&quot;OWNER.signerName&quot;,this)">Clear</button>'));
   const addr = field(b, 'OWNER.address');
-  assert.ok(addr.startsWith('<div class="tk-yd-field need" id="ydField-OWNER_address">') && addr.includes('<span class="tk-yd-req need">needed before the first trial</span>'));
+  assert.ok(addr.startsWith('<div class="tk-yd-field need" id="ydField-OWNER_address">') && addr.includes('<span class="tk-yd-req need">needed before the first client</span>'));
   assert.ok(addr.includes('<textarea id="ydIn-OWNER_address" data-tk-form rows="3" autocomplete="off"></textarea>') && !addr.includes('ydReset('), 'a postal address gets more than one line; nothing to clear');
   // the others are not marked; the email and the links have the right kind of box
   assert.ok(!field(b, 'OWNER.email').includes('tk-yd-req') && field(b, 'OWNER.email').includes('type="email" inputmode="email"') && field(b, 'OWNER.email').includes('value="owner@example.com"'));
@@ -298,11 +298,11 @@ test('Settings › Your details: the eight boxes with plain labels and helper li
   // everything empty / everything in
   const e = renderDetailsSet({ data: configStates.empty });
   assert.equal(e.state, '<span class="pill amber" id="ydPill">7 still to fill in</span>');
-  assert.ok(e.body.includes('Still to fill in: 7 — Your full name, Your postal address, Your email address, Your call link, Your PayPal.me link, Your Wise details, Your Clutch review page. The first trial cannot start without your name and address.'));
+  assert.ok(e.body.includes('Still to fill in: 7 — Your full name, Your postal address, Your email address, Your call link, Your PayPal.me link, Your Wise details, Your Clutch review page. The first client cannot start without your name and address.'));
   assert.equal(count(e.body, /class="tk-yd-field need"/g), 2);
   const full = clone(configStates.some); Object.assign(full.settings[0].value, { address: '12 Main St, Austin TX' }); Object.assign(full.settings[1].value, { paypalMe: 'https://paypal.me/aviance', wiseDetails: 'Wise USD 123' }); full.settings[4].value.clutchUrl = 'https://clutch.co/profile/aviance';
   const fr = renderDetailsSet({ data: full });
-  assert.equal(fr.state, '<span class="pill green" id="ydPill">All filled in</span>'); assert.ok(fr.body.includes('<p class="tk-status green">Everything is filled in.</p>') && !fr.body.includes('needed before the first trial') && !fr.body.includes('tk-yd-field need'));
+  assert.equal(fr.state, '<span class="pill green" id="ydPill">All filled in</span>'); assert.ok(fr.body.includes('<p class="tk-status green">Everything is filled in.</p>') && !fr.body.includes('needed before the first client') && !fr.body.includes('tk-yd-field need'));
   assert.ok(fr.body.includes('<textarea id="ydIn-OWNER_address" data-tk-form rows="3" autocomplete="off">12 Main St, Austin TX</textarea>'));
   // one row per field
   const d = renderDetailsSet({ data: configStates.dotted });
@@ -358,7 +358,7 @@ test('Settings › Your details: Save (Enter too) and Clear post the right bodie
     assert.equal(toastText(), 'Cleared — your email address');
     await ydReset('OWNER.signerName');
     assert.deepEqual(st.posts(CFG).pop()[2], { action: 'set', key: 'OWNER', value: { usHours: ['09:00', '17:00'], signerName: null, address: '12 Main St\nAustin, TX 78701', email: null, telegramChatId: null } });
-    assert.ok(el('ydField-OWNER_signerName').outerHTML.includes('tk-yd-field need') && el('ydField-OWNER_signerName').outerHTML.includes('needed before the first trial'), 'cleared: needed again');
+    assert.ok(el('ydField-OWNER_signerName').outerHTML.includes('tk-yd-field need') && el('ydField-OWNER_signerName').outerHTML.includes('needed before the first client'), 'cleared: needed again');
     // the reason when the machine says no
     st.cfgErr = 'OWNER.email: expected text'; el('ydIn-OWNER_email').value = 'x@y.co'; await ydSave('OWNER.email');
     assert.equal(el('ydMsg-OWNER_email').innerHTML, 'OWNER.email: expected text.'); assert.equal(el('ydMsg-OWNER_email').className, 'tk-yd-msg red'); assert.equal(el('ydIn-OWNER_email').value, 'x@y.co', 'what was typed stays');

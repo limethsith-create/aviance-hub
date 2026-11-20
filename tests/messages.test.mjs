@@ -70,7 +70,7 @@ test('Messages: the whole conversation as a chat — oldest at the top, newest a
   assert.ok(h.startsWith('<section class="card tk-msgs" id="tkSec-messages">') && h.includes('<h3>Messages</h3>'));
   assert.ok(h.includes('<div class="tk-chat" id="tkChat" role="region" tabindex="0" aria-label="Emails with Sam, oldest at the top">'));
   // oldest first, whatever order the machine sent
-  const order = ['Hi Sam, good news', 'Day 1 is Monday', 'What times work', 'Here is my booking page', 'How much is it after', 'The 30-day trial is free', 'Happy to go through', 'Sam is out today'];
+  const order = ['Hi Sam, good news', 'Day 1 is Monday', 'What times work', 'Here is my booking page', 'How much is it', "You're on the Starter plan", 'Happy to go through', 'Sam is out today'];
   let last = -1; for (const t of order) { const i = h.indexOf(t); assert.ok(i > last, 'order: ' + t); last = i; }
   // theirs vs ours, as classes (grey on the left / outlined on the right is the CSS below)
   assert.equal(count(h, /<div class="tk-cm in">/g), 3); assert.equal(count(h, /<div class="tk-cm out">/g), 2); assert.equal(count(h, /<div class="tk-cm out auto">/g), 2);
@@ -93,7 +93,7 @@ test('Messages: the whole conversation as a chat — oldest at the top, newest a
 test('Messages: the reply bot\'s emails say "Auto-reply · …" in plain words, one per rule; automatic emails fold to one line "We sent: …" with "show"', () => {
   const h = renderMessages(ecreekConvDetail);
   assert.ok(h.includes('<div class="tk-cm out auto"><div class="tk-cm-head"><span class="tk-cm-who"><b>Auto-reply</b><span class="tk-cm-rule"> · sent your booking link and free times</span></span>'));
-  assert.ok(h.includes('<b>Auto-reply</b><span class="tk-cm-rule"> · explained the trial is free</span>'));
+  assert.ok(h.includes('<b>Auto-reply</b><span class="tk-cm-rule"> · said which plan they are on and that the call covers billing</span>'));
   // every rule, in the owner's words
   for (const [rule, words] of Object.entries(botRuleWords)) {
     const one = renderMsgEntry({ dir: 'out', at: '2026-10-16T09:03:00Z', kind: 'auto_reply', auto: true, rule, text: 'x' }, {});
@@ -105,8 +105,8 @@ test('Messages: the reply bot\'s emails say "Auto-reply · …" in plain words, 
   assert.ok(renderMsgEntry({ dir: 'out', kind: 'owner_reply', auto: true, rule: 'reschedule', text: 'x' }, {}).includes(' · sent the booking page to pick another time'), 'auto: true marks it too');
   assert.ok(renderMsgEntry({ dir: 'out', kind: 'auto_reply', rule: '<b>x</b>', text: 'x' }, {}).includes('<b>Auto-reply</b></span></div>'), 'an unknown rule is never printed');
   // system emails: one line, folded, "show" / "hide"
-  assert.ok(h.includes('<details class="tk-cm-sys"><summary><span class="tk-cm-sys-t">We sent: Your trial dates</span><span class="tk-cm-show" aria-hidden="true"><span class="tk-cm-open">show</span><span class="tk-cm-close">hide</span></span>'));
-  assert.ok(between(h, 'tk-cm-sys', '</details>').includes('<div class="tk-cm-text">Day 1 is Monday 26 October.\nDay 30 is Tuesday 24 November.</div>'), 'the full text when opened');
+  assert.ok(h.includes('<details class="tk-cm-sys"><summary><span class="tk-cm-sys-t">We sent: We start on Monday 26 October</span><span class="tk-cm-show" aria-hidden="true"><span class="tk-cm-open">show</span><span class="tk-cm-close">hide</span></span>'));
+  assert.ok(between(h, 'tk-cm-sys', '</details>').includes('<div class="tk-cm-text">Day 1 is Monday 26 October.</div>'), 'the full text when opened');
   assert.ok(!between(h, 'tk-cm-sys', '</details>').includes(' open'), 'folded to begin with');
   assert.ok(renderMsgEntry({ dir: 'out', kind: 'system', text: 'x' }, {}).includes('We sent: an automatic email'));
   const css = fs.readFileSync(path.join(root, 'trials.css'), 'utf8');
@@ -470,10 +470,10 @@ test('Settings › Reply bot: what it answers, in plain words; where to switch i
   const r = renderReplyBotSet({ hub: fullHub, details: { 'ecreek-it': ecreekConvDetail } });
   assert.equal(r.state, '', 'no switch for everyone in the contract: no made-up state');
   const t = visibleText(r.body);
-  for (const w of ["They ask when you're free", 'sends your booking link and three free times', 'They suggest a time', 'They need to move the call', 'They ask what it costs', 'explains the 30-day trial is free', 'They ask what to prepare', 'sends the one-page form', "They're not interested", 'They just say thanks', 'nothing — no reply needed'])
+  for (const w of ["They ask when you're free", 'sends your booking link and three free times', 'They suggest a time', 'They need to move the call', 'They ask what it costs', "says which plan they're on", 'They ask what to prepare', 'sends the one-page form', "They're not interested", 'They just say thanks', 'nothing — no reply needed'])
     assert.ok(t.includes(w), w);
   assert.ok(t.includes('at most 3 emails a day to one person'), 'the daily limit from the bot data');
-  assert.ok(t.includes('To turn it off for one person, use the switch under Messages on their trial page. To turn it off for everyone, or change what it says, open Advanced settings.'));
+  assert.ok(t.includes('To turn it off for one person, use the switch under Messages on their page. To turn it off for everyone, or change what it says, open Advanced settings.'));
   assert.ok(r.body.includes('onclick="openMachine(&quot;/mc/config&quot;)">Advanced settings ↗</button>'));
   assert.ok(visibleText(renderReplyBotSet({}).body).includes('only a few emails a day'), 'no bot data: no number');
   const known = renderReplyBotSet({ hub: Object.assign({}, fullHub, { machine: Object.assign({}, fullHub.machine, { replyBot: { enabled: false, maxPerDay: 2 } }) }) });
@@ -709,7 +709,7 @@ test('alerts: "could not send" and "bounced" are urgent (red, the bell, a to-do 
 /* ───────────── 11. Settings › Reply bot: the two new answers ───────────── */
 test('Settings › Reply bot: "They ask who you are, or how you got their email" and "They say not now, or later" (check back in N weeks — REPLYBOT.laterWeeks from the settings the hub already reads; "a few weeks" without it); the Messages labels for both', () => {
   const t = visibleText(renderReplyBotSet({ hub: fullHub }).body);
-  assert.ok(t.includes('They ask who you are, or how you got their email — says honestly how their email reached you (they applied on your website, or wrote through its form) and gives your website. If they came to you another way, it leaves the answer to you.'));
+  assert.ok(t.includes('They ask who you are, or how you got their email — says honestly how their email reached you (they booked a call through the form on your website) and gives your website. If they came to you another way, it leaves the answer to you.'));
   assert.ok(t.includes("They say not now, or later — says no problem and that you'll check back in a few weeks, and stops the reminders. On that day you get a reminder to check back with them."), 'no settings read: no number made up');
   // GET /api/mc/config: one row per top-level setting (the field inside), or a row per field — both shapes
   const cfg = { settings: [{ key: 'OWNER', default: {}, value: {} }, { key: 'REPLYBOT', default: { enabled: true, maxPerDay: 3, laterWeeks: 4 }, value: { enabled: true, maxPerDay: 3, laterWeeks: 6 }, overridden: true }] };

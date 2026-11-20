@@ -116,7 +116,7 @@ test('shell: the owner and approved team members get in (a team member read-only
   assert.equal(authUser.role, 'employee'); assert.equal(el('app').style.display, 'grid');
   assert.ok(document.body._classes.has('ro'), 'read-only');
   assert.ok(trialsIsAdmin() && !hubIsOwner());
-  assert.deepEqual(navItems().map((i) => i.view), ['trials', 'paying', 'calendar', 'team', 'dialer', 'mystats'], 'no Settings, no Activity');
+  assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'team'], 'no Settings, no Activity');
   assert.ok(viewSettings().includes('Only the owner can open this.'));
   authUser = null;
   supa.session = { access_token: 'test-token' };
@@ -124,26 +124,26 @@ test('shell: the owner and approved team members get in (a team member read-only
   await routeUser('loginErr');
   assert.equal(authUser.role, 'admin');
   assert.equal(el('app').style.display, 'grid');
-  assert.equal(currentView, 'trials', 'lands on the Trials board');
+  assert.equal(currentView, 'paying', 'lands on Clients');
   assert.equal(el('whoName').textContent, 'Limethsith');
   assert.ok(!document.body._classes.has('ro'), 'the owner is not read-only');
 });
 
 test('shell: render() ignores unknown views and needs a signed-in owner', () => {
   asOwner();
-  render('trials'); assert.equal(currentView, 'trials');
-  render('dashboard'); assert.equal(currentView, 'trials');
+  render('trials'); assert.equal(currentView, 'paying', 'the old Trials place opens Clients');
+  render('dashboard'); assert.equal(currentView, 'paying');
   render('settings'); assert.equal(currentView, 'settings');
   render('trialAlerts'); assert.equal(currentView, 'settings', 'the old alerts page is gone (it is Settings › Alerts now)');
   authUser = null; render('trials'); assert.equal(currentView, 'settings', 'signed out: no navigation');
   asOwner(); render('trials');
 });
 
-test('shell: ⌘K lists trials and actions only; the bell shows trial to-dos and urgent alerts', () => {
+test('shell: ⌘K lists clients and actions only; the bell shows client to-dos and urgent alerts', () => {
   asOwner(); trialsIngestHub(fullHub);
   renderCmdk('');
   const list = el('cmdkList').innerHTML;
-  for (const s of ['Acme Plumbing', 'Bright Dental', 'Add a trial client', '<b>Trials</b>', '<b>Settings</b>', '<b>Alerts</b>', 'Behind the scenes', 'Is everything running?', 'Warm-up circle', 'Test mode', 'Switch light / dark', 'Log out']) assert.ok(list.includes(s), '⌘K has ' + s);
+  for (const s of ['Acme Plumbing', 'Bright Dental', 'Add a paying client', '<b>Clients</b>', '<b>Settings</b>', '<b>Alerts</b>', 'Behind the scenes', 'Is everything running?', 'Warm-up circle', 'Test mode', 'Switch light / dark', 'Log out']) assert.ok(list.includes(s), '⌘K has ' + s);
   assert.ok(!/Machine alerts|Mission Control|>Machine</.test(list), 'no old words in ⌘K');
   assert.ok(!/New project|Add lead|Schedule meeting/.test(list));
   renderCmdk('bright'); assert.ok(el('cmdkList').innerHTML.includes('Bright Dental') && !el('cmdkList').innerHTML.includes('Acme Plumbing'));
@@ -258,18 +258,18 @@ test('renderBoard: full board with clients across stages, sparklines only where 
   const g14 = tkSliceGrowth(makeGrowth(45), 14);
   const html = renderBoard(fullHub, { at: Date.now(), now: NOW, sparks: { 'acme-plumbing': g14 } });
   for (const s of ['Acme Plumbing', 'Bright Dental', 'Cobalt HVAC', 'Fern IT']) assert.ok(html.includes(s), 'client name ' + s);
-  assert.ok(html.includes('Sending — Day 12 of 30') && html.includes('Waiting for you to buy'));
+  assert.ok(html.includes('Sending — Day 12') && html.includes('Waiting for you to buy'));
   assert.ok(html.includes('Buy bright-team.com and 2 inboxes, then paste the logins'));
   assert.ok(!html.includes('tk-bar') && !html.includes('Heartbeat') && !html.includes('Machine setup'), 'how the system is running moved to Settings');
   assert.ok(renderSystemStatus(fullHub.machine, { now: NOW }).includes('Setup is not finished. Still to set: Telegram messages, the uptime check (Healthchecks).'));
-  assert.ok(html.includes('<h3>All trials by stage</h3>') && html.includes('<h3>Every to-do</h3>'));
+  assert.ok(html.includes('<h3>All clients by stage</h3>') && html.includes('<h3>Every to-do</h3>'));
   assert.ok(!html.includes('<b>Ended</b>'), 'empty Ended column is skipped');
-  assert.ok(html.includes('<h3>Waiting list</h3>') && html.includes('Delta Roofing') && html.includes('>Start their trial now</button>') && html.includes('>Say no…</button>'));
+  assert.ok(!html.includes('Waiting list') && !/trial/i.test(visibleText(html)), 'no waiting list, no trial words');
   const ac = html.indexOf('class="tk-card" onclick="openTrial(&quot;acme-plumbing&quot;)"'); assert.ok(ac > 0);
   const m2 = /<div class="tk-card( review)?"/g; m2.lastIndex = ac + 20; const nx = m2.exec(html); const nextCard = nx ? nx.index : -1;
   const acmeCard = html.slice(ac, nextCard > 0 ? nextCard : ac + 6000);
   assert.ok(acmeCard.includes('Sent · 14 days') && acmeCard.includes('Inbox rate') && count(acmeCard, /class="tk-spark"/g) === 2, 'acme card: two sparklines');
-  assert.ok(html.includes('id="tkSpark-cobalt-hvac"'), 'converted client gets a (lazy) sparkline slot');
+  assert.ok(html.includes('id="tkSpark-cobalt-hvac"'), 'a stopped client keeps a (lazy) sparkline slot');
   assert.ok(!html.includes('id="tkSpark-bright-dental"') && !html.includes('id="tkSpark-fern-it"'), 'nothing to chart before warm-up → no slot');
   const cardStart = html.indexOf('class="tk-card" onclick="openTrial(&quot;bright-dental&quot;)"');
   const brightCard = html.slice(cardStart, html.indexOf('</div>\n  </div>', cardStart) + 1);
@@ -279,7 +279,7 @@ test('renderBoard: full board with clients across stages, sparklines only where 
 
 test('renderBoard: empty board, and hostile names are escaped', () => {
   const e = renderBoard(emptyHub, { now: NOW });
-  assert.ok(e.includes('No trials yet') && e.includes('When someone applies on your website, they show up here.') && e.includes('Nothing waiting on you'));
+  assert.ok(e.includes('No clients yet') && e.includes('When someone books a call on your website, they show up here.') && e.includes('Nothing waiting on you'));
   const evil = Object.assign({}, acme, { id: 'evil', name: '<img src=x onerror=alert(1)>', todo: [{ id: 'x', text: '<script>alert(2)</script>', urgent: true, since: null, action: { type: 'none' } }] });
   const hub = Object.assign({}, fullHub, { stages: stagesWith({ live: [evil] }), todos: [Object.assign({ clientId: 'evil', clientName: evil.name }, evil.todo[0])] });
   const h = renderBoard(hub, { now: NOW });
@@ -290,15 +290,15 @@ test('renderBoard: empty board, and hostile names are escaped', () => {
 const between = (html, a, b) => { const i = html.indexOf(a); const j = b ? html.indexOf(b, i + 1) : html.length; return html.slice(i, j < 0 ? html.length : j); };
 const visibleText = (html) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
 
-test('Trials list: one row per trial client — company, person, the journey (bar + "Step 2 of 5 — …"), the plain sentence and what is next; Needs you, In progress, then a folded Done / not taken', () => {
+test('Clients list: one row per client — company, person, the journey (bar + "Step 2 of 5 — …"), the plain sentence and what is next; the booked sales calls, Needs you, In progress, then a folded Done / not taken', () => {
   const html = renderTrialList(simpleHub, { now: NOW });
-  // an application waiting for him: its own compact row at the top — the business, the match, the Word document, yes / no
-  const apps = between(html, '<h3 class="tk-group red">New trial applications', '<h3 class="tk-group red">Needs you</h3>');
-  assert.ok(apps.includes('Fern IT') && apps.includes('Application (Word)') && apps.includes('>Say yes</button>') && apps.includes('>Say no…</button>') && apps.includes('onclick="downloadApplication(&quot;fern-it&quot;)"'), 'the application row');
+  // a booking waiting for its sales call: its own compact row at the top — the business, the match, the Word document, Won / Lost
+  const apps = between(html, '<h3 class="tk-group">Booked a sales call — Won or Lost after the call', '<h3 class="tk-group red">Needs you</h3>');
+  assert.ok(apps.includes('Fern IT') && apps.includes('Before the call (Word)') && apps.includes('>Won</button>') && apps.includes('>Lost</button>') && apps.includes('onclick="downloadApplication(&quot;fern-it&quot;)"'), 'the booking row');
   const order = ['Bright Dental', 'eCreek IT', 'Delta Roofing', 'Gale Roofing', 'Acme Plumbing', 'Cobalt HVAC', 'Iris Dental'];
   let last = -1; for (const name of order) { const i = html.indexOf('<span class="tk-person-co">' + name + '</span>'); assert.ok(i > last, 'row order: ' + name); last = i; }
-  assert.equal(count(html, /<button type="button" class="tk-person/g), 7, 'one row per trial client (the application has its own row)');
-  assert.ok(!html.includes('tk-person-co">Aviance<'), "the owner's own rows are not trial clients");
+  assert.equal(count(html, /<button type="button" class="tk-person/g), 7, 'one row per client (the booking has its own row)');
+  assert.ok(!html.includes('tk-person-co">Aviance<'), "the owner's own rows are not clients");
   // needs you: a red heading, then the three rows with a red edge and a red "You need to…" line
   const needs = between(html, '<h3 class="tk-group red">Needs you</h3>', '<details class="tk-done tk-going"');
   assert.equal(count(needs, /class="tk-person needs"/g), 2); assert.equal(count(needs, /class="tk-person-you"/g), 2);
@@ -307,32 +307,33 @@ test('Trials list: one row per trial client — company, person, the journey (ba
   assert.ok(needs.includes('<span class="tk-person-step">Step 2 of 5 — Onboarding call</span>') && needs.includes('<span class="tk-person-step">Step 3 of 5 — Setting up</span>'));
   const going = between(html, 'In progress — nothing needed from you</span>', '<details class="tk-done" id="tkDoneGroup"');
   assert.equal(count(going, /tk-person-you|tk-person needs/g), 0, 'in progress: no red');
-  assert.ok(going.includes('Sending — day 12 of 30, 2 calls booked') && going.includes('<span class="tk-person-next">Nothing for you: the Friday update goes out today</span>'));
-  assert.ok(going.includes('Step 4 of 5 — Sending emails</span>') && !going.includes('Day 12 of 30'), 'the plain sentence already says day 12 of 30: not said twice');
+  assert.ok(going.includes('Sending — day 12, 2 calls booked') && going.includes('<span class="tk-person-next">Nothing for you: the Friday update goes out today</span>'));
+  assert.ok(going.includes('Step 4 of 5 — Sending emails</span>') && !going.includes('Day 12 of sending'), 'the plain sentence already says day 12: not said twice');
   // done / not taken: folded, with a count, remembered when opened
   const done = between(html, '<details class="tk-done"');
   assert.ok(done.startsWith('<details class="tk-done" id="tkDoneGroup" ontoggle="trialsDoneToggle(this.open)">'), 'closed by default');
   assert.ok(done.includes('Done / not taken') && done.includes('<span class="tk-done-count">1</span>') && !done.includes('Cobalt HVAC'), 'only what has nothing left');
-  // finished, but a to-do is still open (the month-one invoice to mark paid): kept in view, not folded away
-  assert.ok(going.includes('Cobalt HVAC') && going.includes('Finished — became a client') && going.includes('Step 5 of 5 — Done'));
+  // stopped, but a to-do is still open (the month-one invoice to mark paid): kept in view, not folded away
+  assert.ok(going.includes('Cobalt HVAC') && going.includes('Stopped') && going.includes('Step 5 of 5 — Stopped'));
   const iris = between(done, 'Iris Dental', '</button>');
   assert.ok(iris.includes('<span class="pill grey">Not taken</span>') && !iris.includes('tk-bar5') && !iris.includes('tk-person-say'), 'declined: "Not taken", no journey, no second "Declined"');
   assert.ok(renderTrialList(simpleHub, { doneOpen: true }).includes('id="tkDoneGroup" open'), 'stays open across the 60-second refresh');
   trialsDoneToggle(true); assert.equal(tk.doneOpen, true); trialsDoneToggle(false);
-  // clicking a row opens that trial (an application waiting for review opens at the application)
+  // clicking a row opens that client (a booking waiting for its sales call opens at what we found)
   assert.ok(html.includes('onclick="openTrial(&quot;acme-plumbing&quot;)"') && html.includes("onclick=\"openTrial(&quot;fern-it&quot;,null,'application')\""));
   // kept: adding a client yourself (at the bottom); gone: the old links row, the inquiry strip
-  assert.ok(html.indexOf('onclick="openNewTrialClient()">+ Add a trial client yourself</button>') > html.indexOf('tkDoneGroup'));
+  assert.ok(html.indexOf('onclick="openNewPayingClient()">+ Add a paying client yourself</button>') > html.indexOf('tkDoneGroup'));
   assert.ok(!html.includes('tk-more') && !html.includes('iq-strip') && !html.includes('openPhoneAlerts'), 'phone alerts, alerts and behind the scenes live in Settings now');
+  assert.ok(!/\btrial\b/i.test(visibleText(html)), 'no trial words');
   const calm = renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({ live: [simpleRows.acme] }) }), {});
   assert.ok(calm.includes("Nothing needs you right now. We'll tell you when something does.") && !calm.includes('Needs you</h3>') && !calm.includes('id="tkDoneGroup"'));
 });
 
-test('Trials list: the clutter is gone — no stages board, no status strip, no counts, no to-do panel, no sparklines, no jargon', async () => {
+test('Clients list: the clutter is gone — no stages board, no status strip, no counts, no to-do panel, no sparklines, no jargon', async () => {
   const lists = [renderTrialList(simpleHub, { now: NOW }), renderTrialList(fullHub, { now: NOW })];
   for (const html of lists) {
     for (const gone of ['tk-board', 'tk-col', 'tk-bar"', 'Heartbeat', 'Last send', 'Active trials', 'Usage', 'Redis', 'on the machine', 'waiting on you', 'Stages', 'What you need to do', 'Also on the machine', 'tk-spark', 'tk-five', 'Mission Control', 'Machine setup', 'Promote'])
-      assert.ok(!html.includes(gone), 'not on the Trials screen: ' + gone);
+      assert.ok(!html.includes(gone), 'not on the Clients screen: ' + gone);
     assert.ok(!/\bmachine\b|heartbeat|pipeline|\btick\b|\bstates?\b/i.test(visibleText(html)), 'plain words only: ' + visibleText(html).match(/\bmachine\b|heartbeat|pipeline|\btick\b|\bstates?\b/i));
   }
   // through the router, as the owner lands on it: one board call + the check, never growth history
@@ -343,53 +344,54 @@ test('Trials list: the clutter is gone — no stages board, no status strip, no 
     render('trials'); await new Promise((r) => setTimeout(r, 5));
     const screen = el('tkHost').innerHTML;
     assert.ok(screen.includes('tk-person-co">eCreek IT<') && !screen.includes('Heartbeat') && !screen.includes('tk-board'));
-    assert.equal(el('psub').textContent, 'Who is where, and what needs you');
+    assert.equal(el('psub').textContent, 'Booked sales calls, and every client');
     assert.ok(!calls.some((c) => c[1].includes('/growth')), 'no growth history for the list');
     assert.deepEqual(calls.filter((c) => c[1] === '/api/mc/onboard-calls/check'), [['POST', '/api/mc/onboard-calls/check']], 'the check is asked for once');
     render('trialsBoard'); await new Promise((r) => setTimeout(r, 5));
-    assert.ok(el('tkHost').innerHTML.includes('<h3>All trials by stage</h3>') && el('tkHost').innerHTML.includes('Start their trial now'), 'the stages, the to-dos and the waiting list live on Behind the scenes');
+    assert.ok(el('tkHost').innerHTML.includes('<h3>All clients by stage</h3>') && el('tkHost').innerHTML.includes('<h3>Every to-do</h3>'), 'the stages and the to-dos live on Behind the scenes');
     assert.equal(el('backBtn').style.display, 'grid', 'Behind the scenes has a Back button (to Settings)'); goBack(); assert.equal(currentView, 'settings');
     await new Promise((r) => setTimeout(r, 5));
     assert.ok(el('tkHost').innerHTML.includes('Last check-in') && el('tkHost').innerHTML.includes('Yes. Everything is running.'), 'how the system is running: Settings');
   } finally { globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); }; trialsStopTimer(); }
 });
 
-test('Trials list: an older machine without row.simple falls back to the state and the to-dos; an empty list says what to expect', () => {
+test('Clients list: an older machine without row.simple falls back to the state and the to-dos; an empty list says what to expect', () => {
   const html = renderTrialList(fullHub, { now: NOW });
   const needs = between(html, 'Needs you</h3>', 'In progress — nothing needed from you</span>');
-  assert.ok(between(html, 'New trial applications', 'Needs you</h3>').includes('Fern IT'), 'an application to review: its own row at the top');
+  assert.ok(between(html, 'Booked a sales call — Won or Lost after the call', 'Needs you</h3>').includes('Fern IT'), 'a booking waiting for its sales call: its own row at the top');
   assert.ok(needs.includes('Bright Dental') && needs.includes('Waiting for you to buy') && needs.includes('You need to buy bright-team.com and 2 inboxes, then paste the logins.'), 'an urgent to-do needs you; the red line is that to-do');
   const going = between(html, 'In progress — nothing needed from you</span>', '<details class="tk-done" id="tkDoneGroup"');
-  assert.ok(going.includes('Acme Plumbing') && going.includes('Sending — Day 12 of 30') && going.includes('Decide the dispute on the call with bob@example.com') && going.includes('Ann Lee'));
+  assert.ok(going.includes('Acme Plumbing') && going.includes('Sending — Day 12') && going.includes('Decide the dispute on the call with bob@example.com') && going.includes('Ann Lee'));
   assert.ok(going.includes('Step 4 of 5 — Sending emails'), 'the step comes from the state');
-  assert.ok(going.includes('Cobalt HVAC') && !between(html, '<details class="tk-done"').includes('Cobalt HVAC'), 'converted, invoice still to mark paid → still in view');
+  assert.ok(going.includes('Cobalt HVAC') && !between(html, '<details class="tk-done"').includes('Cobalt HVAC'), 'stopped, invoice still to mark paid → still in view');
   const paid = Object.assign({}, fullHub, { stages: fullHub.stages.map((st) => Object.assign({}, st, { clients: st.clients.map((r) => (r.id === 'cobalt-hvac' ? Object.assign({}, r, { todo: [] }) : r)) })) });
-  assert.ok(between(renderTrialList(paid, { now: NOW }), '<details class="tk-done"').includes('Cobalt HVAC'), 'converted and nothing left → Done');
+  assert.ok(between(renderTrialList(paid, { now: NOW }), '<details class="tk-done"').includes('Cobalt HVAC'), 'stopped and nothing left → Done');
   const e = renderTrialList(emptyHub, { now: NOW });
-  assert.ok(e.includes('No trials yet') && e.includes('When someone applies on your website, they show up here.') && e.includes('Add a trial client yourself'));
+  assert.ok(e.includes('No clients yet') && e.includes('When someone books a call on your website') && e.includes('Add a paying client yourself'));
   assert.ok(tkSimple({}).label === '—' && tkSimple({ state: 'sending' }).step === 'sending' && tkSimple({ state: 'declined' }).done);
 });
 
-test('Trials list: every value from the machine is escaped, ids only reach the click handler as a JSON string', () => {
+test('Clients list: every value from the machine is escaped, ids only reach the click handler as a JSON string', () => {
   const evil = Object.assign({}, acme, { id: 'x");alert(1);("', name: '<img src=x onerror=alert(1)>', contactName: 'x',
     simple: { step: 'sending', company: '<img src=x onerror=alert(1)>', person: '<b onclick=alert(2)>Sam</b>', label: '<script>alert(3)</script>', next: '"><svg onload=alert(4)>', needsYou: true, since: '2026-10-17T00:00:00Z', dayOf30: 3 } });
   const html = renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({ live: [evil] }) }), {});
   assert.ok(!html.includes('<img src=x') && !html.includes('<b onclick') && !html.includes('<script>alert(3)') && !html.includes('"><svg onload'));
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;') && html.includes('&lt;script&gt;alert(3)&lt;/script&gt;') && html.includes('&quot;&gt;&lt;svg onload=alert(4)&gt;'));
   assert.ok(html.includes('onclick="openTrial(&quot;x\\&quot;);alert(1);(\\&quot;&quot;)"'), 'the id is a JSON string inside the handler');
-  assert.ok(html.includes('Step 4 of 5 — Sending emails · Day 3 of 30'), 'Day N of 30 while sending, when the sentence does not already say it');
+  assert.ok(html.includes('Step 4 of 5 — Sending emails · Day 3 of sending'), 'Day N of sending while sending, when the sentence does not already say it');
 });
 
-test('the Trials badge counts the trial clients who need you (red), in the sidebar and the phone tab bar', () => {
+test('the Clients badge counts the clients who need you (red) and new bookings, in the sidebar and the phone tab bar', () => {
   asOwner(); trialsIngestHub(simpleHub);
-  assert.equal(trialsNavCount(), 3); renderNav();
+  assert.equal(payingNavCount(), 2); assert.equal(trialsNavCount(), 2); renderNav();
   for (const id of ['navArea', 'tabBar']) {
     const nav = el(id).innerHTML;
-    assert.ok(nav.includes('aria-label="Trials — 3 need you"') && nav.includes('<span class="badge red" title="3 need you" aria-hidden="true">3</span>'), id);
+    assert.ok(nav.includes('aria-label="Clients — 2 need you"') && nav.includes('<span class="badge red" title="2 need you" aria-hidden="true">2</span>'), id);
   }
-  const one = Object.assign({}, simpleHub, { stages: stagesWith({ intake: [simpleRows.fern], live: [simpleRows.acme] }) });
-  trialsIngestHub(one); renderNav(); assert.ok(el('navArea').innerHTML.includes('title="1 needs you" aria-hidden="true">1<'));
-  trialsIngestHub(Object.assign({}, simpleHub, { stages: stagesWith({ live: [simpleRows.acme] }) })); assert.equal(trialsNavCount(), '');
+  const one = Object.assign({}, simpleHub, { stages: stagesWith({ intake: [simpleRows.fern], onboard: [simpleRows.ecreek], live: [simpleRows.acme] }) });
+  trialsIngestHub(one); renderNav(); assert.ok(el('navArea').innerHTML.includes('title="1 needs you" aria-hidden="true">1<'), 'a booking waiting for its sales call is not a red one');
+  trialsIngestHub(Object.assign({}, one, { inquiries: { counts: { new: 2 }, open: 2, latest: [] } })); assert.equal(payingNavCount(), 3, 'new bookings count too');
+  trialsIngestHub(Object.assign({}, simpleHub, { stages: stagesWith({ live: [simpleRows.acme] }) })); assert.equal(payingNavCount(), '');
   trialsIngestHub(fullHub);
 });
 
@@ -400,15 +402,15 @@ test('client page: only the top card — the journey, the one-line status, "What
   assert.deepEqual([...top.matchAll(/<h3 class="tk-q-title">([^<]+)<\/h3>/g)].map((m) => m[1]), ['What do you need to do?'], 'one question, only because something needs him');
   // the one journey, big, with every step's name; then the plain sentence
   const steps = [...top.matchAll(/<li class="(done|now|todo)"[^>]*><span class="tk-j-dot" aria-hidden="true">[^<]*<\/span><span class="tk-j-name">([^<]+)<\/span>/g)].map((m) => m[1] + ':' + m[2]);
-  assert.deepEqual(steps, ['done:Applied', 'now:Onboarding call', 'todo:Setting up', 'todo:Sending emails', 'todo:Done']);
-  assert.ok(top.includes('<li class="now" aria-current="step">') && top.includes('aria-label="The trial journey, step 2 of 5"'));
+  assert.deepEqual(steps, ['done:Sales call', 'now:Onboarding call', 'todo:Setting up', 'todo:Sending emails', 'todo:Stopped']);
+  assert.ok(top.includes('<li class="now" aria-current="step">') && top.includes('aria-label="The client journey, step 2 of 5"'));
   assert.ok(top.includes('<p class="tk-jcap" aria-hidden="true">Step 2 of 5 — Onboarding call</p>'), 'a phone shows the step in words above the bar');
   assert.ok(top.includes('<p class="tk-q-big">Accepted — they replied about the call, answer them</p>'));
   // What do you need to do? — ONE big button
   assert.equal(count(top, /class="btn tk-primary"/g), 1);
   assert.ok(top.includes('<p class="tk-q-say">Sam wrote to you. Read it and write back under Messages.</p><button type="button" class="btn tk-primary" onclick="tkFocusReply()">Answer Sam\'s message</button>'));
-  assert.ok(top.includes('class="card tk-top needs"'), 'a red edge: this trial needs you');
-  for (const gone of ['Where are they?', 'What happens next?', 'Mission Control', 'Day 1', 'Day 30', 'tk-pills', 'reply waiting 3 h', '← All trials', 'Refresh', 'Needs you', 'Sam Test', 'mailto:']) assert.ok(!top.includes(gone), 'not at the top: ' + gone);
+  assert.ok(top.includes('class="card tk-top needs"'), 'a red edge: this client needs you');
+  for (const gone of ['Where are they?', 'What happens next?', 'Mission Control', 'Day 1', 'Day 30', 'tk-pills', 'reply waiting 3 h', '← All clients', 'Refresh', 'Needs you', 'Sam Test', 'mailto:']) assert.ok(!top.includes(gone), 'not at the top: ' + gone);
   // then ONE big button into their email system — and nothing else
   const after = html.slice(html.indexOf('</section>', html.indexOf('tk-top')) + '</section>'.length);
   assert.ok(after.startsWith('<button type="button" class="tk-sysbtn" id="tkSysBtn" onclick="tkOpenSystem(&quot;ecreek-it&quot;)">'), 'the big button right under the card');
@@ -569,7 +571,7 @@ test('the onboarding-call check: fire-and-forget on opening the list or a trial,
 test('Parts (Only you › Setup & history): the 13-part strip, then every part in full; the dispute is decided there too; the to-do is the big button on the client page', () => {
   const g14 = tkSliceGrowth(makeGrowth(45), 14);
   const page = renderTrialDetail(detail, 'overview', { now: NOW, spark: { g: g14, state: null } });
-  assert.ok(page.includes('Sending — Day 12 of 30'));
+  assert.ok(page.includes('Sending — Day 12'));
   assert.ok(page.includes('>Decide the dispute</button>') && page.includes('When you have a minute: decide the dispute on the call with bob@example.com.'), 'not urgent: "when you have a minute"');
   assert.ok(page.includes('onclick="tkOpenSystem(&quot;acme-plumbing&quot;,&quot;setup&quot;,&quot;disputes&quot;)">Decide the dispute</button>'), 'the dispute is decided under Only you › Setup & history');
   const html = renderSysTab(detail, 'setup', { now: NOW }) + renderTabBar('setup', detail);
@@ -661,7 +663,7 @@ test('Deliverability tab: bounce (sent, measured, half speed), blacklists (could
   assert.ok(h.includes('class="pill green">Clean<') && h.includes('Clean on 5 of 7 lists'));
   assert.ok(h.includes("Couldn't check: dnsbl.sorbs.net, b.barracudacentral.org"), 'unknown verdicts are "couldn\'t check", not clean');
   assert.ok(h.includes('Warning, nothing paused: bl.spamcop.net: 192.0.2.10 (A record)'));
-  for (const s of ['Trial inboxes', 'Aviance inboxes', 'Provider families', 'Pairs today', 'Outside warm-up network', 'Connected', 'adds 10 warm-up emails a day']) assert.ok(h.includes(s), s);
+  for (const s of ['Client inboxes', 'Aviance inboxes', 'Provider families', 'Pairs today', 'Outside warm-up network', 'Connected', 'adds 10 warm-up emails a day']) assert.ok(h.includes(s), s);
   assert.ok(h.includes('Day 1 check not passed yet'), 'hello@ latest spam test is 3.2 points');
   assert.ok(h.includes('1.4 SpamAssassin points — passes') && h.includes('3.2 SpamAssassin points — too high for Day 1'));
   assert.ok(h.includes('DKIM Validator') && h.includes('9.1/10 — passes') && h.includes('https://www.mail-tester.com/test-abc123'));
@@ -681,19 +683,19 @@ test('Deliverability tab: bounce (sent, measured, half speed), blacklists (could
 });
 
 /* ───────────── application review ───────────── */
-test('application pending: open on the client page (in place of the email-system button — no yes yet) with the fit check, the research, every answer, the two buttons and the Word download; the big button at the top scrolls to it', () => {
+test('booking held for its sales call: open on the client page (in place of the email-system button — not a client yet) with the research, every answer, Won / Lost and the Word download; the big button at the top scrolls to it', () => {
   const html = renderTrialDetail(fernDetail, 'overview', { now: NOW });
   const iTop = html.indexOf('id="tkTop"'), iApp = html.indexOf('id="tkSec-application"');
   assert.ok(iTop >= 0 && iTop < iApp, 'the application right under the top card');
-  assert.ok(!html.includes('id="tkSysBtn"') && !html.includes('id="tkBehind"') && !html.includes('id="tkTabBar"'), 'before the yes: no email system to open');
+  assert.ok(!html.includes('id="tkSysBtn"') && !html.includes('id="tkBehind"') && !html.includes('id="tkTabBar"'), 'before Won: no email system to open');
   assert.ok(html.includes('onclick="downloadApplication(&quot;fern-it&quot;)"') && html.includes('>Download as Word (.docx)</button>'), 'the application as a Word document');
   assert.equal(tkSectionPlace('fern-it', 'application').view, 'trial', 'the application section is on the client page while it waits');
   assert.ok(!html.includes('What you need to do') && !html.includes('Also on your list'), 'the review to-do is not repeated');
-  assert.ok(html.includes('onclick="tkGoTo(&quot;application&quot;)">Read the application and say yes or no</button>'));
-  assert.ok(html.includes('<h3>Their application</h3>') && html.includes('Looks like a fit — 3 checks unknown') && !html.includes('Waiting for your review'), 'the top already says it waits for him: no second status');
-  for (const l of fernApplication.fit.lines) assert.ok(html.includes(esc(l.label)), 'fit line ' + l.rule);
+  assert.ok(html.includes('onclick="tkGoTo(&quot;application&quot;)">Read what we found, then mark it Won or Lost</button>'));
+  assert.ok(html.includes('<h3>Before the sales call</h3>') && !html.includes('Fit check') && !html.includes('Waiting for your review'), 'no old fit rules (the fit score is the research): no second status');
   for (const x of fernApplication.answers) assert.ok(html.includes('<dt>' + esc(x.q) + '</dt>'), 'question ' + x.q);
-  assert.ok(html.includes('>Say yes and email them</button>') && html.includes('>Say no…</button>'));
+  assert.ok(html.includes('>Won — make them a client</button>') && html.includes('>Lost</button>'));
+  assert.ok(!/\btrial\b/i.test(visibleText(html)), 'no trial words');
   assert.ok(!html.includes("trialsSetTab(&quot;application&quot;)"), 'no Application tab');
   const iResearch = html.indexOf('What we found'), iAnswers = html.indexOf('Their answers');
   assert.ok(iResearch > 0 && iResearch < iAnswers, 'research above the answers');
@@ -727,49 +729,43 @@ test('Research again posts rerunResearch and says what happened', async () => {
   globalThis.fetch = answer('failed'); await trialResearchAgain('fern-it'); assert.ok(el('toast').innerHTML.includes('could not finish'));
 });
 
-test('application decided: one folded line in their email system › Setup ("Their application · You said yes"), no buttons, the decision in words, the Word download', () => {
+test('booking won: one folded line in their email system › Setup ("Before the sales call · Won"), no buttons, the outcome in words, the Word download', () => {
   assert.ok(!renderTrialDetail(detail, 'overview', { now: NOW }).includes('tkSec-application'), 'not on the client page any more');
   const html = renderSysTab(detail, 'setup', { now: NOW });
   const box = between(html, '<details class="tk-appbox" id="tkSec-application">', '</details>');
   assert.ok(box.includes('>Download as Word (.docx)</button>'), 'the Word download');
-  assert.ok(box.includes('<span class="tk-appbox-title">Their application</span><span class="pill green">You said yes</span>'));
-  assert.ok(box.includes('You said yes') && box.includes('They were emailed.') && !box.includes('Say no…') && !box.includes('Say yes and email them'));
+  assert.ok(box.includes('<span class="tk-appbox-title">Before the sales call</span><span class="pill green">Won</span>'));
+  assert.ok(box.includes('They were emailed to book the onboarding call.') && !box.includes('>Lost</button>') && !box.includes('Won — make them a client'));
   assert.ok(!html.includes("trialsSetTab(&quot;application&quot;)"), 'no Application tab any more');
-  assert.ok(renderTab(detail, 'application').includes('<h3>Their application</h3>'), 'an old link to the tab still shows it');
+  assert.ok(renderTab(detail, 'application').includes('<h3>Before the sales call</h3>'), 'an old link to the tab still shows it');
 });
 
-test('board marker + the review to-do opens the trial scrolled to the Application section', () => {
-  const html = renderBoard(fullHub, { now: NOW });
-  assert.ok(html.includes('class="tk-card review"') && count(html, /New application/g) === 1);
+test('a booking held for its sales call opens the client page scrolled to what we found', () => {
   asOwner(); trialsIngestHub(fullHub);
   tk.detail['fern-it'] = fernDetail; tk.detailAt['fern-it'] = Date.now();
   let scrolled = 0; el('tkSec-application').scrollIntoView = () => { scrolled++; };
-  trialsTodoAction('review:fern-it');
+  openTrial('fern-it', null, 'application');
   assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'fern-it');
   assert.ok(el('content').innerHTML.includes('id="tkSec-application"'));
   assert.equal(scrolled, 1); assert.equal(tk.scrollTo, null);
 });
 
-test('approve + decline post the contract bodies and toast the outcome in plain words', async () => {
+test('Won + Lost post the contract bodies (the booking moves with them) and toast the outcome in plain words', async () => {
   asOwner(); trialsIngestHub(fullHub);
   tk.detail['fern-it'] = fernDetail; tk.detailAt['fern-it'] = Date.now(); currentTrialId = 'fern-it';
   let asked = ''; globalThis.confirm = (q) => { asked = q; return true; };
   const calls = [];
-  globalThis.fetch = async (url, init) => { calls.push({ url, init }); if (url.endsWith('/intake')) return { ok: true, status: 200, text: async () => JSON.stringify(JSON.parse(init.body).action === 'approveApplication' ? { ok: true, outcome: 'queued', position: 2 } : { ok: true, outcome: 'declined' }) }; return { ok: true, status: 200, text: async () => JSON.stringify(url.includes('/hub/') ? fernDetail : fullHub) }; };
+  globalThis.fetch = async (url, init) => { calls.push({ url, init }); if (url.endsWith('/intake')) return { ok: true, status: 200, text: async () => JSON.stringify(JSON.parse(init.body).action === 'approveApplication' ? { ok: true, outcome: 'onboarding' } : { ok: true, outcome: 'declined' }) }; return { ok: true, status: 200, text: async () => JSON.stringify(url.includes('/hub/') ? fernDetail : fullHub) }; };
   await trialApproveApplication('fern-it');
-  assert.equal(asked, 'Say yes to Fern IT? They get an email asking them to book the onboarding call.');
+  assert.equal(asked, 'Mark Fern IT as Won? They become a client and get an email asking them to book the onboarding call.');
   assert.deepEqual(JSON.parse(calls[0].init.body), { action: 'approveApplication' });
-  assert.ok(el('toast').innerHTML.includes('Done. They are on the waiting list — number 2'));
-  const failing = JSON.parse(JSON.stringify(fernDetail)); failing.application.fit.lines[1].status = 'fail';
-  tk.detail['fern-it'] = failing; openDeclineApplication('fern-it');
-  assert.ok(el('modal').innerHTML.includes('>Customer worth ≥ $2,000 in year one.</textarea>') && el('modal').innerHTML.includes('They get this reason by email.') && el('modal').innerHTML.includes('>Say no and email them</button>'));
-  calls.length = 0; el('tkDeclineReason').value = '  ';
-  await submitDeclineApplication('fern-it'); assert.equal(calls.length, 0); assert.ok(el('tkDeclineErr').innerHTML.includes('Write the reason first'));
-  el('modalWrap').classList.add('open'); el('tkDeclineReason').value = 'We only run trials for teams of 5–50 people.';
-  await submitDeclineApplication('fern-it');
-  assert.deepEqual(JSON.parse(calls[0].init.body), { action: 'declineApplication', reason: 'We only run trials for teams of 5–50 people.' });
-  assert.ok(el('toast').innerHTML.includes('Done. They got your no by email') && !el('modalWrap').classList.contains('open'));
-  tk.detail['fern-it'] = fernDetail;
+  assert.ok(el('toast').innerHTML.includes('Won. They were emailed to book the onboarding call'));
+  calls.length = 0;
+  await openDeclineApplication('fern-it');
+  assert.equal(asked, 'Mark Fern IT as Lost? Nothing is emailed to them.');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { action: 'declineApplication' });
+  assert.ok(el('toast').innerHTML.includes('Marked Lost. Nothing was emailed'));
+  globalThis.confirm = () => true;
 });
 
 /* ───────────── Buy & paste v2 ───────────── */
@@ -876,18 +872,18 @@ test('machineFetch: bearer token, JSON bodies, 401/503/non-JSON/ok:false handlin
   supa.session = null; r = await machineFetch('/api/mc/hub'); assert.ok(r.error.includes('not signed in')); supa.session = { access_token: 'test-token' };
 });
 
-test('new-client modal posts the contract body, shows 400 {errors}, and opens the new trial', async () => {
+test('new-client modal posts the contract body (with the plan), shows 400 {errors}, and opens the new client', async () => {
   asOwner();
-  openNewTrialClient({ companyName: 'Delta Roofing', contactName: 'Sam Ito', contactEmail: 'sam@delta.com', website: 'https://delta.com' });
+  openNewPayingClient({ companyName: 'Delta Roofing', contactName: 'Sam Ito', contactEmail: 'sam@delta.com', website: 'https://delta.com', plan: 'growth' });
   assert.ok(el('modal').innerHTML.includes('value="Delta Roofing"'));
-  el('ntCompany').value = 'Delta Roofing'; el('ntContact').value = 'Sam Ito'; el('ntEmail').value = 'sam@delta.com'; el('ntWebsite').value = 'https://delta.com'; el('ntOverride').checked = true;
+  el('ntCompany').value = 'Delta Roofing'; el('ntContact').value = 'Sam Ito'; el('ntEmail').value = 'sam@delta.com'; el('ntWebsite').value = 'https://delta.com'; el('ntPlan').value = 'growth';
   const calls = [];
   globalThis.fetch = async (url, init) => { calls.push({ url, init }); if (url.endsWith('/clients/new')) return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, clientId: 'delta-roofing', state: 'onboarding' }) }; return { ok: true, status: 200, text: async () => JSON.stringify(fullHub) }; };
   await submitNewTrialClient();
-  assert.deepEqual(JSON.parse(calls[0].init.body), { companyName: 'Delta Roofing', contactName: 'Sam Ito', contactEmail: 'sam@delta.com', website: 'https://delta.com', override: true });
+  assert.deepEqual(JSON.parse(calls[0].init.body), { companyName: 'Delta Roofing', contactName: 'Sam Ito', contactEmail: 'sam@delta.com', website: 'https://delta.com', plan: 'growth' });
   assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'delta-roofing');
   globalThis.fetch = async () => ({ ok: false, status: 400, text: async () => JSON.stringify({ ok: false, errors: { contactEmail: 'A valid email address is required.' } }) });
-  openNewTrialClient(); el('ntCompany').value = 'X'; el('ntContact').value = 'Y'; el('ntEmail').value = 'z@z.zz'; el('ntWebsite').value = 'https://z.zz';
+  openNewPayingClient(); el('ntPlan').value = 'starter'; el('ntCompany').value = 'X'; el('ntContact').value = 'Y'; el('ntEmail').value = 'z@z.zz'; el('ntWebsite').value = 'https://z.zz';
   await submitNewTrialClient();
   assert.ok(el('ntErr').innerHTML.includes('A valid email address is required.') && el('modalWrap').classList.contains('open'));
   closeModal();
@@ -973,7 +969,7 @@ test('deep links: #trial/{id}, #alerts (Settings › Alerts), #settings and #tri
   assert.deepEqual(parseDeepLink('#trial/a%2Eb'), { view: 'trial', id: 'a.b' });
   assert.deepEqual(parseDeepLink('#alerts'), { view: 'settings', section: 'alerts' });
   assert.deepEqual(parseDeepLink('/#settings'), { view: 'settings' });
-  assert.deepEqual(parseDeepLink('/#trials'), { view: 'trials' });
+  assert.deepEqual(parseDeepLink('/#trials'), { view: 'paying' }, 'the old Trials link opens Clients');
   for (const bad of ['', '#', '/', '#trial/', '#trial/<script>', '#trial/a b', '#trial/%E0%A4%A', '#trial/x/y', '#access_token=abc&type=recovery', '#type=recovery', '#dashboard', 'trial/acme'])
     assert.equal(parseDeepLink(bad), null, JSON.stringify(bad));
 });
@@ -997,7 +993,7 @@ test('deep links: signed out → kept until sign-in, then lands there; hashchang
   paOnMessage({ data: { type: 'something-else', url: '/#alerts' } });
   assert.equal(currentView, 'trial', 'other messages are ignored');
   paOnMessage({ data: { type: 'aviance:open', url: 'https://evil.example/' } });
-  assert.equal(currentView, 'trials', 'an unknown url falls back to the board');
+  assert.equal(currentView, 'paying', 'an unknown url falls back to Clients');
   location.hash = ''; history.replaceState = () => {};
   trialsStopTimer();
 });
@@ -1212,7 +1208,7 @@ test('inquiries list: Open / All chips, a pipeline tile per stage, calls ahead f
   assert.ok(html.includes('<b>Saturday, October 17, 2026 at 8:30 PM</b> <span class="muted">your time</span>') && html.includes('call in 3 h'));
   assert.ok(html.includes('was 2 days ago'), 'Harbor: the call already happened');
   assert.ok(html.includes('Roof replacement and storm-damage repair'));
-  assert.ok(html.includes('Now a trial'), 'Cedar became a trial');
+  assert.ok(!/\btrial\b/i.test(visibleText(html)), 'no trial words');
   assert.ok(html.includes('openInquiry(&quot;qmgv1stone&quot;)'));
   const lost = renderInquiries(inquiryRecords, inquiryCounts, 'lost', { now: NOW });
   assert.ok(lost.includes('Pixel &amp; Co') && lost.includes('&lt;b&gt;Brand design&lt;/b&gt;') && !lost.includes('<b>Brand design'), 'escaped');
@@ -1224,7 +1220,7 @@ test('inquiries list: Open / All chips, a pipeline tile per stage, calls ahead f
   assert.ok(empty.includes('No inquiries yet') && empty.includes("When someone books a call from your website's Book a call form, it shows up here and on your phone.") && !empty.includes('iq-card'));
 });
 
-test('inquiry detail: reply by email, their time, website, notes, status moves, and Start a trial instead', () => {
+test('booking detail: reply by email, their time, website, notes, status moves, and what Won does', () => {
   const s = renderInquiry(Q('qmgv1stone'), { now: NOW });
   assert.ok(!s.includes('iq-company') && s.includes('Dana Stone') && s.includes('Growth plan'), 'the company is the page title (top bar), not repeated');
   assert.ok(s.includes('<span class="pill blue">Booked</span>'), 'the stage');
@@ -1241,11 +1237,15 @@ test('inquiry detail: reply by email, their time, website, notes, status moves, 
   assert.ok(s.includes('Move them to:') && s.includes('<button class="btn" onclick="inquirySetStatus(&quot;qmgv1stone&quot;,\'held\')">Call done</button>') && s.includes('>No-show</button>'), 'next from Booked: Call done (big) or No-show');
   assert.ok(s.includes('<summary>Another stage</summary>') && s.includes('>Following up</button>') && s.includes('>Proposal sent</button>') && s.includes('>Won</button>') && s.includes('>Lost</button>') && !s.includes('>Booked</button>'), 'every other stage, never the one they are at');
   assert.ok(s.includes('id="iqStatusNote"') && s.includes('Note with the change (optional)'));
-  assert.ok(s.includes('>Start a free trial and email them</button>') && s.includes('inquiryToTrial(&quot;qmgv1stone&quot;)'));
+  assert.ok(visibleText(s).includes('After the call, press Won and they become a client') && !/trial/i.test(visibleText(s)), 'what Won does; no trial');
   const c = renderInquiry(Q('qmgp2cedar'), { now: NOW });
-  assert.ok(c.includes('<b>Now a trial</b> — on the waiting list') && c.includes('openTrial(&quot;cedar-hvac&quot;)') && c.includes('Open the trial →'));
-  assert.ok(!c.includes('Start a free trial') && c.includes('>Booked</button>') && !c.includes('>Following up</button>') && c.includes('<li class="cur">Following up</li>'));
-  assert.ok(c.includes('Good call. Not ready to pay yet'));
+  assert.ok(c.includes('openTrial(&quot;cedar-hvac&quot;)') && c.includes('What we found before the call →'), 'the record held for the call');
+  assert.ok(c.includes('>Booked</button>') && !c.includes('>Following up</button>') && c.includes('<li class="cur">Following up</li>'));
+  assert.ok(c.includes('Good call. Sending the Starter details today.'));
+  const won = renderInquiry(Object.assign(Q('qmgp2cedar'), { status: 'won' }), { now: NOW });
+  assert.ok(won.includes('<b>Now a client</b>') && won.includes('Open their page →'));
+  const noSite = renderInquiry(Object.assign(Q('qmgv1stone'), { website: '' }), { now: NOW });
+  assert.ok(noSite.includes('No website on this booking') && noSite.includes('onclick="inquiryAddClient(&quot;qmgv1stone&quot;)">Add them as a paying client</button>'), 'no website: Add a paying client, filled in');
   const h = renderInquiry(Q('qmgn1harbor'), { now: NOW });
   assert.ok(h.indexOf('Proposal drafted.') < h.indexOf('Called. They want a proposal'), 'newest note first');
   const p = renderInquiry(Q('qmgj2pixel'), { now: NOW });
@@ -1300,8 +1300,9 @@ test('inquiries on the board: a strip ("2 booked calls — Birch Legal, call Sat
   const contactedOnly = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'contacted' || q.status === 'proposal'));
   assert.ok(renderInquiryStrip(contactedOnly, { now: NOW }).includes('2 open inquiries'));
   assert.equal(inquiriesNavCount(), 2); renderNav();
-  // the menu: new call requests count on Paying clients (they live inside it now)
-  assert.ok(el('navArea').innerHTML.includes('aria-label="Paying clients — 2 need you"') && el('navArea').innerHTML.includes('<span class="badge red" title="2 need you" aria-hidden="true">2</span>'));
+  // the menu: new bookings count on Clients (they live inside it)
+  const want = payingNavCount();
+  assert.ok(want >= 2 && el('navArea').innerHTML.includes('aria-label="Clients — ' + want + ' need you"'));
   // Booked calls still ahead are calm to-dos: not in the bell. Once a call's time has passed, it is urgent there.
   assert.equal(trialsNotifs().filter((n) => /Stone Roofing|Birch Legal/.test(n.t)).length, 0, 'calls still ahead: no bell');
   const passedRecs = inquiryRecords.map((q) => (q.id === 'qmgu9birch' ? Object.assign({}, q, { slotStart: '2026-10-17T10:00:00Z', slotEnd: '2026-10-17T10:15:00Z' }) : q));
@@ -1325,7 +1326,7 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
   assert.equal(parseDeepLink('#inquiry/<x>'), null);
   asOwner();
   const recs = JSON.parse(JSON.stringify(inquiryRecords)); const calls = [];
-  let toTrialReply = { status: 200, body: { ok: true, clientId: 'stone-roofing', outcome: 'onboarding' } };
+  let wonReply = null;   // set to make Won fail (the machine says why)
   globalThis.fetch = async (url, init) => {
     const u = new URL(url); const body = init.body ? JSON.parse(init.body) : null; calls.push([init.method, u.pathname, body]);
     let reply = { status: 404, body: { error: 'no' } };
@@ -1333,9 +1334,9 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
     if (u.pathname === '/api/mc/inquiries' && init.method === 'GET') reply = { status: 200, body: { inquiries: recs, counts: inquirySummaryOf(recs).counts } };
     if (u.pathname === '/api/mc/inquiries' && init.method === 'POST') {
       const q = recs.find((r) => r.id === body.id);
-      if (body.action === 'status') { q.status = body.status; if (body.note) q.notes.push({ at: NOW.toISOString(), text: body.note }); reply = { status: 200, body: { ok: true, inquiry: q } }; }
+      if (body.action === 'status' && body.status === 'won' && wonReply) reply = wonReply;
+      else if (body.action === 'status') { q.status = body.status; if (body.status === 'won') q.clientId = q.clientId || 'stone-roofing'; if (body.note) q.notes.push({ at: NOW.toISOString(), text: body.note }); reply = { status: 200, body: { ok: true, inquiry: q } }; }
       if (body.action === 'note') { q.notes.push({ at: NOW.toISOString(), text: body.text }); reply = { status: 200, body: { ok: true, inquiry: q } }; }
-      if (body.action === 'toTrial') { reply = toTrialReply; if (reply.body.clientId) Object.assign(q, { clientId: reply.body.clientId, trialOutcome: reply.body.outcome }); }
     }
     return { ok: reply.status < 400, status: reply.status, text: async () => JSON.stringify(reply.body) };
   };
@@ -1362,31 +1363,25 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
     el('iqNoteText').value = 'Wants to start in November';
     await inquiryAddNote('qmgv1stone');
     assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'note', id: 'qmgv1stone', text: 'Wants to start in November' });
-    // Start a trial instead
+    // Won: asks first, says what it does, the page links to the new client
     let asked = ''; globalThis.confirm = (m) => { asked = m; return true; };
-    await inquiryToTrial('qmgv1stone');
-    assert.equal(asked, 'Start a free trial for Dana Stone? They get the welcome email now.');
-    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'toTrial', id: 'qmgv1stone' });
-    assert.ok(el('toast').innerHTML.includes('Trial started. Dana Stone was emailed the welcome link'));
-    assert.ok(el('tkHost').innerHTML.includes('Open the trial →') && el('tkHost').innerHTML.includes('openTrial(&quot;stone-roofing&quot;)'), 'links to the new trial');
-    toTrialReply = { status: 200, body: { ok: true, clientId: 'birch-legal', outcome: 'queued', position: 2 } };
-    await inquiryToTrial('qmgu9birch');
-    assert.ok(el('toast').innerHTML.includes('On the waiting list at number 2'));
-    toTrialReply = { status: 400, body: { ok: false, errors: { website: 'A website is required.' } } };
-    await inquiryToTrial('qmgn1harbor');
-    assert.ok(el('toast').innerHTML.includes('Trial not started: website: A website is required.'));
+    await inquirySetStatus('qmgv1stone', 'won');
+    assert.equal(asked, 'Mark Stone Roofing as Won? They become a paying client and get an email asking them to book the onboarding call.');
+    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'won' });
+    assert.ok(el('toast').innerHTML.includes('Won — Stone Roofing is a client now and was emailed'));
+    assert.ok(el('tkHost').innerHTML.includes('Open their page →') && el('tkHost').innerHTML.includes('openTrial(&quot;stone-roofing&quot;)'), 'links to the new client');
+    // the machine refuses (no website): the reason, nothing moved
+    wonReply = { status: 400, body: { error: 'This booking has no website. Add them with “Add a paying client” instead, with their website.' } };
+    await inquirySetStatus('qmgn1harbor', 'won');
+    assert.ok(el('toast').innerHTML.includes('Not marked Won: This booking has no website.'));
     globalThis.confirm = () => false; const n = calls.length;
-    await inquiryToTrial('qmgn1harbor'); assert.equal(calls.length, n, 'cancel sends nothing');
-    globalThis.confirm = () => true;
+    await inquirySetStatus('qmgn1harbor', 'won'); assert.equal(calls.length, n, 'cancel sends nothing');
+    globalThis.confirm = () => true; wonReply = null;
     // the list view + filters
     render('inquiries'); await new Promise((r) => setTimeout(r, 5));
     assert.ok(el('tkHost').innerHTML.includes('iq-filters'));
-    inquiriesSetFilter('won'); assert.ok(el('tkHost').innerHTML.includes('Northwind Logistics') && !el('tkHost').innerHTML.includes('Stone Roofing'));
+    inquiriesSetFilter('won'); assert.ok(el('tkHost').innerHTML.includes('Northwind Logistics') && el('tkHost').innerHTML.includes('Stone Roofing') && !el('tkHost').innerHTML.includes('Birch Legal'), 'Stone was just marked Won');
     inquiriesSetFilter('open');
-    assert.equal(iqTrialToast({ already: true }), 'This inquiry is already a trial');
-    assert.ok(/moments ago/.test(iqTrialToast({ ok: true, duplicate: true, outcome: 'received' }, 'Omar')));
-    assert.equal(iqTrialToast({ outcome: 'declined', reason: 'already_had_trial' }), 'The trial was turned down automatically (already had trial)');
-    assert.ok(/finish it/.test(iqTrialToast({ outcome: 'manual' })));
     // unknown id
     openInquiry('qnope'); await new Promise((r) => setTimeout(r, 5));
     assert.ok(el('tkHost').innerHTML.includes('Inquiry not found'));
@@ -1582,7 +1577,7 @@ test('their email system: one switch — "Shared with <Business>" (five tabs, th
   const want = {
     overview: ['id="tkSec-where"', 'Where they are', 'tk-keys tk-keys4'], conversations: ['id="tkConvos"', 'Conversations'], sent: ['id="tkSentMail"', 'Every email sent'],
     calls: ['id="tkSec-calls"', 'Calls prospects booked · 1', '<th>When</th><th>Who</th><th>Status</th>', 'Being checked'], messages: ['id="tkSec-messages"'],
-    money: ['id="tkMoney"', 'Plan <b>Free trial</b>', 'id="tkSec-plan"', 'Day 12 of 30', 'Their decision'],
+    money: ['id="tkMoney"', 'Plan <b>Starter</b>', 'id="tkSec-plan"', 'Day 12', 'Starter plan'],
     health: ['<h2>Inboxes &amp; warm-up</h2>', 'Add inbox', '<h2>Landing in the inbox</h2>', 'Domain setup', '<h2>Growth over time</h2>', 'id="tkGrowthHost"', 'Loading the growth history'],
     leads: ['<h2>Leads</h2>', 'Ready to send', '<h2>The emails</h2>', 'Edit the email wording', '<h2>Replies</h2>', 'Newest replies', '<h2>Coming up</h2>', 'Friday update'],
     setup: ['id="tkSec-about"', 'Full control panel ↗', 'id="tkAccess"', 'Who can see this', 'id="tkSec-disputes"', '>Uphold</button>', '<h2>Parts</h2>', 'class="tk-strip"', 'class="tk-sys"', '<h2>History</h2>', 'tk-timeline', '<h2>Actions</h2>', 'Pause sending'] };
@@ -1598,10 +1593,10 @@ test('their email system: one switch — "Shared with <Business>" (five tabs, th
   for (const [old, now] of [['growth', 'health'], ['deliverability', 'health'], ['inboxes', 'health'], ['systems', 'setup'], ['timeline', 'setup'], ['history', 'setup'], ['actions', 'setup'], ['replies', 'leads'], ['copy', 'leads'], ['comingup', 'leads']]) assert.equal(tkSysValid(old), now, old + ' → ' + now);
   assert.equal(tkSysMode('money'), 'only'); assert.equal(tkSysMode('messages'), 'shared'); assert.equal(tkSysMode('growth'), 'only');
   assert.ok(renderClientSystem(ecreekDetail, 'nope', {}).includes('aria-selected="true" onclick="trialsSetTab(&quot;overview&quot;)"'));
-  // the title: "<Business> — email system", the plan and the day under it (the Test tag on a made-up client)
-  assert.equal(tkSysSub(Object.assign({}, acme, { simple: { step: 'sending', dayOf30: 12 } })), 'Free trial · Day 12 of 30');
-  assert.equal(tkSysSub(Object.assign({}, acme, { plan: 'growth' })), 'Growth plan');
-  assert.ok(renderClientSystem({ row: Object.assign({}, acme, { demo: true }) }, 'overview', {}).includes('A made-up client from the test run'));
+  // the title: "<Business> — email system", the plan and the day under it
+  assert.equal(tkSysSub(Object.assign({}, acme, { simple: { step: 'sending', dayOf30: 12 } })), 'Starter plan · Day 12 of sending');
+  assert.equal(tkSysSub(Object.assign({}, acme, { plan: 'growth' })), 'Growth plan · Day 12 of sending');
+  assert.equal(tkSysSub(Object.assign({}, acme, { plan: 'growth', state: 'warming' })), 'Growth plan');
 });
 
 test('Shared never shows money, costs, the fit score, internal to-dos, rule names or dispute buttons — a paying test client with a paid invoice, a dispute and a to-do', () => {
@@ -1645,7 +1640,7 @@ test('their email system: the client page\'s big button and #system/<id> (Shared
     assert.ok(el('content').innerHTML.startsWith('<div class="view wide">'), 'the whole width');
     assert.ok(el('ptitle').textContent.startsWith('Acme Plumbing — email system'));
     assert.equal(el('backBtn').style.display, 'grid');
-    assert.ok(navItems().find((i) => i.view === 'trials').isOn(), 'still under Trials in the menu');
+    assert.ok(navItems().find((i) => i.view === 'paying').also.includes(currentView), 'still under Clients in the menu');
     trialsSetTab('calls'); trialsSetMode('only'); assert.equal(trialTab, 'money', 'Only you opens at Money & plan');
     trialsSetTab('leads'); assert.equal(trialTab, 'leads');
     trialsSetMode('shared'); assert.equal(trialTab, 'calls', 'back on Shared: the tab last open there');
@@ -1670,14 +1665,12 @@ test('their email system: the client page\'s big button and #system/<id> (Shared
     render('trials'); goDeepLink(parseDeepLink('#system/acme-plumbing/health')); assert.equal(trialTab, 'health');
     render('trials'); goDeepLink(parseDeepLink('#system/acme-plumbing/growth')); assert.equal(trialTab, 'health', 'an old tab name: where it lives now');
     render('trials'); goDeepLink(parseDeepLink('#system/acme-plumbing/nope')); assert.equal(trialTab, 'overview');
-    // a paying client: the same page and the same system, under Paying clients
+    // another client: the same page and the same system, under Clients
     tk.detail['cobalt-hvac'] = { row: fullHub.stages.flatMap((s) => s.clients).find((r) => r.id === 'cobalt-hvac') }; tk.detailAt['cobalt-hvac'] = Date.now();
     openTrial('cobalt-hvac'); assert.ok(el('content').innerHTML.includes('id="tkSysBtn"'));
     tkOpenSystem('cobalt-hvac', 'overview'); assert.equal(currentView, 'clientSystem');
-    assert.ok(navItems().find((i) => i.view === 'paying').isOn(), 'under Paying clients');
+    assert.ok(navItems().find((i) => i.view === 'paying').also.includes(currentView), 'under Clients');
     assert.equal(el('psub').textContent, 'Starter plan');
-    // My stats is never an email system of its own
-    tkOpenSystem(MY_STATS_ID); assert.equal(currentView, 'trial'); assert.equal(currentTrialId, MY_STATS_ID);
   } finally { globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); }; trialsStopTimer(); await new Promise((r) => setTimeout(r, 5)); }
 });
 
