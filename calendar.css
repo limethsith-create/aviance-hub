@@ -180,3 +180,11 @@
   .cal-aitem{grid-template-columns:88px 1fr}
   .cal-trial-ask .btn{flex:1 1 100%}
 }
+
+/* Book a call */
+.cal-bookbtn{font-weight:600}
+.cal-book-line{display:block}
+.cal-book-bad{color:var(--red)}
+.cal-book-warn .tk-note{background:var(--amber-bg);margin:0 0 14px}
+#cbAnyway{display:contents}
+@media(max-width:900px){.cal-tools .cal-bookbtn{flex:1 1 100%;min-height:48px}}

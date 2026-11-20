@@ -339,7 +339,7 @@ function renderCalendar(data,meta){
   const monday=calKeyOk(meta.week)?calMonday(meta.week):calMonday(calDayKey(now,st.ownerZone));
   const reqs=calRequestsOf(data);
   const bar=`<div class="cal-bar"><div class="cal-nav"><button class="btn ghost" onclick="calWeekMove(-1)" aria-label="Previous week" title="Previous week">◀</button><button class="btn ghost" onclick="calGoToday()">Today</button><button class="btn ghost" onclick="calWeekMove(1)" aria-label="Next week" title="Next week">▶</button><b class="cal-range">${esc(calWeekLabel(monday))}</b></div>
-    <div class="cal-tools"><button class="btn" onclick="calOpenAdd()">Add a meeting</button><button class="btn ghost" onclick="calOpenBlock()">Block time</button></div></div>`;
+    <div class="cal-tools"><button class="btn cal-bookbtn" onclick="calOpenBook()">Book a call</button><button class="btn ghost" onclick="calOpenAdd()">Add a meeting</button><button class="btn ghost" onclick="calOpenBlock()">Block time</button></div></div>`;
   let week;
   if(meta.loading)week=renderLoading('Loading this week…');
   else{
@@ -719,4 +719,111 @@ async function calTick(){
 function calendarForget(){
   calendarStopTimer();
   Object.assign(cal,{weeks:{},at:{},err:{},inflight:{},week:null,lastWeek:null,showGone:false,reqs:[],reqsAt:0,peekAt:0,settings:null,focus:null,pick:null});
+  cb.seq=0;cb.busy=false;clearTimeout(cb.timer);
+}
+
+/* ===================== 8. BOOK A CALL (cold call) =====================
+   The owner is on the phone with someone and books the call himself. Contract: POST /api/mc/inquiries
+   {action:'bookCheck'|'book', booking, force?}. bookCheck saves nothing; book saves it like a website booking
+   (409 {warnings} when there is a clash or it is outside his hours, unless force:true). */
+const CB_API='/api/mc/inquiries';
+const cb={seq:0,busy:false,timer:null,warnings:null};
+const CB_ZONES=[['America/New_York','US Eastern (New York)'],['America/Chicago','US Central (Chicago)'],['America/Denver','US Mountain (Denver)'],['America/Phoenix','Arizona (no clock change)'],['America/Los_Angeles','US Pacific (Los Angeles)'],['America/Anchorage','Alaska'],['Pacific/Honolulu','Hawaii']];
+const CB_PLANS=[['','Not sure yet'],['starter','Starter'],['growth','Growth'],['scale','Scale']];
+const CB_TZ_FROM={entered:'the time zone you picked',state:'their state',phone:'guessed from the phone number',default:'US Eastern, as nothing was given'};
+function renderCalBook(def,st){
+  const f=(id,label,attrs,extra)=>`<div class="field"><label for="${id}">${esc(label)}</label><input id="${id}" ${attrs||''} autocomplete="off" oninput="calBookSchedule()">${extra||''}</div>`;
+  return `<div class="modal-head"><div><h3>Book a call</h3><p>For someone you are talking to on the phone. They get the confirmation email and the reminders, like anyone who books on your website.</p></div></div>
+    <div class="modal-body cal-book">
+      ${f('cbName','Their name','maxlength="120" placeholder="e.g. Dana Smith"')}
+      ${f('cbEmail','Their email','type="email" inputmode="email" maxlength="200" placeholder="dana@theircompany.com"')}
+      <div class="field row2"><div><label for="cbDate">Date (${esc(calOwnerName(st))})</label><input id="cbDate" type="date" value="${esc(def.date||'')}" oninput="calBookSchedule()"></div><div><label for="cbTime">Time (${esc(calOwnerName(st))})</label><input id="cbTime" type="time" step="300" value="${esc(def.time||'')}" oninput="calBookSchedule()"></div></div>
+      <p class="cal-preview cal-book-prev" id="cbPrev" aria-live="polite">Fill in their name, email and the time to see the time on their side.</p>
+      <div id="cbWarn" class="cal-book-warn" aria-live="polite"></div>
+      <h4 class="cal-h4">If you know more (all optional)</h4>
+      ${f('cbCompany','Company','maxlength="160"')}
+      ${f('cbWebsite','Website','maxlength="200" inputmode="url" placeholder="Leave empty to use their email address"')}
+      <div class="field row2"><div><label for="cbTz">Their time zone</label><select id="cbTz" onchange="calBookSchedule()"><option value="">Not sure</option>${CB_ZONES.map(([z,l])=>`<option value="${esc(z)}">${esc(l)}</option>`).join('')}</select></div><div><label for="cbState">Or their US state</label><input id="cbState" maxlength="40" placeholder="e.g. Texas or TX" autocomplete="off" oninput="calBookSchedule()"></div></div>
+      ${f('cbPhone','Phone','type="tel" inputmode="tel" maxlength="40"')}
+      ${f('cbSells','What they sell','maxlength="200"')}
+      <div class="field"><label for="cbPlan">Plan</label><select id="cbPlan">${CB_PLANS.map(([v,l])=>`<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select></div>
+      <div class="field"><label for="cbNotes">Notes</label><textarea id="cbNotes" rows="3" maxlength="1000" placeholder="Anything you want to remember for the call"></textarea></div>
+      <div id="cbErr" class="login-err" role="alert"></div>
+    </div>
+    <div class="modal-foot cal-acts"><button class="btn ghost" onclick="closeModal()">Close</button><span id="cbAnyway"></span><button class="btn" id="cbSave" onclick="calBookSave()">Book it</button></div>`;
+}
+/* The preview under the time: both clocks, then where the time zone and website came from. Pure. */
+function renderCalBookPreview(r){
+  if(!r||typeof r!=='object')return '';
+  const bits=[];
+  if(r.whenHost||r.whenTheirs)bits.push(`<b>Your time:</b> ${esc(r.whenHost||'—')} · <b>Their time:</b> ${esc(r.whenTheirs||'—')}`);
+  if(r.theirTz)bits.push('Their time zone: '+esc(calZoneName(r.theirTz))+' ('+esc(CB_TZ_FROM[r.tzFrom]||'')+')');
+  if(r.website)bits.push('Website: '+esc(r.website)+' ('+(r.websiteFrom==='email'?'from their email':'as you typed it')+')');
+  else bits.push('No website yet'+(r.websiteFrom===null?' (a free email address says nothing about their business)':''));
+  return bits.map(x=>`<span class="cal-book-line">${x}</span>`).join('');
+}
+function renderCalBookWarnings(w){
+  const list=(Array.isArray(w)?w:[]).filter(x=>x&&x.message);
+  return list.length?`<div class="tk-note" role="alert">${list.map(x=>`<div>${esc(x.message)}</div>`).join('')}</div>`:'';
+}
+function calOpenBook(){openModal(renderCalBook(calDefaultWhen(),calSettingsNow()));cb.warnings=null;cb.seq++;}
+function calBookRead(){
+  const d=calReadWhen('cb');const b={};
+  const add=(k,v)=>{if(v)b[k]=v};
+  add('name',val('cbName'));add('email',val('cbEmail'));
+  if(d)b.start=d.toISOString();
+  add('company',val('cbCompany'));add('website',val('cbWebsite'));add('theirTz',val('cbTz'));add('state',val('cbState'));
+  add('phone',val('cbPhone'));add('sells',val('cbSells'));add('plan',val('cbPlan'));add('notes',val('cbNotes'));
+  return b;
+}
+/* What is missing, in the owner's words ('' when all three are there). */
+function calBookMissing(b){
+  if(!b.name)return 'Write their name first.';
+  if(!b.email)return 'Write their email first.';
+  if(!calEmail(b.email))return "That email doesn't look right. Check it for typos.";
+  if(!b.start)return 'Pick the date and the time first.';
+  return '';
+}
+function calBookSchedule(){cb.warnings=null;const a=document.getElementById('cbAnyway');if(a)a.innerHTML='';clearTimeout(cb.timer);cb.timer=setTimeout(calBookCheckNow,450)}
+async function calBookCheckNow(){
+  const prev=document.getElementById('cbPrev'),warn=document.getElementById('cbWarn');if(!prev)return null;
+  const b=calBookRead();
+  if(calBookMissing(b)){prev.innerHTML='Fill in their name, email and the time to see the time on their side.';if(warn)warn.innerHTML='';return null;}
+  const my=++cb.seq;
+  const r=await machineFetch(CB_API,{method:'POST',body:{action:'bookCheck',booking:b}});
+  if(my!==cb.seq)return r;   // a newer check is on its way
+  const p=document.getElementById('cbPrev'),w=document.getElementById('cbWarn');if(!p)return r;
+  if(r.ok&&r.data){p.innerHTML=renderCalBookPreview(r.data);if(w)w.innerHTML=renderCalBookWarnings(r.data.warnings);}
+  else{p.innerHTML=`<span class="cal-book-line cal-book-bad">${esc(r.error||"Couldn't check that.")}</span>`;if(w)w.innerHTML='';}
+  return r;
+}
+async function calBookSave(force){
+  if(cb.busy)return {ok:false,busy:true};
+  clearTimeout(cb.timer);
+  const b=calBookRead();const miss=calBookMissing(b);
+  errEl('cbErr','');
+  if(miss){errEl('cbErr',miss);return {ok:false,error:miss};}
+  cb.busy=true;const btn=document.getElementById('cbSave');if(btn)btn.disabled=true;
+  try{
+    const body={action:'book',booking:b};if(force===true)body.force=true;
+    const r=await machineFetch(CB_API,{method:'POST',body});
+    if(r.ok&&r.data){
+      const inq=r.data.id!=null?r.data.id:(r.data.inquiry&&r.data.inquiry.id);
+      toast(r.data.emailed===false?'Booked — but the confirmation email could not be sent. Check the booking.':'Booked — the confirmation email is on its way');
+      closeModal();
+      Object.keys(cal.at).forEach(k=>{cal.at[k]=0;});
+      calRepaint();calLoad(cal.week,true).then(()=>calRepaint());
+      if(inq!=null&&typeof openInquiry==='function')openInquiry(inq);
+      return r;
+    }
+    if(r.status===409){
+      cb.warnings=(r.data&&r.data.warnings)||[];
+      const w=document.getElementById('cbWarn');if(w)w.innerHTML=renderCalBookWarnings(cb.warnings)||'';
+      const a=document.getElementById('cbAnyway');if(a)a.innerHTML='<button type="button" class="btn ghost" onclick="calBookSave(true)">Book it anyway</button>';
+      errEl('cbErr','Not booked yet. Fix the time, or press "Book it anyway".');
+      return r;
+    }
+    errEl('cbErr',r.error||"That did not work. Try again.");
+    return r;
+  }finally{cb.busy=false;const b2=document.getElementById('cbSave');if(b2)b2.disabled=false;}
 }
