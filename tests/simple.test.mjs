@@ -602,7 +602,7 @@ test('Calendar: a request the owner answered with "Suggest another time" is draw
   assert.deepEqual(where(calWeekModel('2026-10-05', calWeek.meetings, ST, { now: CAL_NOW }), 'mreq3'), ['2026-10-05', 19 * 60, 'requested'], 'at the suggested time: Mon 5 Oct, 7:00 pm');
   assert.equal(calHeldAt(calWeek.meetings.find((m) => m.id === 'mreq3')), '2026-10-05T13:30:00Z'); assert.equal(calHeldAt(calWeek.meetings.find((m) => m.id === 'mconf')), '2026-09-29T13:00:00Z');
   const grid = renderCalGrid(calWeekModel('2026-10-05', calWeek.meetings, ST, { now: CAL_NOW }));
-  assert.ok(/class="cal-ev suggested"[^>]*onclick="calOpenMeeting\(&quot;mreq3&quot;\)"[^>]*>.*Waiting for them/.test(grid), 'drawn apart from the ones waiting for his yes, in words');
+  assert.ok(/class="cal-ev suggested[^"]*"[^>]*onclick="calOpenMeeting\(&quot;mreq3&quot;\)"[^>]*>.*Waiting for them/.test(grid), 'drawn apart from the ones waiting for his yes, in words');
   assert.equal(calNavCount(), '', 'a suggestion waiting for them is no badge for him');
   cal.reqs = calRequestsOf(calWeek); assert.equal(calNavCount(), 2); calendarForget();
   // the grid helper and the "Call done" action are two different functions (one global script)

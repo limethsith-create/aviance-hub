@@ -346,7 +346,7 @@ test('15–20 the launch call, from the machine\'s snapshots: the card from the 
   assert.deepEqual(buttons(o.top), [['Say yes to their launch-call time', 'openCalendar(&quot;' + s17.detail.launchCall.meetingId + '&quot;)']]);
   assert.ok(flat(o.top).includes('Dana asked for the launch call on Tue 20 Oct · 8:30 pm your time (Tue 11:00 am US Eastern). Say yes, or suggest another time.'));
   assert.ok(!o.launch.includes('Mark call booked') && !o.launch.includes('Approved on the call</button>'), 'her time waits in the Calendar: no second way to book it on the card');
-  assert.ok(flat(o.calendar[1] || o.calendar[0]).includes('Launch call · Waiting for your yes'));
+  assert.ok(flat(o.calendar[1] || o.calendar[0]).includes('Launch · Waiting for your yes'));
   // 18–19 booked: nothing until the call; the card joins the Meet and says what to do on it
   for (const p of ['18', '19']) {
     o = drawStep(byStep(p));
@@ -454,7 +454,7 @@ test('05 time requested: the big button opens the Calendar at her request; the l
   assert.ok(cal0.includes('Calls on Google Meet') && !cal0.includes('No meeting link set yet'), 'Google Meet is connected: never "no meeting link set yet"');
   assert.ok(!cal0.includes('no meeting link set yet'));
   assert.ok(o.meetings.some((h) => flat(h).includes('Calls happen on Google Meet — the link is made when you say yes')), 'her request (the sales call before it is done)');
-  assert.ok(o.calendar.some((h) => /class="cal-ev requested"[^>]*>/.test(h)), 'on the grid: waiting for his yes');
+  assert.ok(o.calendar.some((h) => /class="cal-ev requested[^"]*"[^>]*>/.test(h)), 'on the grid: waiting for his yes');
   // an empty week (if one of the weeks drawn has nothing — the sales call and her request now fill the first two)
   for (const empty of o.calendar.filter((h) => h.includes('class="cal-empty"'))) assert.ok(!empty.includes('cal-anone') && (flat(empty).match(/Nothing booked this week/g) || []).length === 1, 'an empty week says so once (on a phone it said it twice)');
   // pressing it: the Calendar at that request
