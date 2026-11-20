@@ -2130,9 +2130,11 @@ async function clientInvitePortal(id){
   if(tk.busy){toast('Still working on the last action…');return;}
   tk.busy=true;
   try{
+    const row=tkFindRow(id);const seatErr=typeof seatsUpsert==='function'?await seatsUpsert(id,(row&&row.plan)||''):'';
+    if(seatErr){toast('Could not set their plan limit: '+seatErr);return;}
     const token=tkPortalToken();const hash=await tkSha256Hex(token);
     const ins=await sb.from('portal_invites').insert({client_id:id,email,token_hash:hash,created_by:(authUser&&authUser.uid)||null,expires_at:new Date(Date.now()+14*86400000).toISOString()});
-    if(ins&&ins.error){toast('Could not make the invite: '+(ins.error.message||'try again'));return;}
+    if(ins&&ins.error){toast(ins.error.message&&ins.error.message.indexOf("You've reached the limit")>=0?ins.error.message:'Could not make the invite: '+(ins.error.message||'try again'));return;}
     const link=location.origin+'/#join='+token;
     const r=await machineFetch('/api/mc/clients/'+encodeURIComponent(id),{method:'POST',body:{action:'invitePortal',email,link}});
     tk.portalInvite=tk.portalInvite||{};
