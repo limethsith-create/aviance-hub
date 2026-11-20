@@ -426,49 +426,42 @@ Screen); it then opens like an app. Links such as `#trial/{id}` open straight to
   transparent stripe under the red top). iOS paints transparency black on the
   home screen, so the hub's icons are the same cube flattened onto white.
 
-## Readability floor (keep this in any redesign)
+## The look (keep this in any change)
 
-The owner reads this hub a lot; text must be easy to see. Every size and
-colour comes from tokens in `index.html` (`:root`, and `body.dark` for dark
-mode), and the tests enforce the floor.
+A working tool, not a template: an ink-dark sidebar (both themes), an off-white
+page, white panels with 1px hairlines (no shadow on cards), small corners, dense
+type, and one brand colour (the logo's red-orange) used for the primary button,
+the active-nav marker and the focus ring. Shadows only on things that float
+(menus, modals, toasts). Empty states are left-aligned: a bold line, what to do,
+one button. Loading is skeleton bars, errors a red strip with "Try again".
 
-- **One simple font:** the computer's own UI font for everything —
-  `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-  sans-serif` (the `--font` token). Nothing is downloaded, so it never loads
-  late or looks different while loading. No second font (no monospace, not
-  even for emails), no labels in capitals, no letter-spacing, and only two
-  weights: 400 (normal) and 600 (bold).
+**`theme.css` is the only place tokens are defined** (colours, radii, shadows,
+type sizes, spacing). New screens use them, never raw values:
+`--bg --surface --surface-2 --surface-3 --border --border-strong --text --muted
+--brand --brand-hover --brand-ink --sidebar* --green/--amber/--red/--blue (+ -bg)
+--r 8px --r-sm 6px --r-xs 4px --sh-lg --s1..--s7`. Older names (`--accent`,
+`--border-soft`, `--muted-2`, `--field`, `--red-brand` …) still work: they point at
+the new tokens. Dark = `body.dark` (Settings › Light or dark, and ⌘K) which also
+sets `data-theme="dark"` on `<html>`; every token has a dark value.
 
-- **Size:** nothing smaller than **13px** anywhere — labels, pills, badges,
-  table heads, timestamps, chart labels, tab bar. Body text is **16px**.
-  Scale: `--fs-min` 13 · `--fs-small` 15 · `--fs-base` 16 · `--fs-strong` 17 ·
-  `--fs-h3` 19 · `--fs-h2` 24 · `--fs-num` 19 (the five numbers) ·
-  `--fs-num-lg` 26. Use a token, never a raw size under 13px.
-- **Contrast:** every text colour passes **WCAG AA, 4.5:1**, against every
-  background it sits on, in light and dark — including pill text on its pill
-  fill. Light: text #000, muted #3A3A3A, muted-2 #555555, green #17662F,
-  amber #8A5300, red #B01F06 on white / #F4F4F4 / #EAEAEA. Dark: text #FFF,
-  muted #C8C8C8, muted-2 #A3A3A3, green #5CCB83, amber #E6B03A, red #FF6A4D on
-  black / #121212 / #1D1D1D. Pill fills are solid tokens (`--green-bg`,
-  `--amber-bg`, `--red-bg`, `--blue-bg`), never see-through rgba, so their
-  contrast is fixed and testable. The lowest pair in use is 5.4:1.
-- **Charts:** every mark colour is at least **3:1** against the page in both
-  themes (series blue `--c1`, orange `--c2`, violet `--c3`, grey `--c-none`,
-  and a blue ramp `--g-a/b/c` for lead grades), checked with a colour-blind
-  safety validator. Chart text is ordinary HTML, not SVG text, so it never
-  shrinks below 13px on a phone.
-- **Spacing:** line-height ≈1.5 for reading text; to-do rows, cards and
-  table cells have room to breathe.
-- **Phones (≤860px):** one column, the tab bar at the bottom, every tap target
-  at least 44px (buttons, tabs, rows), long button labels wrap rather than
-  clip, no sideways scrolling.
-- **Colour means one thing:** red = needs you, amber = waiting, green = good,
-  grey = done. Hover and focus use black/white, never red.
+- **Font:** `--font` is Inter, then the system UI font. Inter is not downloaded
+  (the page's Content-Security-Policy only allows our own files), so it shows
+  where installed and the system font everywhere else. `--mono` for ids.
+- **Size:** nothing under **12px** (labels, uppercase, tracking .04em). Scale:
+  `--fs-min` 12 · `--fs-small` 13 · `--fs-base` 14 (body, tables, inputs) ·
+  `--fs-strong`/`--fs-h3` 16 · `--fs-h2` 20 · `--fs-title` 24 (page title,
+  weight 650) · `--fs-num-lg` 28 (stats). Numbers use tabular figures.
+- **Phones (≤860px):** one column, tab bar, 16px in every box (iPhone does not
+  zoom), every tap target at least 44px (desktop buttons and inputs are 36px),
+  toasts bottom-centre.
+- **Contrast:** every text colour passes **WCAG AA, 4.5:1** on every background
+  it sits on, in light and dark; chart marks 3:1. One chart series is `--brand`.
+- **Colour means one thing:** brand = the main action, red = needs you (always
+  with a word or icon), amber = waiting, green = done, blue = information.
 
-`npm test` fails if any `font-size` in `trials.css`, the shell styles or
-inline styles drops below 13px, if any other font family, capitals-only
-label, letter-spacing or weight other than 400/600 appears, if any text pair
-drops below 4.5:1, or if any chart mark drops below 3:1.
+`npm test` fails if any `font-size` drops below 12px, any other font family
+appears, a weight outside 400-700 is used, capitals/letter-spacing appear outside
+`theme.css`, a text pair drops below 4.5:1 or a chart mark below 3:1.
 
 ## How much the hub asks of the machine
 
@@ -520,7 +513,7 @@ Sign-in needs the real Supabase project.
 ```
 npm test          # node --test tests/*.test.mjs
 HUB_JOURNEY_REPORT=/tmp/journey.txt npm test   # + a plain-text report of every step of the journey
-npm run check     # node --check trials.js, inquiries.js, calendar.js, messages.js, autobuy.js, warmup.js, keys.js, people.js, ava.js
+npm run check     # node --check trials.js, inquiries.js, calendar.js, messages.js, autobuy.js, warmup.js, keys.js, people.js
 ```
 
 The tests load the shell's inline script, `trials.js` and `inquiries.js` into a tiny fake DOM

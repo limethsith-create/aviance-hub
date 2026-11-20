@@ -66,8 +66,8 @@ const ok = (body) => async () => ({ ok: true, status: 200, text: async () => JSO
 /* ───────────── shell ───────────── */
 test('shell: title, router knows the four places (and the pages inside them), nothing from the old workspace remains', () => {
   assert.ok(html.includes('<title>Aviance Hub</title>'));
-  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'clientSystem', 'paying', 'trialPurchase', 'calendar', 'inquiries', 'inquiry', 'settings', 'people', 'team', 'trialsBoard']);
-  assert.deepEqual(Object.keys(views).filter((v) => !views[v].back), ['trials', 'paying', 'calendar', 'settings', 'people', 'team'], 'the places have no Back button; every page inside one has (plan call requests sit inside Paying clients)');
+  assert.deepEqual(Object.keys(views), ['trials', 'trial', 'clientSystem', 'paying', 'trialPurchase', 'calendar', 'channels', 'inquiries', 'inquiry', 'settings', 'people', 'numbers', 'team', 'trialsBoard']);
+  assert.deepEqual(Object.keys(views).filter((v) => !views[v].back), ['trials', 'paying', 'calendar', 'channels', 'settings', 'people', 'numbers', 'team'], 'the places have no Back button; every page inside one has (plan call requests sit inside Paying clients)');
   for (const gone of ['viewDashboard', 'viewProjects', 'viewTeam', 'viewClients', 'viewCRM', 'viewProposals', 'viewInvoices', 'viewMyDay', 'viewDirectory', 'workspace_shared', 'workspace_admin', 'loadData', 'saveDB', 'openNewProject', 'composeGmail', 'submitJoin', 'approveJoin', 'applyRole', 'employeePersona', 'printDoc', 'crmStages', 'phases', 'Request to join', 'joinPane', 'roleMenu']) {
     assert.ok(!html.includes(gone), gone + ' is gone');
   }
@@ -78,13 +78,13 @@ test('shell: title, router knows the four places (and the pages inside them), no
 });
 
 test('shell: the full control panel pages (Mission Control) are signed-in links from Settings › Advanced and ⌘K, never in the navigation', () => {
-  assert.deepEqual(MACHINE_PAGES.map(([p]) => p), ['/mc/queue', '/mc/warmup', '/mc/config', '/mc/test', '/mc/learning']);
-  assert.deepEqual(MACHINE_PAGES.map((x) => x[2]), ['Waiting list', 'Warm-up circle', 'Advanced settings', 'Test mode', 'What we learned']);
+  assert.deepEqual(MACHINE_PAGES.map(([p]) => p), ['/mc/warmup', '/mc/config', '/mc/learning']);
+  assert.deepEqual(MACHINE_PAGES.map((x) => x[2]), ['Warm-up circle', 'Advanced settings', 'What we learned']);
   asOwner(); renderNav();
   const nav = el('navArea').innerHTML + el('tabBar').innerHTML;
   assert.ok(!nav.includes('openMachine') && !nav.includes('Mission Control') && !/Projects|CRM|Invoices/.test(nav));
   const adv = renderSettings({ open: { advanced: true } });
-  for (const p of ['/mc', '/mc/queue', '/mc/warmup', '/mc/config', '/mc/test', '/mc/learning']) assert.ok(adv.includes(`onclick="openMachine(&quot;${p}&quot;)"`), 'Settings › Advanced opens ' + p);
+  for (const p of ['/mc', '/mc/warmup', '/mc/config', '/mc/learning']) assert.ok(adv.includes(`onclick="openMachine(&quot;${p}&quot;)"`), 'Settings › Advanced opens ' + p);
   assert.ok(adv.includes('Full control panel ↗') && adv.includes('Advanced settings ↗'));
 });
 
@@ -115,7 +115,7 @@ test('shell: the owner and approved team members get in (a team member read-only
   assert.equal(authUser.role, 'employee'); assert.equal(el('app').style.display, 'grid');
   assert.ok(document.body._classes.has('ro'), 'read-only');
   assert.ok(trialsIsAdmin() && !hubIsOwner());
-  assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'team'], 'no Settings, no Activity');
+  assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'channels', 'team'], 'no Settings, no Activity');
   assert.ok(viewSettings().includes('Only the owner can open this.'));
   authUser = null;
   supa.session = { access_token: 'test-token' };
@@ -142,7 +142,7 @@ test('shell: ⌘K lists clients and actions only; the bell shows client to-dos a
   asOwner(); trialsIngestHub(fullHub);
   renderCmdk('');
   const list = el('cmdkList').innerHTML;
-  for (const s of ['Acme Plumbing', 'Bright Dental', 'Add a paying client', '<b>Clients</b>', '<b>Settings</b>', '<b>Alerts</b>', 'Behind the scenes', 'Is everything running?', 'Warm-up circle', 'Test mode', 'Switch light / dark', 'Log out']) assert.ok(list.includes(s), '⌘K has ' + s);
+  for (const s of ['Acme Plumbing', 'Bright Dental', 'Add a paying client', '<b>Clients</b>', '<b>Settings</b>', '<b>Alerts</b>', 'Behind the scenes', 'Is everything running?', 'Warm-up circle', 'Switch light / dark', 'Log out']) assert.ok(list.includes(s), '⌘K has ' + s);
   assert.ok(!/Machine alerts|Mission Control|>Machine</.test(list), 'no old words in ⌘K');
   assert.ok(!/New project|Add lead|Schedule meeting/.test(list));
   renderCmdk('bright'); assert.ok(el('cmdkList').innerHTML.includes('Bright Dental') && !el('cmdkList').innerHTML.includes('Acme Plumbing'));
@@ -898,37 +898,41 @@ const messagesJs = fs.readFileSync(path.join(root, 'messages.js'), 'utf8');
 const autobuyJs = fs.readFileSync(path.join(root, 'autobuy.js'), 'utf8');
 const warmupJs = fs.readFileSync(path.join(root, 'warmup.js'), 'utf8');
 const varsIn = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*([^;}]+)/g)].map((m) => [m[1], m[2].trim()]));
-const rootVars = varsIn(shellCss.match(/:root\{[\s\S]*?\n\}/)[0]);
-const darkVars = Object.assign({}, rootVars, varsIn(shellCss.match(/body\.dark\{[^}]*\}/)[0]));
+const themeCss = fs.readFileSync(path.join(root, 'theme.css'), 'utf8');
+const rootVars = varsIn(themeCss.match(/:root\{[\s\S]*?\n\}/)[0]);
+const darkVars = Object.assign({}, rootVars, varsIn(themeCss.match(/body\.dark,:root\[data-theme="dark"\]\{[^}]*\}/)[0]));
 const noComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '');
-const allStyle = { 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'messages.js': messagesJs, 'autobuy.js': autobuyJs, 'warmup.js': warmupJs, };
+const allStyle = { 'theme.css': noComments(themeCss), 'trials.css': noComments(css), 'calendar.css': noComments(calendarCss), 'index.html <style>': noComments(shellCss), 'index.html markup/script': html.slice(html.indexOf('</style>')), 'trials.js': trialsJs, 'calendar.js': calendarJs, 'messages.js': messagesJs, 'autobuy.js': autobuyJs, 'warmup.js': warmupJs, };
 
-test('font: one plain system font family, no web fonts, no capitals-only labels, no letter-spacing, weights 400/600', () => {
-  assert.equal(rootVars.font, '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif');
-  assert.ok(!/fonts\.googleapis|fonts\.gstatic|@import|@font-face/i.test(html + css), 'no web font is loaded');
-  assert.ok(!/JetBrains|Inter Tight|var\(--mono\)|var\(--display\)/.test(noComments(html) + noComments(css) + noComments(calendarCss) + trialsJs + calendarJs + messagesJs + autobuyJs + warmupJs), 'no second family');
+test('font: one UI family (Inter, then the system font) plus a mono for ids; labels may be capitals; weights 400-700', () => {
+  assert.equal(rootVars.font, '"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif');
+  assert.ok(/ui-monospace/.test(rootVars.mono), 'a mono stack for ids and numbers');
+  assert.ok(!/@import/i.test(html + css + themeCss), 'no CSS is imported from elsewhere');
+  for (const m of (html + css + themeCss).matchAll(/@font-face\{[^}]*\}/gi)) assert.ok(/url\("\/fonts\/[a-z0-9-]+\.woff2"\)/.test(m[0]) && !/https?:/.test(m[0]), 'fonts come only from our own /fonts/ folder (the CSP only allows our own origin)');
   for (const [name, src] of Object.entries(allStyle)) {
-    for (const m of src.matchAll(/font-family:\s*([^;"'}]+)/g)) assert.ok(['var(--font)', 'inherit'].includes(m[1].trim()), `${name}: font-family ${m[1]}`);
-    assert.ok(!/text-transform:\s*uppercase/.test(src), `${name}: no capitals-only text`);
-    assert.ok(!/letter-spacing/.test(src), `${name}: no letter-spacing`);
-    for (const m of src.matchAll(/font-weight:\s*([^;"'}!]+)/g)) assert.ok(['400', '600', 'normal'].includes(m[1].trim()), `${name}: font-weight ${m[1]}`);
+    for (const m of src.matchAll(/font-family:\s*([^;"'}]+)/g)) assert.ok(['var(--font)', 'var(--mono)', 'inherit'].includes(m[1].trim()), `${name}: font-family ${m[1]}`);
+    if (name !== 'theme.css') {
+      assert.ok(!/text-transform:\s*uppercase/.test(src), `${name}: capitals-only labels are set in theme.css only`);
+      assert.ok(!/letter-spacing/.test(src), `${name}: letter-spacing is set in theme.css only`);
+    }
+    for (const m of src.replace(/@font-face\{[^}]*\}/g, '').matchAll(/font-weight:\s*([^;"'}!]+)/g)) assert.ok(['400', '500', '600', '650', '700', 'normal'].includes(m[1].trim()), `${name}: font-weight ${m[1]}`);
   }
   assert.ok(/b,strong,th,h5,summary\{font-weight:600\}/.test(shellCss) && /h1,h2,h3,h4\{font-weight:600\}/.test(shellCss), 'browser-bold elements capped at 600');
 });
 
-test('readability: no font size below 13px anywhere (CSS, shell styles, inline styles in JS)', () => {
+test('readability: no font size below 12px anywhere (CSS, shell styles, inline styles in JS)', () => {
   const fs_ = Object.entries(rootVars).filter(([k]) => k.startsWith('fs-'));
   assert.ok(fs_.length >= 6);
-  for (const [k, v] of fs_) assert.ok(parseFloat(v) >= 13, `--${k} is ${v}`);
+  for (const [k, v] of fs_) assert.ok(parseFloat(v) >= 12, `--${k} is ${v}`);
   let checked = 0;
   for (const [name, src] of Object.entries(allStyle)) {
     for (const m of src.matchAll(/font-size:\s*([^;"'}]+)/g)) {
-      const v = m[1].trim(); checked++;
+      const v = m[1].trim().replace(/\s*!important$/, ''); checked++;
       if (v === 'inherit') continue;
       const tok = /^var\(--(fs-[\w-]+)\)$/.exec(v);
-      if (tok) { assert.ok(parseFloat(rootVars[tok[1]]) >= 13, `${name}: ${v}`); continue; }
+      if (tok) { assert.ok(parseFloat(rootVars[tok[1]]) >= 12, `${name}: ${v}`); continue; }
       assert.match(v, /^\d+(\.\d+)?px$/, `${name}: font-size must be a --fs-* token or px, got "${v}"`);
-      assert.ok(parseFloat(v) >= 13, `${name}: font-size ${v} is below the 13px floor`);
+      assert.ok(parseFloat(v) >= 12, `${name}: font-size ${v} is below the 12px floor`);
     }
   }
   assert.ok(checked > 150, 'scanned the real rules (' + checked + ')');

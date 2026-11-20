@@ -70,14 +70,13 @@ const TK_SECTION_TAB={messages:'messages',calls:'calls',conversations:'conversat
 const TK_SYS_TAB_KEY='avianceSysTab:v2';   // the side and tab last open, per client (a convenience — kept in this browser only)
 const TK_TRIAL_VIEWS=['paying','trialsBoard','trial','clientSystem','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
 /* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
-const TK_SETTINGS=['alerts','details','keys','ava','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
+const TK_SETTINGS=['alerts','details','keys','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
 /* A to-do that opens a Settings section ({type:'view', view:'settings', section}): the button's words. */
-const TK_SETTINGS_NAMES={alerts:'Alerts',details:'Your details',keys:'Keys',ava:'Ava',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot'};
+const TK_SETTINGS_NAMES={alerts:'Alerts',details:'Your details',keys:'Keys',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot'};
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
 const TK_GROWTH_FRESH_MS=5*60000;     // Growth tab: reuse an answer this young
-const TK_OVERVIEW_FRESH_MS=15*60000;  // Overview sparklines (14 days)
 const TK_SPARK_FRESH_MS=6*3600000;    // board-card sparklines — kept across reloads to spare the machine's Redis
 const TK_SPARK_KEY='avianceGrowth14:v1';
 /* States with nothing to chart yet (no warm-up, no sending): no sparkline fetch. */
@@ -486,7 +485,7 @@ function renderSpark(values,o){
 function tkEmptyChart(msg){return `<div class="card tk-chart-empty">${esc(msg)}</div>`}
 
 /* ===================== 5. PURE RENDERERS (data → HTML) ===================== */
-function renderLoading(msg){return `<div class="tk-loading" role="status">${esc(msg||'Loading…')}</div>`}
+function renderLoading(msg){return `<div class="tk-loading" role="status"><div class="sk" aria-hidden="true"><i></i><i></i><i></i></div><span>${esc(msg||'Loading…')}</span></div>`}
 function renderMachineError(reason,retryFn){
   return `<div class="card tk-err" role="alert"><b>We can't reach the system right now</b><p>${esc(reason||'No answer.')}</p>
     <div class="tk-inline"><button class="btn" onclick="${esc(retryFn||'trialsRetry()')}">Try again</button></div></div>`;
@@ -753,7 +752,6 @@ function tkListRows(hub){const out=[],seen={};((hub&&hub.stages)||[]).forEach(st
    trials, so every row is a paying client and lives in Clients. */
 const TK_PAID_PLANS=['starter','growth','scale'];
 function tkIsPaidRow(r){return !!r}
-function tkIsPaidId(id){if(id==null)return false;const r=tkFindRow(id);if(r)return tkIsPaidRow(r);const d=tk.detail[id];return !!(d&&d.row&&tkIsPaidRow(d.row))}
 function tkPlanName(p){p=String(p||'').toLowerCase();return TK_PAID_PLANS.includes(p)?p[0].toUpperCase()+p.slice(1):'Starter'}
 /* ---- Money (owner only): the machine keeps ONE invoice per client — the month-one invoice (HUB-API.md `invoice` on
    GET /api/mc/hub/{id}: number, amount, issuedAt, paidAt, status sent|paid|blocked, plan). An `invoices` list is read
@@ -1517,7 +1515,7 @@ function tkAppOnPage(d){d=d||{};return tkAppPending(d)||tkStep(d.row||{}).notTak
    with Say yes / Say no / the Word download. Nothing else: everything else is inside the system. */
 function renderTrialDetail(d,tab,meta){
   d=d||{};meta=meta||{};const act=tkPrimaryAction(d,meta);
-  return renderTrialTop(d,meta,act)+(tkAppOnPage(d)?renderApplicationBlock(d,meta):renderSystemButton(d));   // not taken: no system to open
+  return renderTrialTop(d,meta,act)+(tkAppOnPage(d)?renderApplicationBlock(d,meta):renderSystemButton(d))+(typeof numbersTrialSection==='function'?numbersTrialSection((d.row||{}).id):'');   // not taken: no system to open
 }
 /* The to-dos the big button does not already ask for (never the call's, the application's or the buying one CheapInboxes
    handles — those have their own place): "Also on your list", on top of Actions in their system. */
@@ -2020,12 +2018,10 @@ function renderSettings(ctx){
   const wu=typeof renderWarmupSet==='function'?renderWarmupSet(ctx.warmup||{}):null;
   const yd=typeof renderDetailsSet==='function'?renderDetailsSet(ctx.owner||{}):null;   // keys.js: Your details, Keys
   const ky=typeof renderKeysSet==='function'?renderKeysSet(ctx.keys||{}):null;
-  const av=typeof avaRenderSet==='function'?avaRenderSet(ctx.ava||{}):null;   // ava.js: her brains, voice, requests
   return `<div class="tk-sets">`+
     sec('alerts','Alerts','Messages from the system about your clients.',unseen==null?'':unseen?`<span class="pill amber">${tkNum(unseen)} not seen</span>`:'<span class="pill green">All seen</span>',alertsBody)+
     (yd?sec('details','Your details','Your name, address and links — what the emails say about you.',yd.state,yd.body):'')+
     (ky?sec('keys','Keys','The keys for the free services the system uses. Paste each one once.',ky.state,ky.body):'')+
-    (av?sec('ava','Ava','Your helper: her brains, her voice, and what people asked her to change.',av.state,av.body):'')+
     (gm?sec('google','Google Meet','A Google Meet link for every call you say yes to.',gm.state,gm.body):'')+
     (ib?sec('inboxes','Inboxes & domains','You buy on CheapInboxes, we set up the rest.',ib.state,ib.body):'')+
     (wu?sec('warmup','Warm-up','Free helper email accounts that warm up new inboxes.',wu.state,wu.body):'')+
@@ -2107,15 +2103,49 @@ function tkClientGrowthKick(id){
   tk.growthBusy[id]=true;
   loadGrowth(id,tk.growthDays,true).then(()=>{delete tk.growthBusy[id];tkSysRepaintIf(id,['overview','health']);});
 }
-function tkClientStatsKick(id){
-  tkMailKick(id);   // their conversations and every email sent (5 minutes each)
-  tkClientGrowthKick(id);
-}
 function renderClientAccess(d,id){
   const acc=(d&&d.dashboardAccess)||{};const list=acc.sharedWith||[];const ro=typeof hubIsOwner==='function'&&!hubIsOwner()&&document.body&&document.body.classList&&document.body.classList.contains('ro');
   return `<div class="card tk-pad tk-access" id="tkAccess"><div><h4>Who can see this</h4><p class="tk-muted tk-small">Add someone from their business by email. They get a private link to their own live page — emails sent, replies and booked calls. Nothing else.</p></div>
     ${list.length?`<ul class="tk-access-list">${list.map(x=>`<li><b>${esc(x.email)}</b> <span class="tk-muted tk-small">since ${esc(tkDate(x.at))}</span></li>`).join('')}</ul>`:'<p class="tk-small tk-muted">Nobody yet.</p>'}
-    ${ro?'':`<div class="tk-access-add"><input type="email" id="tkAccessEmail" data-tk-form placeholder="name@theirbusiness.com" onkeydown="if(event.key==='Enter')clientShare(${tkAttr(id)})"><button class="btn" onclick="clientShare(${tkAttr(id)})">Give access</button>${list.length?`<button class="btn ghost danger" onclick="clientUnshare(${tkAttr(id)})">Stop all access</button>`:''}</div>`}</div>`;
+    ${ro?'':`<div class="tk-access-add"><input type="email" id="tkAccessEmail" data-tk-form placeholder="name@theirbusiness.com" onkeydown="if(event.key==='Enter')clientShare(${tkAttr(id)})"><button class="btn" onclick="clientShare(${tkAttr(id)})">Give access</button>${list.length?`<button class="btn ghost danger" onclick="clientUnshare(${tkAttr(id)})">Stop all access</button>`:''}</div>`}
+    ${ro?'':`<div class="tk-portal" id="tkPortal"><h4>Invite to their portal</h4><p class="tk-muted tk-small">A portal login of their own: their Channels (message us) and their Numbers. We email the link, and you can copy it too. It works for 14 days.</p>
+      <div class="tk-access-add"><input type="email" id="tkPortalEmail" data-tk-form aria-label="Their email address" placeholder="name@theirbusiness.com" onkeydown="if(event.key==='Enter')clientInvitePortal(${tkAttr(id)})"><button class="btn" onclick="clientInvitePortal(${tkAttr(id)})">Invite to their portal</button></div>
+      <div id="tkPortalOut">${tkPortalOut(id)}</div></div>`}</div>`;
+}
+/* ---- Invite to their portal: a secret link (32 random bytes) the hub makes itself. Only its sha-256 is stored (Supabase portal_invites,
+   14 days); the machine emails the link; the link is shown here to copy. The person opens it, sets up an account and joins as that client. ---- */
+function tkB64url(bytes){let s='';for(let i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+function tkPortalToken(){const b=new Uint8Array(32);crypto.getRandomValues(b);return tkB64url(b);}
+async function tkSha256Hex(text){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return Array.from(new Uint8Array(d)).map(x=>x.toString(16).padStart(2,'0')).join('');}
+function tkPortalOut(id){
+  const r=(tk.portalInvite||{})[id];if(!r)return '';
+  return `<div class="tk-portal-out" role="status"><p class="tk-small"><b>${r.sent?'Sent to '+esc(r.email):'Not emailed yet'}</b>${r.sent?'':' — '+esc(r.error||'the email did not go out')+'. Copy the link and send it yourself.'}</p>
+    <div class="tk-access-add"><input type="text" readonly id="tkPortalLink" aria-label="Invite link" value="${esc(r.link)}" onfocus="this.select()"><button class="btn ghost" onclick="clientCopyPortalLink()">Copy link</button></div>
+    <p class="tk-muted tk-small">Only works with ${esc(r.email)}, for 14 days.</p></div>`;
+}
+async function clientInvitePortal(id){
+  if(typeof hubIsOwner==='function'&&!hubIsOwner()){toast('Only the owner can invite someone.');return;}
+  const el=document.getElementById('tkPortalEmail');const email=(el?el.value.trim():'').toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Type their email address first');return;}
+  if(tk.busy){toast('Still working on the last action…');return;}
+  tk.busy=true;
+  try{
+    const token=tkPortalToken();const hash=await tkSha256Hex(token);
+    const ins=await sb.from('portal_invites').insert({client_id:id,email,token_hash:hash,created_by:(authUser&&authUser.uid)||null,expires_at:new Date(Date.now()+14*86400000).toISOString()});
+    if(ins&&ins.error){toast('Could not make the invite: '+(ins.error.message||'try again'));return;}
+    const link=location.origin+'/#join='+token;
+    const r=await machineFetch('/api/mc/clients/'+encodeURIComponent(id),{method:'POST',body:{action:'invitePortal',email,link}});
+    tk.portalInvite=tk.portalInvite||{};
+    tk.portalInvite[id]={email,link,sent:!!(r.ok&&r.data&&r.data.sent),error:r.ok?'':(r.error||'')};
+    if(el)el.value='';
+    const out=document.getElementById('tkPortalOut');if(out)out.innerHTML=tkPortalOut(id);
+    toast(tk.portalInvite[id].sent?'Invite sent to '+email:'The invite is ready, but the email did not send');
+  }catch(e){toast('Could not make the invite: try again');}
+  finally{tk.busy=false;}
+}
+function clientCopyPortalLink(){
+  const el=document.getElementById('tkPortalLink');if(!el)return;
+  try{navigator.clipboard.writeText(el.value).then(()=>toast('Link copied'),()=>{if(el.select)el.select();toast('Press Ctrl+C to copy');});}catch(e){if(el.select)el.select();toast('Press Ctrl+C to copy');}
 }
 async function clientShare(id){
   const el=document.getElementById('tkAccessEmail');const email=el?el.value.trim():'';
@@ -2442,6 +2472,7 @@ function trialsRepaint(view,opts){
   try{renderNav();updateNotifBadge();}catch(e){}
   if(view==='clientSystem'){tkSysTabsReveal();if(typeof msgScrollDown==='function')msgScrollDown();}   // Messages: the newest email in view
   trialsApplyScroll();
+  try{if(typeof numbersMountHosts==='function')numbersMountHosts();}catch(e){}
 }
 /* Everything the system's tabs need besides the detail. */
 function trialsSysMeta(id){return Object.assign({at:tk.detailAt[id]},trialsCtx(id))}
@@ -2482,7 +2513,7 @@ async function trialsKick(view,force){
   if(view==='trials'||view==='trialsBoard'||view==='paying'){if(typeof teamKick==='function'&&typeof tm!=='undefined'&&!tm.data)teamKick(false);r=await loadHub(force);if(view==='paying')tkMoneyKick();}
   else if(view==='trial'||view==='clientSystem')r=await loadTrial(currentTrialId,force);   // their stats and mail: trialsEnsureTab, on the owner's own clicks
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
-  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null,typeof avaLoadSettings==='function'?avaLoadSettings(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
+  else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
   else if(view==='inquiries'||view==='inquiry')r=await loadInquiries(force);
   trialsRepaint(view,{soft:true});
   return r;
@@ -2503,7 +2534,7 @@ function trialsSettingsCtx(){
     dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:'',
     google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,inboxes:typeof abSettingsCtx==='function'?abSettingsCtx():null,
     warmup:typeof wuSettingsCtx==='function'?wuSettingsCtx():null,details:tk.detail,
-    keys:typeof kySettingsCtx==='function'?kySettingsCtx():null,ava:typeof avaSettingsCtx==='function'?avaSettingsCtx():null,owner:typeof ydSettingsCtx==='function'?ydSettingsCtx():null,left:typeof kyStillToDo==='function'?kyStillToDo():null};
+    keys:typeof kySettingsCtx==='function'?kySettingsCtx():null,owner:typeof ydSettingsCtx==='function'?ydSettingsCtx():null,left:typeof kyStillToDo==='function'?kyStillToDo():null};
 }
 /* #alerts, #settings/warmup, the bell and to-dos ({view:'settings', section}) open Settings with that section open and in view. */
 function openSettings(section){
@@ -2904,7 +2935,7 @@ function trialsOnRender(v){
 function trialsForget(){
   trialsStopTimer();
   Object.assign(tk,{outreach:null,outreachAt:0,outreachErr:null,hub:null,hubAt:0,hubErr:null,detail:{},detailAt:{},detailErr:{},alerts:null,alertsAt:0,alertsErr:null,purchase:{},purchaseAt:{},purchaseErr:{},growth:{},growthErr:{},growthBusy:{},spark:{},sparkErr:{},sparkBusy:{},moneyTried:{},mail:{},threads:{},mailView:null});
-  currentTrialId=null;trialTab='overview';tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;tk.sysTab=null;tk.focusReply=false;
+  tk.portalInvite={};currentTrialId=null;trialTab='overview';tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;tk.sysTab=null;tk.focusReply=false;
   try{localStorage.removeItem(TK_SYS_TAB_KEY);}catch(e){}
   try{inquiriesForget();}catch(e){}
   try{messagesForget();}catch(e){}
