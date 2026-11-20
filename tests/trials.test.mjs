@@ -1589,7 +1589,7 @@ test('an employee (read-only) opens a client\'s email system too — both sides,
     const setup = renderSysTab(tk.detail['cobalt-hvac'], 'setup', {});
     assert.ok(setup.includes('Who can see this') && !setup.includes('tk-access-add'), 'who can see it, but not the way to change it');
     const css = fs.readFileSync(path.join(root, 'theme.css'), 'utf8');
-    assert.ok(css.includes('body.ro .content .btn:not(.ro-ok)'), 'every button that changes something is hidden for them');
+    assert.ok(css.includes('body.ro:not(.client-mode) .content .btn:not(.ro-ok)'), 'every button that changes something is hidden for them (a client in their portal keeps their own buttons)');
     assert.ok(!/class="[^"]*\bbtn\b[^"]*"[^>]*id="tkSysBtn"/.test(renderTrialDetail(tk.detail['cobalt-hvac'], 'overview', {})) && renderTrialDetail(tk.detail['cobalt-hvac'], 'overview', {}).includes('class="tk-sysbtn"'), 'the big system button is not a hidden .btn: they can open it');
   } finally { document.body.classList.remove('ro'); asOwner(); trialsStopTimer(); }
 });
