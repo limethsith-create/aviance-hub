@@ -3,8 +3,8 @@
    "Book a call" form — the only way in. The machine saves each one, puts the call in the Calendar, emails them
    the confirmation and the reminders, and pops it up on the owner's phone (push url
    /#inquiry/{id}); here he sees every person's stage and moves them along: Booked → Call done
-   (or No-show) → Following up → Agreement and invoice sent → Won / Lost, and adds notes. Won makes them a paying client (the
-   onboarding email goes out); Lost closes the record held for the call. Contract: email-distributor/docs/HUB-API.md
+   (or No-show) → Following up → Agreement and invoice sent (the yes: both are emailed at once) → Won (paid:
+   they become a paying client and the onboarding email goes out) / Lost, and adds notes. Lost closes the record held for the call. Contract: email-distributor/docs/HUB-API.md
    "Changes on 2026-11-20" and "## Plan inquiries".
      GET  /api/mc/hub        → inquiries: {counts, open, latest:[…]} + a to-do per new one
      GET  /api/mc/inquiries  → {inquiries:[record…] newest first, counts}
@@ -21,7 +21,7 @@ function iqKey(s) { return s === 'proposal' || s === 'proposal_sent' ? 'agreemen
 function iqFixList(list) { return (list || []).map((q) => (q && iqKey(q.status) !== q.status ? Object.assign({}, q, { status: iqKey(q.status) }) : q)); }
 function iqFixCounts(c) { if (!c || (c.proposal == null && c.proposal_sent == null)) return c; const o = Object.assign({}, c); o.agreement_sent = (Number(o.agreement_sent) || 0) + (Number(o.proposal) || 0) + (Number(o.proposal_sent) || 0); delete o.proposal; delete o.proposal_sent; return o; }
 /* What usually comes next from each stage (the first is the big button). */
-const IQ_NEXT = { new: ['held', 'no_show'], held: ['agreement_sent', 'contacted'], no_show: ['contacted', 'lost'], contacted: ['agreement_sent', 'won'], agreement_sent: ['won', 'lost'], won: [], lost: ['contacted'] };
+const IQ_NEXT = { new: ['held', 'no_show'], held: ['agreement_sent', 'contacted'], no_show: ['contacted', 'lost'], contacted: ['agreement_sent', 'lost'], agreement_sent: ['won', 'lost'], won: [], lost: ['contacted'] };
 const IQ_FILTERS = [['open', 'Open'], ['all', 'All']].concat(IQ_STATUSES.map((s) => [s, IQ_STATUS[s][1]]));
 const IQ_CHIPS = ['open', 'all'];   // the chips; each stage is a tile on the pipeline above them
 const iq = { list: null, counts: null, at: 0, err: null, filter: 'open' };
@@ -187,10 +187,10 @@ function renderInquiry(q, meta) {
   const trial = q.clientId && q.status === 'won'
     ? `<div class="iq-trial-done"><b>Now a client</b> — they were emailed to book the onboarding call. <span class="tk-linkish" onclick="openTrial(${tkAttr(q.clientId)})">Open their page →</span></div>`
     : q.clientId || q.website
-      ? `<p class="tk-small muted">After the call, press <b>Won</b> and they become a client (the onboarding email goes out), or <b>Lost</b> (nothing is emailed).${q.clientId ? ` <span class="tk-linkish" onclick="openTrial(${tkAttr(q.clientId)})">What we found before the call →</span>` : ''}</p>`
+      ? `<p class="tk-small muted">They said yes on the call? Press <b>Send the agreement and invoice</b>: both are emailed to them straight away. Once they've paid, press <b>Won</b> and the onboarding email goes out. Or <b>Lost</b> (nothing is emailed).${q.clientId ? ` <span class="tk-linkish" onclick="openTrial(${tkAttr(q.clientId)})">What we found before the call →</span>` : ''}</p>`
       : `<p class="tk-small muted">No website on this booking, so Won can't make them a client from here. Add them with their website instead.</p><div class="tk-inline"><button class="btn ghost" onclick="inquiryAddClient(${tkAttr(id)})">Add them as a paying client</button></div>`;
   const next = IQ_NEXT[q.status] || [];
-  const moveBtn = (s, main) => `<button class="btn${main ? '' : ' ghost'}" onclick="inquirySetStatus(${tkAttr(id)},'${s}')">${esc(IQ_STATUS[s][1])}</button>`;
+  const moveBtn = (s, main) => `<button class="btn${main ? '' : ' ghost'}" onclick="inquirySetStatus(${tkAttr(id)},'${s}')">${esc(s === 'agreement_sent' ? 'Send the agreement and invoice' : IQ_STATUS[s][1])}</button>`;
   const others = IQ_STATUSES.filter((s) => s !== q.status && !next.includes(s));
   const path = ['new', 'held', 'contacted', 'agreement_sent', 'won'];
   const at = path.indexOf(q.status);
@@ -199,7 +199,7 @@ function renderInquiry(q, meta) {
     <div class="card tk-pad iq-moves">${stepper}
     ${next.length ? `<p class="tk-small muted iq-move-q">Move them to:</p><div class="tk-inline">${next.map((s, i) => moveBtn(s, i === 0)).join('')}</div>` : ''}
     <details class="iq-other"><summary>Another stage</summary><div class="tk-inline">${others.map((s) => moveBtn(s, false)).join('')}</div></details>
-    <div class="field"><label for="iqStatusNote">Note with the change (optional)</label><input id="iqStatusNote" data-tk-form placeholder="e.g. Sending the Growth proposal on Monday"></div>
+    <div class="field"><label for="iqStatusNote">Note with the change (optional)</label><input id="iqStatusNote" data-tk-form placeholder="e.g. Said yes to Growth on the call"></div>
     <div class="iq-trial">${trial}</div></div>`;
   const notes = (q.notes || []).slice().sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
   const notesHtml = `<div class="section-head tk-section"><h3>Notes</h3><span class="count">${notes.length}</span></div><div class="card tk-pad">
@@ -267,8 +267,10 @@ function inquirySetStatus(id, status) {
   const label = IQ_STATUS[status] ? IQ_STATUS[status][1].toLowerCase() : status;
   const q = iqFind(id); const name = (q && (q.company || q.name)) || 'them';
   // Won makes them a paying client and emails them; the machine says why when it can't (no website, say)
-  const opts = status === 'won'
-    ? { confirm: 'Mark ' + name + ' as Won? They become a paying client and get an email asking them to book the onboarding call.', done: 'Won — ' + name + ' is a client now and was emailed', fail: 'Not marked Won' }
+  const opts = status === 'agreement_sent'
+    ? { confirm: 'Send ' + name + ' the agreement and the invoice now? Both are emailed to them straight away.', done: 'Agreement and invoice sent to ' + name, fail: 'Not sent' }
+    : status === 'won'
+    ? { confirm: 'Mark ' + name + ' as Won? Only once they have paid: they become a paying client and get an email asking them to book the onboarding call.', done: 'Won — ' + name + ' is a client now and was emailed', fail: 'Not marked Won' }
     : status === 'lost' && q && q.clientId ? { confirm: 'Mark ' + name + ' as Lost? Nothing is emailed to them.', done: 'Moved to Lost', fail: 'Not changed' }
       : { done: 'Moved to ' + (IQ_STATUS[status] ? IQ_STATUS[status][1] : label), fail: 'Not changed' };
   return trialPost('/api/mc/inquiries', Object.assign({ action: 'status', id, status }, note ? { note } : {}), opts);

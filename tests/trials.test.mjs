@@ -1078,9 +1078,9 @@ test('booking detail: reply by email, their time, website, notes, status moves, 
   assert.ok(s.includes('href="https://stoneroofing.com"') && s.includes('>stoneroofing.com</a>'));
   assert.ok(s.includes('No notes yet.') && s.includes('id="iqNoteText"') && s.includes('Add note'));
   assert.ok(s.includes('Move them to:') && s.includes('<button class="btn" onclick="inquirySetStatus(&quot;qmgv1stone&quot;,\'held\')">Call done</button>') && s.includes('>No-show</button>'), 'next from Booked: Call done (big) or No-show');
-  assert.ok(s.includes('<summary>Another stage</summary>') && s.includes('>Following up</button>') && s.includes('>Agreement and invoice sent</button>') && s.includes('>Won</button>') && s.includes('>Lost</button>') && !s.includes('>Booked</button>'), 'every other stage, never the one they are at');
+  assert.ok(s.includes('<summary>Another stage</summary>') && s.includes('>Following up</button>') && s.includes('>Send the agreement and invoice</button>') && s.includes('>Won</button>') && s.includes('>Lost</button>') && !s.includes('>Booked</button>'), 'every other stage, never the one they are at');
   assert.ok(s.includes('id="iqStatusNote"') && s.includes('Note with the change (optional)'));
-  assert.ok(visibleText(s).includes('After the call, press Won and they become a client') && !/trial/i.test(visibleText(s)), 'what Won does; no trial');
+  assert.ok(visibleText(s).includes('Send the agreement and invoice') && visibleText(s).includes('both are emailed to them straight away') && visibleText(s).includes('Won and the onboarding email goes out') && !/trial/i.test(visibleText(s)), 'what Won does; no trial');
   const c = renderInquiry(Q('qmgp2cedar'), { now: NOW });
   assert.ok(c.includes('openTrial(&quot;cedar-hvac&quot;)') && c.includes('What we found before the call →'), 'the record held for the call');
   assert.ok(c.includes('>Booked</button>') && !c.includes('>Following up</button>') && c.includes('<li class="cur">Following up</li>'));
@@ -1206,10 +1206,15 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
     el('iqNoteText').value = 'Wants to start in November';
     await inquiryAddNote('qmgv1stone');
     assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'note', id: 'qmgv1stone', text: 'Wants to start in November' });
-    // Won: asks first, says what it does, the page links to the new client
+    // The yes: asks first, says both emails go now, posts agreement_sent
     let asked = ''; globalThis.confirm = (m) => { asked = m; return true; };
+    await inquirySetStatus('qmgv1stone', 'agreement_sent');
+    assert.equal(asked, 'Send Stone Roofing the agreement and the invoice now? Both are emailed to them straight away.');
+    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'agreement_sent' });
+    assert.ok(el('toast').innerHTML.includes('Agreement and invoice sent to Stone Roofing'));
+    // Won (after payment): asks first, says what it does, the page links to the new client
     await inquirySetStatus('qmgv1stone', 'won');
-    assert.equal(asked, 'Mark Stone Roofing as Won? They become a paying client and get an email asking them to book the onboarding call.');
+    assert.equal(asked, 'Mark Stone Roofing as Won? Only once they have paid: they become a paying client and get an email asking them to book the onboarding call.');
     assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'won' });
     assert.ok(el('toast').innerHTML.includes('Won — Stone Roofing is a client now and was emailed'));
     assert.ok(el('tkHost').innerHTML.includes('Open their page →') && el('tkHost').innerHTML.includes('openTrial(&quot;stone-roofing&quot;)'), 'links to the new client');
