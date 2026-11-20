@@ -29,7 +29,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | --- | --- |
 | `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, the four-place navigation (sidebar on a computer, tab bar on a phone), ⌘K, notifications, theme. |
 | `trials.js` | Clients (the list, one client's page and their email system, Buy & paste, Behind the scenes) and Settings — the file name is from the trial days. Talks to the machine. |
-| `calendar.js`, `calendar.css` | The Calendar: requests waiting for your yes, the week, meetings, each confirmed call's Google Meet (see `email-distributor/docs/CALENDAR.md`). |
+| `calendar.js`, `calendar.css` | The Calendar: requests waiting for your yes, the week, meetings, each confirmed call's Google Meet, and "Book a call" for a cold call (see `email-distributor/docs/CALENDAR.md`). |
 | `messages.js` | Messages on every client page (the whole conversation, how each email we sent went, the reply box, the reply-bot switch), Settings › Google Meet and Settings › Reply bot (see `email-distributor/docs/REPLYBOT-MEET.md` and HUB-API "Delivery monitoring"). Styles in `trials.css`. |
 | `autobuy.js` | Their domain and inboxes through CheapInboxes: the "what to buy" panel behind the big button, the "Inboxes & domain" card on a client while it sets itself up, and Settings › Inboxes & domains (see `email-distributor/docs/AUTO-BUY.md`). Styles in `trials.css`. |
 | `warmup.js` | Warm-up: Settings › Warm-up (the circle meter, why helpers exist, the helpers with Test / Remove, Add a helper) and the "Warm-up" card on a client; while a client waits for helpers its big button is "Add N warm-up helpers" (see `email-distributor/docs/WARMUP-HUB.md`). Styles in `trials.css`. |
@@ -294,6 +294,17 @@ already says the day).
   Google Meet" as a button when the Google status in `settings.googleMeet`
   is not connected) + either "The email had your usual link instead" or
   "Send them a link yourself".
+- **Book a call (cold call)** — the Calendar's **Book a call** button opens a
+  form for someone on the phone: their name, email, and the date and time in
+  your own time zone (required); company, website, time zone or US state,
+  phone, what they sell, plan and notes (optional). As you type, the hub asks
+  the machine (`POST /api/mc/inquiries`, `action:'bookCheck'`, nothing saved)
+  and shows "Your time … · Their time …", where the website and time zone came
+  from ("from their email", "guessed from the phone number", "US Eastern, as
+  nothing was given") and any warnings in amber. **Book it** sends
+  `action:'book'`; on a 409 (a clash, or outside your call hours) the
+  warnings show with **Book it anyway** (resends with `force:true`). On
+  success: a toast and the new booking opens (`#inquiry/{id}`).
 - **Behind the scenes in a client's email system** — tabs. **Parts**: the 13 parts as one
   strip (each says OK / Working / Waiting / Blocked / Off in words), and four
   growth numbers — emails sent, replies, calls booked, warm-up inbox rate —
