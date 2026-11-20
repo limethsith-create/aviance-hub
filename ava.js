@@ -1470,7 +1470,7 @@ function avaNewChat(){
 }
 function avaSync(){
   const root=avaEl('avaRoot');if(!root)return;
-  const on=!!(typeof authUser!=='undefined'&&authUser);
+  const on=!!(typeof authUser!=='undefined'&&authUser&&authUser.role!=='client');   // never for a client (portal user)
   root.hidden=!on;if(root.style)root.style.display=on?'':'none';
   try{document.body.classList.toggle('ava-on',on);}catch(e){}
   if(!on){AVA.log=[];AVA.greeted=false;AVA.pending=null;AVA.restoredFor=null;AVA_AI.noted=false;avaForget();avaClose({keepFocus:true});return;}
@@ -1495,7 +1495,7 @@ function avaGreet(){
   return say;
 }
 function avaOpen(opts){
-  opts=opts||{};if(typeof authUser!=='undefined'&&!authUser)return;
+  opts=opts||{};if(typeof authUser!=='undefined'&&(!authUser||authUser.role==='client'))return;
   if(!AVA.mounted)avaMount();
   const p=avaEl('avaPanel'),f=avaEl('avaFab');
   const was=AVA.open;AVA.open=true;
@@ -2010,11 +2010,11 @@ function avaReadCmd(text){
 function avaIsSpace(e){return e&&(e.code==='Space'||e.key===' '||e.key==='Spacebar')}
 function avaKey(e){
   if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey&&String(e.key||'').toLowerCase()==='j'){
-    if(typeof authUser!=='undefined'&&!authUser)return;e.preventDefault&&e.preventDefault();
+    if(typeof authUser!=='undefined'&&(!authUser||authUser.role==='client'))return;e.preventDefault&&e.preventDefault();
     if(AVA.open)avaClose();else{avaOpen({listen:false});}return;
   }
   if(avaIsSpace(e)&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.shiftKey&&!e.isComposing){
-    if(typeof authUser!=='undefined'&&!authUser)return;
+    if(typeof authUser!=='undefined'&&(!authUser||authUser.role==='client'))return;
     if(avaEditable(e.target)||avaEditable(typeof document!=='undefined'?document.activeElement:null)||avaModalOpen())return;
     e.preventDefault&&e.preventDefault();
     if(e.repeat||AVA.ptt)return;
