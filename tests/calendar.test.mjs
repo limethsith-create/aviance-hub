@@ -184,7 +184,7 @@ test('week grid across US daylight saving: winter hours move one hour later in C
 
 test('the Calendar screen, short: who is waiting for your yes (your time big, the other clocks on hover, their note, Yes / Other time / No), this week, and one line with the call link and hours at the bottom', () => {
   const out = renderCalendar(calWeek, { week: '2026-09-28', now: CAL_NOW });
-  assert.ok(!out.includes('Clients pick a time on your booking page') && !out.includes('cal-legend'), 'no explainer, no colour legend');
+  assert.ok(!out.includes('Clients pick a time on your booking page') && out.includes('class="cal-legend"') && out.includes('Sales call') && out.includes('class="cal-upcoming"'), 'no explainer; a colour legend by type and an Upcoming list');
   assert.ok(out.includes('Calls on <a href="https://meet.google.com/abc-defg-hij" target="_blank" rel="noopener noreferrer">meet.google.com/abc-defg-hij</a>'));
   assert.ok(out.includes('Your call hours: Mon–Fri, 9:00 am – 5:00 pm US Eastern = 6:30 pm – 2:30 am the next morning in Sri Lanka.'));
   assert.ok(out.indexOf('Your call hours') > out.indexOf('This week'), 'the call facts sit at the bottom');
@@ -220,10 +220,10 @@ test('the grid draws each call sized by its minutes, coloured by status (green /
   assert.ok(g.includes('<div class="cal-hour" style="top:24px" title="3 pm ET, day before"><b>12:30 am</b><small>3 pm ET, day before</small></div>'));
   assert.ok(g.includes('<div class="cal-gapnote" style="top:120px;height:24px">No calls</div>'));
   const block = (id) => { const i = g.indexOf(`calOpenMeeting(&quot;${id}&quot;)`); return i < 0 ? '' : g.slice(g.lastIndexOf('<button', i), g.indexOf('</button>', i)); };
-  assert.match(block('mconf'), /class="cal-ev confirmed" style="top:192px;height:22px;left:calc\(0% \+ 2px\);width:calc\(100% - 4px\)"/, '30 min = 22 px, green');
-  assert.ok(block('mconf').includes('<span class="cal-ev-t">Acme Plumbing</span><span class="cal-ev-s">6:30 pm · Confirmed</span>'), 'who first, then the time and the status in words');
+  assert.match(block('mconf'), /class="cal-ev confirmed ty-onboarding" style="top:192px;height:22px;left:calc\(0% \+ 2px\);width:calc\(100% - 4px\)"/, '30 min = 22 px, green');
+  assert.ok(block('mconf').includes('<span class="cal-ev-t">Ann Lee</span><span class="cal-ev-s">6:30 pm · Onboarding</span>'), 'who first, then the time and the status in words');
   assert.match(block('mreq2'), /class="cal-ev requested short" style="top:72px;height:20px;/, '15 min = 20 px (the smallest a call is drawn), amber, 1:30 am');
-  assert.ok(!block('mreq2').includes('cal-ev-s') && block('mreq2').includes('<span class="cal-ev-t">Gale Roofing</span>'), 'a 15-minute block has one line: who');
+  assert.ok(!block('mreq2').includes('cal-ev-s') && block('mreq2').includes('<span class="cal-ev-t">Mia Gale</span>'), 'a 15-minute block has one line: who');
   assert.match(block('mheld'), /class="cal-ev held"/); assert.match(block('mblocked'), /class="cal-ev blocked" style="top:\d+(\.\d)?px;height:46px;/); assert.ok(block('mblocked').includes('<span class="cal-ev-t">Busy</span><span class="cal-ev-s">8:30 pm · Busy</span>'));
   assert.match(block('mnoshow'), /class="cal-ev noshow short"/);
   assert.ok(block('mconf').includes('aria-label="Onboarding call — Acme Plumbing with Ann Lee. Tue 29 Sep, 6:30 pm Sri Lanka time (Tue 9:00 am US Eastern). 30 minutes. Confirmed."'));
@@ -247,7 +247,7 @@ test('phone: a day-by-day list instead of the grid — every day, calls in time 
   assert.ok(a.includes('<section class="cal-aday today"><h4>Tue 29 Sep<span class="cal-today-tag">Today</span></h4>'));
   const tue = a.slice(a.indexOf('Tue 29 Sep'), a.indexOf('Wed 30 Sep'));
   assert.ok(tue.indexOf('12:30 am') < tue.indexOf('6:30 pm'), 'in time order');
-  assert.ok(tue.includes('<button type="button" class="cal-aitem noshow" onclick="calOpenMeeting(&quot;mnoshow&quot;)"><span class="cal-atime"><b>12:30 am</b><small>Mon 3:00 pm ET</small></span><span class="cal-amain"><b>Fern IT</b><small>Lee Park</small><span class="cal-astatus">No-show · 15 min</span>'));
+  assert.ok(tue.includes('<button type="button" class="cal-aitem noshow ty-other" onclick="calOpenMeeting(&quot;mnoshow&quot;)"><span class="cal-atime"><b>12:30 am</b><small>Mon 3:00 pm ET</small></span><span class="cal-amain"><b>Lee Park</b><small>Fern IT</small><span class="cal-astatus">Other · No-show · 15 min</span>'));
   assert.ok(a.slice(a.indexOf('Sun 4 Oct')).includes('Nothing booked'));
   assert.equal(renderCalAgenda(model('2026-09-28', [])), '<div class="cal-agenda"><p class="cal-anone">Nothing booked this week.</p></div>');
   const css = fs.readFileSync(path.join(root, 'calendar.css'), 'utf8');
@@ -431,7 +431,7 @@ test('Add a meeting (client from the trials list or none, Sri Lanka date + time 
 test('week buttons: ◀ ▶ and Today ask the machine for that week; while a new week loads the requests stay on screen', async () => {
   fresh(); const mc = fakeMachine();
   try {
-    render('calendar'); await tick();
+    render('calendar'); await tick(); cal.at = {}; delete cal.weeks['2026-10-05'];   // the Upcoming list also fetched next week: forget it, so the move really loads
     const p = calWeekMove(1);
     assert.ok(el('calHost').innerHTML.includes('Loading this week…') && el('calHost').innerHTML.includes('Waiting for your yes'), 'the requests stay while the next week loads');
     assert.ok(el('calHost').innerHTML.includes('<b class="cal-range">5 Oct – 11 Oct 2026</b>'));
