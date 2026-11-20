@@ -4,7 +4,7 @@
    Ava (from AVIance) listens, answers out loud and takes you to the right page.
    Free: no key, no paid service. Loaded last by index.html (after people.js),
    so it can read everything the hub already knows:
-     tk (trials.js: the board tk.hub, each client's page tk.detail, My stats tk.outreach),
+     tk (trials.js: the board tk.hub, each client's page tk.detail),
      cal (calendar.js), tm (people.js: the team), authUser + hubIsOwner() (the shell).
 
      Ears   — hold Space (anywhere but a text box) or hold the mic, talk, let go: sent. The browser's SpeechRecognition
@@ -48,7 +48,7 @@ const AVA_SYN=[
   [/\bwarm(?:ing)?[- ]?up\b|\bwarmup\b/g,'warmup'],[/\bset(?:ting)?[- ]up\b|\bsetup\b/g,'setup'],
   [/\bi've\b/g,'i have'],[/\bdidn't\b|\bdidnt\b/g,'did not'],[/\bdon't\b|\bdont\b/g,'do not'],[/\bcan't\b|\bcant\b/g,'cannot'],
   [/\btrial clients?\b/g,'trials'],[/\bpaid clients?\b|\bpaying customers?\b/g,'paying'],
-  [/\btele?phone\b/g,'phone'],[/\bpeople inside\b/g,'activity'],[/\bmy statistics\b/g,'my stats'],
+  [/\btele?phone\b/g,'phone'],[/\bpeople inside\b/g,'activity'],
   [/\bgoogle meets?\b/g,'meet'],[/\bgmail\b/g,'gmail'],[/\bconvos?\b/g,'conversations'],
 ];
 function avaNorm(s){
@@ -79,7 +79,7 @@ function avaCtx(){
 function avaHub(){return typeof tk!=='undefined'&&tk&&tk.hub?tk.hub:null}
 /* Every client the hub knows (trials and paying, not your own outreach): {id, name, person, row}. */
 function avaClients(){
-  const out=[],seen={};const own=id=>id==='aviance'||id==='_test'||(typeof MY_STATS_ID!=='undefined'&&id===MY_STATS_ID);
+  const out=[],seen={};const own=id=>id==='aviance'||id==='_test';
   const add=r=>{if(!r||r.id==null||own(r.id)||seen[r.id])return;seen[r.id]=1;const s=typeof tkSimple==='function'?tkSimple(r):{company:r.name,person:r.contactName};out.push({id:String(r.id),name:String(s.company||r.name||r.id),person:String(s.person||''),row:r});};
   const hub=avaHub();if(hub&&typeof tkListRows==='function')tkListRows(hub).forEach(add);
   if(typeof tk!=='undefined'&&tk&&tk.detail)Object.keys(tk.detail).forEach(k=>{const d=tk.detail[k];if(d&&d.row)add(d.row);});
@@ -135,7 +135,6 @@ const AVA_PLACES=[
   ['paying',/\bpaying\b|\bpaid plans?\b/,'Paying clients',()=>render('paying')],
   ['calendar',/\bcalendar\b/,'Calendar',()=>render('calendar')],
   ['team',/\bteam\b/,'Team',()=>render('team')],
-  ['mystats',/\bmy stats\b|\bmy outreach\b|\bstats\b/,'My stats',()=>openMyStats()],
   ['activity',/\bactivity\b|\bwho signed in\b/,'Activity',()=>render('people'),true],
   ['inquiries',/\binquir(y|ies)\b|\bplan call requests?\b/,'Plan call requests',()=>render('inquiries')],
   ['behind',/\bbehind the scenes\b|\bboard\b/,'Behind the scenes',()=>render('trialsBoard')],
@@ -157,7 +156,7 @@ const AVA_PLACES=[
 ];
 function avaPlace(key){const p=AVA_PLACES.find(x=>x[0]===key);return p?avaAct('Open '+p[2],p[3],{owner:!!p[4],place:key}):null}
 /* What she says once a place is open: short ("Here's the Calendar", "Here's Keys in Settings"). */
-const AVA_HERE={trials:'Here are your trials',paying:'Here are your paying clients',calendar:"Here's your calendar",team:"Here's the team",mystats:'Here are your stats',
+const AVA_HERE={trials:'Here are your trials',paying:'Here are your paying clients',calendar:"Here's your calendar",team:"Here's the team",
   activity:"Here's who signed in",inquiries:'Here are the plan call requests',behind:"Here's behind the scenes",settings:"Here's Settings",'set-phone':"Here's phone alerts"};
 function avaHere(key){
   if(AVA_HERE[key])return AVA_HERE[key]+'.';
@@ -224,13 +223,12 @@ const AVA_KB=[
   {id:'team',kw:'team page status working on who looks after whom choose clients assign',a:"The Team page shows everyone who uses the hub: who's in the hub now, where they are, what they're working on, and which clients each person looks after. Write your own line under What are you working on. The owner picks each person's clients with Choose clients.",go:'team'},
   {id:'activity',kw:'activity signed in out how long approve new account waiting approval',a:"Activity is the owner's page: who signed in and out, for how long, what they opened, and new accounts waiting for approval. Approve lets a person in — they can see everything and change nothing.",go:'activity',owner:true},
   {id:'roles',kw:'team member read only change nothing roles employee owner permission cannot press',a:"The owner can do everything. A team member sees the same screens but can't change anything, so the buttons that change things are hidden for them, and money is only for the owner. New team members make an account on the sign-in page and the owner approves it.",go:'team'},
-  {id:'mystats',kw:'my stats own outreach saved history save and start fresh spreadsheet clear',a:"My stats is your own outreach: emails sent, opened, replies and bounced, emails per day, by inbox, and every reply. Saved history keeps full copies as spreadsheets. Save and start fresh saves a copy, then clears the numbers so My stats starts from zero — people already emailed are never emailed again.",go:'mystats'},
   {id:'settings',kw:'settings sections what is in settings',a:"Settings has named sections, each saying its state in one word: Alerts, Phone alerts, Your details, Keys, Ava, Google Meet, Inboxes and domains, Warm-up, Reply bot, Test run, Is everything running, Behind the scenes, Advanced, Light or dark, and Your account.",go:'settings',owner:true},
   {id:'keys',kw:'keys api key paste service google places verify test and save forget',a:"Settings, Keys has one card per free service the system uses. Each card says its state and the steps to get the key; paste it once and press Test and save. A saved key is never shown again.",go:'set-keys',owner:true},
   {id:'details',kw:'your details name address call link paypal wise clutch onboarding inbox',a:"Settings, Your details holds what the emails say about you — your name, address, email, the onboarding inbox, call link, PayPal, Wise and Clutch. Each has its own Save; it tells you what's still to fill in.",go:'set-details',owner:true},
   {id:'meet',kw:'google meet connect link calls video',a:"Settings, Google Meet connects your Google account so every call you say yes to gets a Meet link. Follow the numbered steps once, press Connect Google, then Test it.",go:'set-google',owner:true},
   {id:'phone',kw:'phone alerts push notifications iphone home screen',a:"Phone alerts send a message to your phone when something needs you. On an iPhone, add the hub to your Home Screen first, then open it from there and turn alerts on.",go:'set-phone',owner:true},
-  {id:'opened',kw:'opened blank empty dash not tracked opens client why',a:"Opened is blank for clients on purpose: their emails go out without an open tracker, because trackers hurt landing in the inbox. So there's nothing to count. Only your own outreach on My stats tracks opens.",go:'mystats'},
+  {id:'opened',kw:'opened blank empty dash not tracked opens client why',a:"Opened is blank for clients on purpose: their emails go out without an open tracker, because trackers hurt landing in the inbox. So there's nothing to count."},
   {id:'bounce',kw:'bounce bounced what is bounce rate address does not exist pause',a:"A bounce is an email that came back because the address doesn't exist or the mailbox refused it. A few are normal. If too many bounce — about 2 to 3 percent — sending slows down or pauses by itself to protect the inboxes, and you get an alert.",go:null},
   {id:'bell',kw:'bell notifications what needs you alerts not seen mark as seen',a:"The bell at the top lists what needs you right now. Settings, Alerts has every message from the system, not seen first, with Mark as seen.",go:'set-alerts'},
   {id:'search',kw:'search find command k shortcut keyboard slash space',a:"Press Control or Command K — or the slash key — to find any client or page. Hold the Space bar to talk to me, and let go to send; Control or Command J opens me.",go:null},
@@ -346,13 +344,6 @@ function avaLive(t,ctx){
     if(!m.checked)return avaReply("I'm still counting the money received — open Paying clients in a moment.",[avaPlace('paying')]);
     const extra=[m.waiting?'still counting '+avaPlural(m.waiting,'client'):'',m.demo?tkDollars(m.demo)+' of it is from the test run':''].filter(Boolean).join('; ');
     return avaReply('You received '+tkDollars(m.month)+' this month, and '+tkDollars(m.all)+' in total from '+avaPlural(m.count,'paid invoice')+(extra?' — '+extra:''),[avaPlace('paying')]);
-  }
-  // my own outreach
-  if(/\b(have i|did i|i have|my own|my|we)\b.*\b(sent|send|emailed|outreach)\b|\bmy (outreach|emails)\b/.test(t)&&!client){
-    const o=typeof tk!=='undefined'&&tk?tk.outreach:null;
-    if(!o||!o.totals)return avaReply("I couldn't load your own sending just now. My stats has it.",[avaPlace('mystats')]);
-    const x=o.totals;const since=x.firstDay&&typeof tkDayName==='function'?' since '+tkDayName(x.firstDay):'';
-    return avaReply('Your own outreach has sent '+avaPlural(x.sent||0,'email')+since+', with '+avaPlural(x.replies||0,'reply','replies')+' and '+avaNum(x.bounces||0)+' bounced'+(x.uniqueOpens!=null?'; '+avaNum(x.uniqueOpens)+' were opened':''),[avaPlace('mystats')]);
   }
   // what needs me
   if(/\bneeds? (me|you|my|attention)\b|\bwhat (should|do) i (do|work on)\b|\bmy to ?dos?\b|\bto ?do list\b|\banything (urgent|for me)\b|\bwhat is waiting\b|\bwhat is urgent\b/.test(t))return avaNeeds(ctx);
@@ -1086,7 +1077,7 @@ function avaFirstWord(t){
 }
 const AVA_GO_WORDS=/\b(open|show|go to|go|take me|bring up|switch to|jump to|navigate|see)\b/;
 /* The machine's views → Ava's places (AVA_PLACES keys); settings and client are handled on their own. */
-const AVA_NAV_PLACE={trials:'trials',paying:'paying',calendar:'calendar',team:'team',mystats:'mystats',activity:'activity',people:'activity',inquiries:'inquiries',behind:'behind',trialsBoard:'behind'};
+const AVA_NAV_PLACE={trials:'trials',paying:'paying',calendar:'calendar',team:'team',activity:'activity',people:'activity',inquiries:'inquiries',behind:'behind',trialsBoard:'behind'};
 /* A client-system tab key (overview, conversations, sent, calls, messages, money, health, leads, setup) → its label and
    whether it is in the owner's "Only you" part. */
 function avaTabInfo(tab){
@@ -1315,7 +1306,6 @@ async function avaPrime(text){
     jobs.push(safe(calLoad(w1)));if(w2!==w1)jobs.push(safe(calLoad(w2)));
   }
   if(/\b(online|team|looks after|in the hub|working)\b/.test(t)&&typeof teamKick==='function'&&(typeof tm==='undefined'||!tm.data))jobs.push(safe(teamKick(false)));
-  if(/\b(i|my|we)\b.*\b(sent|send|outreach|emails)\b/.test(t)&&typeof loadOutreach==='function')jobs.push(safe(loadOutreach(false)));
   await Promise.all(jobs);
   if(/\b(money|revenue|income|received|paid|earn)\b/.test(t)&&avaOwner()&&typeof tkMoneyKick==='function'){const p=tkMoneyKick();if(p)await safe(p);}
   const c=avaFindClient(t);
@@ -1325,7 +1315,7 @@ const AVA_LOOP_STOP=/^(stop( listening)?|that is all( for now)?|thanks? ava|than
 /* Three follow-ups for the page you're on (when the AI gives none of its own); never the question just asked. */
 function avaFollowUps(ctx,asked){
   ctx=ctx||avaCtx();const pg=avaPage();const v=pg.view;const q=avaNorm(asked||'');let xs;
-  const name=pg.clientName&&pg.clientId!==(typeof MY_STATS_ID!=='undefined'?MY_STATS_ID:'aviance')?pg.clientName:null;
+  const name=pg.clientName&&pg.clientId!=='aviance'?pg.clientName:null;
   if(name)xs=['How is '+name+' doing?','Summarise '+avaPossessive(name)+' latest replies','What does '+name+' need from me?'];
   else if(v==='calendar')xs=["What's on tomorrow?",'Any call times waiting for my yes?','What needs me today?'];
   else if(v==='paying')xs=ctx.owner?['How much came in this month?','Which paying clients need me?','How does a paid plan start?']:['Which paying clients need the owner?','How does a paid plan start?','What needs me today?'];
@@ -1602,7 +1592,7 @@ function avaTime(at){if(!at)return '';try{return new Date(at).toLocaleTimeString
 
 /* ---- light markdown: **bold**, *italic*, `code`, lists, headings, line breaks, links. Everything is escaped first;
    a link to a hub page (#system/<id>, #trial/<id>, #settings/keys, #calendar …) is a button that opens it here. ---- */
-const AVA_ROUTE=/^#(?:system|trial|settings|calendar|trials|paying|inquiries|stats|alerts|team|mystats|activity|behind)(?:\/[A-Za-z0-9_.:-]+){0,2}$/;
+const AVA_ROUTE=/^#(?:system|trial|settings|calendar|trials|paying|inquiries|alerts|team|activity|behind)(?:\/[A-Za-z0-9_.:-]+){0,2}$/;
 function avaMd(src){
   const lines=String(src==null?'':src).replace(/\r\n?/g,'\n').split('\n');
   let html='',list=null,para=[],code=null;
@@ -1647,7 +1637,6 @@ function avaRoute(url){
   if(v==='trial')return bits[1]?{view:'client',id:bits[1]}:null;
   if(v==='settings')return {view:'settings',tab:bits[1]||null};
   if(v==='alerts')return {view:'settings',tab:'alerts'};
-  if(v==='stats')return {view:'mystats'};
   if(v==='calendar'&&bits[1])return {view:'calendar',id:bits[1]};
   return {view:v};
 }

@@ -293,7 +293,6 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
       <div class="la-guarantee">Live in 3 weeks — <b>guaranteed</b></div>
     </div>
     <div class="login-card">
-      <a class="btn" href="/dialer/" style="width:100%;justify-content:center;padding:13px;margin-bottom:22px;text-decoration:none;background:var(--red-brand);border-color:var(--red-brand);color:#fff">Open the Dialer — no sign-in needed</a>
       <div class="login-eyebrow">Aviance Hub</div>
       <div class="login-title">Sign in</div>
       <div class="login-desc">Your email and password.</div>
@@ -394,8 +393,6 @@ const I={
 };
 
 /* ---- Config ---- */
-/* Your own outreach is the machine's client `aviance`; My stats opens it. */
-const MY_STATS_ID='aviance';
 const SUPA_URL='https://zjbxnkpktbghhudjbxhk.supabase.co';
 const SUPA_KEY='sb_publishable_WV4FANV2hNsmbzK3DbiLFg_9bjiB8Z1';
 /* The system behind the hub (email-distributor). Override for testing: localStorage.setItem('avianceMachineUrl','http://localhost:3000') */
@@ -458,7 +455,6 @@ function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('
 function parseDeepLink(h){
   h=String(h||'');const at=h.indexOf('#');if(at<0)return null;h=h.slice(at+1).replace(/^\/+/,'').replace(/\/+$/,'');
   if(h==='trials')return {view:'trials'};
-  if(h==='stats')return {view:'trial',id:MY_STATS_ID};
   if(h==='alerts')return {view:'settings',section:'alerts'};
   if(h==='settings')return {view:'settings'};
   const s=h.match(/^settings\/(warmup|keys|details)$/);if(s)return {view:'settings',section:s[1]};
@@ -495,26 +491,17 @@ if(typeof window.addEventListener==='function')window.addEventListener('hashchan
 /* The home-screen app (iPhone "Add to Home Screen", or an installed desktop app) */
 function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.standalone===true)||(typeof window.matchMedia==='function'&&window.matchMedia('(display-mode: standalone)').matches);}catch(e){return false}}
 
-/* ---- My stats: your own outreach (the machine's `aviance` client) — inboxes, sending volume, replies, the copy —
-   on the same page a trial opens (Overview, Growth, Inboxes, Copy, …), one tap from the menu. #stats deep links here. ---- */
-function openMyStats(){openTrial(MY_STATS_ID)}
-
-/* ---- Dialer: the cold-calling dialer (three lines at once, scripts, outcomes) lives at /dialer/ — its own full-screen page. ---- */
-function openDialer(){location.href='/dialer/'}
-
-/* ---- Navigation: four places plus My stats. Badges: Trials = how many need you (red), Calendar = call times waiting
+/* ---- Navigation: the places in the sidebar. Badges: Trials = how many need you (red), Calendar = call times waiting
    for your yes (amber), Inquiries = new ones (red). The same items fill the sidebar and the phone's tab bar. ---- */
 function navItems(){
   const isPaid=()=>typeof tkIsPaidId==='function'&&tkIsPaidId(currentTrialId);
   const pn=typeof peopleNavCount==='function'?peopleNavCount():'';
   const n=typeof trialsNavCount==='function'?trialsNavCount():'',q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'';
   return [
-    {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','clientSystem','trialPurchase'],isOn:()=>currentView==='trials'||((currentView==='trialPurchase'||currentView==='clientSystem')&&!isPaid())||(currentView==='trial'&&currentTrialId!==MY_STATS_ID&&!isPaid())},
+    {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','clientSystem','trialPurchase'],isOn:()=>currentView==='trials'||((currentView==='trialPurchase'||currentView==='clientSystem')&&!isPaid())||(currentView==='trial'&&!isPaid())},
     {view:'paying',icon:I.money,label:'Paying clients',short:'Paying',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry'],isOn:()=>['paying','inquiries','inquiry'].includes(currentView)||((currentView==='trial'||currentView==='clientSystem'||currentView==='trialPurchase')&&isPaid())},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:c,tone:'amber',badgeTitle:c?c+' waiting for your yes':''},
     {view:'team',icon:I.people,label:'Team',badge:''},
-    {view:'dialer',icon:I.phone,label:'Dialer',badge:'',go:'openDialer()'},
-    {view:'mystats',icon:I.chart,label:'My stats',short:'Stats',badge:'',go:'openMyStats()',isOn:()=>currentView==='trial'&&currentTrialId===MY_STATS_ID},
     {view:'people',icon:I.activity,label:'Activity',short:'Activity',badge:pn,tone:pn?'red':'',badgeTitle:pn?pn+' waiting for your approval':'',owner:true},
     {view:'settings',icon:I.gear,label:'Settings',badge:'',also:['trialsBoard'],owner:true},
   ].filter(it=>!it.owner||!authUser||authUser.role==='admin');

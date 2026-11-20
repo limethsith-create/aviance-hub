@@ -13,7 +13,7 @@ const PP_BEAT_MS=60000;
 
 /* ---- presence ---- */
 function ppPost(body,opts){try{return machineFetch('/api/mc/presence',Object.assign({method:'POST',body,timeout:8000},opts||{})).catch(()=>null);}catch(e){return Promise.resolve(null)}}
-function ppViewKey(v){if(v==='trial'){return typeof MY_STATS_ID!=='undefined'&&currentTrialId===MY_STATS_ID?'mystats':'trial:'+String(currentTrialId||'').slice(0,50);}return String(v||'').slice(0,60)}
+function ppViewKey(v){if(v==='trial'){return 'trial:'+String(currentTrialId||'').slice(0,50);}return String(v||'').slice(0,60)}
 function peopleSignedIn(){
   if(typeof authUser==='undefined'||!authUser)return;
   ppPost({event:'signin',name:authUser.name||'',view:ppViewKey(typeof currentView!=='undefined'?currentView:'')});
@@ -88,7 +88,7 @@ function ppAgo(v){const d=tkParseDate(v);if(!d)return '';const s=Math.max(0,(Dat
 function ppDur(sec){sec=Number(sec)||0;if(sec<60)return sec?'<1 min':'—';const h=Math.floor(sec/3600),m=Math.round((sec%3600)/60);return h?`${h} h ${m} min`:`${m} min`}
 function ppPlace(k){
   k=String(k||'');if(!k)return '—';
-  const names={team:'Team',trials:'Trials',paying:'Paying clients',calendar:'Calendar',mystats:'My stats',settings:'Settings',people:'Activity',inquiries:'Plan call requests',inquiry:'A plan call request',trialsBoard:'Behind the scenes',trialPurchase:'A purchase page'};
+  const names={team:'Team',trials:'Trials',paying:'Paying clients',calendar:'Calendar',settings:'Settings',people:'Activity',inquiries:'Plan call requests',inquiry:'A plan call request',trialsBoard:'Behind the scenes',trialPurchase:'A purchase page'};
   if(names[k])return names[k];
   if(k.indexOf('trial:')===0){const id=k.slice(6);const r=typeof tkFindRow==='function'?tkFindRow(id):null;return (r&&(r.name||(r.simple&&r.simple.company)))||('the page of '+id);}
   return k;
