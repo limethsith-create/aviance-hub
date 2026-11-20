@@ -40,7 +40,7 @@ const fakeSb = {
     signOut: async () => { supa.signOuts++; supa.session = null; }, resetPasswordForEmail: async () => ({ error: null }), updateUser: async () => ({ error: null }),
   },
   from: (table) => ({
-    select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: supa.profile }) }) }),
+    select: () => { const c = { eq: () => c, is: () => c, gt: () => c, limit: () => c, maybeSingle: async () => ({ data: supa.profile }), then: (res, rej) => Promise.resolve({ data: supa.liveInvites || [] }).then(res, rej) }; return c; },
     insert: async (row) => { supa.inserts.push({ table, row }); return { error: supa.insertError }; },
   }),
   rpc: async (name, args) => { supa.rpcCalls.push({ name, args }); return supa.rpc ? supa.rpc(name, args) : { data: 'stone-roofing', error: null }; },
@@ -263,4 +263,23 @@ test('invite to their portal: token + sha-256 hash + 14-day invite row, machine 
   authUser = { uid: 'e1', name: 'Emp', role: 'employee', email: 'e@x.c' }; const n = supa.inserts.length;
   el('tkPortalEmail').value = 'y@stone.test'; await clientInvitePortal('stone-roofing');
   assert.equal(supa.inserts.length, n);
+});
+
+/* ── the automatic invite when a booking is marked paid ── */
+test('paid: invites the booking to their portal; skipped when they already have a login or a live invite', async () => {
+  authUser = { uid: 'owner-1', name: 'Owner', role: 'admin', email: 'o@x.c' }; supa.session = { access_token: 'owner-token' };
+  iq.list = [{ id: 'q1', company: 'Stone', email: 'Dana@Stone.test', status: 'agreement_sent', invoice: { number: 'A1' } }];
+  const posts = []; const toasts = [];
+  globalThis.toast = (m) => toasts.push(m);
+  globalThis.fetch = async (url, init = {}) => { posts.push({ url: String(url), body: init.body ? JSON.parse(init.body) : null }); const paid = /inquiries$/.test(String(url)); return { ok: true, status: 200, text: async () => JSON.stringify(paid ? { ok: true, clientId: 'stone-roofing' } : { ok: true, sent: true }) }; };
+  supa.profile = null; supa.liveInvites = []; supa.inserts.length = 0;
+  await inquirySetStatus('q1', 'won');
+  assert.equal(supa.inserts.length, 1); assert.equal(supa.inserts[0].row.client_id, 'stone-roofing'); assert.equal(supa.inserts[0].row.email, 'dana@stone.test');
+  assert.ok(posts.some((c) => /clients\/stone-roofing$/.test(c.url) && c.body.action === 'invitePortal'));
+  assert.ok(toasts.includes('Portal invite sent to dana@stone.test'));
+  // they already have a login: nothing new
+  supa.profile = { id: 'u7' }; await inquirySetStatus('q1', 'won'); assert.equal(supa.inserts.length, 1);
+  // a live unused invite exists: nothing new
+  supa.profile = null; supa.liveInvites = [{ id: 'i1' }]; await inquirySetStatus('q1', 'won'); assert.equal(supa.inserts.length, 1);
+  supa.liveInvites = [];
 });
