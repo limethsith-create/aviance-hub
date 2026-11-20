@@ -70,9 +70,9 @@ const TK_SECTION_TAB={messages:'messages',calls:'calls',conversations:'conversat
 const TK_SYS_TAB_KEY='avianceSysTab:v2';   // the side and tab last open, per client (a convenience — kept in this browser only)
 const TK_TRIAL_VIEWS=['paying','trialsBoard','trial','clientSystem','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
 /* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
-const TK_SETTINGS=['alerts','details','keys','ava','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
+const TK_SETTINGS=['alerts','details','keys','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
 /* A to-do that opens a Settings section ({type:'view', view:'settings', section}): the button's words. */
-const TK_SETTINGS_NAMES={alerts:'Alerts',details:'Your details',keys:'Keys',ava:'Ava',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot'};
+const TK_SETTINGS_NAMES={alerts:'Alerts',details:'Your details',keys:'Keys',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot'};
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
 const TK_FRESH_MS=15000;              // a cached answer younger than this is not re-fetched on navigation
 const TK_GROWTH_RANGES=[7,30,45,90];
@@ -2020,12 +2020,10 @@ function renderSettings(ctx){
   const wu=typeof renderWarmupSet==='function'?renderWarmupSet(ctx.warmup||{}):null;
   const yd=typeof renderDetailsSet==='function'?renderDetailsSet(ctx.owner||{}):null;   // keys.js: Your details, Keys
   const ky=typeof renderKeysSet==='function'?renderKeysSet(ctx.keys||{}):null;
-  const av=typeof avaRenderSet==='function'?avaRenderSet(ctx.ava||{}):null;   // ava.js: her brains, voice, requests
   return `<div class="tk-sets">`+
     sec('alerts','Alerts','Messages from the system about your clients.',unseen==null?'':unseen?`<span class="pill amber">${tkNum(unseen)} not seen</span>`:'<span class="pill green">All seen</span>',alertsBody)+
     (yd?sec('details','Your details','Your name, address and links — what the emails say about you.',yd.state,yd.body):'')+
     (ky?sec('keys','Keys','The keys for the free services the system uses. Paste each one once.',ky.state,ky.body):'')+
-    (av?sec('ava','Ava','Your helper: her brains, her voice, and what people asked her to change.',av.state,av.body):'')+
     (gm?sec('google','Google Meet','A Google Meet link for every call you say yes to.',gm.state,gm.body):'')+
     (ib?sec('inboxes','Inboxes & domains','You buy on CheapInboxes, we set up the rest.',ib.state,ib.body):'')+
     (wu?sec('warmup','Warm-up','Free helper email accounts that warm up new inboxes.',wu.state,wu.body):'')+
@@ -2503,7 +2501,7 @@ function trialsSettingsCtx(){
     dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:'',
     google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,inboxes:typeof abSettingsCtx==='function'?abSettingsCtx():null,
     warmup:typeof wuSettingsCtx==='function'?wuSettingsCtx():null,details:tk.detail,
-    keys:typeof kySettingsCtx==='function'?kySettingsCtx():null,ava:typeof avaSettingsCtx==='function'?avaSettingsCtx():null,owner:typeof ydSettingsCtx==='function'?ydSettingsCtx():null,left:typeof kyStillToDo==='function'?kyStillToDo():null};
+    keys:typeof kySettingsCtx==='function'?kySettingsCtx():null,owner:typeof ydSettingsCtx==='function'?ydSettingsCtx():null,left:typeof kyStillToDo==='function'?kyStillToDo():null};
 }
 /* #alerts, #settings/warmup, the bell and to-dos ({view:'settings', section}) open Settings with that section open and in view. */
 function openSettings(section){

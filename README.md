@@ -520,7 +520,7 @@ Sign-in needs the real Supabase project.
 ```
 npm test          # node --test tests/*.test.mjs
 HUB_JOURNEY_REPORT=/tmp/journey.txt npm test   # + a plain-text report of every step of the journey
-npm run check     # node --check trials.js, inquiries.js, calendar.js, messages.js, autobuy.js, warmup.js, keys.js, people.js, ava.js
+npm run check     # node --check trials.js, inquiries.js, calendar.js, messages.js, autobuy.js, warmup.js, keys.js, people.js
 ```
 
 The tests load the shell's inline script, `trials.js` and `inquiries.js` into a tiny fake DOM
