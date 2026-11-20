@@ -44,7 +44,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'feed.js', 'calendar.js', 'messages.js', 'autobuy.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 
@@ -493,11 +493,11 @@ test('Trials list + trial page: a client who asked for a time says "They asked f
   try {
     await calLoad('2026-09-28');
     const list = renderTrialList(simpleHub, {});
-    assert.ok(list.includes('<div class="cal-ask-wrap"><button type="button" class="tk-person needs" onclick="openTrial(&quot;ecreek-it&quot;)">'));
-    assert.ok(list.includes('<button type="button" class="cal-rowask" onclick="openCalendar(&quot;mreq1&quot;)"><span>They asked for Wed 30 Sep · 11:30 pm (your time) — say yes in the Calendar</span>'));
-    assert.ok(list.includes('onclick="openCalendar(&quot;mreq2&quot;)"'), 'Gale Roofing too');
+    const needs = list.slice(list.indexOf('<h3>Needs you</h3>'), list.indexOf('<h3>Just happened</h3>'));
+    assert.ok(needs.includes('onclick="openCalendar(&quot;mreq1&quot;)">Open the Calendar</button>') && needs.includes('asked for a call time. Say yes in the Calendar.'), 'a button straight to the Calendar, on the Needs you list');
+    assert.ok(needs.includes('onclick="openCalendar(&quot;mreq2&quot;)"'), 'Gale Roofing too');
     assert.ok(!list.includes('openCalendar(&quot;mreq3&quot;)'), 'Delta: the owner already suggested a time — nothing to do');
-    assert.equal((list.match(/cal-ask-wrap/g) || []).length, 2, 'only the rows with a request');
+    assert.equal((needs.match(/feed-kind">Call time</g) || []).length, 2, 'only the rows with a request');
     const said = calRowAsk('ecreek-it', { label: 'They asked for Tue 2 pm ET — say yes in the Calendar', next: '' });
     assert.ok(said.includes('<span>Open the Calendar to say yes</span>'), 'the machine already said it: just the link');
     // the trial page: saying yes to the time is the big button at the top — said once, not a second card
@@ -512,7 +512,7 @@ test('Trials list + trial page: a client who asked for a time says "They asked f
     assert.ok(p2.includes('<div class="card cal-trial-ask"><div class="cal-trial-ask-main"><b>Sam asked for a call: Wed 30 Sep · 11:30 pm (your time)</b><small>Wed 2:00 pm US Eastern · 30 min · say yes in the Calendar</small></div><button class="btn" onclick="openCalendar(&quot;mreq1&quot;)">Open the Calendar</button></div>'));
     assert.ok(p2.indexOf('cal-trial-ask') < p2.indexOf('tkOcHost'), 'above the onboarding call card');
     calendarForget();
-    assert.ok(!renderTrialList(simpleHub, {}).includes('cal-ask'), 'no calendar data → the list is unchanged');
+    assert.ok(!renderTrialList(simpleHub, {}).includes('feed-kind">Call time<'), 'no calendar data → no call-time lines');
   } finally { offline(); calendarStopTimer(); trialsStopTimer(); }
 });
 

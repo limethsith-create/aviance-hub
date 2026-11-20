@@ -1,0 +1,15 @@
+/* The Clients page live list (feed.js): Needs you + Just happened. Tokens come from theme.css. */
+.feed .count.feed-count{background:var(--red-bg);color:var(--red);border-radius:var(--r-xs);padding:1px 8px;font-weight:600}
+.feed-card{padding:16px 20px}.feed-card p{margin:4px 0 0}
+.feed-needs,.feed-events{list-style:none;margin:0 0 24px;padding:0;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
+.feed-need{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 16px;border-bottom:1px solid var(--border);border-left:3px solid var(--red)}
+.feed-need:last-child,.feed-events li:last-child .feed-event{border-bottom:0}
+.feed-need-main{flex:1 1 280px;display:flex;flex-direction:column;gap:2px;min-height:44px;justify-content:center;text-align:left;background:none;border:0;padding:0;font:inherit;color:var(--text);cursor:pointer}
+.feed-kind{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--red);font-weight:600}
+.feed-text{font-size:14px}
+.feed-btns{display:flex;flex-wrap:wrap;gap:8px}
+.feed-btns .btn{min-height:36px}
+.feed-event{display:flex;gap:16px;align-items:baseline;width:100%;min-height:44px;padding:10px 16px;text-align:left;background:none;border:0;border-bottom:1px solid var(--border);font:inherit;color:var(--text);cursor:pointer}
+.feed-event:hover,.feed-need-main:hover .feed-text{background:var(--surface-2)}
+.feed-when{flex:0 0 72px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+@media(max-width:560px){.feed-btns .btn{min-height:44px}.feed-when{flex-basis:60px}}

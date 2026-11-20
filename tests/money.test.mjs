@@ -43,7 +43,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 /* ───────────── load the shell, then the section scripts ───────────── */
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
-const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'people.js'];
+const FILES = ['trials.js', 'inquiries.js', 'feed.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'people.js'];
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 for (const f of FILES) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
@@ -110,38 +110,18 @@ test('Money card on a client\'s Stats: plan, each invoice (number, amount, issue
   assert.ok(!renderMoneyCard(Object.assign({}, cobaltDetail, { invoice: { number: '<b>x</b>', amount: 1 } })).includes('<b>x</b>'));
 });
 
-test('Clients: "Received this month · all time" above the stage tiles, paid invoices only, from the clients\' pages — the owner only', async () => {
+test('Clients: the money box is gone — no "Received this month", no background loading of every client\'s page', async () => {
   reset();
   tk.hub = hub; tk.hubAt = Date.now();
-  // nothing counted yet → one quiet line, no made-up numbers
-  let h = renderTrialList(hub, { now: MONTH_NOW }, true);
-  assert.ok(h.includes('Counting the money received') && !h.includes('$'));
-  // the pages come in: Cobalt paid $2,497 in September, Harbor $3,997 in October
-  tk.detail['cobalt-hvac'] = cobaltDetail; tk.detail['harbor-co'] = harborDetail;
-  h = renderTrialList(hub, { now: MONTH_NOW }, true);
-  const line = between(h, '<div class="card tk-money-sum">', '<div class="tk-stages"');
-  const t = visibleText(line);
-  assert.ok(t.includes('Received this month $3,997') && t.includes('All time $6,494') && t.includes('2 paid invoices'), t);
-  assert.ok(h.indexOf('tk-money-sum') < h.indexOf('tk-stages'), 'above the stage tiles');
-  // an unpaid invoice adds nothing
-  tk.detail['cobalt-hvac'] = Object.assign({}, cobaltDetail, { invoice: Object.assign({}, cobaltDetail.invoice, { paidAt: null, status: 'sent' }) });
-  assert.ok(visibleText(renderTrialList(hub, { now: MONTH_NOW }, true)).includes('All time $3,997'));
-  tk.detail['cobalt-hvac'] = cobaltDetail;
-  // not for the team
-  asEmployee(); assert.ok(!renderTrialList(hub, { now: MONTH_NOW }, true).includes('tk-money-sum')); reset();
-  // opening Paying clients loads the pages it has not seen yet, once each
-  tk.hub = hub; tk.hubAt = Date.now();
+  const h = renderTrialList(hub, { now: MONTH_NOW }, true);
+  assert.ok(!h.includes('tk-money-sum') && !h.includes('Received this month') && !h.includes('All time'));
+  assert.equal(typeof tkMoneyKick, 'undefined'); assert.equal(typeof renderMoneyTotals, 'undefined');
+  // opening Clients asks for the board only — not one page per paying client
   const calls = [];
   globalThis.fetch = route({ '/api/mc/hub': hub, '/api/mc/hub/cobalt-hvac': cobaltDetail, '/api/mc/hub/harbor-co': harborDetail }, calls);
   try {
     render('paying'); for (let i = 0; i < 6; i++) await tick();
-    const pages = calls.filter((c) => /^\/api\/mc\/hub\/[a-z-]+$/.test(c.u)).map((c) => c.u).sort();
-    assert.deepEqual(pages, ['/api/mc/hub/cobalt-hvac', '/api/mc/hub/harbor-co'], 'each client once');
-    assert.ok(visibleText(el('tkHost').innerHTML).includes('All time $6,494'));
-    const n = calls.length; tkMoneyKick(); await tick();
-    assert.equal(calls.length, n, 'not asked again');
-    // the team never asks
-    reset(); asEmployee(); tk.hub = hub; tk.hubAt = Date.now(); assert.equal(tkMoneyKick(), null);
+    assert.deepEqual(calls.filter((c) => /^\/api\/mc\/hub\/[a-z-]+$/.test(c.u)), [], 'no per-client pages');
   } finally { offline(); trialsStopTimer(); reset(); }
 });
 
