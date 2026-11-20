@@ -330,9 +330,6 @@ function renderCalIntro(st,monday){
   const link=st.meetingLink?(tkSafeUrl(st.meetingLink)?tkLink(st.meetingLink):esc(st.meetingLink)):'';
   return `<div class="cal-intro"><p class="cal-facts">${st.googleMeet==='connected'?'Calls on Google Meet':link?`Calls on ${link}`:'No meeting link set yet'} · ${esc(calHoursLine(st,monday))}</p></div>`;
 }
-function renderCalLegend(){
-  return `<div class="cal-legend" aria-label="What the colours mean"><span><i class="cal-sw confirmed"></i>Confirmed</span><span><i class="cal-sw requested"></i>Waiting for your yes</span><span><i class="cal-sw suggested"></i>Waiting for them</span><span><i class="cal-sw held"></i>Call done</span><span><i class="cal-sw blocked"></i>Busy</span><span><i class="cal-sw noshow"></i>No-show</span><span class="cal-legend-open"><i class="cal-sw open"></i>White = your call hours</span></div>`;
-}
 /* The whole Calendar screen. meta: {week, now, showGone, at, focus, loading} */
 function renderCalendar(data,meta){
   data=data||{};meta=meta||{};const st=calSettings(data.settings);const now=meta.now||calNow();

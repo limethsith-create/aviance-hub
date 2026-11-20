@@ -78,13 +78,13 @@ test('shell: title, router knows the four places (and the pages inside them), no
 });
 
 test('shell: the full control panel pages (Mission Control) are signed-in links from Settings › Advanced and ⌘K, never in the navigation', () => {
-  assert.deepEqual(MACHINE_PAGES.map(([p]) => p), ['/mc/queue', '/mc/warmup', '/mc/config', '/mc/test', '/mc/learning']);
-  assert.deepEqual(MACHINE_PAGES.map((x) => x[2]), ['Waiting list', 'Warm-up circle', 'Advanced settings', 'Test mode', 'What we learned']);
+  assert.deepEqual(MACHINE_PAGES.map(([p]) => p), ['/mc/warmup', '/mc/config', '/mc/learning']);
+  assert.deepEqual(MACHINE_PAGES.map((x) => x[2]), ['Warm-up circle', 'Advanced settings', 'What we learned']);
   asOwner(); renderNav();
   const nav = el('navArea').innerHTML + el('tabBar').innerHTML;
   assert.ok(!nav.includes('openMachine') && !nav.includes('Mission Control') && !/Projects|CRM|Invoices/.test(nav));
   const adv = renderSettings({ open: { advanced: true } });
-  for (const p of ['/mc', '/mc/queue', '/mc/warmup', '/mc/config', '/mc/test', '/mc/learning']) assert.ok(adv.includes(`onclick="openMachine(&quot;${p}&quot;)"`), 'Settings › Advanced opens ' + p);
+  for (const p of ['/mc', '/mc/warmup', '/mc/config', '/mc/learning']) assert.ok(adv.includes(`onclick="openMachine(&quot;${p}&quot;)"`), 'Settings › Advanced opens ' + p);
   assert.ok(adv.includes('Full control panel ↗') && adv.includes('Advanced settings ↗'));
 });
 
@@ -142,7 +142,7 @@ test('shell: ⌘K lists clients and actions only; the bell shows client to-dos a
   asOwner(); trialsIngestHub(fullHub);
   renderCmdk('');
   const list = el('cmdkList').innerHTML;
-  for (const s of ['Acme Plumbing', 'Bright Dental', 'Add a paying client', '<b>Clients</b>', '<b>Settings</b>', '<b>Alerts</b>', 'Behind the scenes', 'Is everything running?', 'Warm-up circle', 'Test mode', 'Switch light / dark', 'Log out']) assert.ok(list.includes(s), '⌘K has ' + s);
+  for (const s of ['Acme Plumbing', 'Bright Dental', 'Add a paying client', '<b>Clients</b>', '<b>Settings</b>', '<b>Alerts</b>', 'Behind the scenes', 'Is everything running?', 'Warm-up circle', 'Switch light / dark', 'Log out']) assert.ok(list.includes(s), '⌘K has ' + s);
   assert.ok(!/Machine alerts|Mission Control|>Machine</.test(list), 'no old words in ⌘K');
   assert.ok(!/New project|Add lead|Schedule meeting/.test(list));
   renderCmdk('bright'); assert.ok(el('cmdkList').innerHTML.includes('Bright Dental') && !el('cmdkList').innerHTML.includes('Acme Plumbing'));
