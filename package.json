@@ -4,6 +4,6 @@
   "description": "Aviance Hub \u2014 the owner's command centre (static site, no build step).",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check autobuy.js && node --check calendar.js && node --check channels-api.js && node --check inquiries.js && node --check keys.js && node --check messages.js && node --check numbers.js && node --check people.js && node --check trials.js && node --check warmup.js"
+    "check": "node --check autobuy.js && node --check calendar.js && node --check channels-api.js && node --check channels.js && node --check inquiries.js && node --check keys.js && node --check messages.js && node --check numbers.js && node --check people.js && node --check trials.js && node --check warmup.js"
   }
 }

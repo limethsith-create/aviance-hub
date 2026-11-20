@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="trials.css">
 <link rel="stylesheet" href="calendar.css">
 <link rel="stylesheet" href="numbers.css">
+<link rel="stylesheet" href="channels.css">
 <!-- Installable app (Add to Home Screen) -->
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
@@ -360,6 +361,7 @@ const I={
   activity:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
   people:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.9-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.6"/><path d="M16.2 14.2c2.3.2 3.9 1.8 4.3 4.3"/></svg>',
   calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16v15H4zM4 10.5h16M8.5 3v5M15.5 3v5"/><path d="M8 14.5h3M8 17.5h6"/></svg>',
+  chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/></svg>',
 };
 
 /* ---- Config ---- */
@@ -395,6 +397,7 @@ const views={
   paying:{fn:()=>viewPaying(),title:'Clients',sub:'Booked sales calls, and every client'},
   trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins',back:()=>currentTrialId?openTrial(currentTrialId):render('paying')},
   calendar:{fn:()=>viewCalendar(),title:'Calendar',sub:'Every call, in Sri Lanka time'},
+  channels:{fn:()=>viewChannels(),title:'Channels',sub:'Talk with your team and your clients',wide:true},
   inquiries:{fn:()=>viewInquiries(),title:'Bookings',sub:'Sales calls booked from the website — mark each one Won or Lost',back:()=>render('paying')},
   inquiry:{fn:()=>viewInquiry(),title:'Booking',sub:'',back:()=>render('inquiries')},
   settings:{fn:()=>viewSettings(),title:'Settings',sub:'Your details, keys, alerts, Google Meet, warm-up helpers, the reply bot, and how everything is running'},
@@ -415,6 +418,7 @@ function render(v){
   try{updateNotifBadge();}catch(e){}
   try{trialsOnRender(v);}catch(e){}
   try{calendarOnRender(v);}catch(e){}
+  try{if(typeof channelsOnRender==='function')channelsOnRender(v);}catch(e){}
   try{if(typeof peopleOnRender==='function')peopleOnRender(v);}catch(e){}
   try{if(typeof numbersOnRender==='function')numbersOnRender(v);}catch(e){}
 }
@@ -436,6 +440,7 @@ function parseDeepLink(h){
   if(h==='paying')return {view:'paying'};
   if(h==='calendar')return {view:'calendar'};
   if(h==='numbers')return {view:'numbers'};
+  if(h==='channels')return {view:'channels'};
   const g=h.match(/^settings\/google\/?(?:\?([^#]*))?$/);
   if(g){
     const q={};try{new URLSearchParams(g[1]||'').forEach((v,k)=>{q[k]=v;});}catch(e){}
@@ -446,7 +451,7 @@ function parseDeepLink(h){
   }
   const t=h.match(/^system\/([^/?#&=]+)\/([a-z]{2,20})$/);   // #system/<id>/<tab>: one tab of their email system
   if(t){let id='';try{id=decodeURIComponent(t[1]);}catch(e){return null;}return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:'clientSystem',id,tab:t[2]}:null;}
-  const m=h.match(/^(trial|system|inquiry|calendar)\/([^/?#&=]+)$/);if(!m)return null;
+  const m=h.match(/^(trial|system|inquiry|calendar|channels)\/([^/?#&=]+)$/);if(!m)return null;
   let id='';try{id=decodeURIComponent(m[2]);}catch(e){return null;}
   return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:m[1]==='system'?'clientSystem':m[1],id}:null;
 }
@@ -458,6 +463,7 @@ function goDeepLink(d){
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same alert can open it again
   closeModal();closeCmdk();
   if(d.view==='trial')openTrial(d.id);else if(d.view==='clientSystem')tkOpenSystem(d.id,d.tab||'overview');else if(d.view==='inquiry')openInquiry(d.id);else if(d.view==='calendar'&&d.id)openCalendar(d.id);
+  else if(d.view==='channels'){if(typeof chv!=='undefined')chv.want=d.id||null;render('channels');}
   else if(d.view==='settings'){if(d.google&&typeof googleReturn==='function')googleReturn(d.google,d.error);openSettings(d.section);}
   else render(d.view);
   return true;
@@ -470,10 +476,11 @@ function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.s
    times waiting for your yes (amber). The same items fill the sidebar and the phone's tab bar. ---- */
 function navItems(){
   const pn=typeof peopleNavCount==='function'?peopleNavCount():'';
-  const q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'';
+  const q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'',ch=typeof chvNavCount==='function'?chvNavCount():'';
   return [
     {view:'paying',icon:I.money,label:'Clients',short:'Clients',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry','trial','clientSystem','trialPurchase']},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:c,tone:'amber',badgeTitle:c?c+' waiting for your yes':''},
+    {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':''},
     {view:'team',icon:I.people,label:'Team',badge:''},
     {view:'people',icon:I.activity,label:'Activity',short:'Activity',badge:pn,tone:pn?'red':'',badgeTitle:pn?pn+' waiting for your approval':'',owner:true},
     {view:'settings',icon:I.gear,label:'Settings',badge:'',also:['trialsBoard'],owner:true},
@@ -552,8 +559,9 @@ function showLogin(){
   closeModal();closeCmdk();
   try{trialsStopTimer();}catch(e){}
   try{calendarStopTimer();}catch(e){}
+  try{if(typeof channelsStopTimer==='function')channelsStopTimer();}catch(e){}
 }
-async function logout(){try{if(typeof peopleSignOut==='function')await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}errEl('loginErr','');showLogin();}
+async function logout(){try{if(typeof peopleSignOut==='function')await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}errEl('loginErr','');showLogin();}
 /* ---- Password recovery ---- */
 async function forgotPassword(){
   const email=val('loginEmail').toLowerCase();
@@ -659,6 +667,7 @@ boot();
 <script src="trials.js"></script>
 <script src="inquiries.js"></script>
 <script src="calendar.js"></script>
+<script src="channels.js"></script>
 <script src="messages.js"></script>
 <script src="autobuy.js"></script>
 <script src="warmup.js"></script>
