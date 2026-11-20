@@ -361,7 +361,7 @@ already says the day).
   them a confirmation with a calendar invite, then reminders the day before and
   an hour before, and pops it up on the owner's phone.
   - **Stages** (the pipeline, in order): Booked · Call done · No-show ·
-    Following up · Proposal sent · Won · Lost. Above the list, one tile per
+    Following up · Agreement and invoice sent · Won · Lost. Above the list, one tile per
     stage with how many are in it (a tile filters the list); chips Open / All.
     Calls still ahead come first, soonest first. Each card shows its stage, the
     call, their answers in one line (role · deal size · calls a month) and what
@@ -369,7 +369,7 @@ already says the day).
     whose time has passed gets a red edge: "How did the call go? Move them on".
   - One inquiry: Join the call (Google Meet) · Reply by email · See it in the
     Calendar; **Where it stands** — a stepper (Booked → Call done → Following up
-    → Proposal sent → Won), the likely next stages as buttons, every other stage
+    → Agreement and invoice sent → Won), the likely next stages as buttons, every other stage
     under "Another stage", a note with the change; **Their answers** (the
     website's five questions); **Emails to them** (confirmation, reminders).
     Call done / No-show here also mark the Calendar meeting, and the Calendar's

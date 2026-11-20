@@ -1185,20 +1185,29 @@ test('inquiries: call times read "call in 3 h" / "call is now" / "was 2 days ago
   assert.deepEqual(iqCountsOf(inquiryRecords), inquiryCounts);
 });
 
+test('inquiries: old records saying "proposal" or "proposal_sent" show as Agreement and invoice sent', () => {
+  const old = inquiryRecords.map((q) => (q.status === 'agreement_sent' ? { ...q, status: 'proposal_sent' } : q));
+  const oldCounts = { ...inquiryCounts, proposal: inquiryCounts.agreement_sent }; delete oldCounts.agreement_sent;
+  const html = renderInquiries(old, oldCounts, 'open', { now: NOW });
+  assert.ok(html.includes('<span class="pill amber">Agreement and invoice sent</span>'));
+  assert.ok(html.includes('<b>1</b><span>Agreement and invoice sent</span>'));
+  assert.ok(!html.includes('Proposal sent'));
+});
+
 test('inquiries list: Open / All chips, a pipeline tile per stage, calls ahead first, cards with stage, plan, call time, answers and what was emailed', () => {
   const html = renderInquiries(inquiryRecords, inquiryCounts, 'open', { now: NOW });
   for (const chip of ['Open · 4', 'All · 6']) assert.ok(html.includes(chip), chip);
   // the pipeline: every stage with its count, in order
   assert.ok(html.includes('class="iq-pipe"'));
-  const tiles = ['<b>2</b><span>Booked</span>', '<b>0</b><span>Call done</span>', '<b>0</b><span>No-show</span>', '<b>1</b><span>Following up</span>', '<b>1</b><span>Proposal sent</span>', '<b>1</b><span>Won</span>', '<b>1</b><span>Lost</span>'].map((t) => html.indexOf(t));
+  const tiles = ['<b>2</b><span>Booked</span>', '<b>0</b><span>Call done</span>', '<b>0</b><span>No-show</span>', '<b>1</b><span>Following up</span>', '<b>1</b><span>Agreement and invoice sent</span>', '<b>1</b><span>Won</span>', '<b>1</b><span>Lost</span>'].map((t) => html.indexOf(t));
   assert.ok(tiles.every((x, i) => x > 0 && (i === 0 || x > tiles[i - 1])), 'one tile per stage, in pipeline order');
-  assert.ok(renderInquiries(inquiryRecords, inquiryCounts, 'proposal', { now: NOW }).includes('aria-pressed="true" onclick="inquiriesSetFilter(\'proposal\')"><b>1</b><span>Proposal sent</span>'), 'a stage tile is the filter');
+  assert.ok(renderInquiries(inquiryRecords, inquiryCounts, 'agreement_sent', { now: NOW }).includes('aria-pressed="true" onclick="inquiriesSetFilter(\'agreement_sent\')"><b>1</b><span>Agreement and invoice sent</span>'), 'a stage tile is the filter');
   const order = ['Birch Legal', 'Stone Roofing', 'Cedar HVAC', 'Harbor Dental Group'].map((c) => html.indexOf(c));
   assert.ok(order.every((x, i) => x > 0 && (i === 0 || x > order[i - 1])), 'calls still ahead first (soonest first), then newest first');
   assert.ok(!html.includes('Northwind') && !html.includes('Pixel'), 'won/lost hidden under Open');
   assert.equal(count(html, /class="card iq-card iq-new"/g), 0, 'no call has passed without an outcome');
   assert.equal(count(html, /<span class="pill blue">Booked<\/span>/g), 2);
-  assert.ok(html.includes('<span class="pill amber">Proposal sent</span>'));
+  assert.ok(html.includes('<span class="pill amber">Agreement and invoice sent</span>'));
   assert.ok(html.includes('Founder / CEO · $5,000 – $25,000 deals · Around 10 calls a month'), 'their answers in one line');
   assert.ok(html.includes('<span class="iq-mail on">✓ Confirmation</span><span class="iq-mail">· Day before</span><span class="iq-mail">· 1 hour before</span>'), 'what was emailed');
   // a booked call whose time has passed: red edge and "How did the call go?"
@@ -1235,7 +1244,7 @@ test('booking detail: reply by email, their time, website, notes, status moves, 
   assert.ok(s.includes('href="https://stoneroofing.com"') && s.includes('>stoneroofing.com</a>'));
   assert.ok(s.includes('No notes yet.') && s.includes('id="iqNoteText"') && s.includes('Add note'));
   assert.ok(s.includes('Move them to:') && s.includes('<button class="btn" onclick="inquirySetStatus(&quot;qmgv1stone&quot;,\'held\')">Call done</button>') && s.includes('>No-show</button>'), 'next from Booked: Call done (big) or No-show');
-  assert.ok(s.includes('<summary>Another stage</summary>') && s.includes('>Following up</button>') && s.includes('>Proposal sent</button>') && s.includes('>Won</button>') && s.includes('>Lost</button>') && !s.includes('>Booked</button>'), 'every other stage, never the one they are at');
+  assert.ok(s.includes('<summary>Another stage</summary>') && s.includes('>Following up</button>') && s.includes('>Agreement and invoice sent</button>') && s.includes('>Won</button>') && s.includes('>Lost</button>') && !s.includes('>Booked</button>'), 'every other stage, never the one they are at');
   assert.ok(s.includes('id="iqStatusNote"') && s.includes('Note with the change (optional)'));
   assert.ok(visibleText(s).includes('After the call, press Won and they become a client') && !/trial/i.test(visibleText(s)), 'what Won does; no trial');
   const c = renderInquiry(Q('qmgp2cedar'), { now: NOW });
@@ -1297,7 +1306,7 @@ test('inquiries on the board: a strip ("2 booked calls — Birch Legal, call Sat
   assert.ok(!renderBoard(fullHub, { now: NOW }).includes('iq-strip'), 'an older machine without inquiries: no strip');
   const quiet = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'won' || q.status === 'lost'));
   assert.equal(renderInquiryStrip(quiet, { now: NOW }), '', 'nothing open: no strip');
-  const contactedOnly = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'contacted' || q.status === 'proposal'));
+  const contactedOnly = inquirySummaryOf(inquiryRecords.filter((q) => q.status === 'contacted' || q.status === 'agreement_sent'));
   assert.ok(renderInquiryStrip(contactedOnly, { now: NOW }).includes('2 open inquiries'));
   assert.equal(inquiriesNavCount(), 2); renderNav();
   // the menu: new bookings count on Clients (they live inside it)

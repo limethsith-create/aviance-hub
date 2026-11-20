@@ -3,7 +3,7 @@
    "Book a call" form — the only way in. The machine saves each one, puts the call in the Calendar, emails them
    the confirmation and the reminders, and pops it up on the owner's phone (push url
    /#inquiry/{id}); here he sees every person's stage and moves them along: Booked → Call done
-   (or No-show) → Following up → Proposal sent → Won / Lost, and adds notes. Won makes them a paying client (the
+   (or No-show) → Following up → Agreement and invoice sent → Won / Lost, and adds notes. Won makes them a paying client (the
    onboarding email goes out); Lost closes the record held for the call. Contract: email-distributor/docs/HUB-API.md
    "Changes on 2026-11-20" and "## Plan inquiries".
      GET  /api/mc/hub        → inquiries: {counts, open, latest:[…]} + a to-do per new one
@@ -13,33 +13,37 @@
 
 const IQ_HOST_TZ = 'Asia/Colombo';   // the owner's time (the website books calls in it; whenHost is written in it)
 /* The stages, in pipeline order (the machine's `status`), and the owner's word for each. */
-const IQ_STATUSES = ['new', 'held', 'no_show', 'contacted', 'proposal', 'won', 'lost'];
-const IQ_STATUS = { new: ['blue', 'Booked'], held: ['amber', 'Call done'], no_show: ['red', 'No-show'], contacted: ['amber', 'Following up'], proposal: ['amber', 'Proposal sent'], won: ['green', 'Won'], lost: ['grey', 'Lost'] };
-const IQ_OPEN = ['new', 'held', 'no_show', 'contacted', 'proposal'];
+const IQ_STATUSES = ['new', 'held', 'no_show', 'contacted', 'agreement_sent', 'won', 'lost'];
+const IQ_STATUS = { new: ['blue', 'Booked'], held: ['amber', 'Call done'], no_show: ['red', 'No-show'], contacted: ['amber', 'Following up'], agreement_sent: ['amber', 'Agreement and invoice sent'], won: ['green', 'Won'], lost: ['grey', 'Lost'] };
+const IQ_OPEN = ['new', 'held', 'no_show', 'contacted', 'agreement_sent'];
+/* Older records say 'proposal' / 'proposal_sent': the same stage as agreement_sent. */
+function iqKey(s) { return s === 'proposal' || s === 'proposal_sent' ? 'agreement_sent' : s; }
+function iqFixList(list) { return (list || []).map((q) => (q && iqKey(q.status) !== q.status ? Object.assign({}, q, { status: iqKey(q.status) }) : q)); }
+function iqFixCounts(c) { if (!c || (c.proposal == null && c.proposal_sent == null)) return c; const o = Object.assign({}, c); o.agreement_sent = (Number(o.agreement_sent) || 0) + (Number(o.proposal) || 0) + (Number(o.proposal_sent) || 0); delete o.proposal; delete o.proposal_sent; return o; }
 /* What usually comes next from each stage (the first is the big button). */
-const IQ_NEXT = { new: ['held', 'no_show'], held: ['proposal', 'contacted'], no_show: ['contacted', 'lost'], contacted: ['proposal', 'won'], proposal: ['won', 'lost'], won: [], lost: ['contacted'] };
+const IQ_NEXT = { new: ['held', 'no_show'], held: ['agreement_sent', 'contacted'], no_show: ['contacted', 'lost'], contacted: ['agreement_sent', 'won'], agreement_sent: ['won', 'lost'], won: [], lost: ['contacted'] };
 const IQ_FILTERS = [['open', 'Open'], ['all', 'All']].concat(IQ_STATUSES.map((s) => [s, IQ_STATUS[s][1]]));
 const IQ_CHIPS = ['open', 'all'];   // the chips; each stage is a tile on the pipeline above them
 const iq = { list: null, counts: null, at: 0, err: null, filter: 'open' };
 let currentInquiryId = null;
 
 /* ---------- pure helpers ---------- */
-function iqCountsOf(list) { const c = {}; IQ_STATUSES.forEach((k) => { c[k] = 0; }); (list || []).forEach((q) => { if (c[q.status] != null) c[q.status]++; }); return c; }
+function iqCountsOf(list) { const c = {}; IQ_STATUSES.forEach((k) => { c[k] = 0; }); (list || []).forEach((q) => { const k = iqKey(q.status); if (c[k] != null) c[k]++; }); return c; }
 /* The freshest counts we have: the full list if it came after the board, else the board's summary. */
 function iqCounts() {
   const hq = typeof tk !== 'undefined' && tk.hub && tk.hub.inquiries;
-  if (iq.counts && (!hq || iq.at >= tk.hubAt)) return iq.counts;
-  return (hq && hq.counts) || null;
+  if (iq.counts && (!hq || iq.at >= tk.hubAt)) return iqFixCounts(iq.counts);
+  return iqFixCounts((hq && hq.counts) || null);
 }
 function inquiriesNavCount() { const c = iqCounts(); const n = c ? Number(c.new) || 0 : 0; return n > 0 ? n : ''; }
-function iqIsOpen(q) { return Boolean(q) && IQ_OPEN.includes(q.status); }
+function iqIsOpen(q) { return Boolean(q) && IQ_OPEN.includes(iqKey(q.status)); }
 /* Booked, and the call's time has passed: the owner should say how it went. */
 function iqNeedsOutcome(q, now) { const s = tkParseDate(q && q.slotStart); return Boolean(q && q.status === 'new' && s && (now || new Date()) - s > 20 * 60000); }
-function iqMatches(q, f) { return f === 'all' ? true : f === 'open' ? iqIsOpen(q) : q.status === f; }
+function iqMatches(q, f) { return f === 'all' ? true : f === 'open' ? iqIsOpen(q) : iqKey(q.status) === f; }
 function iqFind(id) { return (iq.list || []).find((q) => q.id === id) || null; }
 function iqPlanName(p) { return { starter: 'Starter', growth: 'Growth', scale: 'Scale' }[String(p || '').toLowerCase()] || ''; }
 function iqPlanChip(p) { const n = iqPlanName(p); return n ? `<span class="pill blue">${esc(n)} plan</span>` : '<span class="pill grey">No plan picked</span>'; }
-function iqStatusPill(s) { const m = IQ_STATUS[s] || ['grey', s || '—']; return `<span class="pill ${m[0]}">${esc(m[1])}</span>`; }
+function iqStatusPill(s) { s = iqKey(s); const m = IQ_STATUS[s] || ['grey', s || '—']; return `<span class="pill ${m[0]}">${esc(m[1])}</span>`; }
 function iqClip(s, n) { s = String(s || '').trim(); return s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s; }
 function iqEmail(e) { e = String(e || '').trim(); return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']{2,}$/.test(e) ? e : ''; }
 /* The website stores what they typed ("stoneroofing.com" or a full URL) — link only http(s). */
@@ -125,6 +129,7 @@ function renderInquiryPipeline(list, filter) {
   return `<div class="iq-pipe" role="group" aria-label="Stages">${IQ_STATUSES.map((k, i) => `<button type="button" class="iq-stage ${IQ_STATUS[k][0]}${filter === k ? ' active' : ''}${c[k] ? '' : ' zero'}" aria-pressed="${filter === k}" onclick="inquiriesSetFilter('${k}')"><b>${c[k]}</b><span>${esc(IQ_STATUS[k][1])}</span>${i < 4 ? '<i aria-hidden="true">›</i>' : ''}</button>`).join('')}</div>`;
 }
 function renderInquiries(list, counts, filter, meta) {
+  list = iqFixList(list); counts = iqFixCounts(counts); filter = iqKey(filter);
   list = list || []; meta = meta || {}; filter = IQ_FILTERS.some(([k]) => k === filter) ? filter : 'open';
   counts = counts || iqCountsOf(list);
   const nOf = (f) => list.filter((q) => iqMatches(q, f)).length;
@@ -146,6 +151,7 @@ function renderInquiries(list, counts, filter, meta) {
   return toolbar + body;
 }
 function renderInquiry(q, meta) {
+  q = iqFixList([q])[0];
   meta = meta || {}; const now = meta.now;
   if (!q) return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'Inquiry not found', 'It may have been removed.', 'All inquiries', "render('inquiries')");
   const id = q.id, mail = iqMailto(q), email = iqEmail(q.email), site = iqSiteUrl(q.website);
@@ -186,7 +192,7 @@ function renderInquiry(q, meta) {
   const next = IQ_NEXT[q.status] || [];
   const moveBtn = (s, main) => `<button class="btn${main ? '' : ' ghost'}" onclick="inquirySetStatus(${tkAttr(id)},'${s}')">${esc(IQ_STATUS[s][1])}</button>`;
   const others = IQ_STATUSES.filter((s) => s !== q.status && !next.includes(s));
-  const path = ['new', 'held', 'contacted', 'proposal', 'won'];
+  const path = ['new', 'held', 'contacted', 'agreement_sent', 'won'];
   const at = path.indexOf(q.status);
   const stepper = `<ol class="iq-steps" aria-label="Their stage">${path.map((s, i) => `<li class="${s === q.status ? 'cur' : at > i ? 'done' : ''}">${esc(IQ_STATUS[s][1])}</li>`).join('')}</ol>${['no_show', 'lost'].includes(q.status) ? `<p class="tk-small iq-side">${q.status === 'no_show' ? "They didn't show up for the call." : 'Marked lost.'}</p>` : ''}`;
   const status = `<div class="section-head tk-section"><h3>Where it stands</h3>${iqStatusPill(q.status)}${q.statusAt ? `<span class="tk-updated" title="${esc(tkFull(q.statusAt))}">since ${esc(tkRel(q.statusAt, now))}</span>` : ''}</div>
@@ -239,7 +245,7 @@ function inquiryTitle() {
 async function loadInquiries(force) {
   if (!force && iq.list && Date.now() - iq.at < TK_FRESH_MS) return { ok: true, data: { inquiries: iq.list, counts: iq.counts } };
   const r = await machineFetch('/api/mc/inquiries');
-  if (r.ok && r.data && Array.isArray(r.data.inquiries)) { iq.list = r.data.inquiries; iq.counts = r.data.counts || iqCountsOf(iq.list); iq.at = Date.now(); iq.err = null; }
+  if (r.ok && r.data && Array.isArray(r.data.inquiries)) { iq.list = iqFixList(r.data.inquiries); iq.counts = iqFixCounts(r.data.counts) || iqCountsOf(iq.list); iq.at = Date.now(); iq.err = null; }
   else { iq.err = r.error || "The inquiries didn't load. Try again."; if (r.ok) r.ok = false; }
   return r;
 }
