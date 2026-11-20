@@ -367,7 +367,7 @@ body.dark .btn{background:var(--brand);color:var(--brand-ink);border-color:var(-
 @media(max-width:560px){.pp-summary>div{padding:12px 14px}.pp-summary b{font-size:22px}.pp-acts{margin-left:0;width:100%}}
 
 /* ---- a team member: sees everything, changes nothing (the machine refuses their changes too) ---- */
-body.ro .content .btn:not(.ro-ok),body.ro .tk-app-btns,body.ro .tk-add,body.ro .tk-stage-head .btn{display:none!important}
+body.ro:not(.client-mode) .content .btn:not(.ro-ok),body.ro .tk-app-btns,body.ro .tk-add,body.ro .tk-stage-head .btn{display:none!important}
 body.ro .tk-app-row{padding-right:20px}
 
 /* sign in: the team's own way in */
@@ -414,14 +414,15 @@ body.ro .tk-app-row{padding-right:20px}
 .cal-hour{padding:2px 8px 0;font-size:13px;line-height:1.2}
 .cal-hour b{font-size:13px}
 .cal-hour small{font-size:13px;color:var(--muted-2)}
-.cal-grid{grid-template-columns:96px repeat(7,minmax(84px,1fr));min-width:700px}
+.cal-grid{grid-template-columns:96px repeat(7,minmax(104px,1fr));min-width:820px}
 .cal-ev{padding:1px 6px;line-height:1.25;justify-content:center}
 .cal-gapnote{font-size:13px;display:flex;align-items:center;padding-left:8px}
 .cal-foot{margin-top:10px}
 /* one clean line per call and per hour (the full details are in the hover text and in the call's panel) */
-.cal-ev{flex-direction:row;align-items:center;padding:0 6px;font-size:13px}
-.cal-ev .cal-ev-s{display:none}
-.cal-ev .cal-ev-t{font-size:13px}
+/* each call: who on the first line, then the time and the type (the full details are in the hover text and the call's panel) */
+.cal-ev{flex-direction:column;align-items:flex-start;justify-content:flex-start;padding:3px 6px;font-size:13px;overflow:hidden}
+.cal-ev .cal-ev-s{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.cal-ev .cal-ev-t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .cal-hour small{display:none}
 .cal-hour{justify-content:flex-start}
 .cal-gapnote{color:var(--muted-2)}

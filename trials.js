@@ -756,7 +756,7 @@ function tkPlanName(p){p=String(p||'').toLowerCase();return TK_PAID_PLANS.includ
 /* ---- Money (owner only): the machine keeps ONE invoice per client — the month-one invoice (HUB-API.md `invoice` on
    GET /api/mc/hub/{id}: number, amount, issuedAt, paidAt, status sent|paid|blocked, plan). An `invoices` list is read
    too, for when the machine keeps more than one. Board rows carry no invoice, so the Paying list's totals come from the
-   clients' pages (loaded in the background, tkMoneyKick). ---- */
+   clients' pages. ---- */
 function tkDollars(n){const x=tkNorm(n);if(x==null)return '—';return (x<0?'-':'')+'$'+Math.abs(x).toLocaleString('en-US',{minimumFractionDigits:x%1?2:0,maximumFractionDigits:2})}
 function tkInvoicesOf(src){
   if(!src||typeof src!=='object')return null;
@@ -776,22 +776,6 @@ function tkMoneyTotals(rows,now){
     inv.filter(i=>i.paid&&i.amount!=null).forEach(i=>{out.all+=i.amount;out.count++;if(tkMonthKey(i.paidAt)===mk)out.month+=i.amount;});
   });
   return out;
-}
-function renderMoneyTotals(rows,now){
-  if(!hubIsOwner()||!rows||!rows.length)return '';
-  const t=tkMoneyTotals(rows,now);
-  if(!t.checked)return `<div class="card tk-money-sum"><span class="tk-muted">${t.waiting?'Counting the money received…':'The money received could not be checked. Open a client to see their invoice.'}</span></div>`;
-  const note=[t.waiting?'still counting '+t.waiting+' more':'',t.failed?t.failed+' could not be checked':''].filter(Boolean).join(' · ');
-  return `<div class="card tk-money-sum"><div class="tk-money-fig"><small>Received this month</small><b>${tkDollars(t.month)}</b></div><div class="tk-money-fig"><small>All time</small><b>${tkDollars(t.all)}</b></div><p class="tk-muted tk-small">${esc(t.count+' paid invoice'+(t.count===1?'':'s')+(note?' · '+note:''))}</p></div>`;
-}
-/* Load the pages of paying clients the hub has not seen yet (owner only, each once) so the totals can count them. */
-function tkMoneyKick(){
-  if(!hubIsOwner()||!tk.hub)return null;
-  const tried=tk.moneyTried||(tk.moneyTried={});
-  const ids=tkListRows(tk.hub).filter(r=>tkIsPaidRow(r)&&!tkInvoicesOf(r)&&!tk.detail[r.id]&&!tried[r.id]).map(r=>r.id).slice(0,20);
-  if(!ids.length)return null;
-  ids.forEach(id=>{tried[id]=1;});
-  return Promise.all(ids.map(id=>loadTrial(id,false))).then(()=>trialsRepaint('paying',{soft:true}));
 }
 /* A client's Stats: their plan, each invoice and what they have paid in total. The owner only. */
 function renderMoneyCard(d){
@@ -848,54 +832,11 @@ function renderTrialRow(x){
    onboarding email) or Lost (nothing is emailed). */
 function tkMatchText(fs){if(!fs)return 'Scoring…';if(fs.score==null)return fs.label||'Needs a look';return fs.score+'% match'}
 function tkMatchClass(fs){if(!fs||fs.score==null)return 'amber';const n=Number(fs.score);return fs.label==='Not a fit'?'red':n>=80?'green':n>=65?'blue':n>=50?'amber':'red'}
-function renderApplicationRow(r){
-  const fs=r.fitScore||null;const name=(r.simple&&r.simple.company)||r.name||r.id;const id=tkAttr(r.id);
-  const plan=tkIsPaidRow(r)?`<span class="tk-app-plan">${esc(tkPlanName(r.plan))}</span>`:'';
-  return `<div class="tk-app-row"><button type="button" class="tk-app-open" onclick="downloadApplication(${id})" title="Open what they sent and what we found as a Word document">
-    <span class="tk-app-name">${esc(name)}${plan}</span><span class="pill ${tkMatchClass(fs)} tk-app-match">${esc(tkMatchText(fs))}</span><span class="tk-app-doc">Before the call (Word) ↓</span></button>
-    <div class="tk-app-btns"><button type="button" class="btn" onclick="trialApproveApplication(${id})">Won</button><button type="button" class="btn ghost" onclick="openDeclineApplication(${id})">Lost</button><button type="button" class="btn ghost" onclick="openTrial(${id},null,'application')">Details</button></div></div>`;
-}
-/* Where everyone is: one tile per stage of the journey, with how many clients are in it. A tap shows just that stage's
-   clients (tap again, or "All stages", to go back) — so a long list never grows under "In progress". */
-const TK_STAGE_TILES=[['applied','Sales call',['new']],['booking','Booking the call',['accepted']],['call','Call booked',['call_booked']],['setup','Setting up',['setting_up']],['warming','Warming up',['warming_up']],['sending','Sending',['sending']],['finished','Stopped',['finished']]];
-function tkStageOf(row){const st=tkSimple(row).step;const t=TK_STAGE_TILES.find(x=>x[2].includes(st));return t?t[0]:null}
-function trialsSetStage(paid,key){if(!tk.stage)tk.stage={};const k='paying';tk.stage[k]=tk.stage[k]===key?null:(key||null);trialsRepaint(currentView)}
-function renderStageTiles(rows,active,paid){
-  const counts={};rows.forEach(x=>{const k=tkStageOf(x.row);if(k)counts[k]=(counts[k]||0)+1;});
-  const tiles=TK_STAGE_TILES;   // the same seven stages, always
-  return `<div class="tk-stages" role="group" aria-label="Where everyone is">${tiles.map(([k,label])=>{const n=counts[k]||0;return `<button type="button" class="tk-stage${active===k?' on':''}${n?'':' zero'}" onclick="trialsSetStage(${paid?'true':'false'},${tkAttr(k)})" aria-pressed="${active===k}"><b>${n}</b><span>${esc(label)}</span></button>`}).join('')}</div>`;
-}
+/* The Clients page: the stage strip (stages.js, when loaded), then the live list (feed.js): Needs you + Just happened. */
 function renderTrialList(hub,meta){
-  hub=hub||{};meta=meta||{};const paid=true;
-  const g=tkListGroups(hub);const total=g.needs.length+g.going.length+g.done.length;
-  const add=`<div class="tk-add"><button type="button" class="btn ghost" onclick="openNewPayingClient()">+ Add a paying client yourself</button></div>`;
-  const extra=renderPaidCallRequests(hub);
-  // nobody yet: the same stage strip (all zero), then one line saying what to expect
-  if(!total)return renderStageTiles([],null,paid)+emptyState(I.money||I.trials||'','No clients yet','When someone books a call on your website, they show up here with how well they match. Mark the booking Won after the call and they become a client. You can also add one yourself.','Add a paying client yourself','openNewPayingClient()')+extra;
-  const all=g.needs.concat(g.going,g.done);
-  const active=(tk.stage&&tk.stage.paying)||null;
-  const tiles=renderMoneyTotals(all.map(x=>x.row),meta.now)+renderStageTiles(all,active,paid);
-  const list=xs=>`<div class="tk-people">${xs.map(x=>tkIsUnderReview(x.row)?renderApplicationRow(x.row):renderTrialRow(x)).join('')}</div>`;
-  const head=(t,cls,n)=>`<h3 class="tk-group${cls?' '+cls:''}">${esc(t)}${n!=null?` <span class="tk-done-count">${n}</span>`:''}</h3>`;
-  if(active){
-    const t=TK_STAGE_TILES.find(x=>x[0]===active)||[active,active];
-    const xs=all.filter(x=>tkStageOf(x.row)===active);
-    return tiles+`<div class="tk-stage-head">${head(t[1],'',xs.length)}<button type="button" class="btn ghost" onclick="trialsSetStage(true,null)">All stages</button></div>`+(xs.length?list(xs):`<p class="tk-allclear">Nobody is at this stage right now.</p>`)+extra+add;
-  }
-  // a booking held for its sales call: its own group at the top (Won / Lost after the call), never "In progress"
-  const isApp=x=>tkIsUnderReview(x.row);
-  const apps=all.filter(isApp);const needsRest=g.needs.filter(x=>!isApp(x));const goingRest=g.going.filter(x=>!isApp(x));
-  const appsHTML=apps.length?head('Booked a sales call — Won or Lost after the call','',apps.length)+`<div class="tk-apps">${apps.map(x=>renderApplicationRow(x.row)).join('')}</div>`:'';
-  const needs=needsRest.length?head('Needs you','red')+`<div class="tk-people">${needsRest.map(renderTrialRow).join('')}</div>`:`<p class="tk-allclear">Nothing needs you right now. We'll tell you when something does.</p>`;
-  // everyone running with nothing needed from him: folded while something needs him, open when nothing does
-  const going=goingRest.length?`<details class="tk-done tk-going" id="tkGoingGroup"${meta.goingOpen||tk.goingOpen||(tk.goingOpen===undefined&&!needsRest.length)?' open':''} ontoggle="tk.goingOpen=this.open"><summary><span class="tk-done-title">In progress — nothing needed from you</span><span class="tk-done-count">${goingRest.length}</span></summary><div class="tk-people">${goingRest.map(renderTrialRow).join('')}</div></details>`:'';
-  const done=g.done.length?`<details class="tk-done" id="tkDoneGroup"${meta.doneOpen?' open':''} ontoggle="trialsDoneToggle(this.open)"><summary><span class="tk-done-title">Done / not taken</span><span class="tk-done-count">${g.done.length}</span></summary><div class="tk-people">${g.done.map(renderTrialRow).join('')}</div></details>`:'';
-  return tiles+appsHTML+needs+going+done+extra+add;
-}
-/* Every booking from the website's "Book a call" (Inquiries): Won / Lost live there too. */
-function renderPaidCallRequests(hub){
-  const q=hub&&hub.inquiries;const open=q&&q.open||0;
-  return `<div class="tk-add"><button type="button" class="btn ghost" onclick="render('inquiries')">Bookings${open?` · ${open} open`:''} ›</button></div>`;
+  hub=hub||{};meta=meta||{};
+  const strip=typeof renderStageStrip==='function'?renderStageStrip(hub,typeof feedBookings==='function'?feedBookings(hub):[]):'';
+  return strip+(typeof renderFeed==='function'?renderFeed(hub,meta):'');
 }
 
 /* -- one client: the client page and their email system --
@@ -2030,7 +1971,7 @@ function renderSettings(ctx){
     sec('behind','Behind the scenes','Every client by stage and every to-do.','',
       `<p class="tk-set-text">The full picture: every client by stage and every to-do in one list.</p><button type="button" class="btn" onclick="render('trialsBoard')">Open behind the scenes</button>`)+
     sec('advanced','Advanced','The full control panel, for rare changes.','',
-      `<p class="tk-set-text">Each link opens the full control panel in a new tab, already signed in.</p><div class="tk-set-links"><button type="button" class="btn ghost" onclick="openMachine(${tkAttr('/mc')})">Full control panel ↗</button>${pages.map(([path,,label])=>`<button type="button" class="btn ghost" onclick="openMachine(${tkAttr(path)})">${esc(label)} ↗</button>`).join('')}</div>`)+
+      `<p class="tk-set-text">Each link opens the full control panel in a new tab, already signed in.</p><div class="tk-set-links"><button type="button" class="btn ghost" onclick="openMachine(${tkAttr('/mc')})">Full control panel ↗</button>${pages.map(([path,,label])=>`<button type="button" class="btn ghost" onclick="openMachine(${tkAttr(path)})">${esc(label)} ↗</button>`).join('')}${hubIsOwner()?`<button type="button" class="btn ghost" onclick="openCleanup()">Remove test data</button>`:''}</div>`)+
     sec('look','Light or dark','How the hub looks on this device.',`<span class="pill grey">${ctx.dark?'Dark':'Light'}</span>`,
       `<div class="seg" role="group" aria-label="Light or dark"><button class="${ctx.dark?'':'active'}" aria-pressed="${!ctx.dark}" onclick="setTheme('light')">Light</button><button class="${ctx.dark?'active':''}" aria-pressed="${!!ctx.dark}" onclick="setTheme('dark')">Dark</button></div>`)+
     sec('account','Your account','Sign out of the hub.','',
@@ -2130,18 +2071,40 @@ async function clientInvitePortal(id){
   if(tk.busy){toast('Still working on the last action…');return;}
   tk.busy=true;
   try{
-    const token=tkPortalToken();const hash=await tkSha256Hex(token);
-    const ins=await sb.from('portal_invites').insert({client_id:id,email,token_hash:hash,created_by:(authUser&&authUser.uid)||null,expires_at:new Date(Date.now()+14*86400000).toISOString()});
-    if(ins&&ins.error){toast('Could not make the invite: '+(ins.error.message||'try again'));return;}
-    const link=location.origin+'/#join='+token;
-    const r=await machineFetch('/api/mc/clients/'+encodeURIComponent(id),{method:'POST',body:{action:'invitePortal',email,link}});
-    tk.portalInvite=tk.portalInvite||{};
-    tk.portalInvite[id]={email,link,sent:!!(r.ok&&r.data&&r.data.sent),error:r.ok?'':(r.error||'')};
+    const r=await portalInvite(id,email,{auto:false});
+    if(r.error){toast(r.limit?r.error:'Could not make the invite: '+r.error);return;}
     if(el)el.value='';
     const out=document.getElementById('tkPortalOut');if(out)out.innerHTML=tkPortalOut(id);
-    toast(tk.portalInvite[id].sent?'Invite sent to '+email:'The invite is ready, but the email did not send');
+    toast(r.sent?'Invite sent to '+email:'The invite is ready, but the email did not send');
   }catch(e){toast('Could not make the invite: try again');}
   finally{tk.busy=false;}
+}
+/* One invite for both ways in: the owner's button (auto false) and the automatic one when a booking pays (auto true).
+   Auto skips when they already have a login or a live unused invite. Returns {ok, sent, link, skipped?, error?}. */
+async function portalInvite(clientId,email,opts){
+  const auto=!!(opts&&opts.auto);email=String(email||'').trim().toLowerCase();
+  try{
+    if(auto){
+      if(!clientId||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return {ok:false,skipped:'no email or client'};
+      const p=await sb.from('profiles').select('id').eq('email',email).maybeSingle();
+      if(p&&p.data)return {ok:true,skipped:'has an account'};
+      const u=await sb.from('portal_invites').select('id').eq('email',email).is('used_at',null).gt('expires_at',new Date().toISOString()).limit(1);
+      if(u&&u.data&&u.data.length)return {ok:true,skipped:'already invited'};
+    }
+    // their plan's people limit first (Starter 2, Growth 4, Scale 6): the database refuses invites past it
+    const row=typeof tkFindRow==='function'?tkFindRow(clientId):null;
+    const seatErr=typeof seatsUpsert==='function'?await seatsUpsert(clientId,(opts&&opts.plan)||(row&&row.plan)||''):'';
+    if(seatErr)return {ok:false,error:'Could not set their plan limit: '+seatErr};
+    const token=tkPortalToken();const hash=await tkSha256Hex(token);
+    const ins=await sb.from('portal_invites').insert({client_id:clientId,email,token_hash:hash,created_by:(authUser&&authUser.uid)||null,expires_at:new Date(Date.now()+14*86400000).toISOString()});
+    if(ins&&ins.error)return {ok:false,error:ins.error.message||'try again',limit:String(ins.error.message||'').indexOf("You've reached the limit")>=0};
+    const link=location.origin+'/#join='+token;
+    const r=await machineFetch('/api/mc/clients/'+encodeURIComponent(clientId),{method:'POST',body:{action:'invitePortal',email,link}});
+    tk.portalInvite=tk.portalInvite||{};
+    const sent=!!(r.ok&&r.data&&r.data.sent);
+    tk.portalInvite[clientId]={email,link,sent,error:r.ok?'':(r.error||'')};
+    return {ok:true,sent,link};
+  }catch(e){return {ok:false,error:'try again'};}
 }
 function clientCopyPortalLink(){
   const el=document.getElementById('tkPortalLink');if(!el)return;
@@ -2510,7 +2473,7 @@ function trialsApplyScroll(){
 }
 async function trialsKick(view,force){
   let r;
-  if(view==='trials'||view==='trialsBoard'||view==='paying'){if(typeof teamKick==='function'&&typeof tm!=='undefined'&&!tm.data)teamKick(false);r=await loadHub(force);if(view==='paying')tkMoneyKick();}
+  if(view==='trials'||view==='trialsBoard'||view==='paying'){if(typeof teamKick==='function'&&typeof tm!=='undefined'&&!tm.data)teamKick(false);r=await loadHub(force);if(view==='paying'&&typeof feedLoadExtras==='function')await feedLoadExtras(force);}
   else if(view==='trial'||view==='clientSystem')r=await loadTrial(currentTrialId,force);   // their stats and mail: trialsEnsureTab, on the owner's own clicks
   else if(view==='trialPurchase')r=await loadPurchase(currentTrialId,force);
   else if(view==='settings'){const [h,a]=await Promise.all([loadHub(force),loadAlerts(force),typeof loadGoogle==='function'?loadGoogle(false):null,typeof loadCheapInboxes==='function'?loadCheapInboxes(false):null,typeof loadWarmup==='function'?loadWarmup(false):null,typeof loadKeys==='function'?loadKeys(false):null,typeof loadDetails==='function'?loadDetails(false):null]);r=h&&h.ok===false?h:a;}   // Google, CheapInboxes, the warm-up circle, the keys and your details: their own 5-minute caches, never every minute
@@ -2519,7 +2482,7 @@ async function trialsKick(view,force){
   return r;
 }
 /* The Trials list costs one board call (no growth history) plus the onboarding-call check. */
-function viewPaying(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('paying');trialsOcCheck();return `<div id="tkHost">${trialsHostHTML('paying')}</div>`}
+function viewPaying(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('paying');trialsOcCheck();if(typeof feedStart==='function')feedStart();return `<div id="tkHost">${trialsHostHTML('paying')}</div>`}
 /* "Behind the scenes": the old board — status strip, every to-do, stage columns, queue, the owner's own rows, sparklines. */
 function viewTrialsBoard(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trialsBoard').then(()=>trialsSparkBoot());return `<div id="tkHost">${trialsHostHTML('trialsBoard')}</div>`}
 function viewTrial(){if(!trialsIsAdmin())return trialsNotAdminHTML();trialsKick('trial');trialsOcCheck();loadHub(false).then(()=>{try{renderNav();}catch(e){}});return `<div id="tkHost">${trialsHostHTML('trial')}</div>`}
@@ -2938,6 +2901,7 @@ function trialsForget(){
   tk.portalInvite={};currentTrialId=null;trialTab='overview';tk.doneOpen=false;tk.setOpen={};tk.setScroll=null;tk.sysTab=null;tk.focusReply=false;
   try{localStorage.removeItem(TK_SYS_TAB_KEY);}catch(e){}
   try{inquiriesForget();}catch(e){}
+  try{if(typeof feedForget==='function')feedForget();}catch(e){}
   try{messagesForget();}catch(e){}
   try{autobuyForget();}catch(e){}
   try{warmupForget();}catch(e){}

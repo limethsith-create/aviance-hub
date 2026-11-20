@@ -45,7 +45,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'keys.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'feed.js', 'calendar.js', 'messages.js', 'autobuy.js', 'keys.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 
@@ -168,7 +168,7 @@ test('needsReply: the big button is "Answer Sam\'s message" (into the reply box)
   const r1 = row(simpleRows.acme, { step: 'sending', needsReply: true, needsYou: false, label: 'Sending — day 12 of 30', next: 'Nothing for you: the Friday update goes out today' });
   const r2 = Object.assign(row(simpleRows.gale, { step: 'warming_up', needsReply: false, needsYou: false, label: 'Setting up', next: '' }), { todo: [{ id: 'onboard-reply:gale-roofing', text: 'Answer Mia', urgent: true }] });
   const list = renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({ live: [r1], build: [r2], onboard: [simpleRows.ecreek] }) }), { now: NOW });
-  const needs = between(list, '<h3 class="tk-group red">Needs you</h3>', '<details class="tk-done tk-going"');
+  const needs = between(list, '<h3>Needs you</h3>', '<h3>Just happened</h3>');
   assert.ok(between(needs, 'Acme Plumbing', '</button>').includes('<span class="tk-person-you">Ann wrote — answer them</span>'), 'needsReply puts the row under Needs you, with the red line');
   assert.ok(between(list, 'eCreek IT', '</button>').includes('<span class="tk-person-you">Sam wrote — answer them</span>'), 'the machine\'s reply to-do says the same');
   assert.ok(!between(list, 'Gale Roofing', '</button>').includes('wrote — answer them'), 'an explicit needsReply: false wins over an old to-do');
