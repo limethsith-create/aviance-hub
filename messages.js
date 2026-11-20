@@ -48,7 +48,7 @@ const MSG_RULES={
   proposes_time_ok:'pencilled in the time they asked for',
   proposes_time_busy:'that time was taken — sent free times',
   reschedule:'sent the booking page to pick another time',
-  price:'explained the trial is free',
+  price:'said which plan they are on and that the call covers billing',
   what_needed:'sent the one-page form',
   not_interested:'said goodbye and stopped reminders',
   who_are_you:'said who you are and how their email reached you',
@@ -83,9 +83,9 @@ const MSG_BOT_RULES=[
   ["They ask when you're free",'sends your booking link and three free times.'],
   ['They suggest a time',"if you're free then, pencils it in and says you'll confirm (you still say yes in the Calendar); if not, sends three free times."],
   ['They need to move the call','sends the booking page so they can pick another time.'],
-  ['They ask what it costs','explains the 30-day trial is free, with no card.'],
+  ['They ask what it costs',"says which plan they're on and that you'll go through what's included and billing on the call."],
   ['They ask what to prepare','sends the one-page form.'],
-  ['They ask who you are, or how you got their email','says honestly how their email reached you (they applied on your website, or wrote through its form) and gives your website. If they came to you another way, it leaves the answer to you.'],
+  ['They ask who you are, or how you got their email','says honestly how their email reached you (they booked a call through the form on your website) and gives your website. If they came to you another way, it leaves the answer to you.'],
   ['They say not now, or later',o=>"says no problem and that you'll check back "+(o.weeks?'in '+o.weeks+' week'+(o.weeks===1?'':'s'):'in a few weeks')+', and stops the reminders. On that day you get a reminder to check back with them.'],
   ["They're not interested",'says goodbye, stops the reminders and tells you.'],
   ['They just say thanks','nothing — no reply needed.'],
@@ -297,7 +297,7 @@ function renderReplyBotSet(ctx){
     <ul class="tk-bot-rules">${MSG_BOT_RULES.map(([a,b])=>`<li><b>${esc(a)}</b> — ${esc(typeof b==='function'?b({weeks}):b)}</li>`).join('')}</ul>
     <h4 class="tk-set-h4">What it never does</h4>
     <p class="tk-set-text">${esc('It never answers automatic emails (out of office, bounces), a message you already answered, or a message older than 3 days. It sends '+(max!=null?'at most '+max+' emails':'only a few emails')+' a day to one person, and it waits a few minutes first, so you can answer yourself. It never makes up a price.')}</p>
-    <p class="tk-set-text">To turn it off for one person, use the switch under Messages on their trial page. To turn it off for everyone, or change what it says, open Advanced settings.</p>
+    <p class="tk-set-text">To turn it off for one person, use the switch under Messages on their page. To turn it off for everyone, or change what it says, open Advanced settings.</p>
     <button type="button" class="btn ghost" onclick="openMachine(${tkAttr('/mc/config')})">Advanced settings ↗</button>`;
   return {state,body};
 }

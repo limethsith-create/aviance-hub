@@ -4,7 +4,7 @@
    Ava (from AVIance) listens, answers out loud and takes you to the right page.
    Free: no key, no paid service. Loaded last by index.html (after people.js),
    so it can read everything the hub already knows:
-     tk (trials.js: the board tk.hub, each client's page tk.detail, My stats tk.outreach),
+     tk (trials.js: the board tk.hub, each client's page tk.detail),
      cal (calendar.js), tm (people.js: the team), authUser + hubIsOwner() (the shell).
 
      Ears   — hold Space (anywhere but a text box) or hold the mic, talk, let go: sent. The browser's SpeechRecognition
@@ -47,8 +47,8 @@ const AVA_SYN=[
   [/\bwhat's\b|\bwhats\b/g,'what is'],[/\bwho's\b|\bwhos\b/g,'who is'],[/\bhow's\b/g,'how is'],[/\bthere's\b/g,'there is'],
   [/\bwarm(?:ing)?[- ]?up\b|\bwarmup\b/g,'warmup'],[/\bset(?:ting)?[- ]up\b|\bsetup\b/g,'setup'],
   [/\bi've\b/g,'i have'],[/\bdidn't\b|\bdidnt\b/g,'did not'],[/\bdon't\b|\bdont\b/g,'do not'],[/\bcan't\b|\bcant\b/g,'cannot'],
-  [/\btrial clients?\b/g,'trials'],[/\bpaid clients?\b|\bpaying customers?\b/g,'paying'],
-  [/\btele?phone\b/g,'phone'],[/\bpeople inside\b/g,'activity'],[/\bmy statistics\b/g,'my stats'],
+  [/\btrial clients?\b/g,'clients'],[/\bpaid clients?\b|\bpaying customers?\b/g,'paying'],
+  [/\btele?phone\b/g,'phone'],[/\bpeople inside\b/g,'activity'],
   [/\bgoogle meets?\b/g,'meet'],[/\bgmail\b/g,'gmail'],[/\bconvos?\b/g,'conversations'],
 ];
 function avaNorm(s){
@@ -77,9 +77,9 @@ function avaCtx(){
     now:typeof calNow==='function'?calNow():new Date()};
 }
 function avaHub(){return typeof tk!=='undefined'&&tk&&tk.hub?tk.hub:null}
-/* Every client the hub knows (trials and paying, not your own outreach): {id, name, person, row}. */
+/* Every client the hub knows: {id, name, person, row}. */
 function avaClients(){
-  const out=[],seen={};const own=id=>id==='aviance'||id==='_test'||(typeof MY_STATS_ID!=='undefined'&&id===MY_STATS_ID);
+  const out=[],seen={};const own=id=>id==='aviance'||id==='_test';
   const add=r=>{if(!r||r.id==null||own(r.id)||seen[r.id])return;seen[r.id]=1;const s=typeof tkSimple==='function'?tkSimple(r):{company:r.name,person:r.contactName};out.push({id:String(r.id),name:String(s.company||r.name||r.id),person:String(s.person||''),row:r});};
   const hub=avaHub();if(hub&&typeof tkListRows==='function')tkListRows(hub).forEach(add);
   if(typeof tk!=='undefined'&&tk&&tk.detail)Object.keys(tk.detail).forEach(k=>{const d=tk.detail[k];if(d&&d.row)add(d.row);});
@@ -131,15 +131,12 @@ function avaStepLine(row){
 function avaAct(label,run,extra){return Object.assign({label,run},extra||{})}
 const AVA_PLACES=[
   // [key, words that name it, label, run, owner only]
-  ['trials',/\btrials?\b(?! run)|\btrial list\b/,'Trials',()=>render('trials')],
-  ['paying',/\bpaying\b|\bpaid plans?\b/,'Paying clients',()=>render('paying')],
+  ['paying',/\bclients?\b(?! (page|system))|\bclient list\b|\bpaying\b|\bpaid plans?\b|\btrials?\b/,'Clients',()=>render('paying')],
   ['calendar',/\bcalendar\b/,'Calendar',()=>render('calendar')],
   ['team',/\bteam\b/,'Team',()=>render('team')],
-  ['mystats',/\bmy stats\b|\bmy outreach\b|\bstats\b/,'My stats',()=>openMyStats()],
   ['activity',/\bactivity\b|\bwho signed in\b/,'Activity',()=>render('people'),true],
-  ['inquiries',/\binquir(y|ies)\b|\bplan call requests?\b/,'Plan call requests',()=>render('inquiries')],
+  ['inquiries',/\binquir(y|ies)\b|\bbookings?\b|\bsales calls?\b|\bplan call requests?\b/,'Bookings',()=>render('inquiries')],
   ['behind',/\bbehind the scenes\b|\bboard\b/,'Behind the scenes',()=>render('trialsBoard')],
-  ['set-demo',/\btest run\b|\bdemo\b/,'Settings › Test run',()=>openSettings('demo'),true],
   ['set-warmup',/\bwarmup\b|\bhelpers?\b/,'Settings › Warm-up',()=>openSettings('warmup'),true],
   ['set-ava',/\bava settings\b|\bsettings (for )?ava\b|\bava'?s? (brain|voice|requests)\b|\byour (brain|voice) settings\b/,'Settings › Ava',()=>openSettings('ava'),true],
   ['set-keys',/\bkeys?\b/,'Settings › Keys',()=>openSettings('keys'),true],
@@ -157,8 +154,8 @@ const AVA_PLACES=[
 ];
 function avaPlace(key){const p=AVA_PLACES.find(x=>x[0]===key);return p?avaAct('Open '+p[2],p[3],{owner:!!p[4],place:key}):null}
 /* What she says once a place is open: short ("Here's the Calendar", "Here's Keys in Settings"). */
-const AVA_HERE={trials:'Here are your trials',paying:'Here are your paying clients',calendar:"Here's your calendar",team:"Here's the team",mystats:'Here are your stats',
-  activity:"Here's who signed in",inquiries:'Here are the plan call requests',behind:"Here's behind the scenes",settings:"Here's Settings",'set-phone':"Here's phone alerts"};
+const AVA_HERE={paying:'Here are your clients',calendar:"Here's your calendar",team:"Here's the team",
+  activity:"Here's who signed in",inquiries:'Here are the bookings',behind:"Here's behind the scenes",settings:"Here's Settings",'set-phone':"Here's phone alerts"};
 function avaHere(key){
   if(AVA_HERE[key])return AVA_HERE[key]+'.';
   const p=AVA_PLACES.find(x=>x[0]===key);if(!p)return 'Here it is.';
@@ -196,49 +193,44 @@ function avaWantTab(t){for(const k of Object.keys(AVA_TABS))if(AVA_TABS[k].words
    REPLYBOT-MEET.md). Each entry: id, kw (the words that point to it), a (the answer, said out loud), go (Take me there),
    owner (only the owner hears it). */
 const AVA_KB=[
-  {id:'process',kw:'how does trial work whole process journey steps start finish month 30 day explain everything',a:"Every trial goes the same way. They apply on the website, and you read it and say yes or no. They book the onboarding call. After the call, their domain and two inboxes are bought and set up, and the inboxes warm up for about two weeks. Near the end of warm-up there's a launch call where you go through their list and emails together. Then we send for 30 days. Replies are sorted, the reply bot answers simple questions, and booked calls land in their calendar. On day 30 they get a decision page; if they pick a plan, the month-one invoice goes out and you mark it paid.",go:'trials'},
-  {id:'apply',kw:'apply application applicant new applications arrive come in website form review read',a:"When someone applies on the website, they show up at the top of Trials, or Paying clients for a paid plan, under New applications, with how well they match. Tap Application (Word) to read everything they sent plus what we found about them, then press Say yes or Say no.",go:'trials'},
-  {id:'sayyes',kw:'say yes approve accept applicant what happens after yes',a:"Say yes emails them at once, asking them to book the onboarding call. From then on the trial runs by itself. You'll see it move to step 2, Onboarding call.",go:'trials',owner:true},
-  {id:'sayno',kw:'say no decline reject applicant not a fit',a:"Say no asks you for a short reason first, then sends them a polite no. They move to Done, not taken. Nothing is sent until you confirm.",go:'trials',owner:true},
-  {id:'word',kw:'application word document download match percent score what we found research brief',a:"Application (Word) downloads one Word document: everything they wrote, our fit check with the match percent, and What we found — a short brief about the company, with where each fact comes from. It's handy to read before the onboarding call.",go:'trials'},
-  {id:'addclient',kw:'add trial client yourself manually new client form create start someone',a:"Use Add a trial client yourself at the bottom of Trials — or press N anywhere. Write the company, the person, their email and website. They get the welcome email now, or join the waiting list if three trials are already running. For a paid plan use Add a paying client yourself on Paying clients.",go:'trials',owner:true},
-  {id:'onboarding',kw:'onboarding call book booking mark call booked done no show did not show reminders send email again stop reminders',a:"After your yes, they get one email asking them to book the onboarding call, and reminders if they don't. On their page the call card has Mark call booked, Call done, They didn't show, Send the email again and Stop reminders. When they pick a time, it waits in the Calendar for your yes.",go:'calendar'},
+  {id:'process',kw:'how does it work whole process journey steps start finish client explain everything',a:"Every client goes the same way. They book a sales call on the website. After the call you mark the booking Won, and they get one email asking them to book the onboarding call. After that call, their domain and two inboxes are bought and set up, and the inboxes warm up for about two weeks. Near the end of warm-up there's a launch call where you go through their list and emails together. Then we send, every sending day, until they stop. Replies are sorted, the reply bot answers simple questions, and booked calls land in their calendar. The month-one invoice goes out when they sign the plan agreement; you mark it paid.",go:'paying'},
+  {id:'apply',kw:'booking booked sales call new booking arrive come in website form what we found',a:"When someone books a call on the website, it shows up in Bookings and at the top of Clients under Booked a sales call, with how well they match. Tap Before the call (Word) to read everything they sent plus what we found about them. After the call, press Won or Lost.",go:'paying'},
+  {id:'sayyes',kw:'won mark won win after the sales call what happens client yes',a:"Won makes them a paying client: they get one email at once, asking them to book the onboarding call, and from then on everything runs by itself. You'll see them move to step 2, Onboarding call. A booking without a website can't be Won from there — add them with Add a paying client yourself, with their website.",go:'paying',owner:true},
+  {id:'sayno',kw:'lost mark lost not a fit decline no',a:"Lost closes the booking. Nothing is emailed to them. They move to Done, not taken.",go:'paying',owner:true},
+  {id:'word',kw:'word document download match percent score what we found research brief before the call',a:"Before the call (Word) downloads one Word document: everything they wrote, the match percent, and What we found — a short brief about the company, with where each fact comes from. Read it before the sales call.",go:'paying'},
+  {id:'addclient',kw:'add paying client yourself manually new client form create start someone',a:"Use Add a paying client yourself at the bottom of Clients — or press N anywhere. Write the company, the person, their email, website and plan. They get the onboarding email now.",go:'paying',owner:true},
+  {id:'onboarding',kw:'onboarding call book booking mark call booked done no show did not show reminders send email again stop reminders',a:"After Won, they get one email asking them to book the onboarding call, and reminders if they don't. On their page the call card has Mark call booked, Call done, They didn't show, Send the email again and Stop reminders. When they pick a time, it waits in the Calendar for your yes.",go:'calendar'},
   {id:'calendar',kw:'calendar yes other time suggest decline meeting request call time sri lanka eastern join',a:"The Calendar shows every call in Sri Lanka time, with US Eastern beside it. When a client asks for a time, it waits at the top: Say yes sends them the time and an invite, Suggest another time lets you pick a new one, and Say no declines it. A confirmed call has a Join Google Meet button.",go:'calendar'},
   {id:'settingup',kw:'setting up setup domain inboxes buy purchase cheapinboxes buy and paste step 3',a:"Setting up means buying their domain and two inboxes. With CheapInboxes set up, the big button shows exactly what to buy; you buy it in your CheapInboxes account and the system finds the purchase and connects everything by itself. Without it, Buy and paste lets you paste the logins.",go:'set-inboxes',owner:false},
-  {id:'warmup',kw:'warmup warming mean what is warm circle inbox rate spam 14 days ready',a:"Warming up means the new inboxes send and answer friendly emails with other accounts for about two weeks, so email providers learn to trust them and our emails land in the inbox, not spam. The trial's Warm-up card shows the day and how many land in the inbox. Sending starts when they're ready.",go:'set-warmup'},
+  {id:'warmup',kw:'warmup warming mean what is warm circle inbox rate spam 14 days ready',a:"Warming up means the new inboxes send and answer friendly emails with other accounts for about two weeks, so email providers learn to trust them and our emails land in the inbox, not spam. The client's Warm-up card shows the day and how many land in the inbox. Sending starts when they're ready.",go:'set-warmup'},
   {id:'helpers',kw:'warmup helpers add helper gmail yahoo aol icloud gmx yandex app password circle test remove',a:"Helpers are free email accounts you make once — Gmail, Yahoo, AOL, iCloud and so on — that join the warm-up circle. Go to Settings, Warm-up, press Add a helper, pick the kind, follow the steps and paste its app password, then Test and add. Each helper has Test and Remove.",go:'set-warmup',owner:true},
   {id:'launch',kw:'launch call approved on the call skip approval page list emails before sending',a:"Near the end of warm-up, the client gets the launch-call invite. On the call you go through their list and their emails together. Press Approved on the call when they say OK — sending starts on Day 1. If they already approved on the page, you can skip the call.",go:'calendar'},
-  {id:'sending',kw:'sending day 1 30 how many emails per day follow ups ramp step 4',a:"Sending runs for 30 days from Day 1. Each inbox starts slowly and sends a few more each day. The list shows Day 12 of 30 and so on. Their email system shows every email sent, and the numbers on Overview.",go:'trials'},
-  {id:'replies',kw:'replies reply interested hot lead forwarded question not now unsubscribe sorted',a:"Every reply is read and sorted: interested, question, not now, wrong person, no, and so on. Interested people are passed to the client as hot leads. A STOP or no is never emailed again, for any client. You see every reply under Conversations in their email system.",go:'trials'},
+  {id:'sending',kw:'sending day 1 how many emails per day follow ups ramp step 4',a:"Sending starts on Day 1 and keeps going until they stop. Each inbox starts slowly and sends a few more each day. The list shows Day 12 of sending and so on. Their email system shows every email sent, and the numbers on Overview.",go:'paying'},
+  {id:'replies',kw:'replies reply interested hot lead forwarded question not now unsubscribe sorted',a:"Every reply is read and sorted: interested, question, not now, wrong person, no, and so on. Interested people are passed to the client as hot leads. A STOP or no is never emailed again, for any client. You see every reply under Conversations in their email system.",go:'paying'},
   {id:'replybot',kw:'reply bot switch off on automatic answers what does it answer',a:"The reply bot answers simple questions for you with fixed answers — like sending the booking link and free times, or saying who we are. It never makes things up. Switch it off for one person with the switch under Messages on their page. Settings, Reply bot lists every rule.",go:'set-replybot'},
-  {id:'calls',kw:'booked calls qualified count held no show dispute guarantee',a:"Calls booked from our emails land in the client's calendar. A call counts as qualified when it was held, with the right kind of person, booked from our outreach. No-shows get a rebook email. If the client says a call doesn't count, it shows as a dispute for you to decide.",go:'trials'},
-  {id:'day30',kw:'day 30 decision page end of trial plan recommendation extension zero calls bonus decide',a:"On day 30 the client gets the decision page with their numbers, one plan we recommend, and a 24-hour bonus. They can pick a plan, ask to talk, or say not now. With no qualified call yet, the trial keeps sending free until the first one, up to 60 sending days.",go:'trials'},
-  {id:'invoice',kw:'invoice paid mark paid money payment month one',a:"When a client picks a plan, the month-one invoice goes out. When the money lands, press Mark paid on their to-do. Paying clients shows what you received this month and in total — that's only for you.",go:'paying',owner:true},
-  {id:'tiles',kw:'stage tiles squares filter applied booking the call call booked setting up warming up sending finished counts',a:"The row of tiles on Trials and Paying clients counts how many clients are at each stage: Applied, Booking the call, Call booked, Setting up, Warming up, Sending and Finished. Tap a tile to see only those clients; tap it again or All stages to go back.",go:'trials'},
-  {id:'trialspage',kw:'trials page needs you in progress done not taken red row list',a:"Trials lists every trial client. Needs you is at the top, in red, with what you need to do. In progress are the ones running with nothing needed from you. Done, not taken is folded at the bottom. Tap a row to open that client.",go:'trials'},
-  {id:'payingpage',kw:'paying clients page paid plan starter growth scale',a:"Paying clients works like Trials but for clients on Starter, Growth or Scale: new paid-plan applications, the stage tiles, and every paying client. The owner also sees the money received at the top.",go:'paying'},
-  {id:'clientpage',kw:'client page one client five steps big button what do you need to do open email system',a:"A client's page is one card: the five steps — Applied, Onboarding call, Setting up, Sending emails, Done — the one-line status, and when something needs you, one big button for the most important thing. Under it, Open their email system shows everything else.",go:'trials'},
-  {id:'system',kw:'email system tabs shared only you overview conversations emails sent calls messages money health leads setup',a:"Their email system has tabs across the top. Shared, for everyone: Overview, Conversations, Emails sent, Calls and Messages. Only you, the owner: Money, Health, Leads and Setup. Say, for example, 'show Lakeview's conversations' and I'll open it.",go:'trials'},
-  {id:'access',kw:'give client access dashboard share who can see this link stop access',a:"Open the client, then their email system's Setup tab. Under Who can see this, type an email from their business and press Give access — they get a private link to their own live page. Stop all access turns every link off.",go:'trials',owner:true},
-  {id:'testrun',kw:'test run demo load remove made up fake clients test tag',a:"Settings, Test run loads two made-up clients — a trial and a paying client — who went through a whole month, marked with a Test tag. No real emails are sent. Press Remove the test run there to take them away; your real clients aren't touched.",go:'set-demo',owner:true},
+  {id:'calls',kw:'booked calls qualified count held no show dispute guarantee',a:"Calls booked from our emails land in the client's calendar. A call counts as qualified when it was held, with the right kind of person, booked from our outreach. No-shows get a rebook email. If the client says a call doesn't count, it shows as a dispute for you to decide.",go:'paying'},
+  {id:'invoice',kw:'invoice paid mark paid money payment month one',a:"When a client signs the plan agreement, the month-one invoice goes out. When the money lands, press Mark paid on their to-do. Clients shows what you received this month and in total — that's only for you.",go:'paying',owner:true},
+  {id:'tiles',kw:'stage tiles squares filter sales call booking the call call booked setting up warming up sending stopped counts',a:"The row of tiles on Clients counts how many clients are at each stage: Sales call, Booking the call, Call booked, Setting up, Warming up, Sending and Stopped. Tap a tile to see only those clients; tap it again or All stages to go back.",go:'paying'},
+  {id:'trialspage',kw:'clients page needs you in progress done not taken red row list',a:"Clients lists every client. Bookings waiting for their sales call are at the top, then Needs you, in red, with what you need to do. In progress are the ones running with nothing needed from you. Done, not taken is folded at the bottom. Tap a row to open that client. The owner also sees the money received.",go:'paying'},
+  {id:'clientpage',kw:'client page one client five steps big button what do you need to do open email system',a:"A client's page is one card: the five steps — Sales call, Onboarding call, Setting up, Sending emails, Stopped — the one-line status, and when something needs you, one big button for the most important thing. Under it, Open their email system shows everything else.",go:'paying'},
+  {id:'system',kw:'email system tabs shared only you overview conversations emails sent calls messages money health leads setup',a:"Their email system has tabs across the top. Shared, for everyone: Overview, Conversations, Emails sent, Calls and Messages. Only you, the owner: Money, Health, Leads and Setup. Say, for example, 'show Lakeview's conversations' and I'll open it.",go:'paying'},
+  {id:'access',kw:'give client access dashboard share who can see this link stop access',a:"Open the client, then their email system's Setup tab. Under Who can see this, type an email from their business and press Give access — they get a private link to their own live page. Stop all access turns every link off.",go:'paying',owner:true},
   {id:'team',kw:'team page status working on who looks after whom choose clients assign',a:"The Team page shows everyone who uses the hub: who's in the hub now, where they are, what they're working on, and which clients each person looks after. Write your own line under What are you working on. The owner picks each person's clients with Choose clients.",go:'team'},
   {id:'activity',kw:'activity signed in out how long approve new account waiting approval',a:"Activity is the owner's page: who signed in and out, for how long, what they opened, and new accounts waiting for approval. Approve lets a person in — they can see everything and change nothing.",go:'activity',owner:true},
   {id:'roles',kw:'team member read only change nothing roles employee owner permission cannot press',a:"The owner can do everything. A team member sees the same screens but can't change anything, so the buttons that change things are hidden for them, and money is only for the owner. New team members make an account on the sign-in page and the owner approves it.",go:'team'},
-  {id:'mystats',kw:'my stats own outreach saved history save and start fresh spreadsheet clear',a:"My stats is your own outreach: emails sent, opened, replies and bounced, emails per day, by inbox, and every reply. Saved history keeps full copies as spreadsheets. Save and start fresh saves a copy, then clears the numbers so My stats starts from zero — people already emailed are never emailed again.",go:'mystats'},
-  {id:'settings',kw:'settings sections what is in settings',a:"Settings has named sections, each saying its state in one word: Alerts, Phone alerts, Your details, Keys, Ava, Google Meet, Inboxes and domains, Warm-up, Reply bot, Test run, Is everything running, Behind the scenes, Advanced, Light or dark, and Your account.",go:'settings',owner:true},
+  {id:'settings',kw:'settings sections what is in settings',a:"Settings has named sections, each saying its state in one word: Alerts, Phone alerts, Your details, Keys, Ava, Google Meet, Inboxes and domains, Warm-up, Reply bot, Is everything running, Behind the scenes, Advanced, Light or dark, and Your account.",go:'settings',owner:true},
   {id:'keys',kw:'keys api key paste service google places verify test and save forget',a:"Settings, Keys has one card per free service the system uses. Each card says its state and the steps to get the key; paste it once and press Test and save. A saved key is never shown again.",go:'set-keys',owner:true},
-  {id:'details',kw:'your details name address call link paypal wise clutch onboarding inbox',a:"Settings, Your details holds what the emails say about you — your name, address, email, the onboarding inbox, call link, PayPal, Wise and Clutch. Each has its own Save; it tells you what's still to fill in.",go:'set-details',owner:true},
+  {id:'details',kw:'your details name address call link paypal wise clutch onboarding inbox',a:"Settings, Your details holds what the emails say about you — your name, address, email, the onboarding inbox, call link, PayPal and Wise. Each has its own Save; it tells you what's still to fill in.",go:'set-details',owner:true},
   {id:'meet',kw:'google meet connect link calls video',a:"Settings, Google Meet connects your Google account so every call you say yes to gets a Meet link. Follow the numbered steps once, press Connect Google, then Test it.",go:'set-google',owner:true},
   {id:'phone',kw:'phone alerts push notifications iphone home screen',a:"Phone alerts send a message to your phone when something needs you. On an iPhone, add the hub to your Home Screen first, then open it from there and turn alerts on.",go:'set-phone',owner:true},
-  {id:'opened',kw:'opened blank empty dash not tracked opens client why',a:"Opened is blank for clients on purpose: their emails go out without an open tracker, because trackers hurt landing in the inbox. So there's nothing to count. Only your own outreach on My stats tracks opens.",go:'mystats'},
+  {id:'opened',kw:'opened blank empty dash not tracked opens client why',a:"Opened is blank for clients on purpose: their emails go out without an open tracker, because trackers hurt landing in the inbox. So there's nothing to count."},
   {id:'bounce',kw:'bounce bounced what is bounce rate address does not exist pause',a:"A bounce is an email that came back because the address doesn't exist or the mailbox refused it. A few are normal. If too many bounce — about 2 to 3 percent — sending slows down or pauses by itself to protect the inboxes, and you get an alert.",go:null},
   {id:'bell',kw:'bell notifications what needs you alerts not seen mark as seen',a:"The bell at the top lists what needs you right now. Settings, Alerts has every message from the system, not seen first, with Mark as seen.",go:'set-alerts'},
   {id:'search',kw:'search find command k shortcut keyboard slash space',a:"Press Control or Command K — or the slash key — to find any client or page. Hold the Space bar to talk to me, and let go to send; Control or Command J opens me.",go:null},
   {id:'dark',kw:'dark mode light theme look',a:"Settings, Light or dark switches how the hub looks on this device. It's also in the Control K search.",go:'settings',owner:true},
-  {id:'behind',kw:'behind the scenes board every to do waiting list queue parts',a:"Behind the scenes, in Settings, is the full picture: every trial by stage, every to-do in one list, the waiting list and your own sending. Each client's email system also has behind-the-scenes tabs like Growth, Parts and Deliverability.",go:'behind'},
-  {id:'waitlist',kw:'three trials waiting list queue full max limit',a:"At most three trials run at the same time. Anyone else you say yes to joins the waiting list and starts when a place opens.",go:'behind'},
-  {id:'inquiries',kw:'plan call requests inquiries paid plan booked call website',a:"Plan call requests are people who booked a call about a paid plan from the website without an application. Find them at the bottom of Paying clients.",go:'inquiries'},
-  {id:'ava',kw:'who are you ava privacy voice listen microphone data google what can you do',a:"I'm Ava, the hub's helper. With my AI brain switched on, you can ask me anything — about the hub, your clients or anything else — and plain commands like 'open trials' run at once. The AI is a free service that doesn't train on your data, and your prospects' email addresses are never sent. Without it I'm in basic mode and answer the simple things from what the hub has loaded. Hold Space to talk, or type.",go:null},
+  {id:'behind',kw:'behind the scenes board every to do parts',a:"Behind the scenes, in Settings, is the full picture: every client by stage and every to-do in one list. Each client's email system also has behind-the-scenes tabs like Growth, Parts and Deliverability.",go:'behind'},
+  {id:'inquiries',kw:'bookings inquiries sales call booked website plan won lost',a:"Bookings are the sales calls booked from the website — the only way in. Each one moves Booked, Call done, Following up, Proposal sent, then Won or Lost. Won makes them a client. Open Bookings from the bottom of Clients.",go:'inquiries'},
+  {id:'ava',kw:'who are you ava privacy voice listen microphone data google what can you do',a:"I'm Ava, the hub's helper. With my AI brain switched on, you can ask me anything — about the hub, your clients or anything else — and plain commands like 'open clients' run at once. The AI is a free service that doesn't train on your data, and your prospects' email addresses are never sent. Without it I'm in basic mode and answer the simple things from what the hub has loaded. Hold Space to talk, or type.",go:null},
 ];
 function avaKbScore(entry,qTokens){
   if(!entry._bag){entry._bag=new Set(avaTokens(entry.kw+' '+entry.id));}
@@ -264,12 +256,12 @@ const AVA_NO=/^(no|nope|cancel|stop|never ?mind|don't|do not|not now)\b/;
 function avaExample(){const c=avaClients();const run=c.find(x=>typeof tkStageOf==='function'&&tkStageOf(x.row)==='sending')||c.find(x=>typeof tkStageOf==='function'&&!['applied',null].includes(tkStageOf(x.row)))||c[0];return run?run.name:'Lakeview'}
 function avaChipsFor(ctx){
   const ex=avaClients().length?avaExample():null;
-  const chips=['What needs me today?','How many trials are running?',"What's on my calendar today?"];
+  const chips=['What needs me today?','How many clients are running?',"What's on my calendar today?"];
   if(ex)chips.push('How many emails did '+ex+' send?');
-  chips.push('How does a trial work?');
+  chips.push('How does it all work?');
   return chips;
 }
-function avaOwnerOnly(what){return avaReply("That's only for the owner"+(what?' — '+what:'')+". I can tell you anything else on the hub.",[avaPlace('trials')])}
+function avaOwnerOnly(what){return avaReply("That's only for the owner"+(what?' — '+what:'')+". I can tell you anything else on the hub.",[avaPlace('paying')])}
 
 function avaThink(text,ctx){
   ctx=ctx||avaCtx();const t=avaNorm(text);
@@ -295,7 +287,7 @@ function avaThink(text,ctx){
 
   // 1. hello / help
   if(/^(hi|hello|hey|hiya|good (morning|afternoon|evening))( ava)?$/.test(t))return avaReply('Hi'+(ctx.name?' '+ctx.name:'')+'! Ask me what needs you, about a client, or how anything in the hub works.',[],{chips:avaChipsFor(ctx)});
-  if(/\b(what can you do|help me|how do i use you|what do you do)\b|^help$/.test(t))return avaReply("I can tell you what needs you, how many trials are running, what's on your calendar and who's online. I can open any page or client — like 'open "+avaExample()+"' or 'show "+avaExample()+"'s conversations' — and explain how anything in the hub works.",[],{chips:avaChipsFor(ctx)});
+  if(/\b(what can you do|help me|how do i use you|what do you do)\b|^help$/.test(t))return avaReply("I can tell you what needs you, how many clients are running, what's on your calendar and who's online. I can open any page or client — like 'open "+avaExample()+"' or 'show "+avaExample()+"'s conversations' — and explain how anything in the hub works.",[],{chips:avaChipsFor(ctx)});
   if(/\b(thank|thanks|cheers)\b/.test(t))return avaReply("You're welcome.",[]);
 
   // 2. back
@@ -322,7 +314,7 @@ function avaThink(text,ctx){
 
   // 8. not sure
   const ex=avaExample();
-  return avaReply("I'm not sure yet — try 'what needs me' or 'open "+ex+"'.",[],{chips:['What needs me today?','Open '+ex,'How does a trial work?'],unknown:true});
+  return avaReply("I'm not sure yet — try 'what needs me' or 'open "+ex+"'.",[],{chips:['What needs me today?','Open '+ex,'How does it all work?'],unknown:true});
 }
 function avaKbAnswer(e,ctx){
   if(e.owner&&!ctx.owner&&/\b(money|invoice)\b/.test(e.kw))return avaOwnerOnly('money');
@@ -344,15 +336,8 @@ function avaLive(t,ctx){
     if(!rows.length)return avaReply('No paying clients yet, so no money received yet.',[avaPlace('paying')]);
     const m=tkMoneyTotals(rows,ctx.now);
     if(!m.checked)return avaReply("I'm still counting the money received — open Paying clients in a moment.",[avaPlace('paying')]);
-    const extra=[m.waiting?'still counting '+avaPlural(m.waiting,'client'):'',m.demo?tkDollars(m.demo)+' of it is from the test run':''].filter(Boolean).join('; ');
+    const extra=[m.waiting?'still counting '+avaPlural(m.waiting,'client'):''].filter(Boolean).join('; ');
     return avaReply('You received '+tkDollars(m.month)+' this month, and '+tkDollars(m.all)+' in total from '+avaPlural(m.count,'paid invoice')+(extra?' — '+extra:''),[avaPlace('paying')]);
-  }
-  // my own outreach
-  if(/\b(have i|did i|i have|my own|my|we)\b.*\b(sent|send|emailed|outreach)\b|\bmy (outreach|emails)\b/.test(t)&&!client){
-    const o=typeof tk!=='undefined'&&tk?tk.outreach:null;
-    if(!o||!o.totals)return avaReply("I couldn't load your own sending just now. My stats has it.",[avaPlace('mystats')]);
-    const x=o.totals;const since=x.firstDay&&typeof tkDayName==='function'?' since '+tkDayName(x.firstDay):'';
-    return avaReply('Your own outreach has sent '+avaPlural(x.sent||0,'email')+since+', with '+avaPlural(x.replies||0,'reply','replies')+' and '+avaNum(x.bounces||0)+' bounced'+(x.uniqueOpens!=null?'; '+avaNum(x.uniqueOpens)+' were opened':''),[avaPlace('mystats')]);
   }
   // what needs me
   if(/\bneeds? (me|you|my|attention)\b|\bwhat (should|do) i (do|work on)\b|\bmy to ?dos?\b|\bto ?do list\b|\banything (urgent|for me)\b|\bwhat is waiting\b|\bwhat is urgent\b/.test(t))return avaNeeds(ctx);
@@ -370,33 +355,33 @@ function avaLive(t,ctx){
   }
   return null;
 }
-function avaNoData(){const e=typeof tk!=='undefined'&&tk&&tk.hubErr;return avaReply(e?"I couldn't load your clients just now — try again in a minute.":'Give me a second — your clients are still loading. Ask me again.',[avaPlace('trials')])}
+function avaNoData(){const e=typeof tk!=='undefined'&&tk&&tk.hubErr;return avaReply(e?"I couldn't load your clients just now — try again in a minute.":'Give me a second — your clients are still loading. Ask me again.',[avaPlace('paying')])}
 function avaStageWord(t){
   const M=[['sending',/\bsending\b/],['warming',/\bwarmup\b|\bwarming\b/],['setup',/\bsetup\b|\bbuying\b/],['call',/\bcall booked\b|\bbooked (a|the) call\b/],['booking',/\bbooking (the )?call\b|\bneed to book\b/],['applied',/\bapplied\b|\bnew\b/],['finished',/\bfinished\b|\bdone\b|\bdeciding\b/]];
   const m=M.find(x=>x[1].test(t));return m?m[0]:null;
 }
 function avaCounts(t,ctx,stage){
   const hub=avaHub();if(!hub)return avaNoData();
-  const paid=/\bpaying\b/.test(t);
-  const g=tkListGroups(hub,paid);const all=g.needs.concat(g.going,g.done);
-  const where=paid?'paying':'trials';const place=avaPlace(where);
+  const paid=true;
+  const g=tkListGroups(hub);const all=g.needs.concat(g.going,g.done);
+  const where='paying';const place=avaPlace(where);
   if(stage){
     const tile=(TK_STAGE_TILES.find(x=>x[0]===stage)||[stage,stage])[1];
     const xs=all.filter(x=>tkStageOf(x.row)===stage).map(x=>x.s.company);
     const run=avaAct('Show them',()=>{render(where);if(typeof trialsSetStage==='function'&&!(tk.stage&&tk.stage[where]===stage))trialsSetStage(paid,stage);});
-    if(!xs.length)return avaReply('Nobody is at '+tile.toLowerCase()+' right now'+(paid?' among paying clients':'')+'.',[place]);
-    return avaReply(avaPlural(xs.length,paid?'paying client':'trial')+' '+(xs.length===1?'is':'are')+' at '+tile.toLowerCase()+': '+avaList(xs.slice(0,5))+(xs.length>5?' and '+(xs.length-5)+' more':''),[run]);
+    if(!xs.length)return avaReply('Nobody is at '+tile.toLowerCase()+' right now.',[place]);
+    return avaReply(avaPlural(xs.length,'client')+' '+(xs.length===1?'is':'are')+' at '+tile.toLowerCase()+': '+avaList(xs.slice(0,5))+(xs.length>5?' and '+(xs.length-5)+' more':''),[run]);
   }
   const running=all.filter(x=>!x.s.done&&!tkStep(x.row).notTaken&&tkStageOf(x.row)!=='applied');
   const applied=all.filter(x=>!x.s.done&&tkStageOf(x.row)==='applied').length;
-  if(!running.length)return avaReply((paid?'No paying clients yet':'No trials are running right now')+(applied?', and '+avaPlural(applied,'application')+' '+(applied===1?'is':'are')+' waiting':''),[place]);
+  if(!running.length)return avaReply('No clients are running right now'+(applied?', and '+avaPlural(applied,'booked sales call')+' '+(applied===1?'is':'are')+' waiting':''),[place]);
   const by={};running.forEach(x=>{const k=tkStageOf(x.row);if(k)by[k]=(by[k]||0)+1;});
   const parts=TK_STAGE_TILES.filter(x=>by[x[0]]).map(x=>by[x[0]]+' '+x[1].toLowerCase());
   const needs=g.needs.length;
-  return avaReply(avaPlural(running.length,paid?'paying client':'trial')+' '+(running.length===1?'is':'are')+' going: '+avaList(parts)+(applied?'. Plus '+avaPlural(applied,'applicant')+' at the start':'')+(needs?'. '+avaPlural(needs,'client')+' '+(needs===1?'needs':'need')+(ctx.owner?' you':' the owner'):''),[place]);
+  return avaReply(avaPlural(running.length,'client')+' '+(running.length===1?'is':'are')+' going: '+avaList(parts)+(applied?'. Plus '+avaPlural(applied,'booked sales call')+' at the start':'')+(needs?'. '+avaPlural(needs,'client')+' '+(needs===1?'needs':'need')+(ctx.owner?' you':' the owner'):''),[place]);
 }
 function avaNeedLine(x){
-  const s=x.s;if(typeof tkIsUnderReview==='function'&&tkIsUnderReview(x.row))return s.company+' — a new application to read';
+  const s=x.s;if(typeof tkIsUnderReview==='function'&&tkIsUnderReview(x.row))return s.company+' — a sales call to mark Won or Lost';
   if(s.needsReply)return s.company+' — '+(avaFirst(s.person)||'they')+' wrote, answer them';
   const nx=/^nothing\b/i.test(s.next)?'':s.next;const td=typeof tkTodosSorted==='function'?tkTodosSorted(x.row)[0]:null;
   const what=String(nx||(td&&td.text)||'open it to see what').trim().replace(/\.+$/,'');
@@ -405,11 +390,11 @@ function avaNeedLine(x){
 function avaNeeds(ctx){
   const hub=avaHub();if(!hub)return avaNoData();
   const seen={};const xs=[];
-  tkListGroups(hub,false).needs.concat(tkListGroups(hub,true).needs).forEach(x=>{if(!seen[x.row.id]){seen[x.row.id]=1;xs.push(x);}});
+  tkListGroups(hub).needs.forEach(x=>{if(!seen[x.row.id]){seen[x.row.id]=1;xs.push(x);}});
   const reqs=typeof cal!=='undefined'&&cal&&Array.isArray(cal.reqs)?cal.reqs.filter(m=>m&&!m.proposed&&m.status==='requested'):[];
   const pend=ctx.owner&&typeof pp!=='undefined'&&pp&&Array.isArray(pp.pending)?pp.pending.length:0;
   const who=ctx.owner?'you':'the owner';
-  if(!xs.length&&!reqs.length&&!pend)return avaReply("Nothing needs "+who+" right now. We'll tell you when something does.",[avaPlace('trials')]);
+  if(!xs.length&&!reqs.length&&!pend)return avaReply("Nothing needs "+who+" right now. We'll tell you when something does.",[avaPlace('paying')]);
   const lines=xs.slice(0,3).map(avaNeedLine);
   if(xs.length>3)lines.push(avaPlural(xs.length-3,'more client'));
   if(reqs.length)lines.push(avaPlural(reqs.length,'call time')+' '+(reqs.length===1?'waits':'wait')+' for your yes in the Calendar');
@@ -417,7 +402,7 @@ function avaNeeds(ctx){
   const n=xs.length+(reqs.length?1:0)+(pend?1:0);
   const acts=[];
   if(xs[0])acts.push(avaAct('Open '+xs[0].s.company,()=>tkIsUnderReview(xs[0].row)?openTrial(xs[0].row.id,null,'application'):openTrial(xs[0].row.id)));
-  if(xs.length)acts.push(avaPlace(tkIsPaidRow(xs[0].row)?'paying':'trials'));
+  if(xs.length)acts.push(avaPlace('paying'));
   if(reqs.length)acts.push(avaAct('Open the Calendar',()=>typeof openCalendar==='function'?openCalendar(reqs[0].id):render('calendar')));
   if(pend)acts.push(avaPlace('activity'));
   return avaReply((n===1?'One thing needs ':avaNum(n)+' things need ')+who+': '+lines.join('; '),acts.slice(0,3));
@@ -425,9 +410,9 @@ function avaNeeds(ctx){
 function avaApps(ctx){
   const hub=avaHub();if(!hub)return avaNoData();
   const xs=tkListRows(hub).filter(r=>tkIsUnderReview(r));
-  if(!xs.length)return avaReply('No new applications right now.',[avaPlace('trials')]);
+  if(!xs.length)return avaReply('No booked sales calls waiting right now.',[avaPlace('paying')]);
   const names=xs.slice(0,4).map(r=>{const s=tkSimple(r);const fs=r.fitScore;return s.company+(fs&&fs.score!=null?' ('+fs.score+'% match)':'')+(tkIsPaidRow(r)?', '+tkPlanName(r.plan)+' plan':'')});
-  return avaReply(avaPlural(xs.length,'new application')+' '+(xs.length===1?'is':'are')+' waiting: '+avaList(names)+(xs.length>4?' and more':'')+(ctx.owner?'. Read it, then say yes or no.':'. The owner says yes or no.'),[avaAct('Open '+tkSimple(xs[0]).company,()=>openTrial(xs[0].id,null,'application')),avaPlace(tkIsPaidRow(xs[0])?'paying':'trials')]);
+  return avaReply(avaPlural(xs.length,'booked sales call')+' '+(xs.length===1?'is':'are')+' waiting: '+avaList(names)+(xs.length>4?' and more':'')+(ctx.owner?'. Read what we found, then after the call mark it Won or Lost.':'. The owner marks each one Won or Lost after the call.'),[avaAct('Open '+tkSimple(xs[0]).company,()=>openTrial(xs[0].id,null,'application')),avaPlace('paying')]);
 }
 function avaMeetings(){
   const out=[],seen={};if(typeof cal==='undefined'||!cal)return out;
@@ -509,24 +494,19 @@ function avaClientStats(t,ctx,c,want){
 /* ---- the owner's few actions: always asked first, and they only OPEN the place ---- */
 function avaActions(t,ctx,client){
   const ask=(say,label,run,done)=>{
-    if(!ctx.owner)return avaReply("Only the owner can do that. I can show you where it is.",[avaPlace('trials')]);
+    if(!ctx.owner)return avaReply("Only the owner can do that. I can show you where it is.",[avaPlace('paying')]);
     const act=avaAct(label,run);AVA.pending={act,done};
     return avaReply(say,[avaAct('Yes, '+label.charAt(0).toLowerCase()+label.slice(1),()=>{AVA.pending=null;run();},{yes:true}),avaAct('No',()=>{AVA.pending=null;},{no:true})],{confirm:true});
   };
   if(/\b(add|new|create|start)\b.*\b(trials?|clients?|customers?|paying)\b/.test(t)&&!/^(how|what|why)\b/.test(t)){
-    const paid=/\bpaying|paid\b/.test(t);
-    return ask('Shall I open the form to add a '+(paid?'paying':'trial')+' client? Nothing is sent until you press the button in it.','Open the form',()=>{render(paid?'paying':'trials');paid?openNewPayingClient():openNewTrialClient();},'Opening the form.');
+    return ask('Shall I open the form to add a paying client? Nothing is sent until you press the button in it.','Open the form',()=>{render('paying');openNewPayingClient();},'Opening the form.');
   }
   if(/\b(give|share|grant)\b.*\baccess\b|\baccess\b.*\b(give|share)\b/.test(t)&&!/^(how|what|why)\b/.test(t)){
     if(!client)return avaReply("Which client? Say, for example, 'give "+avaExample()+" access'.",[]);
     return ask('Shall I open '+tkPossessive(client.name)+' Setup, where you type their email and press Give access?','Open their Setup',()=>avaOpenTab(client.id,'setup'),'Opening their Setup — Who can see this is there.');
   }
-  if(/\b(load|add|start|remove|delete|clear|take away)\b.*\b(test run|demo)\b/.test(t)&&!/^(how|what|why)\b/.test(t)){
-    const rm=/\b(remove|delete|clear|take away)\b/.test(t);
-    return ask('Shall I open Settings, Test run? You press '+(rm?'Remove the test run':'Load the test run')+' there yourself.','Open Test run',()=>openSettings('demo'),'Opening Settings, Test run.');
-  }
   if(/\b(send|email|reply|say yes|say no|approve|decline|confirm)\b/.test(t)&&/\b(to|them|applicant|application|call)\b/.test(t)&&/^(send|email|reply|say|approve|decline|confirm)\b/.test(t)){
-    const where=client?avaAct('Open '+client.name,()=>openTrial(client.id)):avaPlace('trials');
+    const where=client?avaAct('Open '+client.name,()=>openTrial(client.id)):avaPlace('paying');
     return avaReply("I don't send emails or answer applicants for you — that always takes your own click. I can open the right place.",[where]);
   }
   return null;
@@ -1086,7 +1066,7 @@ function avaFirstWord(t){
 }
 const AVA_GO_WORDS=/\b(open|show|go to|go|take me|bring up|switch to|jump to|navigate|see)\b/;
 /* The machine's views → Ava's places (AVA_PLACES keys); settings and client are handled on their own. */
-const AVA_NAV_PLACE={trials:'trials',paying:'paying',calendar:'calendar',team:'team',mystats:'mystats',activity:'activity',people:'activity',inquiries:'inquiries',behind:'behind',trialsBoard:'behind'};
+const AVA_NAV_PLACE={trials:'paying',paying:'paying',calendar:'calendar',team:'team',activity:'activity',people:'activity',inquiries:'inquiries',behind:'behind',trialsBoard:'behind'};
 /* A client-system tab key (overview, conversations, sent, calls, messages, money, health, leads, setup) → its label and
    whether it is in the owner's "Only you" part. */
 function avaTabInfo(tab){
@@ -1117,18 +1097,16 @@ function avaNavAct(a,ctx,why){
   if(p.owner&&!ctx.owner){why.owner=true;why.what=AVA_PLACES.find(x=>x[0]===key)[2];return null;}
   p.here=avaHere(key);return p;
 }
-function avaSetName(k){return ({alerts:'Alerts',phone:'Phone alerts',details:'Your details',keys:'Keys',ava:'Ava',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot',demo:'Test run',status:'Is everything running?',behind:'Behind the scenes',advanced:'Advanced',look:'Light or dark',account:'Your account'})[k]||k}
+function avaSetName(k){return ({alerts:'Alerts',phone:'Phone alerts',details:'Your details',keys:'Keys',ava:'Ava',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot',status:'Is everything running?',behind:'Behind the scenes',advanced:'Advanced',look:'Light or dark',account:'Your account'})[k]||k}
 function avaClientName(id){const c=avaClients().find(x=>x.id===String(id));return c?c.name:(typeof tkClientName==='function'?tkClientName(id):String(id))}
 /* What a "confirm" card may do — each only when its button is pressed (or "yes" is said right after), with the hub's
    own functions. owner: the owner only (a team member never sees the card). */
 const AVA_DO={
-  open_add_trial:{owner:true,ok:()=>true,run:()=>{render('trials');openNewTrialClient();}},
+  open_add_trial:{owner:true,ok:()=>true,run:()=>{render('paying');openNewPayingClient();}},   // an older answer: a paying client now
   open_add_paid:{owner:true,ok:()=>true,run:()=>{render('paying');openNewPayingClient();}},
   open_client:{ok:a=>!!a.id,run:a=>openTrial(String(a.id))},
   mark_todo_seen:{owner:true,ok:a=>!!a.todoId,run:a=>trialsTodoAction(String(a.todoId))},
   give_access:{owner:true,ok:a=>!!a.id,run:a=>tkOpenSystem(String(a.id),'setup','access')},
-  load_test_run:{owner:true,ok:()=>true,run:()=>{openSettings('demo');return demoAction('load');}},
-  remove_test_run:{owner:true,ok:()=>true,run:()=>{openSettings('demo');return demoAction('remove');}},
   set_my_status:{ok:a=>typeof a.text==='string',run:a=>avaSetStatus(a.text)},
   add_change_request:{ok:a=>!!String(a.text||'').trim(),run:a=>avaAddRequest(a.text)},
 };
@@ -1299,7 +1277,7 @@ function avaRenderSet(c){
     :`<ul class="ava-reqs">${list.slice(0,20).map(q=>`<li class="${q.status==='done'?'done':''}"><span><b>${e(q.text||'')}</b><small>${e(q.by||'Someone')}${q.at?' · '+e(rel(q.at)):''}</small></span>${q.status==='done'?'<span class="pill grey">Done</span>':`<button type="button" class="btn ghost" onclick="avaReqDone(${at(q.id)})">Done</button>`}</li>`).join('')}</ul>`);
   const f=c.facts||{};
   const facts=`<h4 class="ava-set-h">Business facts</h4>`+(f.missing?`<p class="tk-muted tk-small">Not available yet — your system needs an update first.</p>`:f.text==null&&!f.err?`<p class="tk-muted tk-small">Loading…</p>`
-    :`<p class="tk-muted tk-small">What Ava should always know about your business — what you offer, prices, hours, how you like things said. Up to ${avaNum(AVA_FACTS_MAX)} characters; her AI brain reads it with every question.</p><label class="ava-sr" for="avaFacts">Business facts</label><textarea id="avaFacts" class="ava-facts" rows="6" maxlength="${AVA_FACTS_MAX}" placeholder="e.g. We set up cold email for IT companies in the US. The trial is 30 days and free…" oninput="AVA.facts.draft=this.value">${e(f.draft!=null?f.draft:f.text||'')}</textarea><div class="tk-set-links"><button type="button" class="btn"${f.busy?' disabled':''} onclick="avaFactsSave()">${f.busy?'Saving…':'Save facts'}</button>${f.saved?'<span class="pill green">Saved</span>':''}</div>${f.err?`<p class="tk-note red">${e(f.err)} <button type="button" class="tk-textbtn" onclick="avaSetRetry()">Try again</button></p>`:''}`);
+    :`<p class="tk-muted tk-small">What Ava should always know about your business — what you offer, prices, hours, how you like things said. Up to ${avaNum(AVA_FACTS_MAX)} characters; her AI brain reads it with every question.</p><label class="ava-sr" for="avaFacts">Business facts</label><textarea id="avaFacts" class="ava-facts" rows="6" maxlength="${AVA_FACTS_MAX}" placeholder="e.g. We set up cold email for IT companies in the US. Plans start at Starter…" oninput="AVA.facts.draft=this.value">${e(f.draft!=null?f.draft:f.text||'')}</textarea><div class="tk-set-links"><button type="button" class="btn"${f.busy?' disabled':''} onclick="avaFactsSave()">${f.busy?'Saving…':'Save facts'}</button>${f.saved?'<span class="pill green">Saved</span>':''}</div>${f.err?`<p class="tk-note red">${e(f.err)} <button type="button" class="tk-textbtn" onclick="avaSetRetry()">Try again</button></p>`:''}`);
   const privacy=`<p class="ava-privacy">Your voice is turned into text by your browser (Chrome uses Google). Ava's AI only uses services that don't train on your data, and never sends your prospects' names or emails.</p>`;
   return {state,body:intro+`<h4 class="ava-set-h">Her brains</h4>`+brainsHTML+btns+testLine+facts+voice+reqs+privacy};
 }
@@ -1315,7 +1293,6 @@ async function avaPrime(text){
     jobs.push(safe(calLoad(w1)));if(w2!==w1)jobs.push(safe(calLoad(w2)));
   }
   if(/\b(online|team|looks after|in the hub|working)\b/.test(t)&&typeof teamKick==='function'&&(typeof tm==='undefined'||!tm.data))jobs.push(safe(teamKick(false)));
-  if(/\b(i|my|we)\b.*\b(sent|send|outreach|emails)\b/.test(t)&&typeof loadOutreach==='function')jobs.push(safe(loadOutreach(false)));
   await Promise.all(jobs);
   if(/\b(money|revenue|income|received|paid|earn)\b/.test(t)&&avaOwner()&&typeof tkMoneyKick==='function'){const p=tkMoneyKick();if(p)await safe(p);}
   const c=avaFindClient(t);
@@ -1325,13 +1302,13 @@ const AVA_LOOP_STOP=/^(stop( listening)?|that is all( for now)?|thanks? ava|than
 /* Three follow-ups for the page you're on (when the AI gives none of its own); never the question just asked. */
 function avaFollowUps(ctx,asked){
   ctx=ctx||avaCtx();const pg=avaPage();const v=pg.view;const q=avaNorm(asked||'');let xs;
-  const name=pg.clientName&&pg.clientId!==(typeof MY_STATS_ID!=='undefined'?MY_STATS_ID:'aviance')?pg.clientName:null;
+  const name=pg.clientName&&pg.clientId!=='aviance'?pg.clientName:null;
   if(name)xs=['How is '+name+' doing?','Summarise '+avaPossessive(name)+' latest replies','What does '+name+' need from me?'];
   else if(v==='calendar')xs=["What's on tomorrow?",'Any call times waiting for my yes?','What needs me today?'];
   else if(v==='paying')xs=ctx.owner?['How much came in this month?','Which paying clients need me?','How does a paid plan start?']:['Which paying clients need the owner?','How does a paid plan start?','What needs me today?'];
   else if(v==='settings')xs=['Is everything running?','What does warm-up do?','How do I add a key?'];
   else if(v==='team'||v==='people')xs=["Who's online?",'Who looks after '+avaExample()+'?','What needs me today?'];
-  else xs=['What needs me today?','How many trials are running?',"What's on my calendar today?",'How does a trial work?'];
+  else xs=['What needs me today?','How many clients are running?',"What's on my calendar today?",'How does it all work?'];
   return xs.filter(x=>avaNorm(x)!==q).slice(0,3);
 }
 function avaPossessive(n){return typeof tkPossessive==='function'?tkPossessive(n):n+"'s"}
@@ -1602,7 +1579,7 @@ function avaTime(at){if(!at)return '';try{return new Date(at).toLocaleTimeString
 
 /* ---- light markdown: **bold**, *italic*, `code`, lists, headings, line breaks, links. Everything is escaped first;
    a link to a hub page (#system/<id>, #trial/<id>, #settings/keys, #calendar …) is a button that opens it here. ---- */
-const AVA_ROUTE=/^#(?:system|trial|settings|calendar|trials|paying|inquiries|stats|alerts|team|mystats|activity|behind)(?:\/[A-Za-z0-9_.:-]+){0,2}$/;
+const AVA_ROUTE=/^#(?:system|trial|settings|calendar|trials|paying|inquiries|alerts|team|activity|behind)(?:\/[A-Za-z0-9_.:-]+){0,2}$/;
 function avaMd(src){
   const lines=String(src==null?'':src).replace(/\r\n?/g,'\n').split('\n');
   let html='',list=null,para=[],code=null;
@@ -1647,7 +1624,6 @@ function avaRoute(url){
   if(v==='trial')return bits[1]?{view:'client',id:bits[1]}:null;
   if(v==='settings')return {view:'settings',tab:bits[1]||null};
   if(v==='alerts')return {view:'settings',tab:'alerts'};
-  if(v==='stats')return {view:'mystats'};
   if(v==='calendar'&&bits[1])return {view:'calendar',id:bits[1]};
   return {view:v};
 }
@@ -1931,7 +1907,7 @@ function avaWalk(e,out){
   if(tag==='SUMMARY'){const title=avaFind(e,k=>avaHasCls(k,'tk-set-title'));const pill=avaFind(e,k=>avaHasCls(k,'pill'));
     const t=title?avaClean(avaText(title))+(pill&&avaClean(avaText(pill))?' — '+avaClean(avaText(pill)):''):avaJoin(avaPieces(e));if(t)out.push({k:'head',t});return;}
   if(avaHasCls(e,'tk-sets')){avaSettingsOut(e,out);return;}
-  if(avaHasCls(e,'tk-journey')){const al=avaAttr(e,'aria-label');if(al)out.push({k:'text',t:avaClean(al.replace(/^the trial journey,?\s*/i,'Journey: '))});return;}
+  if(avaHasCls(e,'tk-journey')){const al=avaAttr(e,'aria-label');if(al)out.push({k:'text',t:avaClean(al.replace(/^the (trial|client) journey,?\s*/i,'Journey: '))});return;}
   if(avaIsTile(e)){const t=avaTile(e);if(t)out.push({k:'tile',t});return;}
   if(avaHasCls(e,'tk-kv')||tag==='DL'){avaPairs(e,out);return;}
   if(avaHasCls(e,'tk-chat')){const ms=avaElKids(e).filter(k=>avaHasCls(k,'tk-cm')&&!avaSkip(k)).reverse();

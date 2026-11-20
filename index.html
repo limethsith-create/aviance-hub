@@ -22,7 +22,7 @@
    Black/white, one plain system font (--font), sentence case, weights 400/600,
    square corners. Calm: soft borders, lots of room. One accent for "needs you"
    (--red); pills: green = good, amber = waiting, red = needs you, grey = done.
-   Four places only: Trials, Calendar, Inquiries, Settings — a sidebar on a
+   A few places only: Clients, Calendar, Team, Activity, Settings — a sidebar on a
    computer, a tab bar along the bottom on a phone.
    The screens themselves are styled in trials.css and calendar.css on top of these. */
 :root{
@@ -283,7 +283,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
         <div><div class="la-name">Aviance Hub</div><div class="la-sub">For the Aviance team</div></div></div>
       <div class="la-hero">
         <h2>We don't sell emails. We sell <span class="accent">booked calls</span>.</h2>
-        <p>Every client runs by itself — trials and paying. This is where you see who is where, and do the few things only people can do.</p>
+        <p>Every client runs by itself. This is where you see who is where, and do the few things only people can do.</p>
       </div>
       <div class="la-points">
         <div class="la-point"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12l5 5 9-11"/></svg>Every client on one line: where they are</div>
@@ -293,7 +293,6 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
       <div class="la-guarantee">Live in 3 weeks — <b>guaranteed</b></div>
     </div>
     <div class="login-card">
-      <a class="btn" href="/dialer/" style="width:100%;justify-content:center;padding:13px;margin-bottom:22px;text-decoration:none;background:var(--red-brand);border-color:var(--red-brand);color:#fff">Open the Dialer — no sign-in needed</a>
       <div class="login-eyebrow">Aviance Hub</div>
       <div class="login-title">Sign in</div>
       <div class="login-desc">Your email and password.</div>
@@ -323,7 +322,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
   <div class="cmdk">
     <div class="cmdk-in">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-      <input id="cmdkInput" placeholder="Find a trial, or type what you want to do…" autocomplete="off" aria-label="Find a trial, or type what you want to do">
+      <input id="cmdkInput" placeholder="Find a client, or type what you want to do…" autocomplete="off" aria-label="Find a client, or type what you want to do">
     </div>
     <div class="cmdk-list" id="cmdkList"></div>
   </div>
@@ -345,10 +344,10 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
   <div class="main">
     <header class="topbar">
       <button type="button" class="back-btn" id="backBtn" onclick="goBack()" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15 5l-7 7 7 7"/></svg></button>
-      <div class="page-title"><h2 id="ptitle">Trials</h2><p id="psub"></p></div>
+      <div class="page-title"><h2 id="ptitle">Clients</h2><p id="psub"></p></div>
       <div class="search" onclick="openCmdk()" title="Find anything (Ctrl/⌘ K)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-        <input placeholder="Find…" readonly aria-label="Find a trial">
+        <input placeholder="Find…" readonly aria-label="Find a client">
         <span class="kbd" style="margin-left:auto">⌘K</span>
       </div>
       <button type="button" class="tb-btn" id="notifBtn" onclick="toggleNotif(event)" title="What needs you" aria-label="What needs you">
@@ -366,7 +365,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
 /* ===================== AVIANCE HUB — shell =====================
    Sign-in, router, the four-place navigation (sidebar on a computer, tab bar
    on a phone), ⌘K, notifications, theme. Everything the owner sees inside is
-   Trials + Settings in trials.js, Inquiries in inquiries.js, the Calendar
+   Clients + Settings in trials.js, Inquiries in inquiries.js, the Calendar
    in calendar.js, and Messages, Google Meet and the reply bot in messages.js. */
 
 /* Capture the URL hash before supabase-js processes & strips it (password recovery flow) */
@@ -394,8 +393,6 @@ const I={
 };
 
 /* ---- Config ---- */
-/* Your own outreach is the machine's client `aviance`; My stats opens it. */
-const MY_STATS_ID='aviance';
 const SUPA_URL='https://zjbxnkpktbghhudjbxhk.supabase.co';
 const SUPA_KEY='sb_publishable_WV4FANV2hNsmbzK3DbiLFg_9bjiB8Z1';
 /* The system behind the hub (email-distributor). Override for testing: localStorage.setItem('avianceMachineUrl','http://localhost:3000') */
@@ -406,7 +403,7 @@ const MACHINE_PAGES=[['/mc/queue',I.inbox,'Waiting list'],['/mc/warmup',I.sun,'W
 const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY);
 
 /* ---- State ---- */
-let authUser=null, currentView='trials';
+let authUser=null, currentView='paying';
 
 /* ---- Helpers ---- */
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
@@ -418,23 +415,25 @@ function openModal(html){document.getElementById('modal').innerHTML=html;documen
 function closeModal(){document.getElementById('modalWrap').classList.remove('open');}
 document.getElementById('modalWrap').addEventListener('click',e=>{if(e.target.id==='modalWrap')closeModal();});
 
-/* ---- Router: Trials + Settings (trials.js), Inquiries (inquiries.js) and the Calendar (calendar.js) — lazy wrappers, the files load after this.
-   The four places are trials, calendar, inquiries, settings; the rest are pages inside them with a Back button (back). ---- */
+/* ---- Router: Clients + Settings (trials.js), Inquiries (inquiries.js) and the Calendar (calendar.js) — lazy wrappers, the files load after this.
+   The places are Clients ('paying'), Calendar, Team, Activity and Settings; the rest are pages inside them with a Back button (back).
+   'trials' (the old Trials place) opens Clients. ---- */
 const views={
-  trials:{fn:()=>viewTrials(),title:'Trials',sub:'Who is where, and what needs you'},
-  trial:{fn:()=>viewTrial(),title:'Trial',sub:'',back:()=>render(typeof tkIsPaidId==='function'&&tkIsPaidId(currentTrialId)?'paying':'trials')},
-  clientSystem:{fn:()=>viewClientSystem(),title:'Email system',sub:'',wide:true,back:()=>currentTrialId?openTrial(currentTrialId):render('trials')},
-  paying:{fn:()=>viewPaying(),title:'Paying clients',sub:'New paid-plan applications, and every paying client'},
-  trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins',back:()=>currentTrialId?openTrial(currentTrialId):render('trials')},
+  trials:{fn:()=>viewPaying(),title:'Clients',sub:'Who is where, and what needs you',alias:'paying'},
+  trial:{fn:()=>viewTrial(),title:'Client',sub:'',back:()=>render('paying')},
+  clientSystem:{fn:()=>viewClientSystem(),title:'Email system',sub:'',wide:true,back:()=>currentTrialId?openTrial(currentTrialId):render('paying')},
+  paying:{fn:()=>viewPaying(),title:'Clients',sub:'Booked sales calls, and every client'},
+  trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins',back:()=>currentTrialId?openTrial(currentTrialId):render('paying')},
   calendar:{fn:()=>viewCalendar(),title:'Calendar',sub:'Every call, in Sri Lanka time'},
-  inquiries:{fn:()=>viewInquiries(),title:'Plan call requests',sub:'People who booked a call about a paid plan',back:()=>render('paying')},
-  inquiry:{fn:()=>viewInquiry(),title:'Inquiry',sub:'',back:()=>render('inquiries')},
+  inquiries:{fn:()=>viewInquiries(),title:'Bookings',sub:'Sales calls booked from the website — mark each one Won or Lost',back:()=>render('paying')},
+  inquiry:{fn:()=>viewInquiry(),title:'Booking',sub:'',back:()=>render('inquiries')},
   settings:{fn:()=>viewSettings(),title:'Settings',sub:'Your details, keys, alerts, Google Meet, warm-up helpers, the reply bot, and how everything is running'},
   people:{fn:()=>viewPeople(),title:'Activity',sub:'Who signed in and out, for how long, and what they opened'},
   team:{fn:()=>teamPageView(),title:'Team',sub:'Who is working on what, and which clients each person looks after'},
-  trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every trial by stage, every to-do, the waiting list',back:()=>render('settings')},
+  trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every client by stage, every to-do',back:()=>render('settings')},
 };
 function render(v){
+  if(views[v]&&views[v].alias)v=views[v].alias;
   const view=views[v];if(!view||!authUser)return;
   currentView=v;
   document.getElementById('content').innerHTML=`<div class="view${view.wide?' wide':''}">${view.fn()}</div>`;
@@ -449,16 +448,15 @@ function render(v){
 }
 
 /* The Back button in the top bar (pages inside one of the four places). */
-function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('trials');}
+function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('paying');}
 
 /* ---- Deep links: #trial/{id}, #system/{id} (a client's email system, Shared › Overview), #system/{id}/{tab} (one of its tabs), #inquiry/{id}, #calendar/{meetingId}, #alerts (Settings › Alerts), #settings, #settings/warmup (Settings › Warm-up),
-   #settings/keys (Settings › Keys), #settings/details (Settings › Your details), #inquiries, #calendar, #trials (what a phone alert opens),
+   #settings/keys (Settings › Keys), #settings/details (Settings › Your details), #inquiries, #calendar, #paying and the old #trials (Clients — what a phone alert opens),
    and #settings/google?connected=1 | ?error=… (where Google sends the owner back after "Connect Google" → Settings › Google Meet with a message) ----
    Honoured on load and on hashchange; when signed out, kept until sign-in. */
 function parseDeepLink(h){
   h=String(h||'');const at=h.indexOf('#');if(at<0)return null;h=h.slice(at+1).replace(/^\/+/,'').replace(/\/+$/,'');
-  if(h==='trials')return {view:'trials'};
-  if(h==='stats')return {view:'trial',id:MY_STATS_ID};
+  if(h==='trials'||h==='clients')return {view:'paying'};
   if(h==='alerts')return {view:'settings',section:'alerts'};
   if(h==='settings')return {view:'settings'};
   const s=h.match(/^settings\/(warmup|keys|details)$/);if(s)return {view:'settings',section:s[1]};
@@ -495,26 +493,15 @@ if(typeof window.addEventListener==='function')window.addEventListener('hashchan
 /* The home-screen app (iPhone "Add to Home Screen", or an installed desktop app) */
 function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.standalone===true)||(typeof window.matchMedia==='function'&&window.matchMedia('(display-mode: standalone)').matches);}catch(e){return false}}
 
-/* ---- My stats: your own outreach (the machine's `aviance` client) — inboxes, sending volume, replies, the copy —
-   on the same page a trial opens (Overview, Growth, Inboxes, Copy, …), one tap from the menu. #stats deep links here. ---- */
-function openMyStats(){openTrial(MY_STATS_ID)}
-
-/* ---- Dialer: the cold-calling dialer (three lines at once, scripts, outcomes) lives at /dialer/ — its own full-screen page. ---- */
-function openDialer(){location.href='/dialer/'}
-
-/* ---- Navigation: four places plus My stats. Badges: Trials = how many need you (red), Calendar = call times waiting
-   for your yes (amber), Inquiries = new ones (red). The same items fill the sidebar and the phone's tab bar. ---- */
+/* ---- Navigation: the places in the sidebar. Badges: Clients = how many need you + new bookings (red), Calendar = call
+   times waiting for your yes (amber). The same items fill the sidebar and the phone's tab bar. ---- */
 function navItems(){
-  const isPaid=()=>typeof tkIsPaidId==='function'&&tkIsPaidId(currentTrialId);
   const pn=typeof peopleNavCount==='function'?peopleNavCount():'';
-  const n=typeof trialsNavCount==='function'?trialsNavCount():'',q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'';
+  const q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'';
   return [
-    {view:'trials',icon:I.trials,label:'Trials',badge:n,tone:'red',badgeTitle:n?n+' need'+(n===1?'s':'')+' you':'',also:['trial','clientSystem','trialPurchase'],isOn:()=>currentView==='trials'||((currentView==='trialPurchase'||currentView==='clientSystem')&&!isPaid())||(currentView==='trial'&&currentTrialId!==MY_STATS_ID&&!isPaid())},
-    {view:'paying',icon:I.money,label:'Paying clients',short:'Paying',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry'],isOn:()=>['paying','inquiries','inquiry'].includes(currentView)||((currentView==='trial'||currentView==='clientSystem'||currentView==='trialPurchase')&&isPaid())},
+    {view:'paying',icon:I.money,label:'Clients',short:'Clients',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry','trial','clientSystem','trialPurchase']},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:c,tone:'amber',badgeTitle:c?c+' waiting for your yes':''},
     {view:'team',icon:I.people,label:'Team',badge:''},
-    {view:'dialer',icon:I.phone,label:'Dialer',badge:'',go:'openDialer()'},
-    {view:'mystats',icon:I.chart,label:'My stats',short:'Stats',badge:'',go:'openMyStats()',isOn:()=>currentView==='trial'&&currentTrialId===MY_STATS_ID},
     {view:'people',icon:I.activity,label:'Activity',short:'Activity',badge:pn,tone:pn?'red':'',badgeTitle:pn?pn+' waiting for your approval':'',owner:true},
     {view:'settings',icon:I.gear,label:'Settings',badge:'',also:['trialsBoard'],owner:true},
   ].filter(it=>!it.owner||!authUser||authUser.role==='admin');
@@ -574,7 +561,7 @@ function enterApp(){
   document.getElementById('whoAvatar').textContent=(authUser.name||'A').trim().charAt(0).toUpperCase()||'A';
   document.getElementById('whoName').textContent=authUser.name;
   document.getElementById('whoEmail').textContent=authUser.email;
-  if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('trials');
+  if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('paying');
   try{if(typeof peopleSignedIn==='function')peopleSignedIn();}catch(e){}
   try{phoneAlertsBoot();}catch(e){}
 }
@@ -629,7 +616,7 @@ async function boot(){
   }
 }
 
-/* ---- ⌘K: trials + actions only ---- */
+/* ---- ⌘K: clients + actions only ---- */
 let cmdkState={items:[],sel:0};
 function cmdkActions(){const a=[];
   if(typeof trialsCmdkActions==='function')a.push(...trialsCmdkActions());
@@ -663,7 +650,7 @@ document.getElementById('cmdkInput').addEventListener('keydown',e=>{
   else if(e.key==='Escape'){closeCmdk();}
 });
 
-/* ---- Notifications: trial to-dos + open urgent machine alerts + calendar requests waiting for a yes ---- */
+/* ---- Notifications: client to-dos + open urgent machine alerts + calendar requests waiting for a yes ---- */
 function computeNotifs(){if(!authUser)return [];let n=[];try{n=typeof trialsNotifs==='function'?trialsNotifs():[];}catch(e){n=[];}try{if(typeof calendarNotifs==='function')n=n.concat(calendarNotifs());}catch(e){}return n;}
 function updateNotifBadge(){const dot=document.getElementById('notifDot');if(!dot)return;const n=computeNotifs();if(n.length){dot.style.display='grid';dot.textContent=n.length>9?'9+':n.length;}else{dot.style.display='none';}}
 function toggleNotif(e){e.stopPropagation();const pop=document.getElementById('notifPop');if(pop.classList.contains('open')){pop.classList.remove('open');return;}const n=computeNotifs();window._notifs=n;
@@ -684,7 +671,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){closeModal();return;}
   if(typing||!authUser)return;
   if(e.key==='/'){e.preventDefault();openCmdk();}
-  else if(e.key.toLowerCase()==='n'){openNewTrialClient();}
+  else if(e.key.toLowerCase()==='n'){openNewPayingClient();}
 });
 initTheme();
 boot();

@@ -7,7 +7,7 @@
      POST /api/mc/push/unsubscribe {endpoint} → {ok}
      GET  /api/mc/push/status?endpoint=…      → {subscribed, count}
      POST /api/mc/push/test {endpoint?}       → {ok, sent, failed}
-   sw.js shows the notifications; tapping one opens /#trial/{id}, /#alerts or /#trials. */
+   sw.js shows the notifications; tapping one opens /#trial/{id}, /#alerts or /#trials (Clients). */
 
 const PA_SW = '/sw.js';
 const pa = { checked: false, on: false, sub: null, count: null, key: null, keyStatus: 0, busy: '', error: '', note: '' };
@@ -106,7 +106,7 @@ function renderPhoneAlerts(v) {
     case 'on': {
       const others = v.count > 1 ? `<p class="pa-small">Alerts go to ${esc(v.count)} devices in total.</p>` : '';
       body = `<p class="pa-state"><span class="pill green">On for this ${dev}</span></p>${others}
-        <p class="pa-small">Urgent alerts stay on screen until you tap them. Tapping an alert opens the trial it's about.</p>`;
+        <p class="pa-small">Urgent alerts stay on screen until you tap them. Tapping an alert opens the client it's about.</p>`;
       foot = `<button class="btn ghost" onclick="phoneAlertsOff()"${v.busy ? ' disabled' : ''}>${v.busy === 'off' ? 'Turning off…' : 'Turn off'}</button><button class="btn" onclick="phoneAlertsTest()"${v.busy ? ' disabled' : ''}>${v.busy === 'test' ? 'Sending…' : 'Send a test'}</button>`;
       break;
     }
@@ -260,7 +260,7 @@ async function phoneAlertsBoot() {
 function paOnMessage(e) {
   const m = e && e.data;
   if (!m || m.type !== 'aviance:open') return;
-  const d = parseDeepLink(String(m.url || '/#trials').replace(/^[^#]*/, '')) || { view: 'trials' };
+  const d = parseDeepLink(String(m.url || '/#trials').replace(/^[^#]*/, '')) || { view: 'paying' };
   goDeepLink(d);
 }
 if (typeof navigator !== 'undefined' && navigator.serviceWorker) {

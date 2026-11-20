@@ -1,11 +1,18 @@
 # Aviance Hub
 
-The Aviance owner's window onto the **trial machine** — live at
+The Aviance owner's window onto the **machine** — live at
 https://aviance.store. One static page, plain browser JavaScript, no build
 step. The machine (`limethsith-create/email-distributor`, deployed at
-https://email-distributor.vercel.app) runs every 30-day trial by itself; the
-hub shows what it is doing and lets the owner steer it, through the contract
-in `email-distributor/docs/HUB-API.md`.
+https://email-distributor.vercel.app) runs every paying client (Starter,
+Growth or Scale) by itself; the hub shows what it is doing and lets the owner
+steer it, through the contract in `email-distributor/docs/HUB-API.md`.
+
+> **No free trial, one way in (November 2026).** A client starts as a booking
+> from the website's "Book a call" form; the owner marks it **Won** after the
+> sales call (they become a client and get the onboarding email) or **Lost**.
+> "+ Add a paying client yourself" stays. The Trials place, the waiting list,
+> Day 30 and the decision page, the Test run, the Dialer and My stats (the
+> owner's own cold email) are gone.
 
 The hub is for one person. Sign-in is Supabase email + password, and only a
 `profiles` row that is `approved` with `role = 'admin'` gets in; anyone else
@@ -21,21 +28,20 @@ sees "This hub is for the Aviance owner." and is signed out.
 | File | What it is |
 | --- | --- |
 | `index.html` | The shell: styles, login screen, app skeleton, sign-in/recovery, router, the four-place navigation (sidebar on a computer, tab bar on a phone), ⌘K, notifications, theme. |
-| `dialer/index.html` | The **Dialer** (sidebar › Dialer): the cold-calling power dialer — three lines at once, the call scripts and objection answers, one-key outcomes, meetings with BANT, call log and analytics. Built from `limethsith-create/cold-calling-for-aviance` (`npm run build:demo -- --hub`, then copy `demo/hub-dialer.html` here); do not edit it by hand. Runs entirely in the browser in **practice mode**: calls are simulated and the practice data stays in that browser (IndexedDB). Opens for anyone, no sign-in (practice mode holds no client data); the sign-in page has an "Open the Dialer" button. Real calling needs the dialer's phone server (see that repo's `docs/DEPLOY.md` and `docs/TWILIO_SETUP.md`). |
-| `trials.js` | Trials (the list, one client's page and their email system, Buy & paste, Behind the scenes) and Settings. Talks to the machine. |
+| `trials.js` | Clients (the list, one client's page and their email system, Buy & paste, Behind the scenes) and Settings — the file name is from the trial days. Talks to the machine. |
 | `calendar.js`, `calendar.css` | The Calendar: requests waiting for your yes, the week, meetings, each confirmed call's Google Meet (see `email-distributor/docs/CALENDAR.md`). |
-| `messages.js` | Messages on every trial page (the whole conversation, how each email we sent went, the reply box, the reply-bot switch), Settings › Google Meet and Settings › Reply bot (see `email-distributor/docs/REPLYBOT-MEET.md` and HUB-API "Delivery monitoring"). Styles in `trials.css`. |
-| `autobuy.js` | Their domain and inboxes through CheapInboxes: the "what to buy" panel behind the big button, the "Inboxes & domain" card on a trial while it sets itself up, and Settings › Inboxes & domains (see `email-distributor/docs/AUTO-BUY.md`). Styles in `trials.css`. |
-| `warmup.js` | Warm-up: Settings › Warm-up (the circle meter, why helpers exist, the helpers with Test / Remove, Add a helper) and the "Warm-up" card on a trial; while a trial waits for helpers its big button is "Add N warm-up helpers" (see `email-distributor/docs/WARMUP-HUB.md`). Styles in `trials.css`. |
-| `keys.js` | The owner's own set-up, so he never opens Vercel: Settings › Keys (one card per service key — status in words, the steps and an "Open …" link, a password box, Test and save / Test / Forget; a value is never shown back) over `GET/POST /api/mc/keys`, and Settings › Your details (name, address, email, the onboarding inbox, call link, PayPal.me, Wise, Clutch — each with its own Save, "Still to fill in: N", the two the first trial needs marked in amber) over `GET/POST /api/mc/config` (see `email-distributor/docs/KEYS.md`). Styles in `trials.css`. |
-| `trials.css` | Styles for the Trials screens, on top of the shell's CSS variables (light + dark). |
-| `inquiries.js` | Inquiries: paid-plan calls booked from the website — list, detail, status/notes, "Start a trial instead", the board strip. |
+| `messages.js` | Messages on every client page (the whole conversation, how each email we sent went, the reply box, the reply-bot switch), Settings › Google Meet and Settings › Reply bot (see `email-distributor/docs/REPLYBOT-MEET.md` and HUB-API "Delivery monitoring"). Styles in `trials.css`. |
+| `autobuy.js` | Their domain and inboxes through CheapInboxes: the "what to buy" panel behind the big button, the "Inboxes & domain" card on a client while it sets itself up, and Settings › Inboxes & domains (see `email-distributor/docs/AUTO-BUY.md`). Styles in `trials.css`. |
+| `warmup.js` | Warm-up: Settings › Warm-up (the circle meter, why helpers exist, the helpers with Test / Remove, Add a helper) and the "Warm-up" card on a client; while a client waits for helpers its big button is "Add N warm-up helpers" (see `email-distributor/docs/WARMUP-HUB.md`). Styles in `trials.css`. |
+| `keys.js` | The owner's own set-up, so he never opens Vercel: Settings › Keys (one card per service key — status in words, the steps and an "Open …" link, a password box, Test and save / Test / Forget; a value is never shown back) over `GET/POST /api/mc/keys`, and Settings › Your details (name, address, email, the onboarding inbox, call link, PayPal.me, Wise, Clutch — each with its own Save, "Still to fill in: N", the two the first client needs marked in amber) over `GET/POST /api/mc/config` (see `email-distributor/docs/KEYS.md`). Styles in `trials.css`. |
+| `trials.css` | Styles for the Clients screens, on top of the shell's CSS variables (light + dark). |
+| `inquiries.js` | Bookings: the sales calls booked from the website — list, detail, status/notes, Won / Lost, the board strip. |
 | `push.js` | Phone alerts: the panel, turning Web Push on/off with the machine, the quiet re-subscribe after sign-in. |
 | `sw.js` | Service worker (site root, scope `/`): shows the machine's push messages as notifications and opens the hub on a tap. Caches nothing. |
 | `manifest.webmanifest` | Makes the hub installable (Add to Home Screen) — iPhone only allows alerts for installed web apps. |
 | `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | The brand cube from the website, flattened onto white (see *Phone alerts*). |
 | `badge-96.png` | One-colour "A" (white on transparent) for Android's status bar. |
-| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, ⌘K, deep links), the Trials screens, application review, phone alerts (`push.js`) and the readability floor. |
+| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, ⌘K, deep links), the Clients screens, bookings waiting for their sales call (Won / Lost), phone alerts (`push.js`) and the readability floor. |
 | `tests/simple.test.mjs` | Node tests for the simple hub: the four places and their badges, the one journey, "Needs you", the three questions and the one big button, Settings, deep links, plain words (a banned-word list), and no function name declared twice. |
 | `tests/calendar.test.mjs` | Node tests for the Calendar. |
 | `tests/messages.test.mjs` | Node tests for Messages (each kind of email, escaped; auto-reply labels; reply and bot posts), "Answer Sam's message", the Join Google Meet button and its fallback, Settings › Google Meet (states, the four actions, the return from Google) and Settings › Reply bot (incl. "who are you" / "not now" and the check-back weeks); delivery monitoring: the status line under our emails (each status, amber "not opened yet", red bounce with why, missing fields, escaping), the "hasn't opened" to-do (big button, list line, confirm → `unopenedDone`, reload), the four new alerts, plain words. |
@@ -44,60 +50,52 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `tests/keys.test.mjs` | Node tests for Settings › Keys (cards per status, order, env-set keys without a box, save / test / forget bodies incl. Verifalia's two fields, a refused key keeps what was typed, a saved one is cleared and never drawn, no encryption key) and Settings › Your details (the eight boxes, required marks, "Still to fill in", save / clear bodies for both row shapes, checks), `#settings/keys`, `#settings/details`, ⌘K, the "Is everything running?" pointers, plain words, touch targets. |
 | `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and `sw.js` (run in a sandbox with a fake service-worker global). |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
-| `tests/journey.test.mjs` | The dress rehearsal: the machine's 34 real snapshots of one applicant's whole trial (application → onboarding call → warm-up → the launch call → sending → paid), each drawn with the real hub code on a device set to US Pacific — the Trials list, the three questions and the big button, Messages (with how each email we sent went), the call / inboxes / warm-up / launch-call cards, "What we found" (the brief and the company file), every Behind-the-scenes tab, the Calendar and Settings; plus the moment of the launch call itself and the delivery watch (an unopened "we start on" email, a bounce, a failed send — between two snapshots). Checks: nothing broken or empty on screen, the journey step is the machine's, the big button is what the owner must do, red only when he is needed, plain words, Sri Lanka time with US Eastern beside a call. `HUB_JOURNEY_REPORT=path npm test` writes what the owner sees at every step as plain text. |
+| `tests/journey.test.mjs` | The dress rehearsal: the machine's 31 real snapshots of one client's whole journey (the booking → Won → onboarding call → warm-up → the launch call → sending → month two), each drawn with the real hub code on a device set to US Pacific — the Clients list, the three questions and the big button, Messages (with how each email we sent went), the call / inboxes / warm-up / launch-call cards, "What we found" (the brief and the company file), every Behind-the-scenes tab, the Calendar and Settings; plus the moment of the launch call itself and the delivery watch (an unopened "we start on" email, a bounce, a failed send — between two snapshots). Checks: nothing broken or empty on screen, the journey step is the machine's, the big button is what the owner must do, red only when he is needed, plain words, Sri Lanka time with US Eastern beside a call. `HUB_JOURNEY_REPORT=path npm test` writes what the owner sees at every step as plain text. |
 | `tests/journey-fixtures.mjs`, `tests/fixtures/journey/` | A trimmed copy of the machine's snapshots (`email-distributor/tests/fixtures/journey/`) without repeats; `node tests/fixtures/journey/trim.mjs` copies them again. |
 
 ## Screens
 
-Four places only, the same on a phone (a tab bar along the bottom) and a
-computer (a sidebar): **Trials**, **Calendar**, **Inquiries**, **Settings**.
-Badges: Trials = how many trial clients need you (red), Calendar = call times
-waiting for your yes (amber), Inquiries = new ones (red). Everything else lives
-in Settings. The hub opens on Trials. Pages inside a place (a trial, Buy &
-paste, an inquiry, Behind the scenes) have a Back arrow in the top bar.
+A few places only, the same on a phone (a tab bar along the bottom) and a
+computer (a sidebar): **Clients**, **Calendar**, **Team**, **Activity** (the
+owner) and **Settings** (the owner). Badges: Clients = how many clients need
+you + new bookings (red), Calendar = call times waiting for your yes (amber).
+The hub opens on Clients (`#trials`, the old place, opens it too). Pages
+inside a place (a client, Buy & paste, the bookings, Behind the scenes) have a
+Back arrow in the top bar.
 
-**One journey, everywhere the same:** ① Applied → ② Onboarding call →
-③ Setting up → ④ Sending emails → ⑤ Done, from the machine's
-`row.simple.step` (new/queued → 1, accepted/call_booked → 2,
-setting_up/warming_up → 3, sending → 4, deciding/finished → 5 — `deciding`, Day 30
-passed and their decision pending, stays under In progress; declined is "Not taken",
-grey, no journey). While sending it also says "Day 12 of 30" (unless the plain
-sentence already does).
+**One journey, everywhere the same:** ① Sales call → ② Onboarding call →
+③ Setting up → ④ Sending emails → ⑤ Stopped, from the machine's
+`row.simple.step` (new → 1, accepted/call_booked → 2, setting_up/warming_up →
+3, sending → 4, finished → 5; declined is "Not taken", grey, no journey).
+While sending it also says "Day 12 of sending" (unless the plain sentence
+already says the day).
 
-- **Trials** (the landing view) — one row per trial client: the company and
-  the person, the journey as five small squares (done ✓, current filled) with
-  "Step 2 of 5 — Onboarding call", the machine's plain sentence
-  (`row.simple.label`) and what happens next (`row.simple.next`). A row that
-  needs you has a red left edge and a red "You need to…" line (from the next
-  step, or the first to-do; when they wrote and nobody has answered —
-  `simple.needsReply`, or the "answer them" to-do — it says "Sam wrote —
-  answer them") and sits under **Needs you** at the top; then
-  **In progress**; then a folded **Done / not taken**. When a client asked for
-  a call time, a link under the row opens the Calendar at it. At the bottom:
-  **+ Add a trial client yourself**. An older machine without `simple` falls
-  back to the state and the to-dos. Opening it asks the machine to look for
-  onboarding-call replies and bookings (`POST /api/mc/onboard-calls/check`,
-  fire-and-forget) and refreshes if something new came in. Refreshes itself
-  every 60 s while open (never the check, never growth history).
-- **Trial** (one client, trial or paying) — one card, big and plain: the
-  journey (Applied · Onboarding call · Setting up · Sending emails · Done), the
-  one-line status ("Sending — day 13 of 30, 1 call booked") and — only when
-  something needs you — **What do you need to do?** with ONE big button for the
-  single most important thing, in this order: a new application ("Read the
-  application and say yes or no" → scrolls to it) · a call time they asked for
-  ("Say yes to their call time" → the Calendar at that meeting) · their message
-  waiting for an answer (`conversation.needsReply`: "Answer Sam's message" →
-  the reply box under Messages) · a call whose time has passed ("Mark
-  the call done", asks first) · a late booking ("Write to them about booking")
-  · buying the domain and inboxes — with CheapInboxes set up, "Buy their domain
-  and 2 inboxes on CheapInboxes" (opens the "what to buy" panel), "See what
-  went wrong" when setting them up failed (→ the card), and nothing while it
-  sets itself up; without it, "Buy the domain and inboxes" (the Buy & paste
-  page) with "Set up CheapInboxes in Settings" under it · anything else on the to-do list (not urgent:
-  "When you have a minute: …") · otherwise "Nothing — we'll tell you when
-  something needs you" (then no question at all). Under the card: ONE big
-  button, **Open <Business>'s email system →** — or, before you said yes, the
-  application itself (Say yes / Say no / Download as Word). Nothing else.
+- **Clients** (the landing view) — first, the bookings waiting for their sales
+  call (state `applied`): the business, the plan, how well they match,
+  **Before the call (Word)** and **Won** / **Lost**. Then one row per client:
+  the company and the person, the journey as five small squares (done ✓,
+  current filled) with "Step 2 of 5 — Onboarding call", the machine's plain
+  sentence (`row.simple.label`) and what happens next (`row.simple.next`). A
+  row that needs you has a red left edge and a red "You need to…" line (from
+  the next step, or the first to-do; when they wrote and nobody has answered
+  it says "Sam wrote — answer them") and sits under **Needs you**; then
+  **In progress**; then a folded **Done / not taken**. The owner sees the money
+  received (this month · all time) above the stage tiles. At the bottom:
+  **Bookings ›** and **+ Add a paying client yourself** (with the plan).
+  Opening it asks the machine to look for onboarding-call replies and bookings
+  (`POST /api/mc/onboard-calls/check`, fire-and-forget). Refreshes itself
+  every 60 s while open.
+- **A client** — one card, big and plain: the journey, the one-line status
+  ("Sending — day 13, 1 call booked") and — only when something needs you —
+  **What do you need to do?** with ONE big button for the single most
+  important thing, in this order: a booking waiting for its sales call ("Read
+  what we found, then mark it Won or Lost" → scrolls to it) · a call time they
+  asked for · their message waiting for an answer · a call whose time has
+  passed · a late booking · buying the domain and inboxes · warm-up helpers ·
+  anything else on the to-do list (not urgent: "When you have a minute: …") ·
+  otherwise "Nothing — we'll tell you when something needs you". Under the
+  card: ONE big button, **Open <Business>'s email system →** — or, before Won,
+  what they sent and what we found (Won / Lost / Download as Word).
 - **Their email system** (`clientSystem`, `#system/{id}` = Shared › Overview,
   `#system/{id}/{tab}`, Back → the client page) — the whole width of the screen.
   At the top one switch with two sides (the side and tab last open are
@@ -113,15 +111,14 @@ sentence already does).
     **Messages** (your emails with them, the reply box). Never money, costs,
     the fit score, internal to-dos, rule names or dispute buttons.
   - **Only you** (a lock, a tinted screen; you and your team) — **Money & plan**
-    (the Money card — the owner only —, the plan, the trial day, their
-    decision), **Health** (Inboxes & warm-up · Landing in the inbox · Growth
+    (the Money card — the owner only —, the plan, Day 1 and the sending day), **Health** (Inboxes & warm-up · Landing in the inbox · Growth
     over time), **Leads & emails** (Leads · The emails · Replies · Coming up),
-    **Setup & history** (who they are, who can see their page, the application,
+    **Setup & history** (who they are, who can see their page, what they sent before the sales call,
     the call boxes and disputes, Parts, History, Actions with "Also on your
     list").
   Every to-do, the bell, ⌘K, the Calendar and `openTrial(id, tab, section)` land
   on the right side and tab.
-- **What we found** (inside the application; `application.research`,
+- **What we found** (before the sales call; `application.research`,
   `email-distributor/docs/HUB-API.md` "Applicant research"). At the top,
   **Before the call** (`renderBrief`): the machine's brief (`research.brief`, up
   to 12 plain sentences) as one readable paragraph; after each sentence a small
@@ -141,15 +138,15 @@ sentence already does).
 - **Settings** — named sections, each folds open and says its state in one
   word: **Alerts** (every alert, "Not seen" first, "Mark as seen"; `#alerts`
   opens it), **Phone alerts**, **Your details** (`#settings/details`), **Keys** (`#settings/keys`), **Google Meet**, **Inboxes & domains**, **Warm-up** (`#settings/warmup` opens it), **Reply bot**, **Is everything running?** (last check-in, last
-  email sent, trials running, free extensions, alerts not seen, paid services
-  used, setup still to finish), **Behind the scenes** (the old board: every
-  to-do, all trials by stage, the waiting list, your own sending), **Advanced**
+  email sent, clients running, alerts not seen, paid services used, setup
+  still to finish), **Behind the scenes** (the old board: every to-do, all
+  clients by stage), **Advanced**
   (the full control panel — Mission Control — pages, opened signed-in in a new
   tab), **Light or dark**, **Your account** (log out).
-- **Inboxes & domain** (`autobuy.js`, `autobuy` on the trial detail —
+- **Inboxes & domain** (`autobuy.js`, `autobuy` on the client detail —
   `email-distributor/docs/AUTO-BUY.md`). The owner buys in his own
   CheapInboxes account; the system never buys or spends anything — it finds
-  the purchase, matches it to the trial and sets up the rest. While a trial
+  the purchase, matches it to the client and sets up the rest. While a client
   waits for its domain (`ready_to_buy`) the big button opens a panel with
   exactly what to buy: the domain and its price (up to 3 other free names,
   folded, each "Buy this one instead" → `{action:'pick', domain}`), Google, the
@@ -171,7 +168,7 @@ sentence already does).
   (account → card → API key → paste it → **Save** → **Test it**); the key in a
   password box (`saveKey`, cleared once saved, never shown back), **Test it**,
   **Forget the key** (asks first); and purchases it couldn't match — "This is
-  for…" (the trials in the Setting-up step) + **Link it** (`{action:'link',
+  for…" (the clients in the Setting-up step) + **Link it** (`{action:'link',
   domain}`). Without CheapInboxes the Buy & paste page stays exactly as it was.
 - **Warm-up** (`warmup.js`, `email-distributor/docs/WARMUP-HUB.md`). The warm-up
   is the system's own free circle; what it needs from the owner is **helpers**
@@ -186,13 +183,13 @@ sentence already does).
   address and a password box labelled the provider's way (`passwordLabel`) →
   **Test and add** (`addHelper`; greyed out with "Testing the login…" for up to
   a minute) → "Added — Gmail helper is working" or the reason in plain words.
-  Answers redraw only the meter and the helpers, never what is typed. A trial's
+  Answers redraw only the meter and the helpers, never what is typed. A client's
   **Warm-up** card (`warmup` on the detail): a bar (day N of about 14), how many
   reach the inbox, each inbox with its day and rate, "Ready to start sending
   around …", the problem when paused — the machine's label only when the top of
   the page doesn't already say it. While `warmup.status` is
   `waiting_for_helpers` the big button is **Add N warm-up helpers** → Settings ›
-  Warm-up (N from the trial, else Settings' answer, else the to-do's words). A
+  Warm-up (N from the client, else Settings' answer, else the to-do's words). A
   to-do `{type:'view', view:'settings', section}` (warm-up, inboxes…) opens that
   Settings section.
 - **Onboarding call** card (when `detail.onboardCall` exists — after Approve
@@ -230,9 +227,9 @@ sentence already does).
   Calendar a `kind: 'launch'` meeting reads "Launch call · 8:30 pm · Confirmed"
   (its title from the machine, "Launch call — {company}" when there is none)
   and the panel's first button is **Approved on the call**, a shortcut to the
-  trial's launch card while the OK is not in.
-- **Messages** (every trial page, right under the three questions;
-  `messages.js`, `conversation` on the trial detail) — every email between
+  client's launch card while the OK is not in.
+- **Messages** (every client page, right under the three questions;
+  `messages.js`, `conversation` on the client detail) — every email between
   him and the client as a chat, oldest at the top and the newest scrolled
   into view: theirs on grey at the left ("Sam wrote", or the address when
   someone else from their side writes), ours outlined at the right ("You
@@ -283,11 +280,11 @@ sentence already does).
   shown unless the board ever sends `replyBot {enabled}`.
 - **The delivery watch** (HUB-API "Delivery monitoring") — the to-do
   `unopened:{id}` ("Sam hasn't opened the “we start on” email — call or text
-  them?") is the trial's big button **I've reached Sam** (red), with when it
+  them?") is the client's big button **I've reached Sam** (red), with when it
   went; it asks the to-do's own question ("Did you reach Sam? This clears the
   reminder."), posts `{action:'unopenedDone'}` through the generic "api"
-  to-do action, and reads the trial and the list again (pressed from the list,
-  a trial kept from before is read again when opened). On the list its red
+  to-do action, and reads the client and the list again (pressed from the list,
+  a client kept from before is read again when opened). On the list its red
   line is the machine's question as it is. The alerts `client_email_failed`
   and `client_email_bounced` (urgent) show the machine's title; their to-do's
   big button "Mark as seen" says what to do first ("Reach Sam another way —
@@ -338,24 +335,18 @@ sentence already does).
   or couldn't be checked); the spam tests with a plain "Day 1 check passes /
   not passed yet" line (every inbox's newest test must pass); every placement
   test with its tool, result and report link (a test that couldn't finish says
-  so); the warm-up circle (pool, helpers, this trial's and Aviance's inboxes,
+  so); the warm-up circle (pool, helpers, this client's and Aviance's inboxes,
   provider families, providers, today's pairs, and the outside warm-up network
   — connected or not, and how many a day); and the domain's DNS checks.
-- **Application review** — trial applications from the website arrive as
-  clients in `applied`, held for the owner. On the board their card carries a
-  "New application" marker; the "Review … application" to-do opens the trial
-  scrolled to the **Application** section: who applied and when, the fit check
-  (each rule pass / fail / unknown with a note), **what the machine found**
-  about the company (summary, services, locations, Google rating with a Maps
-  link, team size and age hints, socials, their market size, and warnings in
-  amber) and every answer. **Research again** (small button beside "What we
-  found") asks the machine to look the company up again. While it is
-  pending it sits open on the trial page with two buttons — **Say yes and
-  email them** (the machine sends the acceptance email, or puts them on the
-  waiting list if three trials are running) and **Say no…** (a one-sentence
-  reason, emailed to the applicant). Once decided it folds into one line
-  ("Their application · You said yes").
-- **Buy & paste** — the one manual step per trial: the total for the first
+- **Before the sales call** — a booking with a website holds a client record
+  in `applied` (researched, nothing emailed). Its page shows who booked and
+  when, **what the machine found** about the company (the brief, the fit
+  score, services, locations, Google rating, team size, socials, their market
+  size, warnings in amber; **Research again** looks it up again) and every
+  answer, with **Won — make them a client** (the onboarding email goes out; the
+  booking moves to Won) and **Lost** (nothing is emailed; the booking moves to
+  Lost). Once decided it folds into one line ("Before the sales call · Won").
+- **Buy & paste** — the one manual step per client: the total for the first
   month, a comparison of the best domain names (why, the best first-year and
   renewal price with a **Buy at {registrar}** link straight to that
   registrar's search for the name, any promo code as a small chip, every other
@@ -364,8 +355,8 @@ sentence already does).
   step-by-step checklist with the sender names), then the form to paste the
   domain and inbox logins. Older machines without the comparison still show
   the plain shopping list.
-- **Inquiries** — people who want a paid plan (Starter / Growth / Scale)
-  without a trial, from the website's "Book a call" form. The machine saves
+- **Bookings** (Inquiries) — people who booked a sales call from the
+  website's "Book a call" form — the only way in. The machine saves
   each one, puts the call in the Calendar as a confirmed **Sales call**, emails
   them a confirmation with a calendar invite, then reminders the day before and
   an hour before, and pops it up on the owner's phone.
@@ -391,17 +382,18 @@ sentence already does).
     sell, and a red New marker until someone moves it on.
   - One inquiry (`#inquiry/{id}`, what the phone alert opens): **Reply by
     email** (mailto, subject "Your Aviance call"), their time and time zone,
-    email, website, what they sell, plan; **Where it stands** — Mark
-    contacted / won / lost or Back to New, with an optional note; **Start a
-    free trial and email them** (asks first, then
-    says in plain words what the machine did and links to the new trial);
+    email, website, what they sell, plan; **Where it stands** — the stages,
+    with an optional note. **Won** asks first, makes them a paying client (the
+    onboarding email) and links to their page; the machine says why when it
+    can't (a booking without a website: **Add them as a paying client**, filled
+    in from the booking). **Lost** closes the record held for the call;
     **Notes** (newest first) + Add note.
   - On Behind the scenes a strip — "2 new inquiries — Stone Roofing, call Tue
     7:30 PM" (the soonest upcoming call, in Sri Lanka time) — opens the list;
     each new one is also an urgent to-do ("Open the inquiry"), in the bell, and in
     ⌘K. The Inquiries badge counts new ones.
   - Machine: `GET /api/mc/inquiries`, `POST /api/mc/inquiries`
-    `{action:'status'|'note'|'toTrial', …}`, and `inquiries` on
+    `{action:'status'|'note', …}`, and `inquiries` on
     `GET /api/mc/hub` (see HUB-API.md "## Plan inquiries"). An older machine
     without it simply shows no strip and no badge.
 
@@ -409,7 +401,7 @@ sentence already does).
   that turns on push notifications for this device. See below.
 
 Top bar: Back (on pages inside a place), the page title, ⌘K on a computer
-(find a trial, or type what you want to do), and the bell (what needs you:
+(find a client, or type what you want to do), and the bell (what needs you:
 urgent to-dos, urgent alerts, call times waiting for your yes).
 
 ## Phone alerts (Web Push)
@@ -509,7 +501,7 @@ reads), so the hub only fetches it when you open something that shows it:
 - **Growth tab** — the chosen range, reused for 5 minutes.
 - **Parts** (a client's email system › Behind the scenes) — 14 days, reused for 15 minutes.
 - **Overview** (a client's email system) — their growth history for the chart and by inbox, reused for 5 minutes.
-- **Board cards** (Behind the scenes only — the Trials list asks for none) — 14 days per warming/sending client (never for clients
+- **Board cards** (Behind the scenes only — the Clients list asks for none) — 14 days per warming/sending client (never for clients
   still applying, onboarding or buying), reused for **6 hours** and kept in
   the browser (`localStorage`) so reloading the page costs nothing. Signing
   out clears it.
@@ -557,9 +549,9 @@ npm run check     # node --check trials.js, inquiries.js, calendar.js, messages.
 The tests load the shell's inline script, `trials.js`, `inquiries.js` and `push.js` into a tiny fake DOM
 with a fake Supabase client, then exercise the router, the admin gate, the
 chart data mapping (null = gap, 0 = a real zero), spam-test verdicts for
-both tools, when growth is and isn't fetched, the simple Trials list (needs-you
+both tools, when growth is and isn't fetched, the simple Clients list (needs-you
 order, the `simple` fallback, escaping, and that the old clutter is gone), the
-trial page's journey line and onboarding-call card (every reply/button posts the
+client page's journey line and onboarding-call card (every reply/button posts the
 contract body; the check call), the Inquiries screens and
 actions (incl. the empty state and an older machine without inquiries), and the
 pure render functions with `tests/fixtures.mjs`; no network.

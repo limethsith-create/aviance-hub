@@ -62,11 +62,11 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
 
 /* A client called Lakeview IT, sending, with numbers — beside the usual fixtures. */
 const lakeview = Object.assign(clone(simpleRows.acme), { id: 'lakeview-it', name: 'Lakeview IT', contactName: 'Dana Reed', five: { sent: 412, replies: 14, positive: 6, booked: 3, qualified: 2 }, todo: [] });
-Object.assign(lakeview.simple, { company: 'Lakeview IT', person: 'Dana Reed', label: 'Sending — day 12 of 30', next: '', needsYou: false });
-const paidCobalt = Object.assign(clone(simpleRows.cobalt), { plan: 'starter' });
+Object.assign(lakeview.simple, { company: 'Lakeview IT', person: 'Dana Reed', label: 'Sending — day 12', next: '', needsYou: false });
+const paidCobalt = Object.assign(clone(simpleRows.cobalt), { plan: 'starter', state: 'sending', simple: Object.assign(clone(simpleRows.cobalt.simple), { step: 'sending', label: 'Sending — day 40', dayOf30: 40 }) });
 function freshHub() {
   const S = simpleRows;
-  return Object.assign({}, fullHub, { stages: stagesWith({ intake: [clone(S.fern), clone(S.delta)], onboard: [clone(S.ecreek)], setup: [clone(S.bright)], build: [clone(S.gale)], live: [clone(S.acme), clone(lakeview)], won: [clone(paidCobalt)], ended: [clone(S.iris)] }) });
+  return Object.assign({}, fullHub, { stages: stagesWith({ intake: [clone(S.fern), clone(S.delta)], onboard: [clone(S.ecreek)], setup: [clone(S.bright)], build: [clone(S.gale)], live: [clone(S.acme), clone(lakeview), clone(paidCobalt)], ended: [clone(S.iris)] }) });
 }
 function setup(role) {
   (role === 'team' ? asTeam : asOwner)();
@@ -79,29 +79,27 @@ function setup(role) {
   cal.weeks = { '2026-09-28': clone(calWeek) }; cal.at = { '2026-09-28': Date.now() }; cal.week = '2026-09-28';
   cal.reqs = calRequestsOf(calWeek);
   tm.data = { team: [
-    { uid: 'u1', name: 'Limeth Sith', role: 'admin', online: true, lastView: 'trials' },
+    { uid: 'u1', name: 'Limeth Sith', role: 'admin', online: true, lastView: 'paying' },
     { uid: 'u9', name: 'Nimal Perera', role: 'employee', online: true, lastView: 'paying' },
     { uid: 'u3', name: 'Sachini Fernando', role: 'employee', online: false },
   ], owners: { 'lakeview-it': ['u9', 'u3'] } };
-  tk.outreach = { totals: { sent: 1012, replies: 8, bounces: 14, uniqueOpens: 260, firstDay: '2026-08-20', days: 24 }, days: [] }; tk.outreachAt = Date.now();
   closeModal();
 }
 const ctx = (over) => Object.assign(avaCtx(), over || {});
 const think = (t) => avaThink(t, ctx());
 
 /* ───────────── 1. places ───────────── */
-test('navigation: places open at once — Trials, Paying clients, Calendar, Team, My stats, Activity, Settings, a Settings section, back', () => {
+test('navigation: places open at once — Clients, Calendar, Team, Activity, Settings, a Settings section, back', () => {
   setup('owner');
-  for (const [said, view] of [['open trials', 'trials'], ['go to paying clients', 'paying'], ['show my calendar', 'calendar'], ['open the team', 'team'], ['Activity', 'people'], ['open settings', 'settings']]) {
+  for (const [said, view] of [['open clients', 'paying'], ['open trials', 'paying'], ['go to paying clients', 'paying'], ['show my calendar', 'calendar'], ['open the team', 'team'], ['Activity', 'people'], ['open settings', 'settings']]) {
     const r = think(said);
     assert.ok(r.auto, said + ': runs at once'); r.auto.run();
     assert.equal(currentView, view, said);
     assert.match(r.say, /^Here(’|'s| are) /, said + ': ' + r.say);
   }
-  const s = think('open my stats'); s.auto.run(); assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'aviance');
   const w = think('open warm-up helpers'); w.auto.run(); assert.equal(currentView, 'settings'); assert.equal(tk.setOpen.warmup, true);
-  render('calendar'); render('trials'); openTrial('lakeview-it');
-  const b = think('go back'); b.auto.run(); assert.equal(currentView, 'trials', 'back from a client page');
+  render('calendar'); render('paying'); openTrial('lakeview-it');
+  const b = think('go back'); b.auto.run(); assert.equal(currentView, 'paying', 'back from a client page');
 });
 
 /* ───────────── 2. clients, said a little wrong ───────────── */
@@ -139,28 +137,29 @@ test("clients: a tab of their email system by its words — conversations, email
 });
 
 /* ───────────── 3. live answers ───────────── */
-test('live answers: emails a client sent, their replies and calls, how many trials run, who is sending / warming up, new applications, what needs me', () => {
+test('live answers: emails a client sent, their replies and calls, how many clients run, who is sending / warming up, booked sales calls, what needs me', () => {
   setup('owner');
   let r = think('how many emails did Lakeview send');
-  assert.match(r.say, /Lakeview IT has sent 412 emails, with 14 replies and 3 calls booked\./); assert.match(r.say, /They're at step 4 of 5: Sending — day 12 of 30\./);
+  assert.match(r.say, /Lakeview IT has sent 412 emails, with 14 replies and 3 calls booked\./); assert.match(r.say, /They're at step 4 of 5: Sending — day 12\./);
   assert.ok(r.actions.some((a) => /Emails sent/.test(a.label)), 'offers to go there');
   assert.match(think('how many replies did lakeview get').say, /Lakeview IT got 14 replies, 6 of them positive, from 412 emails sent/);
   assert.match(think('how many calls has lakeview booked').say, /Lakeview IT has 3 calls booked, 2 qualified so far/);
   assert.match(think('how is bright dental doing').say, /Bright Dental hasn't sent any emails yet\. They're at step 3 of 5: Setting up their emails/);
-  r = think('how many trials are running');
-  assert.match(r.say, /^6 trials are going: /); assert.match(r.say, /1 sending|2 sending/); assert.match(r.say, /need you/);
+  r = think('how many clients are running');
+  assert.match(r.say, /^\d+ clients are going: /); assert.match(r.say, /\d sending/); assert.match(r.say, /need you/);
   r = think("who's sending");
   assert.ok(r.say.includes('Acme Plumbing') && r.say.includes('Lakeview IT'), r.say);
-  r.actions[0].run(); assert.equal(currentView, 'trials'); assert.equal(tk.stage.trials, 'sending', 'Show them: the Sending tile');
-  assert.match(think('who is warming up').say, /1 trial is at warming up: Gale Roofing/);
-  assert.match(think('any new applications').say, /1 new application is waiting: Fern IT/);
+  r.actions[0].run(); assert.equal(currentView, 'paying'); assert.equal(tk.stage.paying, 'sending', 'Show them: the Sending tile');
+  assert.match(think('who is warming up').say, /1 client is at warming up: Gale Roofing/);
+  assert.match(think('any new applications').say, /1 booked sales call is waiting: Fern IT/);
   r = think('what needs me today');
   assert.match(r.say, /^\d+ things need you: /);
-  for (const w of ['Fern IT — a new application to read', 'eCreek IT', 'Bright Dental — buy the domain', 'call times wait for your yes']) assert.ok(r.say.includes(w), w + ' in: ' + r.say);
+  for (const w of ['eCreek IT', 'Bright Dental — buy the domain', 'call times wait for your yes']) assert.ok(r.say.includes(w), w + ' in: ' + r.say);
+  assert.ok(!r.say.includes('Fern IT'), 'a booking waiting for its sales call is not something that needs him now');
   r.actions[0].run(); assert.equal(currentView, 'trial');
 });
 
-test("live answers: today's and tomorrow's calendar (Sri Lanka time), who's online, who looks after a client, my own emails, the money this month", () => {
+test("live answers: today's and tomorrow's calendar (Sri Lanka time), who's online, who looks after a client, the money this month", () => {
   setup('owner');
   let r = think("what's on my calendar today");
   assert.match(r.say, /You have 1 call today \(Sri Lanka time\): 6:30 pm — Onboarding call — Acme Plumbing\./);
@@ -168,9 +167,8 @@ test("live answers: today's and tomorrow's calendar (Sri Lanka time), who's onli
   assert.match(r.say, /11:30 pm — Onboarding call — eCreek IT \(waiting for your yes\)/);
   assert.ok(!/Iris/.test(r.say), 'a cancelled call is not on it');
   r.actions[0].run(); assert.equal(currentView, 'calendar');
-  assert.match(think("who's online").say, /1 person is in the hub: Nimal on Paying clients/);
+  assert.match(think("who's online").say, /1 person is in the hub: Nimal on Clients/);
   assert.match(think('who looks after lakeview').say, /Lakeview IT is looked after by Nimal and Sachini/);
-  assert.match(think('how many emails have I sent').say, /Your own outreach has sent 1,012 emails since .*, with 8 replies and 14 bounced; 260 were opened/);
   tk.detail['cobalt-hvac'] = { row: paidCobalt, invoice: { number: 'INV-0007', amount: 1500, issuedAt: '2026-09-10', paidAt: '2026-09-20T10:00:00Z', status: 'paid' } };
   r = think('how much money did we make this month');
   assert.match(r.say, /You received \$1,500 this month, and \$1,500 in total from 1 paid invoice/);
@@ -183,21 +181,21 @@ test('the guide: FAQs answered from AVA_KB with a "Take me there" that goes ther
   assert.equal(kb('how do I give a client access'), 'access');
   assert.equal(kb('what does warming up mean'), 'warmup');
   assert.equal(kb('why is Opened blank for clients'), 'opened');
-  assert.equal(kb('how do I remove the test run'), 'testrun');
   assert.equal(kb('what is a bounce'), 'bounce');
-  assert.equal(kb('how does a trial work'), 'process');
+  assert.equal(kb('explain the whole process'), 'process');
+  assert.equal(kb('what happens when I mark a booking won'), 'sayyes');
   assert.equal(kb('what does the reply bot do'), 'replybot');
   assert.equal(kb('how do I add a warm-up helper'), 'helpers');
-  assert.equal(kb('what is save and start fresh'), 'mystats');
   assert.equal(kb('what are the stage tiles'), 'tiles');
-  const r = think('how do I remove the test run');
-  assert.match(r.say, /Remove the test run/);
+  const r = think('how do I add a warm-up helper');
+  assert.match(r.say, /Add a helper/);
   const go = r.actions.find((a) => a.label === 'Take me there'); assert.ok(go); go.run();
-  assert.equal(currentView, 'settings'); assert.equal(tk.setOpen.demo, true);
+  assert.equal(currentView, 'settings'); assert.equal(tk.setOpen.warmup, true);
+  for (const e of AVA_KB) assert.ok(!/\btrials?\b|day 30|30 days|test run/i.test(e.a), e.id + ': no trial words in the guide');
   assert.match(think('why is opened blank for clients').say, /without an open tracker/);
   // every entry has words, an answer, and a place that exists
   for (const e of AVA_KB) { assert.ok(e.kw && e.a.length > 40, e.id); if (e.go) assert.ok(avaPlace(e.go), e.id + ' → ' + e.go); }
-  assert.ok(AVA_KB.length >= 35);
+  assert.ok(AVA_KB.length >= 30);
 });
 
 test('not sure: a plain "try …" with three chips', () => {
@@ -217,9 +215,9 @@ test('roles: a team member hears no money, gets no owner-only places or tabs, an
   tk.detail['cobalt-hvac'] = { row: paidCobalt, invoice: { amount: 1500, paidAt: '2026-09-20', status: 'paid' } };
   assert.ok(!/\$/.test(think('how much has cobalt paid').say));
   const tab = think("show Lakeview's money"); assert.ok(!tab.auto && /only for the owner/.test(tab.say));
-  for (const t of ['open settings', 'open activity', 'open the test run']) { const r = think(t); assert.ok(!r.auto, t); assert.match(r.say, /only for the owner/, t); }
-  for (const t of ['add a trial client', 'give Lakeview access', 'load the test run']) { const r = think(t); assert.ok(!r.confirm && !r.auto, t); assert.match(r.say, /Only the owner can do that/, t); assert.equal(AVA.pending, null); }
-  const kb = think('how do I load the test run'); assert.equal(kb.kb, 'testrun'); assert.ok(!kb.actions.some((a) => a.label === 'Take me there'), 'no button into an owner-only place');
+  for (const t of ['open settings', 'open activity']) { const r = think(t); assert.ok(!r.auto, t); assert.match(r.say, /only for the owner/, t); }
+  for (const t of ['add a paying client', 'give Lakeview access']) { const r = think(t); assert.ok(!r.confirm && !r.auto, t); assert.match(r.say, /Only the owner can do that/, t); assert.equal(AVA.pending, null); }
+  const kb = think('how do I add a warm-up helper'); assert.equal(kb.kb, 'helpers'); assert.ok(!kb.actions.some((a) => a.label === 'Take me there'), 'no button into an owner-only place');
   assert.ok(!avaChipsFor(ctx()).some((c) => /money/i.test(c)));
   // the team still gets the shared answers
   assert.match(think('how many emails did Lakeview send').say, /412 emails/);
@@ -228,16 +226,16 @@ test('roles: a team member hears no money, gets no owner-only places or tabs, an
 });
 
 /* ───────────── 6. ask first, then only open ───────────── */
-test('actions: the owner is asked first — "yes" opens the add-a-client form, "no" does nothing; give access opens their Setup; the test run opens Settings; no emails or yes/no by voice', () => {
+test('actions: the owner is asked first — "yes" opens the add-a-client form, "no" does nothing; give access opens their Setup; no emails or Won / Lost by voice', () => {
   setup('owner');
-  let r = think('add a trial client');
+  let r = think('add a client');
   assert.equal(r.confirm, true); assert.ok(!r.auto);
   assert.ok(!el('modalWrap').classList.contains('open'), 'nothing opened before the yes');
   assert.ok(AVA.pending);
   r = think('no'); assert.ok(!r.auto); assert.equal(AVA.pending, null); assert.ok(!el('modalWrap').classList.contains('open'));
-  think('add a new trial client'); r = think('yes please');
+  think('add a new client'); r = think('yes please');
   assert.ok(r.auto); r.auto.run();
-  assert.ok(el('modalWrap').classList.contains('open')); assert.match(el('modal').innerHTML, /Add a trial client yourself/);
+  assert.ok(el('modalWrap').classList.contains('open')); assert.match(el('modal').innerHTML, /Add a paying client yourself/);
   closeModal();
   // the Yes button does the same
   r = think('add a paying client'); const yes = r.actions.find((a) => a.yes); yes.run();
@@ -245,10 +243,8 @@ test('actions: the owner is asked first — "yes" opens the add-a-client form, "
   r = think('give Lakeview access'); assert.equal(r.confirm, true); r = think('yes'); r.auto.run();
   assert.equal(currentView, 'clientSystem'); assert.equal(currentTrialId, 'lakeview-it'); assert.equal(trialTab, 'setup');
   assert.match(think('give access').say, /Which client\?/);
-  r = think('remove the test run'); assert.equal(r.confirm, true); assert.match(r.say, /You press Remove the test run there yourself/); think('ok').auto.run();
-  assert.equal(currentView, 'settings'); assert.equal(tk.setOpen.demo, true);
   // a new question drops the pending one
-  think('load the test run'); think('how many trials are running'); assert.equal(AVA.pending, null);
+  think('add a client'); think('how many clients are running'); assert.equal(AVA.pending, null);
   for (const t of ['send an email to lakeview', 'say yes to fern it', 'approve the application']) { const q = think(t); assert.ok(!q.auto && !q.confirm, t); assert.match(q.say, /always takes your own click/, t); }
 });
 
@@ -560,8 +556,8 @@ test('talking to her: live words in a big listening strip, sent by itself when y
     spoken[spoken.length - 1].onend();
     avaSetHandsFree(true); assert.equal(localStorage.getItem(AVA_HANDS_KEY), '1'); assert.ok(el('avaHands').classList.contains('on'));
     rec = recs.pop(); assert.ok(rec && rec.started, 'turning it on starts listening');
-    rec.onresult({ resultIndex: 0, results: [res('how many trials are running', true)] }); rec.onend(); await tick(); await tick();
-    assert.ok(spoken.some((u) => /trials are going/.test(u.text)));
+    rec.onresult({ resultIndex: 0, results: [res('how many clients are running', true)] }); rec.onend(); await tick(); await tick();
+    assert.ok(spoken.some((u) => /clients are going/.test(u.text)));
     assert.equal(recs.length, 0, 'not while she is speaking');
     spoken[spoken.length - 1].onend(); await sleep(350);
     rec = recs.pop(); assert.ok(rec && rec.started, 'listening again after the answer');
@@ -636,7 +632,7 @@ test('AI first: only plain commands run here at once ("open trials", "open Lakev
     // "yes" / "no" to Ava's own question stays here
     AVA.pending = { act: avaAct('x', () => {}), done: 'Done.' }; const n = chats(); await avaAsk('yes'); assert.equal(chats(), n);
     // the page, the person, the voice flag, the last 16 turns (long ones cut)
-    render('trials'); openTrial('lakeview-it'); AVA.log = [];
+    render('paying'); openTrial('lakeview-it'); AVA.log = [];
     for (let i = 0; i < 12; i++) avaPush({ who: 'you', text: 'question ' + i + ' ' + 'x'.repeat(i === 0 ? 3000 : 5) }), avaPush({ who: 'ava', text: 'answer ' + i });
     await avaAsk('what did dana ask?', { voice: true });
     const c = calls.filter((x) => x.url.includes('/api/mc/ava/chat')).pop();
@@ -649,17 +645,17 @@ test('AI first: only plain commands run here at once ("open trials", "open Lakev
 });
 
 test('the AI brain: POST /api/mc/ava/chat (stream asked for) with the page (emails taken out); "answered by Groq · 0.9 s · time"; a thinking state while it waits', async () => {
-  setup('owner'); voiceReset(); render('trials'); openTrial('lakeview-it');
+  setup('owner'); voiceReset(); render('paying'); openTrial('lakeview-it');
   const calls = aiFetch((p, body) => p === '/api/mc/ava/chat' ? { status: 200, body: { reply: 'Lakeview replies are mostly questions about price.', actions: [], brain: 'groq', tried: ['groq'] } } : null);
   try {
-    AVA.log = []; await avaAsk('open trials'); openTrial('lakeview-it');
+    AVA.log = []; await avaAsk('open clients'); openTrial('lakeview-it');
     const r = await avaAsk('summarise what dana@lakeview.com asked about pricing');
     assert.equal(r.ai, true); assert.equal(r.say, 'Lakeview replies are mostly questions about price.');
     assert.match(r.meta, /^answered by Groq · \d+\.\d s$/);
     const c = calls.find((x) => x.url.includes('/api/mc/ava/chat')); assert.equal(c.method, 'POST');
     assert.equal(c.body.page.clientId, 'lakeview-it');
     const last = c.body.messages[c.body.messages.length - 1]; assert.deepEqual(last, { role: 'user', content: 'summarise what [email] asked about pricing' });
-    assert.ok(c.body.messages.some((m) => m.role === 'assistant' && /^Here are your trials/.test(m.content)));
+    assert.ok(c.body.messages.some((m) => m.role === 'assistant' && /^Here are your clients/.test(m.content)));
     assert.match(el('avaLog').innerHTML, /<small class="ava-meta">answered by Groq · \d+\.\d s · [^<]+<\/small>/);
     // follow-up chips for the page when the AI gives none
     assert.match(el('avaLog').innerHTML, /class="ava-chip" onclick="avaChip\(0\)">How is Lakeview IT doing\?/);
@@ -715,16 +711,16 @@ test('AI actions: navigate runs when you asked to go somewhere, else it is a but
   let actions = [];
   aiFetch((p) => p === '/api/mc/ava/chat' ? { status: 200, body: { reply: 'Here you go.', actions, brain: 'groq' } } : null);
   try {
-    render('trials');
+    render('paying');
     actions = [{ type: 'navigate', view: 'client', id: 'lakeview-it', tab: 'conversations' }];
     let r = await avaAsk('take me to where people wrote back to us yesterday');
     assert.ok(r.auto || currentView === 'clientSystem'); assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'conversations');
-    render('trials'); actions = [{ type: 'navigate', view: 'calendar' }];
-    r = await avaAsk('purple elephant who wrote something'); assert.ok(!r.auto); assert.equal(currentView, 'trials');
+    render('paying'); actions = [{ type: 'navigate', view: 'calendar' }];
+    r = await avaAsk('purple elephant who wrote something'); assert.ok(!r.auto); assert.equal(currentView, 'paying');
     assert.equal(r.actions[0].label, 'Open Calendar'); r.actions[0].run(); assert.equal(currentView, 'calendar');
     const nav = (a, c) => avaNavAct(a, Object.assign(ctx(), c || {}));
     assert.equal(nav({ view: 'settings', tab: 'keys' }).label, 'Open Settings › Keys');
-    assert.equal(nav({ view: 'mystats' }).label, 'Open My stats'); assert.equal(nav({ view: 'activity' }).label, 'Open Activity'); assert.equal(nav({ view: 'behind' }).label, 'Open Behind the scenes');
+    assert.equal(nav({ view: 'mystats' }), null, 'My stats is gone'); assert.equal(nav({ view: 'trials' }).label, 'Open Clients'); assert.equal(nav({ view: 'activity' }).label, 'Open Activity'); assert.equal(nav({ view: 'behind' }).label, 'Open Behind the scenes');
     assert.equal(nav({ view: 'client', id: 'lakeview-it' }).label, 'Open Lakeview IT'); assert.equal(nav({ view: 'client', id: 'lakeview-it', tab: 'sent' }).label, "Open Lakeview IT's emails sent");
     assert.equal(nav({ view: 'client' }), null); assert.equal(nav({ view: 'nowhere' }), null);
     for (const a of [{ view: 'settings' }, { view: 'settings', section: 'keys' }, { view: 'activity' }, { view: 'client', id: 'lakeview-it', tab: 'money' }]) assert.equal(nav(a, { owner: false }), null, JSON.stringify(a));
@@ -746,13 +742,11 @@ test('AI confirm cards: "Ava wants to: …" — every action runs only on Do it 
     return null;
   });
   const cases = [
-    ['open_add_trial', {}, ['openNewTrialClient']],
+    ['open_add_trial', {}, ['openNewPayingClient']],   // an older answer: a paying client now
     ['open_add_paid', {}, ['openNewPayingClient']],
     ['open_client', { id: 'lakeview-it' }, ['openTrial', 'lakeview-it']],
     ['mark_todo_seen', { id: 'lakeview-it', todoId: 'alert:42' }, ['trialsTodoAction', 'alert:42']],
     ['give_access', { id: 'lakeview-it' }, ['tkOpenSystem', 'lakeview-it', 'setup', 'access']],
-    ['load_test_run', {}, ['demoAction', 'load']],
-    ['remove_test_run', {}, ['demoAction', 'remove']],
   ];
   try {
     for (const [name, args, want] of cases) {
@@ -770,7 +764,7 @@ test('AI confirm cards: "Ava wants to: …" — every action runs only on Do it 
     actions = [{ type: 'confirm', label: 'Open the add form', name: 'open_add_trial', args: {} }]; ran.length = 0; AVA.log = [];
     await avaAsk('purple elephant'); avaCard(0, 0); assert.deepEqual(ran, []); assert.match(el('avaLog').innerHTML, /Okay, I won’t\./);
     // a spoken "yes" right after runs the card
-    AVA.log = []; await avaAsk('purple elephant'); const y = await avaAsk('yes'); assert.ok(y.auto); y.auto.run(); assert.deepEqual(ran, [['openNewTrialClient']]);
+    AVA.log = []; await avaAsk('purple elephant'); const y = await avaAsk('yes'); assert.ok(y.auto); y.auto.run(); assert.deepEqual(ran, [['openNewPayingClient']]);
     // set my status / a change request: posted to the machine
     actions = [{ type: 'confirm', label: 'Set your status', name: 'set_my_status', args: { text: 'Calling Lakeview' } }, { type: 'confirm', label: 'Send a request', name: 'add_change_request', args: { text: 'A bigger mic button' } }];
     AVA.log = []; const r = await avaAsk('purple elephant'); assert.equal(r.cards.length, 2);
@@ -978,7 +972,7 @@ test('streaming: SSE parsing — events split across chunks, CRLF, comments, sev
 });
 
 test('streaming: the answer shows as it arrives, the first sentence is said as soon as it is complete (no markdown read out), then actions, follow-ups and done', async () => {
-  setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); render('trials');
+  setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); render('paying');
   const s = sseStream(); const calls = [];
   globalThis.fetch = async (url, init) => { calls.push({ url: String(url), init }); if (String(url).includes('/api/mc/ava/chat')) return s.res; throw new TypeError('Failed to fetch'); };
   try {
@@ -1050,7 +1044,7 @@ test('memory: the conversation survives a reload in this tab (sessionStorage), n
   setup('owner'); voiceReset();
   const store = {}; globalThis.sessionStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
   try {
-    AVA.log = []; avaPush({ who: 'you', text: 'hello', at: 1 }); avaPush({ who: 'ava', text: 'Hi **there**', meta: 'answered by Groq · 0.4 s', at: 2, actions: [avaPlace('trials')], cards: [{ kind: 'draft', title: 'D', text: 'draft text' }, { kind: 'confirm', label: 'x', name: 'open_client', args: {} }] });
+    AVA.log = []; avaPush({ who: 'you', text: 'hello', at: 1 }); avaPush({ who: 'ava', text: 'Hi **there**', meta: 'answered by Groq · 0.4 s', at: 2, actions: [avaPlace('paying')], cards: [{ kind: 'draft', title: 'D', text: 'draft text' }, { kind: 'confirm', label: 'x', name: 'open_client', args: {} }] });
     const saved = JSON.parse(store[AVA_CHAT_KEY]); assert.equal(saved.uid, 'u1'); assert.equal(saved.log.length, 2);
     assert.deepEqual(saved.log[1], { who: 'ava', text: 'Hi **there**', meta: 'answered by Groq · 0.4 s', at: 2, cards: [{ kind: 'draft', title: 'D', text: 'draft text' }] });
     // "reload": the log is read back
@@ -1191,12 +1185,12 @@ function lakeviewLoaded() {
 test('open anything: every view, every client tab (Shared / Only you switched for you) and every Settings section, from the machine\'s navigate action — with a short "Here\'s …"', () => {
   setup('owner'); lakeviewLoaded();
   const go = (a) => { const why = {}; const x = avaNavAct(a, ctx(), why); assert.ok(x, JSON.stringify(a)); x.run(); return x; };
-  for (const [view, want] of [['trials', 'trials'], ['paying', 'paying'], ['calendar', 'calendar'], ['team', 'team'], ['activity', 'people'], ['inquiries', 'inquiries'], ['behind', 'trialsBoard'], ['settings', 'settings']]) {
+  for (const [view, want] of [['trials', 'paying'], ['paying', 'paying'], ['calendar', 'calendar'], ['team', 'team'], ['activity', 'people'], ['inquiries', 'inquiries'], ['behind', 'trialsBoard'], ['settings', 'settings']]) {
     const x = go({ type: 'navigate', view }); assert.equal(currentView, want, view); assert.match(x.here, /^Here/);
   }
-  let x = go({ type: 'navigate', view: 'mystats' }); assert.equal(currentView, 'trial'); assert.equal(currentTrialId, 'aviance'); assert.equal(x.here, 'Here are your stats.');
+  let x;
   for (const tab of ['overview', 'conversations', 'sent', 'calls', 'messages', 'money', 'health', 'leads', 'setup']) {
-    render('trials'); x = go({ type: 'navigate', view: 'client', id: 'lakeview-it', tab });
+    render('paying'); x = go({ type: 'navigate', view: 'client', id: 'lakeview-it', tab });
     assert.equal(currentView, 'clientSystem', tab); assert.equal(currentTrialId, 'lakeview-it'); assert.equal(trialTab, tab);
     assert.equal(tkSysMem('lakeview-it').mode, ['money', 'health', 'leads', 'setup'].includes(tab) ? 'only' : 'shared', tab + ': the side switched by itself');
     assert.match(el('content').innerHTML, new RegExp('tk-sys-' + (['money', 'health', 'leads', 'setup'].includes(tab) ? 'only' : 'shared')), tab);
@@ -1204,7 +1198,7 @@ test('open anything: every view, every client tab (Shared / Only you switched fo
   assert.equal(avaNavAct({ view: 'client', id: 'lakeview-it', tab: 'money' }, ctx()).here, "Here's Lakeview IT's money.");
   x = go({ view: 'client', id: 'lakeview-it', tab: 'emails' }); assert.equal(trialTab, 'sent', 'an old tab name → its tab today');
   for (const sec of TK_SETTINGS) {
-    render('trials'); tk.setOpen = {}; x = go({ type: 'navigate', view: 'settings', section: sec });
+    render('paying'); tk.setOpen = {}; x = go({ type: 'navigate', view: 'settings', section: sec });
     assert.equal(currentView, 'settings', sec); assert.equal(tk.setOpen[sec], true, sec + ' opened'); assert.match(x.here, /^Here's .* in Settings\.$/);
   }
   x = go({ view: 'settings', tab: 'keys' }); assert.equal(tk.setOpen.keys, true, 'section also as tab (older links)');
@@ -1217,15 +1211,15 @@ test('open anything: a team member is told politely — Settings, Activity and a
   for (const t of ['open settings keys', 'show warm-up settings', 'open activity', "open Lakeview's money"]) { const r = think(t); assert.ok(!r.auto, t); assert.match(r.say, /only for the owner/, t); }
   aiFetch((p) => p === '/api/mc/ava/chat' ? { status: 200, body: { reply: 'Opening your keys.', actions: [{ type: 'navigate', view: 'settings', section: 'keys' }], brain: 'groq' } } : null);
   try {
-    render('trials'); AVA.log = [];
+    render('paying'); AVA.log = [];
     const r = await avaAsk('I need to change an API key somewhere');
-    assert.equal(currentView, 'trials', 'not opened'); assert.match(r.refused, /only for the owner — Settings/);
+    assert.equal(currentView, 'paying', 'not opened'); assert.match(r.refused, /only for the owner — Settings/);
     assert.ok(AVA.log.some((m) => m.notice && /only for the owner/.test(m.text)));
     const ok = avaNavAct({ view: 'client', id: 'lakeview-it', tab: 'health' }, ctx()); assert.ok(ok, 'the team sees Health'); ok.run(); assert.equal(trialTab, 'health');
   } finally { noFetch(); voiceTeardown(); }
 });
 
-test('open anything, instantly without the AI: "open settings keys", "open Lakeview\'s money", "show warm-up settings", "open my stats", "go to calendar", "open paying clients", "show the team" — names said a little wrong', async () => {
+test('open anything, instantly without the AI: "open settings keys", "open Lakeview\'s money", "show warm-up settings", "go to calendar", "open paying clients", "show the team" — names said a little wrong', async () => {
   setup('owner'); voiceReset();
   const calls = aiFetch((p) => p === '/api/mc/ava/chat' ? { status: 200, body: { reply: 'From the AI.', brain: 'groq' } } : null);
   try {
@@ -1235,16 +1229,16 @@ test('open anything, instantly without the AI: "open settings keys", "open Lakev
       ['open lakevew money', () => currentView === 'clientSystem' && trialTab === 'money', "Here's Lakeview IT's money."],
       ['show lake view conversations', () => trialTab === 'conversations', "Here's Lakeview IT's conversations."],
       ['show warm-up settings', () => currentView === 'settings' && tk.setOpen.warmup, "Here's Warm-up in Settings."],
-      ['open my stats', () => currentView === 'trial' && currentTrialId === 'aviance', 'Here are your stats.'],
       ['go to calendar', () => currentView === 'calendar', "Here's your calendar."],
-      ['open paying clients', () => currentView === 'paying', 'Here are your paying clients.'],
+      ['open paying clients', () => currentView === 'paying', 'Here are your clients.'],
+      ['open clients', () => currentView === 'paying', 'Here are your clients.'],
       ['show the team', () => currentView === 'team', "Here's the team."],
       ['open the reply bot settings', () => tk.setOpen.replybot, "Here's Reply bot in Settings."],
       ['open dark mode', () => tk.setOpen.look, "Here's Light or dark in Settings."],
       ['open lakeview health', () => trialTab === 'health', "Here's Lakeview IT's health."],
     ];
     for (const [q, ok, say] of cases) {
-      render('trials'); tk.setOpen = {};
+      render('paying'); tk.setOpen = {};
       const n = calls.length; const r = await avaAsk(q);
       assert.ok(r.local, q + ': on this device'); assert.equal(calls.filter((c) => c.url.includes('/ava/chat')).length, calls.filter((c, i) => i < n && c.url.includes('/ava/chat')).length, q + ': no AI');
       assert.ok(ok(), q + ' → ' + currentView + ' ' + trialTab); assert.equal(r.say, say, q);
@@ -1330,12 +1324,12 @@ test('reading the screen: about 90 seconds at a time — "read more" goes on, "s
   setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); const undo = liveScreen();
   noFetch();
   try {
-    render('trials');
+    render('paying');
     el('content').innerHTML = '<div class="view"><div class="card"><h3>Long page</h3><ul>' + Array.from({ length: 5 }, (_, i) => `<li>Item ${i} ${'word '.repeat(10)}</li>`).join('') + '</ul>' + Array.from({ length: 30 }, (_, i) => `<p>Paragraph ${i} says ${'something '.repeat(12)}</p>`).join('') + '<button>Press me</button></div></div>';
     AVA.log = [];
     const r = await avaAsk('read this');
     assert.ok(r.local); assert.deepEqual(r.read, { what: 'page' });
-    const m = AVA.log[AVA.log.length - 1]; assert.equal(m.read, true); assert.match(m.text, /^\*\*Trials\*\*\n\*\*Long page\*\*\n- Item 0/); assert.deepEqual(m.chips, ['Read more', 'Stop']);
+    const m = AVA.log[AVA.log.length - 1]; assert.equal(m.read, true); assert.match(m.text, /^\*\*Clients\*\*\n\*\*Long page\*\*\n- Item 0/); assert.deepEqual(m.chips, ['Read more', 'Stop']);
     assert.ok(!AVA.log.some((x) => x.who === 'ava' && x.text === ''), 'no empty answer before it');
     const words = spoken.map((u) => u.text).join(' ').split(/\s+/).length; assert.ok(words <= AVA_READ_WORDS + 40, 'about 90 seconds: ' + words);
     assert.match(spoken.map((u) => u.text).join(' '), /There's more\. Say read more to go on, or stop\.$/);
@@ -1363,14 +1357,14 @@ test('open X and read it: goes there, waits while it loads (up to ~4 s), then re
   };
   try {
     // local: "open … and read it"
-    render('trials'); AVA.log = []; const t0 = Date.now();
+    render('paying'); AVA.log = []; const t0 = Date.now();
     let r = await avaAsk("open Lakeview's conversations and read it");
     assert.ok(r.local); assert.equal(currentView, 'clientSystem'); assert.equal(trialTab, 'conversations');
     assert.ok(Date.now() - t0 >= 250, 'waited for the conversations to load'); assert.deepEqual(order, ['threads asked', 'threads came']);
     let m = AVA.log[AVA.log.length - 1]; assert.equal(m.read, true); assert.ok(!/Loading/.test(m.text), m.text); assert.match(m.text, /- Beacon Plastics, Interested/);
     const said = spoken.map((u) => u.text); assert.equal(said[0], "Here's Lakeview IT's conversations.", 'the short line first, then what is there'); assert.ok(said.some((x) => /Beacon Plastics/.test(x)));
     // the AI: navigate, wait for the page, read — even with the read listed first
-    render('trials'); order.length = 0; tkMailState('lakeview-it').threads = null; tkMailState('lakeview-it').emails = null; spoken.length = 0; AVA.log = [];
+    render('paying'); order.length = 0; tkMailState('lakeview-it').threads = null; tkMailState('lakeview-it').emails = null; spoken.length = 0; AVA.log = [];
     r = await avaAsk('what did people write back to Lakeview? read it to me');
     assert.equal(r.ai, true); assert.ok(r.auto, 'navigates at once when it is to be read'); assert.deepEqual(r.read, { what: 'page' });
     assert.deepEqual(order.slice(0, 3), ['ai', 'threads asked', 'threads came'], 'asked, went there, waited');
@@ -1417,7 +1411,7 @@ test('answer sooner: the browser\'s own words go at once (500 ms after the last 
 });
 
 test('answer sooner: "thinking" shows at once; the first streamed sentence is said the moment it is here (40+ characters and its full stop, or a comma after 80); the timing line from done.timing', async () => {
-  setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); render('trials');
+  setup('owner'); voiceReset(); const { spoken } = fakeSpeech(); render('paying');
   const s = sseStream();
   globalThis.fetch = async (url) => { if (String(url).includes('/api/mc/ava/chat')) return s.res; throw new TypeError('Failed to fetch'); };
   try {

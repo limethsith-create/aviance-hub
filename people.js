@@ -13,7 +13,7 @@ const PP_BEAT_MS=60000;
 
 /* ---- presence ---- */
 function ppPost(body,opts){try{return machineFetch('/api/mc/presence',Object.assign({method:'POST',body,timeout:8000},opts||{})).catch(()=>null);}catch(e){return Promise.resolve(null)}}
-function ppViewKey(v){if(v==='trial'){return typeof MY_STATS_ID!=='undefined'&&currentTrialId===MY_STATS_ID?'mystats':'trial:'+String(currentTrialId||'').slice(0,50);}return String(v||'').slice(0,60)}
+function ppViewKey(v){if(v==='trial'){return 'trial:'+String(currentTrialId||'').slice(0,50);}return String(v||'').slice(0,60)}
 function peopleSignedIn(){
   if(typeof authUser==='undefined'||!authUser)return;
   ppPost({event:'signin',name:authUser.name||'',view:ppViewKey(typeof currentView!=='undefined'?currentView:'')});
@@ -88,7 +88,7 @@ function ppAgo(v){const d=tkParseDate(v);if(!d)return '';const s=Math.max(0,(Dat
 function ppDur(sec){sec=Number(sec)||0;if(sec<60)return sec?'<1 min':'—';const h=Math.floor(sec/3600),m=Math.round((sec%3600)/60);return h?`${h} h ${m} min`:`${m} min`}
 function ppPlace(k){
   k=String(k||'');if(!k)return '—';
-  const names={team:'Team',trials:'Trials',paying:'Paying clients',calendar:'Calendar',mystats:'My stats',settings:'Settings',people:'Activity',inquiries:'Plan call requests',inquiry:'A plan call request',trialsBoard:'Behind the scenes',trialPurchase:'A purchase page'};
+  const names={team:'Team',trials:'Clients',paying:'Clients',calendar:'Calendar',settings:'Settings',people:'Activity',inquiries:'Bookings',inquiry:'A booking',trialsBoard:'Behind the scenes',trialPurchase:'A purchase page'};
   if(names[k])return names[k];
   if(k.indexOf('trial:')===0){const id=k.slice(6);const r=typeof tkFindRow==='function'?tkFindRow(id):null;return (r&&(r.name||(r.simple&&r.simple.company)))||('the page of '+id);}
   return k;
@@ -156,14 +156,12 @@ async function teamSaveStatus(){
   const r=await machineFetch('/api/mc/team',{method:'POST',body:{action:'status',text}});
   if(r&&r.ok){toast(text.trim()?'Your status is saved':'Your status is cleared');await teamKick(true);}else toast('Not saved: '+((r&&r.error)||'try again'));
 }
-/* A made-up client from the test run (trials.js tkIsDemo): the same small "Test" tag as everywhere else. */
-function teamTestPill(c){return c&&(c.demo||(typeof tkIsDemoId==='function'&&tkIsDemoId(c.id)))?' <span class="pill tk-test">Test</span>':''}
-function teamClients(){return (typeof tkListRows==='function'&&typeof tk!=='undefined'&&tk.hub?tkListRows(tk.hub):[]).map(r=>({id:r.id,name:r.name||(r.simple&&r.simple.company)||r.id,paid:typeof tkIsPaidRow==='function'&&tkIsPaidRow(r),demo:typeof tkIsDemo==='function'&&tkIsDemo(r)})).sort((a,b)=>a.name.localeCompare(b.name))}
+function teamClients(){return (typeof tkListRows==='function'&&typeof tk!=='undefined'&&tk.hub?tkListRows(tk.hub):[]).map(r=>({id:r.id,name:r.name||(r.simple&&r.simple.company)||r.id,paid:typeof tkIsPaidRow==='function'&&tkIsPaidRow(r)})).sort((a,b)=>a.name.localeCompare(b.name))}
 function teamOpenAssign(uid){
   if(!hubIsOwner()||!tm.data)return;const p=(tm.data.team||[]).find(x=>x.uid===uid);if(!p)return;
   const owners=tm.data.owners||{};const list=teamClients();
   openModal(`<div class="modal-head"><div><h3>Clients ${esc(p.name||p.email)} looks after</h3><p>Tick the clients they take care of. Everyone sees this on the Team page.</p></div></div>
-    <div class="modal-body tm-pick">${list.length?list.map(c=>`<label class="tm-check"><input type="checkbox" data-tm-client="${esc(c.id)}"${(owners[c.id]||[]).includes(uid)?' checked':''}><span>${esc(c.name)}${teamTestPill(c)}</span><small>${c.paid?'Paying':'Trial'}</small></label>`).join(''):'<p class="tk-muted">No clients yet.</p>'}</div>
+    <div class="modal-body tm-pick">${list.length?list.map(c=>`<label class="tm-check"><input type="checkbox" data-tm-client="${esc(c.id)}"${(owners[c.id]||[]).includes(uid)?' checked':''}><span>${esc(c.name)}</span><small>${c.paid?'Paying':'Trial'}</small></label>`).join(''):'<p class="tk-muted">No clients yet.</p>'}</div>
     <div class="modal-foot"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="teamSaveAssign(${tkAttr(uid)})">Save</button></div>`);
 }
 async function teamSaveAssign(uid){
@@ -187,10 +185,10 @@ function renderTeam(){
         <span class="tm-state">${p.online?'<span class="pp-dot on"></span>In the hub':`<span class="pp-dot"></span>${esc(p.lastSeen?'Seen '+ppAgo(p.lastSeen):'Not in yet')}`}</span></div>
       <div class="tm-line"><small>Working on</small><span>${p.status?esc(p.status.text)+`<em> · ${esc(ppAgo(p.status.at))}</em>`:'<span class="tk-muted">Nothing written yet</span>'}</span></div>
       <div class="tm-line"><small>Where</small><span>${p.online?esc(ppPlace(p.lastView)):'<span class="tk-muted">Not in the hub</span>'}</span></div>
-      <div class="tm-line"><small>Looks after</small><span class="tm-clients">${p.clients&&p.clients.length?p.clients.map(c=>`<button type="button" class="tm-chip" onclick="openTrial(${tkAttr(c.id)})">${esc(c.name)}${teamTestPill(c)}</button>`).join(''):'<span class="tk-muted">No clients yet</span>'}</span></div>
+      <div class="tm-line"><small>Looks after</small><span class="tm-clients">${p.clients&&p.clients.length?p.clients.map(c=>`<button type="button" class="tm-chip" onclick="openTrial(${tkAttr(c.id)})">${esc(c.name)}</button>`).join(''):'<span class="tk-muted">No clients yet</span>'}</span></div>
       ${owner?`<div class="tm-foot"><button class="btn ghost" onclick="teamOpenAssign(${tkAttr(p.uid)})">Choose clients</button></div>`:''}
     </div>`).join('')}</div>`:`<div class="tk-allclear">Nobody has signed in yet.</div>`;
   const free=teamClients().filter(c=>!((tm.data.owners||{})[c.id]||[]).length);
-  const unassigned=owner&&free.length?`<div class="section-head tk-section"><h3>Nobody looks after these yet</h3><span class="count">${free.length}</span></div><div class="tm-clients tm-free">${free.map(c=>`<button type="button" class="tm-chip" onclick="openTrial(${tkAttr(c.id)})">${esc(c.name)}${teamTestPill(c)}</button>`).join('')}</div>`:'';
+  const unassigned=owner&&free.length?`<div class="section-head tk-section"><h3>Nobody looks after these yet</h3><span class="count">${free.length}</span></div><div class="tm-clients tm-free">${free.map(c=>`<button type="button" class="tm-chip" onclick="openTrial(${tkAttr(c.id)})">${esc(c.name)}</button>`).join('')}</div>`:'';
   return mine+`<div class="section-head tk-section"><h3>The team</h3><span class="count">${online} in the hub now</span></div>`+cards+unassigned;
 }

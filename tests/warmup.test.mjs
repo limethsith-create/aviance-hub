@@ -105,7 +105,7 @@ test('Settings › Warm-up: the circle meter says how full the circle is ("6 of 
   assert.ok(meter.startsWith('<div class="tk-wu-meter amber"><p class="tk-wu-count">6 of 8 in the warm-up circle — add 2 more helpers</p>'));
   assert.equal(count(meter, /class="tk-wu-slot on"/g), 6); assert.equal(count(meter, /class="tk-wu-slot"/g), 2, '8 places, 6 taken');
   assert.ok(meter.includes('<span class="tk-wu-slots" aria-hidden="true">'), 'the squares are decoration: the sentence says it');
-  assert.ok(meter.includes('<p class="tk-wu-who">In the circle: 3 helpers · 2 Aviance inboxes · 1 trial inbox</p>'));
+  assert.ok(meter.includes('<p class="tk-wu-who">In the circle: 3 helpers · 2 Aviance inboxes · 1 client inbox</p>'));
   assert.ok(s.body.includes('<p class="tk-set-text">Helpers are free email accounts that trade friendly emails with new inboxes so Gmail and Outlook learn to trust them. Make them once; they help every client.</p>'));
   assert.ok(s.body.indexOf('tk-wu-meter') < s.body.indexOf('Helpers are free') && s.body.indexOf('Helpers are free') < s.body.indexOf('Your helpers') && s.body.indexOf('Your helpers') < s.body.indexOf('Add a helper'), 'meter, why, helpers, add');
   // ready: green, every place filled (more members than places: still 8 squares)
@@ -116,7 +116,7 @@ test('Settings › Warm-up: the circle meter says how full the circle is ("6 of 
   // no helpers yet
   const e = R(warmupStates.empty);
   assert.equal(e.state, '<span class="pill amber" id="wuPill">Add 5 more</span>');
-  assert.ok(e.body.includes('In the circle: 0 helpers · 2 Aviance inboxes · 1 trial inbox'));
+  assert.ok(e.body.includes('In the circle: 0 helpers · 2 Aviance inboxes · 1 client inbox'));
   assert.ok(e.body.includes('<p class="tk-set-text">No helpers yet. Add the first one below — it takes about 5 minutes.</p>'));
   // no sentence from the system: made from the numbers (one more → "helper")
   const one = R(warmupStates.oneShort);

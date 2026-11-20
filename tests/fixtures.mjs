@@ -18,7 +18,7 @@ export const systems = (overrides) => [
 ].map(([key, label, status, line]) => ({ key, label, status: (overrides && overrides[key]) || status, line, detail: key === 'warmup' ? ['inbox ann@acme-team.com 92%', 'inbox hello@acme-team.com 90%'] : [] }));
 
 export const acme = {
-  id: 'acme-plumbing', name: 'Acme Plumbing', state: 'sending', stateLabel: 'Sending — Day 12 of 30', plan: 'trial', trialDay: 12,
+  id: 'acme-plumbing', name: 'Acme Plumbing', state: 'sending', stateLabel: 'Sending — Day 12', plan: 'starter', trialDay: 12,
   day1Date: '2026-10-06', day30Date: '2026-11-04', contactName: 'Ann Lee', contactEmail: 'ann@acme.com', website: 'https://acme.com',
   health: 'yellow', healthReasons: ['1 hot lead unanswered 26 h'], five: { sent: 230, replies: 9, positive: 4, booked: 2, qualified: 1 }, inboxRate: 0.91,
   openAlerts: 1, urgentAlerts: 0,
@@ -26,29 +26,29 @@ export const acme = {
   systems: systems(), nextUp: { date: '2026-10-17', what: 'Friday update' },
 };
 export const bright = {
-  id: 'bright-dental', name: 'Bright Dental', state: 'awaiting_purchase', stateLabel: 'Waiting for you to buy', plan: 'trial', trialDay: null,
+  id: 'bright-dental', name: 'Bright Dental', state: 'awaiting_purchase', stateLabel: 'Waiting for you to buy', plan: 'starter', trialDay: null,
   day1Date: null, day30Date: null, contactName: 'Raj Patel', contactEmail: 'raj@brightdental.com', website: 'https://brightdental.com',
   health: 'red', healthReasons: ['shopping list unanswered 14 h'], five: null, inboxRate: null, openAlerts: 1, urgentAlerts: 1,
   todo: [{ id: 'buy:bright-dental', text: 'Buy bright-team.com and 2 inboxes, then paste the logins', detail: 'Shopping list sent 14 h ago · Porkbun $9.13 + Premium Inboxes 2 × $3.50', urgent: true, since: '2026-10-16T22:00:00Z', action: { type: 'view', view: 'purchase', clientId: 'bright-dental' } }],
   systems: systems({ purchase: 'waiting', setup: 'off', warmup: 'off', list: 'off', copy: 'off', canary: 'off', sending: 'off', replies: 'off', calls: 'off' }), nextUp: null,
 };
 export const cobalt = {
-  id: 'cobalt-hvac', name: 'Cobalt HVAC', state: 'converted', stateLabel: 'Converted', plan: 'starter', trialDay: 34,
+  id: 'cobalt-hvac', name: 'Cobalt HVAC', state: 'retired', stateLabel: 'Stopped', plan: 'starter', trialDay: 34,
   day1Date: '2026-09-01', day30Date: '2026-09-30', contactName: 'Dee Cole', contactEmail: 'dee@cobalthvac.com', website: 'https://cobalthvac.com',
   health: 'green', healthReasons: [], five: { sent: 812, replies: 31, positive: 12, booked: 5, qualified: 3 }, inboxRate: 0.95, openAlerts: 0, urgentAlerts: 0,
   todo: [{ id: 'paid:cobalt-hvac', text: 'Mark the month-one invoice paid once the money lands', detail: 'INV-0007 · $1,500 · due 2026-10-05', urgent: false, since: '2026-10-05T00:00:00Z', action: { type: 'api', method: 'POST', path: '/api/mc/clients/cobalt-hvac', body: { action: 'markPaid' }, confirm: 'Mark INV-0007 as paid?' } }],
   systems: systems({ closing: 'ok' }), nextUp: null,
 };
-// A website application held for the owner's review (state `applied`).
+// A booking from the website held for its sales call (state `applied`): Won / Lost after the call.
 export const fern = {
-  id: 'fern-it', name: 'Fern IT', state: 'applied', stateLabel: 'Applied — waiting for your review', plan: 'trial', trialDay: null,
+  id: 'fern-it', name: 'Fern IT', state: 'applied', stateLabel: 'Booked a sales call', plan: 'starter', trialDay: null,
   day1Date: null, day30Date: null, contactName: 'Lee Park', contactEmail: 'lee@fernit.com', website: 'https://fernit.com',
-  health: 'yellow', healthReasons: ['application waiting 2 h'], five: null, inboxRate: null, openAlerts: 0, urgentAlerts: 0,
-  todo: [{ id: 'review:fern-it', clientId: 'fern-it', clientName: 'Fern IT', text: "Review Fern IT's trial application", detail: 'From the website 2 h ago · looks like a fit (3 checks unknown)', urgent: false, since: '2026-10-17T10:00:00Z', action: { type: 'view', view: 'detail', clientId: 'fern-it', section: 'application' } }],
+  health: 'grey', healthReasons: [], five: null, inboxRate: null, openAlerts: 0, urgentAlerts: 0,
+  todo: [],
   systems: systems({ intake: 'waiting', market: 'off', purchase: 'off', setup: 'off', warmup: 'off', list: 'off', copy: 'off', canary: 'off', sending: 'off', replies: 'off', calls: 'off', reports: 'off', closing: 'off' }), nextUp: null,
 };
 export const fernApplication = {
-  receivedAt: '2026-10-17T10:00:00Z', source: 'website', review: 'pending', decidedAt: null, decision: null, declineReason: null,
+  receivedAt: '2026-10-17T10:00:00Z', source: 'inquiry', review: 'pending', decidedAt: null, decision: null, declineReason: null,
   answers: [
     { q: 'What do you sell, and who to?', a: 'Managed IT for dental and medical practices in Texas.' },
     { q: 'How many people work at the company?', a: '12' },
@@ -58,36 +58,27 @@ export const fernApplication = {
     { q: 'Can you meet a lead within 5 business days?', a: 'Yes' },
     { q: 'How many sales calls a week can you take?', a: '6' },
     { q: 'Is anyone else cold-emailing for you?', a: 'Not sure' },
-    { q: 'Will you leave a short review if the trial works?', a: '' },
   ],
   fit: {
-    verdict: 'unknown', summary: 'Looks like a fit — 3 checks unknown',
-    lines: [
-      { rule: 'employees', label: '5–50 people at the company', status: 'pass', note: 'They said 12' },
-      { rule: 'deal_value', label: 'Customer worth ≥ $2,000 in year one', status: 'pass', note: 'They said $5,000–$20,000' },
-      { rule: 'strangers', label: 'Has sold to strangers before', status: 'pass', note: 'They said yes' },
-      { rule: 'no_other_sender', label: 'Nobody else cold-emailing for them', status: 'unknown', note: 'They said "Not sure"' },
-      { rule: 'review_ask', label: 'Agrees to the review ask', status: 'unknown', note: 'Not answered' },
-      { rule: 'agency', label: 'Not a lead-gen or outbound agency', status: 'unknown', note: 'Website not checked yet' },
-    ],
+    verdict: 'unknown', summary: 'A booked sales call: read the fit score and the research before the call.',
+    lines: [],
   },
 };
-export const fernDetail = { row: fern, application: fernApplication, holds: {}, links: {}, events: [{ at: '2026-10-17T10:00:00Z', system: 'gatekeeper', event: 'application_received', detail: 'source website' }] };
+export const fernDetail = { row: fern, application: fernApplication, holds: {}, links: {}, events: [{ at: '2026-10-17T10:00:00Z', system: 'gatekeeper', event: 'applied', detail: 'source inquiry' }] };
 
 export const stagesWith = (map) => [
-  ['intake', 'Applied & queued', ['applied', 'queued']], ['onboard', 'Onboarding', ['onboarding']], ['setup', 'Buying & setup', ['awaiting_purchase', 'setup_check']],
-  ['build', 'Warm-up & build', ['warming', 'ready']], ['live', 'Sending', ['sending', 'paused', 'extension']], ['decide', 'Deciding', ['deciding']],
-  ['won', 'Converted', ['converted']], ['closing', 'Not now & closing', ['not_now', 'retired']], ['ended', 'Ended', ['declined', 'closed_silent', 'deleted']],
-].map(([key, label, states]) => ({ key, label, states, clients: map[key] || [] }));
+  ['intake', 'Waiting for the sales call', ['applied']], ['onboard', 'Onboarding', ['onboarding']], ['setup', 'Buying & setup', ['awaiting_purchase', 'setup_check']],
+  ['build', 'Warm-up & build', ['warming', 'ready']], ['live', 'Sending', ['sending', 'paused']],
+  ['closing', 'Stopped & closing', ['retired']], ['ended', 'Ended', ['declined', 'closed_silent', 'deleted']],
+].map(([key, label, states]) => ({ key, label, states, clients: [...(map[key] || []), ...(key === 'closing' ? map.won || [] : [])] }));
 
 export const fullHub = {
   machine: {
     ok: true, baseUrl: 'https://machine.test',
     heartbeat: { lastTickAt: '2026-10-17T11:59:18Z', ageSec: 42, source: 'cronjob', lastSendAt: '2026-10-17T11:45:00Z' },
-    activeTrials: 2, maxActiveTrials: 3, extensions: 0, openAlerts: 2,
+    activeClients: 3, openAlerts: 2,
     usage: { redis: { used: 123, limit: 500000, pct: 0 }, places: { used: 120, limit: 1000, pct: 12 }, reoon: { used: 8, limit: 20, pct: 40, remaining: 12 } },
     setup: { migrated: true, encKey: true, cronSecret: true, telegram: false, healthchecks: false, ownerInbox: true },
-    queue: [{ id: 'delta-roofing', name: 'Delta Roofing', position: 1, expectedDate: '2026-10-20' }],
     others: [{ id: 'aviance', name: 'Aviance', state: 'sending', stateLabel: 'Sending', health: 'green', five: { sent: 5000, replies: 80, positive: 20, booked: 6, qualified: 4 }, todo: [], systems: [] }],
   },
   stages: stagesWith({ intake: [fern], setup: [bright], live: [acme], won: [cobalt] }),
@@ -95,14 +86,13 @@ export const fullHub = {
     Object.assign({ clientId: 'bright-dental', clientName: 'Bright Dental' }, bright.todo[0]),
     Object.assign({ clientId: 'acme-plumbing', clientName: 'Acme Plumbing' }, acme.todo[0]),
     Object.assign({ clientId: 'cobalt-hvac', clientName: 'Cobalt HVAC' }, cobalt.todo[0]),
-    fern.todo[0],
   ],
   alerts: [
     { id: 'a1', at: '2026-10-17T10:00:00Z', key: 'purchase_reminder', clientId: 'bright-dental', title: 'Shopping list unanswered for 14 h', urgent: true, delivered: true },
     { id: 'a2', at: '2026-10-16T08:00:00Z', key: 'dispute', clientId: 'acme-plumbing', title: 'Dispute on a booked call', urgent: false, delivered: false },
   ],
 };
-export const emptyHub = { machine: { ok: true, heartbeat: { lastTickAt: null, ageSec: null, source: null, lastSendAt: null }, activeTrials: 0, maxActiveTrials: 3, extensions: 0, openAlerts: 0, usage: {}, setup: { migrated: true, encKey: true, cronSecret: true, telegram: true, healthchecks: true, ownerInbox: true }, queue: [], others: [] }, stages: stagesWith({}), todos: [], alerts: [] };
+export const emptyHub = { machine: { ok: true, heartbeat: { lastTickAt: null, ageSec: null, source: null, lastSendAt: null }, activeClients: 0, openAlerts: 0, usage: {}, setup: { migrated: true, encKey: true, cronSecret: true, telegram: true, healthchecks: true, ownerInbox: true }, others: [] }, stages: stagesWith({}), todos: [], alerts: [] };
 
 export const detail = {
   row: acme,
@@ -333,11 +323,11 @@ export const inquiryRecords = [
     slotStart: '2026-10-17T15:00:00Z', slotEnd: '2026-10-17T15:15:00Z', theirTz: 'Europe/London',
     whenTheirs: 'Saturday, October 17, 2026 at 4:00 PM', whenHost: 'Saturday, October 17, 2026 at 8:30 PM', page: '/' },
   { id: 'qmgp2cedar', at: '2026-10-14T08:00:00Z', source: 'website', status: 'contacted', statusAt: '2026-10-15T11:00:00Z',
-    notes: [{ at: '2026-10-15T11:00:00Z', text: 'Good call. Not ready to pay yet, so I offered a trial.' }],
+    notes: [{ at: '2026-10-15T11:00:00Z', text: 'Good call. Sending the Starter details today.' }],
     name: 'Priya Nair', email: 'priya@cedarhvac.com', company: 'Cedar HVAC', website: 'cedarhvac.com',
     sells: 'Commercial HVAC maintenance contracts', plan: 'starter',
     slotStart: '2026-10-15T10:30:00Z', slotEnd: '2026-10-15T10:45:00Z', theirTz: 'Asia/Dubai',
-    whenTheirs: 'Thursday, October 15, 2026 at 2:30 PM', whenHost: 'Thursday, October 15, 2026 at 4:00 PM', clientId: 'cedar-hvac', trialOutcome: 'queued' },
+    whenTheirs: 'Thursday, October 15, 2026 at 2:30 PM', whenHost: 'Thursday, October 15, 2026 at 4:00 PM', clientId: 'cedar-hvac' },
   { id: 'qmgn1harbor', at: '2026-10-12T07:00:00Z', source: 'website', status: 'proposal', statusAt: '2026-10-16T08:00:00Z',
     notes: [{ at: '2026-10-15T09:00:00Z', text: 'Called. They want a proposal for 3 clinics — send by Monday.' }, { at: '2026-10-16T08:00:00Z', text: 'Proposal drafted.' }],
     name: 'Grace Lee', email: 'grace@harbordental.com', company: 'Harbor Dental Group', website: 'https://harbordental.com',
@@ -383,27 +373,27 @@ export const noInquiries = { inquiries: [], counts: { new: 0, held: 0, no_show: 
    `simple` on every board row, `onboardCall` on the trial detail. NOW is Sat 17 Oct 2026 12:00 UTC. */
 const withSimple = (row, simple) => Object.assign({}, row, { simple: Object.assign({ person: row.contactName, company: row.name, dayOf30: null }, simple) });
 export const ecreek = {
-  id: 'ecreek-it', name: 'eCreek IT', state: 'onboarding', stateLabel: 'Onboarding', plan: 'trial', trialDay: null,
+  id: 'ecreek-it', name: 'eCreek IT', state: 'onboarding', stateLabel: 'Onboarding', plan: 'starter', trialDay: null,
   day1Date: null, day30Date: null, contactName: 'Sam Test', contactEmail: 'sam@ecreek.io', website: 'https://ecreek.io',
   health: 'yellow', healthReasons: ['reply waiting 3 h'], five: null, inboxRate: null, openAlerts: 0, urgentAlerts: 0,
   todo: [{ id: 'onboard-reply:ecreek-it', text: 'Answer Sam about the onboarding call', detail: 'They replied 3 h ago', urgent: true, since: '2026-10-16T09:00:00Z', action: { type: 'view', view: 'detail', clientId: 'ecreek-it' } }],
   systems: systems({ market: 'off', purchase: 'off', setup: 'off', warmup: 'off', list: 'off', copy: 'off', canary: 'off', sending: 'off', replies: 'off', calls: 'off', reports: 'off', closing: 'off' }), nextUp: null,
 };
 export const gale = {
-  id: 'gale-roofing', name: 'Gale Roofing', state: 'warming', stateLabel: 'Warming up — day 5 of 14', plan: 'trial', trialDay: null,
+  id: 'gale-roofing', name: 'Gale Roofing', state: 'warming', stateLabel: 'Warming up — day 5 of 14', plan: 'starter', trialDay: null,
   day1Date: '2026-10-26', day30Date: '2026-11-24', contactName: 'Mia Gale', contactEmail: 'mia@galeroofing.com', website: 'https://galeroofing.com',
   health: 'green', healthReasons: [], five: null, inboxRate: 0.88, openAlerts: 0, urgentAlerts: 0, todo: [], systems: systems({ sending: 'off', replies: 'off', calls: 'off', reports: 'off', closing: 'off' }), nextUp: { date: '2026-10-26', what: 'Day 1' },
 };
-export const delta = { id: 'delta-roofing', name: 'Delta Roofing', state: 'queued', stateLabel: 'In the queue — expected 2026-10-20', plan: 'trial', contactName: 'Sam Ito', contactEmail: 'sam@delta.com', health: 'green', healthReasons: [], five: null, todo: [], systems: [], nextUp: null };
-export const iris = { id: 'iris-dental', name: 'Iris Dental', state: 'declined', stateLabel: 'Declined', plan: 'trial', contactName: 'Ivy Ross', contactEmail: 'ivy@irisdental.com', health: 'grey', healthReasons: [], five: null, todo: [], systems: [], nextUp: null };
+export const delta = { id: 'delta-roofing', name: 'Delta Roofing', state: 'onboarding', stateLabel: 'Onboarding', plan: 'starter', contactName: 'Sam Ito', contactEmail: 'sam@delta.com', health: 'green', healthReasons: [], five: null, todo: [], systems: [], nextUp: null };
+export const iris = { id: 'iris-dental', name: 'Iris Dental', state: 'declined', stateLabel: 'Declined', plan: 'starter', contactName: 'Ivy Ross', contactEmail: 'ivy@irisdental.com', health: 'grey', healthReasons: [], five: null, todo: [], systems: [], nextUp: null };
 export const simpleRows = {
-  fern: withSimple(fern, { step: 'new', label: 'New application — read it and say yes or no', next: 'Read their application and press Approve or Decline', needsYou: true, since: '2026-10-17T10:00:00Z' }),
+  fern: withSimple(fern, { step: 'new', label: 'Booked a sales call — not a client yet', next: 'Press Won on their booking after the call to start onboarding', needsYou: false, since: '2026-10-17T10:00:00Z' }),
   ecreek: withSimple(ecreek, { step: 'accepted', label: 'Accepted — they replied about the call, answer them', next: 'Answer Sam in the onboarding call box', needsYou: true, since: '2026-10-16T09:00:00Z' }),
   bright: withSimple(bright, { step: 'setting_up', label: 'Setting up their emails (about 2 weeks)', next: 'Buy the domain and 2 inboxes, then paste the logins', needsYou: true, since: '2026-10-16T22:00:00Z' }),
-  delta: withSimple(delta, { step: 'queued', label: 'Accepted — waiting for a free trial slot (first in line)', next: 'Nothing for you: they start when a slot frees up', needsYou: false, since: '2026-10-14T08:00:00Z' }),
+  delta: withSimple(delta, { step: 'accepted', label: 'Accepted — waiting for them to book the call', next: 'Nothing for you: we remind them tomorrow', needsYou: false, since: '2026-10-14T08:00:00Z' }),
   gale: withSimple(gale, { step: 'warming_up', label: 'Setting up their emails (about 2 weeks)', next: 'Nothing for you: the first emails go out on Mon 26 Oct', needsYou: false, since: '2026-10-12T09:00:00Z' }),
-  acme: withSimple(acme, { step: 'sending', label: 'Sending — day 12 of 30, 2 calls booked', next: 'Nothing for you: the Friday update goes out today', needsYou: false, since: '2026-10-06T13:00:00Z', dayOf30: 12 }),
-  cobalt: withSimple(cobalt, { step: 'finished', label: 'Finished — became a client', next: '', needsYou: false, since: '2026-10-05T00:00:00Z' }),
+  acme: withSimple(acme, { step: 'sending', label: 'Sending — day 12, 2 calls booked', next: 'Nothing for you: the Friday update goes out today', needsYou: false, since: '2026-10-06T13:00:00Z', dayOf30: 12 }),
+  cobalt: withSimple(cobalt, { step: 'finished', label: 'Stopped', next: '', needsYou: false, since: '2026-10-05T00:00:00Z' }),
   iris: withSimple(iris, { step: 'declined', label: 'Declined', next: '', needsYou: false, since: '2026-10-02T12:00:00Z' }),
 };
 const S = simpleRows;
@@ -426,7 +416,7 @@ export const onboardCall = {
   ],
   thread: [
     { id: 'm3', dir: 'in', at: '2026-10-16T09:00:00Z', from: 'sam@ecreek.io', to: 'hello@aviance.store', subject: "Re: You're in — let's book your onboarding call", text: 'Hi!\nTuesday 3 pm works for us.\n<script>alert(1)</script>', kind: 'reply' },
-    { id: 'm1', dir: 'out', at: '2026-10-15T10:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: "You're in — let's book your onboarding call", text: 'Hi Sam, good news: we would like to run your free 30-day trial for eCreek IT.', kind: 'acceptance' },
+    { id: 'm1', dir: 'out', at: '2026-10-15T10:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: "You're in — let's book your onboarding call", text: 'Hi Sam, good news: we would love to work with eCreek IT.', kind: 'acceptance' },
     { id: 'm2', dir: 'out', at: '2026-10-16T08:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: "Re: You're in — let's book your onboarding call", text: 'Just checking you saw this.', kind: 'reminder' },
   ],
 };
@@ -493,12 +483,12 @@ export const calHostile = calM({ id: 'x"\');alert(4);//', clientId: 'ev"il', com
 const SUBJ = "You're in — let's book your onboarding call";
 export const conversation = {
   thread: [
-    { id: 'c5', dir: 'in', at: '2026-10-16T14:00:00Z', from: 'sam@ecreek.io', to: 'hello@aviance.store', subject: 'Re: ' + SUBJ, text: 'How much is it after the trial?', kind: 'reply', auto: false, rule: null },
-    { id: 'c1', dir: 'out', at: '2026-10-15T02:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: SUBJ, text: 'Hi Sam, good news: we would like to run your free 30-day trial for eCreek IT.', kind: 'acceptance', auto: false, rule: null },
-    { id: 'c2', dir: 'out', at: '2026-10-15T02:01:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'Your trial dates', text: 'Day 1 is Monday 26 October.\nDay 30 is Tuesday 24 November.', kind: 'system', template: 'welcome_dates', auto: false, rule: null },
+    { id: 'c5', dir: 'in', at: '2026-10-16T14:00:00Z', from: 'sam@ecreek.io', to: 'hello@aviance.store', subject: 'Re: ' + SUBJ, text: 'How much is it?', kind: 'reply', auto: false, rule: null },
+    { id: 'c1', dir: 'out', at: '2026-10-15T02:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: SUBJ, text: 'Hi Sam, good news: we would love to work with eCreek IT.', kind: 'acceptance', auto: false, rule: null },
+    { id: 'c2', dir: 'out', at: '2026-10-15T02:01:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'We start on Monday 26 October', text: 'Day 1 is Monday 26 October.', kind: 'system', template: 'welcome_dates', auto: false, rule: null },
     { id: 'c3', dir: 'in', at: '2026-10-16T09:00:00Z', from: 'Sam Test <sam@ecreek.io>', to: 'hello@aviance.store', subject: 'Re: ' + SUBJ, text: 'Hi!\nWhat times work for you?\n<script>alert(1)</script>', kind: 'reply', auto: false, rule: null },
     { id: 'c4', dir: 'out', at: '2026-10-16T09:03:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'Re: ' + SUBJ, text: 'Here is my booking page: https://aviance.store/book\nOr one of these: Tue 20 Oct 10:00 am your time', kind: 'auto_reply', auto: true, rule: 'wants_time' },
-    { id: 'c6', dir: 'out', at: '2026-10-16T14:03:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'Re: ' + SUBJ, text: 'The 30-day trial is free, with no card.', kind: 'auto_reply', auto: true, rule: 'price' },
+    { id: 'c6', dir: 'out', at: '2026-10-16T14:03:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'Re: ' + SUBJ, text: "You're on the Starter plan, and we'll go through billing on the call.", kind: 'auto_reply', auto: true, rule: 'price' },
     { id: 'c7', dir: 'out', at: '2026-10-16T15:00:00Z', from: 'hello@aviance.store', to: 'sam@ecreek.io', subject: 'Re: ' + SUBJ, text: 'Happy to go through the plans on the call.', kind: 'owner_reply', auto: false, rule: null },
     { id: 'c8', dir: 'in', at: '2026-10-17T08:30:00Z', from: 'Ops <ops@ecreek.io>', to: 'hello@aviance.store', subject: 'Re: ' + SUBJ, text: 'Sam is out today — can we do Wednesday instead?', kind: 'reply', auto: false, rule: null },
   ],
@@ -513,7 +503,7 @@ export const botRuleWords = {
   wants_time: 'sent your booking link and free times',
   proposes_time: 'pencilled in the time they asked for',
   reschedule: 'sent the booking page to pick another time',
-  price: 'explained the trial is free',
+  price: 'said which plan they are on and that the call covers billing',
   what_needed: 'sent the one-page form',
   not_interested: 'said goodbye and stopped reminders',
   who_are_you: 'said who you are and how their email reached you',

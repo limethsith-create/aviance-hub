@@ -122,7 +122,7 @@ function renderWarmupMeter(c){
   if(!c)return '';
   const n=c.min<=24?c.min:0;const on=Math.min(c.members,n);
   const slots=n?`<span class="tk-wu-slots" aria-hidden="true">${Array.from({length:n},(_,i)=>`<span class="tk-wu-slot${i<on?' on':''}"></span>`).join('')}</span>`:'';
-  const who=[c.helpers!=null?wuPlural(c.helpers,'helper','helpers'):'',c.aviance?wuPlural(c.aviance,'Aviance inbox','Aviance inboxes'):'',c.clients?wuPlural(c.clients,'trial inbox','trial inboxes'):''].filter(Boolean);
+  const who=[c.helpers!=null?wuPlural(c.helpers,'helper','helpers'):'',c.aviance?wuPlural(c.aviance,'Aviance inbox','Aviance inboxes'):'',c.clients?wuPlural(c.clients,'client inbox','client inboxes'):''].filter(Boolean);
   return `<div class="tk-wu-meter ${c.ready?'green':'amber'}"><p class="tk-wu-count">${esc(c.label)}</p>${slots}${who.length?`<p class="tk-wu-who">In the circle: ${esc(who.join(' · '))}</p>`:''}</div>`;
 }
 function renderWarmupHelpers(list){

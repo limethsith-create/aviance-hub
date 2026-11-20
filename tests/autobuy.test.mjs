@@ -321,7 +321,7 @@ test('Settings › Inboxes & domains: the status in words (Not set up / Connecte
   const R = (data, more) => renderAutobuySet(Object.assign({ data }, more));
   const n = R(cheapStates.not_set_up);
   assert.equal(n.state, '<span class="pill grey">Not set up</span>');
-  assert.ok(n.body.includes("<p class=\"tk-status grey\">Not set up. Do the steps below once — about 10 minutes. After that you buy each trial's domain and inboxes on CheapInboxes, and we set up the rest by ourselves.</p>"));
+  assert.ok(n.body.includes("<p class=\"tk-status grey\">Not set up. Do the steps below once — about 10 minutes. After that you buy each client's domain and inboxes on CheapInboxes, and we set up the rest by ourselves.</p>"));
   const steps = between(n.body, '<ol class="tk-gm-steps">', '</ol>');
   assert.deepEqual([...steps.matchAll(/<li><b>([^<]+)<\/b>/g)].map((m) => m[1]), ['Make an account at CheapInboxes.', 'Add a card.', 'Create an API key.', 'Paste it here.', 'Press Save.', 'Press Test it']);
   assert.ok(steps.includes('<a href="https://cheapinboxes.com" target="_blank" rel="noopener noreferrer">cheapinboxes.com</a>') || /<a [^>]*href="https:\/\/cheapinboxes\.com"[^>]*>cheapinboxes\.com<\/a>/.test(steps));
@@ -357,15 +357,15 @@ test('Settings › Inboxes & domains: the status in words (Not set up / Connecte
   assert.ok(set.indexOf('id="tkSet-google"') < set.indexOf('id="tkSet-inboxes"') && set.indexOf('id="tkSet-inboxes"') < set.indexOf('id="tkSet-replybot"'));
 });
 
-test('Settings › Inboxes & domains: purchases we could not match — "This is for…" lists the trials in the Setting-up step, then Link it', () => {
+test('Settings › Inboxes & domains: purchases we could not match — "This is for…" lists the clients in the Setting-up step, then Link it', () => {
   const b = renderAutobuySet({ data: cheapStates.unmatched, trials: [{ id: ID, company: 'Bright Dental' }] }).body;
-  assert.ok(b.includes('<h4 class="tk-set-h4">Bought, but not matched to a trial</h4>'));
+  assert.ok(b.includes('<h4 class="tk-set-h4">Bought, but not matched to a client</h4>'));
   const first = between(b, 'brightdental-mail.com', '</li>');
   assert.ok(first.includes(`· 2 inboxes · bought ${tkDayName('2026-10-16T10:00:00Z')}`));
-  assert.ok(first.includes('<label for="abUn0">This is for…</label>') && first.includes('<select id="abUn0" data-tk-form><option value="">Pick a trial</option><option value="bright-dental">Bright Dental</option></select>'));
+  assert.ok(first.includes('<label for="abUn0">This is for…</label>') && first.includes('<select id="abUn0" data-tk-form><option value="">Pick a client</option><option value="bright-dental">Bright Dental</option></select>'));
   assert.ok(first.includes('<button type="button" class="btn" onclick="abLink(&quot;brightdental-mail.com&quot;,&quot;abUn0&quot;,this)">Link it</button>'));
   assert.ok(between(b, 'odd-name.io', '</li>').includes('· 1 inbox</span>') && b.includes('id="abUn1"'));
-  assert.ok(renderAutobuySet({ data: cheapStates.unmatched, trials: [] }).body.includes('<p class="tk-ab-none">No trial is waiting for a domain right now.</p>'));
+  assert.ok(renderAutobuySet({ data: cheapStates.unmatched, trials: [] }).body.includes('<p class="tk-ab-none">No client is waiting for a domain right now.</p>'));
   assert.ok(!renderAutobuySet({ data: cheapStates.connected }).body.includes('not matched'), 'nothing unmatched: nothing shown');
   // only trials in the Setting-up step (not warming up, not sending, not new)
   trialsIngestHub(hubWith(simpleRows.bright));
@@ -410,7 +410,7 @@ test('Settings › Inboxes & domains: Save / Test it / Forget / Link it post the
     st.ci = clone(cheapStates.unmatched); await loadCheapInboxes(true); trialsRepaint('settings');
     assert.ok(el('tkHost').innerHTML.includes('<option value="bright-dental">Bright Dental</option>'));
     el('abUn0').value = ''; await abLink('brightdental-mail.com', 'abUn0', null);
-    assert.equal(st.posts(AB).length, 0); assert.equal(toastText(), 'Pick the trial it is for first');
+    assert.equal(st.posts(AB).length, 0); assert.equal(toastText(), 'Pick the client it is for first');
     st.next.link = autobuyStates.provisioning; tk.detail[ID] = clone(st.detail);
     el('abUn0').value = ID; globalThis.confirm = (q) => { asked = q; return true; };
     await abLink('brightdental-mail.com', 'abUn0', { disabled: false });

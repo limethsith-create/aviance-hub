@@ -444,13 +444,13 @@ test('week buttons: ◀ ▶ and Today ask the machine for that week; while a new
   } finally { offline(); calendarStopTimer(); trialsStopTimer(); }
 });
 
-test('shell: Calendar is the third place (after Trials and Paying clients), with an amber badge for the requests waiting; #calendar deep links; ⌘K; the bell', async () => {
+test('shell: Calendar is the second place (after Clients), with an amber badge for the requests waiting; #calendar deep links; ⌘K; the bell', async () => {
   fresh(); const mc = fakeMachine();
   try {
     assert.equal(views.calendar.title, 'Calendar');
-    assert.deepEqual(navItems().map((i) => i.view), ['trials', 'paying', 'calendar', 'team', 'dialer', 'mystats', 'people', 'settings']);
+    assert.deepEqual(navItems().map((i) => i.view), ['paying', 'calendar', 'team', 'people', 'settings']);
     render('calendar'); await tick();
-    const item = navItems()[2];
+    const item = navItems()[1];
     assert.equal(item.label, 'Calendar'); assert.equal(item.icon, I.calendar); assert.equal(item.badge, 2); assert.equal(item.badgeTitle, '2 waiting for your yes'); assert.equal(item.tone, 'amber');
     for (const id of ['navArea', 'tabBar']) assert.ok(el(id).innerHTML.includes(`onclick="render('calendar')" aria-label="Calendar — 2 waiting for your yes" aria-current="page">`) && el(id).innerHTML.includes('<span class="badge amber" title="2 waiting for your yes" aria-hidden="true">2</span>'), id);
     assert.deepEqual(parseDeepLink('#calendar'), { view: 'calendar' });
@@ -506,7 +506,7 @@ test('Trials list + trial page: a client who asked for a time says "They asked f
     assert.ok(!page.includes('cal-trial-ask'));
     // a new application outranks it: then the time they asked for still shows, as its own card above the call (their email system › Only you › Setup & history)
     const both = Object.assign({}, ecreekDetail, { application: Object.assign({}, ecreekDetail.application, { review: 'pending' }) });
-    assert.ok(renderTrialDetail(both, 'overview', { now: CAL_NOW }).includes('>Read the application and say yes or no</button>'));
+    assert.ok(renderTrialDetail(both, 'overview', { now: CAL_NOW }).includes('>Read what we found, then mark it Won or Lost</button>'));
     const p2 = renderSysTab(both, 'setup', { now: CAL_NOW });
     assert.ok(!renderSysTab(ecreekDetail, 'setup', { now: CAL_NOW }).includes('cal-trial-ask') && !renderSysTab(both, 'calls', { now: CAL_NOW }).includes('cal-trial-ask'), 'when it is the big button: said once; never on the shared Calls');
     assert.ok(p2.includes('<div class="card cal-trial-ask"><div class="cal-trial-ask-main"><b>Sam asked for a call: Wed 30 Sep · 11:30 pm (your time)</b><small>Wed 2:00 pm US Eastern · 30 min · say yes in the Calendar</small></div><button class="btn" onclick="openCalendar(&quot;mreq1&quot;)">Open the Calendar</button></div>'));
