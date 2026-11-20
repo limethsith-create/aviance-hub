@@ -1517,7 +1517,7 @@ function tkAppOnPage(d){d=d||{};return tkAppPending(d)||tkStep(d.row||{}).notTak
    with Say yes / Say no / the Word download. Nothing else: everything else is inside the system. */
 function renderTrialDetail(d,tab,meta){
   d=d||{};meta=meta||{};const act=tkPrimaryAction(d,meta);
-  return renderTrialTop(d,meta,act)+(tkAppOnPage(d)?renderApplicationBlock(d,meta):renderSystemButton(d));   // not taken: no system to open
+  return renderTrialTop(d,meta,act)+(tkAppOnPage(d)?renderApplicationBlock(d,meta):renderSystemButton(d))+(typeof numbersTrialSection==='function'?numbersTrialSection((d.row||{}).id):'');   // not taken: no system to open
 }
 /* The to-dos the big button does not already ask for (never the call's, the application's or the buying one CheapInboxes
    handles — those have their own place): "Also on your list", on top of Actions in their system. */
@@ -2440,6 +2440,7 @@ function trialsRepaint(view,opts){
   try{renderNav();updateNotifBadge();}catch(e){}
   if(view==='clientSystem'){tkSysTabsReveal();if(typeof msgScrollDown==='function')msgScrollDown();}   // Messages: the newest email in view
   trialsApplyScroll();
+  try{if(typeof numbersMountHosts==='function')numbersMountHosts();}catch(e){}
 }
 /* Everything the system's tabs need besides the detail. */
 function trialsSysMeta(id){return Object.assign({at:tk.detailAt[id]},trialsCtx(id))}

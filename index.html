@@ -6,6 +6,7 @@
 <title>Aviance Hub</title>
 <link rel="stylesheet" href="trials.css">
 <link rel="stylesheet" href="calendar.css">
+<link rel="stylesheet" href="numbers.css">
 <!-- Installable app (Add to Home Screen) -->
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
@@ -398,6 +399,7 @@ const views={
   inquiry:{fn:()=>viewInquiry(),title:'Booking',sub:'',back:()=>render('inquiries')},
   settings:{fn:()=>viewSettings(),title:'Settings',sub:'Your details, keys, alerts, Google Meet, warm-up helpers, the reply bot, and how everything is running'},
   people:{fn:()=>viewPeople(),title:'Activity',sub:'Who signed in and out, for how long, and what they opened'},
+  numbers:{fn:()=>numbersView(),title:'Numbers',sub:'How your emails are doing'},
   team:{fn:()=>teamPageView(),title:'Team',sub:'Who is working on what, and which clients each person looks after'},
   trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every client by stage, every to-do',back:()=>render('settings')},
 };
@@ -414,6 +416,7 @@ function render(v){
   try{trialsOnRender(v);}catch(e){}
   try{calendarOnRender(v);}catch(e){}
   try{if(typeof peopleOnRender==='function')peopleOnRender(v);}catch(e){}
+  try{if(typeof numbersOnRender==='function')numbersOnRender(v);}catch(e){}
 }
 
 /* The Back button in the top bar (pages inside one of the four places). */
@@ -432,6 +435,7 @@ function parseDeepLink(h){
   if(h==='inquiries')return {view:'inquiries'};
   if(h==='paying')return {view:'paying'};
   if(h==='calendar')return {view:'calendar'};
+  if(h==='numbers')return {view:'numbers'};
   const g=h.match(/^settings\/google\/?(?:\?([^#]*))?$/);
   if(g){
     const q={};try{new URLSearchParams(g[1]||'').forEach((v,k)=>{q[k]=v;});}catch(e){}
@@ -660,5 +664,6 @@ boot();
 <script src="warmup.js"></script>
 <script src="keys.js"></script>
 <script src="people.js"></script>
+<script src="numbers.js"></script>
 </body>
 </html>
