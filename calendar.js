@@ -816,6 +816,11 @@ async function calBookSave(force){
       if(inq!=null&&typeof openInquiry==='function')openInquiry(inq);
       return r;
     }
+    if(r.status===409&&!((r.data&&r.data.warnings)||[]).length){   // already booked (same person and time): nothing to override
+      const a0=document.getElementById('cbAnyway');if(a0)a0.innerHTML='';
+      errEl('cbErr',(r.data&&r.data.error)||r.error||'This person already has a call booked at that time.');
+      return r;
+    }
     if(r.status===409){
       cb.warnings=(r.data&&r.data.warnings)||[];
       const w=document.getElementById('cbWarn');if(w)w.innerHTML=renderCalBookWarnings(cb.warnings)||'';

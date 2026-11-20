@@ -112,3 +112,14 @@ test('a 400 shows the machine\'s error and books nothing', async () => {
   assert.equal(r.status, 400); assert.equal(el('cbErr').textContent, "That email address doesn't look right.");
   assert.equal(opened, null); assert.deepEqual(toasts, []);
 });
+
+test('already booked (409 with no warnings): says so, and offers no "Book it anyway"', async () => {
+  fresh(); openModal(renderCalBook({ date: '', time: '' }, calSettingsNow())); toasts.length = 0; opened = null;
+  machine(() => reply(409, { error: 'This person already has a call booked at that time.', warnings: [] }));
+  fill(GOOD);
+  const r = await calBookSave();
+  assert.equal(r.status, 409);
+  assert.equal(el('cbErr').textContent, 'This person already has a call booked at that time.');
+  assert.ok(!/Book it anyway/.test(el('cbAnyway').innerHTML));
+  assert.equal(opened, null);
+});
