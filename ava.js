@@ -144,8 +144,7 @@ const AVA_PLACES=[
   ['set-google',/\bmeet\b/,'Settings › Google Meet',()=>openSettings('google'),true],
   ['set-replybot',/\breply bot\b|\bauto ?reply\b/,'Settings › Reply bot',()=>openSettings('replybot'),true],
   ['set-inboxes',/\bcheapinboxes\b|\binboxes (and|&) domains\b/,'Settings › Inboxes & domains',()=>openSettings('inboxes'),true],
-  ['set-phone',/\bphone alerts?\b|\bnotifications\b/,'Phone alerts',()=>openPhoneAlerts(),true],
-  ['set-alerts',/\balerts?\b/,'Settings › Alerts',()=>openSettings('alerts'),true],
+  ['set-alerts',/\balerts?\b|\bnotifications\b/,'Settings › Alerts',()=>openSettings('alerts'),true],
   ['set-status',/\beverything running\b|\bhealth check\b|\bsystem status\b/,'Settings › Is everything running?',()=>openSettings('status'),true],
   ['set-advanced',/\badvanced( settings)?\b/,'Settings › Advanced',()=>openSettings('advanced'),true],
   ['set-look',/\blight or dark\b|\bdark mode\b|\blight mode\b|\btheme\b|\bappearance\b/,'Settings › Light or dark',()=>openSettings('look'),true],
@@ -155,7 +154,7 @@ const AVA_PLACES=[
 function avaPlace(key){const p=AVA_PLACES.find(x=>x[0]===key);return p?avaAct('Open '+p[2],p[3],{owner:!!p[4],place:key}):null}
 /* What she says once a place is open: short ("Here's the Calendar", "Here's Keys in Settings"). */
 const AVA_HERE={paying:'Here are your clients',calendar:"Here's your calendar",team:"Here's the team",
-  activity:"Here's who signed in",inquiries:'Here are the bookings',behind:"Here's behind the scenes",settings:"Here's Settings",'set-phone':"Here's phone alerts"};
+  activity:"Here's who signed in",inquiries:'Here are the bookings',behind:"Here's behind the scenes",settings:"Here's Settings"};
 function avaHere(key){
   if(AVA_HERE[key])return AVA_HERE[key]+'.';
   const p=AVA_PLACES.find(x=>x[0]===key);if(!p)return 'Here it is.';
@@ -218,11 +217,10 @@ const AVA_KB=[
   {id:'team',kw:'team page status working on who looks after whom choose clients assign',a:"The Team page shows everyone who uses the hub: who's in the hub now, where they are, what they're working on, and which clients each person looks after. Write your own line under What are you working on. The owner picks each person's clients with Choose clients.",go:'team'},
   {id:'activity',kw:'activity signed in out how long approve new account waiting approval',a:"Activity is the owner's page: who signed in and out, for how long, what they opened, and new accounts waiting for approval. Approve lets a person in — they can see everything and change nothing.",go:'activity',owner:true},
   {id:'roles',kw:'team member read only change nothing roles employee owner permission cannot press',a:"The owner can do everything. A team member sees the same screens but can't change anything, so the buttons that change things are hidden for them, and money is only for the owner. New team members make an account on the sign-in page and the owner approves it.",go:'team'},
-  {id:'settings',kw:'settings sections what is in settings',a:"Settings has named sections, each saying its state in one word: Alerts, Phone alerts, Your details, Keys, Ava, Google Meet, Inboxes and domains, Warm-up, Reply bot, Is everything running, Behind the scenes, Advanced, Light or dark, and Your account.",go:'settings',owner:true},
+  {id:'settings',kw:'settings sections what is in settings',a:"Settings has named sections, each saying its state in one word: Alerts, Your details, Keys, Ava, Google Meet, Inboxes and domains, Warm-up, Reply bot, Is everything running, Behind the scenes, Advanced, Light or dark, and Your account.",go:'settings',owner:true},
   {id:'keys',kw:'keys api key paste service google places verify test and save forget',a:"Settings, Keys has one card per free service the system uses. Each card says its state and the steps to get the key; paste it once and press Test and save. A saved key is never shown again.",go:'set-keys',owner:true},
   {id:'details',kw:'your details name address call link paypal wise clutch onboarding inbox',a:"Settings, Your details holds what the emails say about you — your name, address, email, the onboarding inbox, call link, PayPal and Wise. Each has its own Save; it tells you what's still to fill in.",go:'set-details',owner:true},
   {id:'meet',kw:'google meet connect link calls video',a:"Settings, Google Meet connects your Google account so every call you say yes to gets a Meet link. Follow the numbered steps once, press Connect Google, then Test it.",go:'set-google',owner:true},
-  {id:'phone',kw:'phone alerts push notifications iphone home screen',a:"Phone alerts send a message to your phone when something needs you. On an iPhone, add the hub to your Home Screen first, then open it from there and turn alerts on.",go:'set-phone',owner:true},
   {id:'opened',kw:'opened blank empty dash not tracked opens client why',a:"Opened is blank for clients on purpose: their emails go out without an open tracker, because trackers hurt landing in the inbox. So there's nothing to count."},
   {id:'bounce',kw:'bounce bounced what is bounce rate address does not exist pause',a:"A bounce is an email that came back because the address doesn't exist or the mailbox refused it. A few are normal. If too many bounce — about 2 to 3 percent — sending slows down or pauses by itself to protect the inboxes, and you get an alert.",go:null},
   {id:'bell',kw:'bell notifications what needs you alerts not seen mark as seen',a:"The bell at the top lists what needs you right now. Settings, Alerts has every message from the system, not seen first, with Mark as seen.",go:'set-alerts'},
@@ -1097,7 +1095,7 @@ function avaNavAct(a,ctx,why){
   if(p.owner&&!ctx.owner){why.owner=true;why.what=AVA_PLACES.find(x=>x[0]===key)[2];return null;}
   p.here=avaHere(key);return p;
 }
-function avaSetName(k){return ({alerts:'Alerts',phone:'Phone alerts',details:'Your details',keys:'Keys',ava:'Ava',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot',status:'Is everything running?',behind:'Behind the scenes',advanced:'Advanced',look:'Light or dark',account:'Your account'})[k]||k}
+function avaSetName(k){return ({alerts:'Alerts',details:'Your details',keys:'Keys',ava:'Ava',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot',status:'Is everything running?',behind:'Behind the scenes',advanced:'Advanced',look:'Light or dark',account:'Your account'})[k]||k}
 function avaClientName(id){const c=avaClients().find(x=>x.id===String(id));return c?c.name:(typeof tkClientName==='function'?tkClientName(id):String(id))}
 /* What a "confirm" card may do — each only when its button is pressed (or "yes" is said right after), with the hub's
    own functions. owner: the owner only (a team member never sees the card). */

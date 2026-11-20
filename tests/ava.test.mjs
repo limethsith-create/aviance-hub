@@ -49,7 +49,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 /* ───────────── load the shell, the section scripts, then Ava ───────────── */
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
-const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'push.js', 'people.js', 'ava.js'];
+const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'people.js', 'ava.js'];
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 for (const f of FILES) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };

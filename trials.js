@@ -44,7 +44,7 @@
 const TK_STAGE_ORDER=['intake','onboard','setup','build','live','closing','ended'];
 const TK_SYSTEM_ORDER=['intake','market','purchase','setup','warmup','list','copy','canary','sending','replies','calls','reports','closing'];
 const TK_STATE_LABEL={applied:'Booked a sales call',onboarding:'Onboarding',awaiting_purchase:'Waiting for you to buy',setup_check:'Checking the setup',warming:'Warming up',ready:'Ready for Day 1',sending:'Sending',paused:'Paused',retired:'Stopped',deleted:'Deleted',declined:'Declined',closed_silent:'Never finished onboarding'};
-const TK_SETUP_NAMES={migrated:'the data update',encKey:'the password lock (ENC_KEY)',cronSecret:'the timer key (CRON_SECRET)',telegram:'Telegram messages',healthchecks:'the uptime check (Healthchecks)',ownerInbox:'your own inbox'};
+const TK_SETUP_NAMES={migrated:'the data update',encKey:'the password lock (ENC_KEY)',cronSecret:'the timer key (CRON_SECRET)',healthchecks:'the uptime check (Healthchecks)',ownerInbox:'your own inbox'};
 const TK_FIVE=[['sent','Sent','Emails sent'],['replies','Replies','Replies'],['positive','Pos.','Positive replies'],['booked','Booked','Calls booked'],['qualified','Qual.','Qualified calls']];
 const TK_COUNTERS=[['sent','Sent'],['companiesContacted','Companies'],['bounces','Bounces'],['replies','Replies'],['positive','Positive'],['booked','Booked'],['held','Held'],['qualified','Qualified'],['noshows','No-shows'],['wrongfit','Wrong fit'],['warmupSent','Warm-up sent'],['warmupInbox','Warm-up inbox'],['warmupSpam','Warm-up spam'],['warmupRescued','Warm-up rescued']];
 /* The parts of a client's machine page, each drawn by renderTab(d, part) — the pieces the system's tabs are made of. */
@@ -70,7 +70,7 @@ const TK_SECTION_TAB={messages:'messages',calls:'calls',conversations:'conversat
 const TK_SYS_TAB_KEY='avianceSysTab:v2';   // the side and tab last open, per client (a convenience — kept in this browser only)
 const TK_TRIAL_VIEWS=['paying','trialsBoard','trial','clientSystem','trialPurchase','settings','inquiries','inquiry']; // inquiries.js hosts the last two
 /* Settings: everything that is not Trials, Calendar or Inquiries, as named sections (renderSettings). */
-const TK_SETTINGS=['alerts','phone','details','keys','ava','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
+const TK_SETTINGS=['alerts','details','keys','ava','google','inboxes','warmup','replybot','status','behind','advanced','look','account'];
 /* A to-do that opens a Settings section ({type:'view', view:'settings', section}): the button's words. */
 const TK_SETTINGS_NAMES={alerts:'Alerts',details:'Your details',keys:'Keys',ava:'Ava',google:'Google Meet',inboxes:'Inboxes & domains',warmup:'Warm-up',replybot:'Reply bot'};
 const TK_REFRESH_MS=60000;            // auto-refresh while a trials view is open (never fetches growth)
@@ -1994,13 +1994,13 @@ function renderAlerts(alerts,filter,meta){
   const toolbar=`<div class="toolbar"><div class="seg" role="group" aria-label="Which alerts"><button class="${filter==='open'?'active':''}" aria-pressed="${filter==='open'}" onclick="trialsSetAlertFilter('open')">Not seen · ${openN}</button><button class="${filter==='all'?'active':''}" aria-pressed="${filter==='all'}" onclick="trialsSetAlertFilter('all')">All · ${alerts.length}</button></div><div style="margin-left:auto" class="tk-inline">${tkUpdatedStamp(meta.at)}</div></div>`;
   if(!list.length)return toolbar+`<p class="tk-todo-empty">${filter==='open'?'No new alerts. Nothing needs you.':'No alerts yet. When something needs you, it shows up here.'}</p>`;
   return toolbar+`<div class="tk-alerts">${list.map(a=>`<div class="tk-alert ${a.acknowledged?'acked':''}">${a.urgent?'<span class="pill red">Urgent</span>':'<span class="pill grey">Note</span>'}
-    <div style="min-width:0"><b>${esc(a.title||'Alert')}</b><small>${a.clientId?`<button type="button" class="tk-client" onclick="openTrial(${tkAttr(a.clientId)})">${esc(tkClientName(a.clientId))}</button> · `:''}<span title="${esc(tkFull(a.at))}">${esc(tkRel(a.at,meta.now))}</span>${a.delivered===false?' · <span class="tk-red">not sent to your phone or email</span>':''}${a.acknowledged?' · seen':''}</small></div>
+    <div style="min-width:0"><b>${esc(a.title||'Alert')}</b><small>${a.clientId?`<button type="button" class="tk-client" onclick="openTrial(${tkAttr(a.clientId)})">${esc(tkClientName(a.clientId))}</button> · `:''}<span title="${esc(tkFull(a.at))}">${esc(tkRel(a.at,meta.now))}</span>${a.acknowledged?' · seen':''}</small></div>
     <div class="tk-alert-act">${a.acknowledged?'':`<button class="btn ghost" onclick="trialsAckAlert(${tkAttr(a.id)})">Mark as seen</button>`}</div></div>`).join('')}</div>`;
 }
 
 /* -- Settings: everything that is not Trials, Calendar or Inquiries, as named sections --
    Each is a <details> with its name and a one-word state in the summary, so the page reads as a short
-   list. ctx = {hub, hubErr, at, alerts, alertsErr, alertsAt, filter, open:{alerts:true…}, phone:'On'|'',
+   list. ctx = {hub, hubErr, at, alerts, alertsErr, alertsAt, filter, open:{alerts:true…},
    dark, email, now, google (messages.js googleSettingsCtx), inboxes (autobuy.js abSettingsCtx), warmup (warmup.js
    wuSettingsCtx), details, keys (keys.js kySettingsCtx), owner (keys.js ydSettingsCtx), left ({keys, details} still to do)}.
    Pure: the host (trialsHostHTML) reads the DOM and caches. Google Meet and Reply bot are drawn by messages.js, Inboxes &
@@ -2023,8 +2023,6 @@ function renderSettings(ctx){
   const av=typeof avaRenderSet==='function'?avaRenderSet(ctx.ava||{}):null;   // ava.js: her brains, voice, requests
   return `<div class="tk-sets">`+
     sec('alerts','Alerts','Messages from the system about your clients.',unseen==null?'':unseen?`<span class="pill amber">${tkNum(unseen)} not seen</span>`:'<span class="pill green">All seen</span>',alertsBody)+
-    sec('phone','Phone alerts','Get a message on your phone when something needs you.',ctx.phone==='On'?'<span class="pill green">On</span>':'<span class="pill grey">Off</span>',
-      `<p class="tk-set-text">${ctx.phone==='On'?'Phone alerts are on for this device.':'Phone alerts are off on this device.'} On an iPhone, add the hub to your Home Screen first; the setup shows you how.</p><button type="button" class="btn" onclick="openPhoneAlerts()">Set up phone alerts</button>`)+
     (yd?sec('details','Your details','Your name, address and links — what the emails say about you.',yd.state,yd.body):'')+
     (ky?sec('keys','Keys','The keys for the free services the system uses. Paste each one once.',ky.state,ky.body):'')+
     (av?sec('ava','Ava','Your helper: her brains, her voice, and what people asked her to change.',av.state,av.body):'')+
@@ -2502,7 +2500,7 @@ function viewSettings(){if(!hubIsOwner())return trialsNotAdminHTML();trialsKick(
 function trialsSettingsCtx(){
   let dark=false;try{dark=!!(document.body&&document.body.classList&&document.body.classList.contains('dark'));}catch(e){dark=false;}
   return {hub:tk.hub,hubErr:tk.hubErr,at:tk.hubAt,alerts:tk.alerts,alertsErr:tk.alertsErr,alertsAt:tk.alertsAt,filter:trialsAlertFilter,open:tk.setOpen,
-    phone:typeof phoneAlertsNavNote==='function'?phoneAlertsNavNote():'',dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:'',
+    dark,email:typeof authUser!=='undefined'&&authUser?authUser.email:'',
     google:typeof googleSettingsCtx==='function'?googleSettingsCtx():null,inboxes:typeof abSettingsCtx==='function'?abSettingsCtx():null,
     warmup:typeof wuSettingsCtx==='function'?wuSettingsCtx():null,details:tk.detail,
     keys:typeof kySettingsCtx==='function'?kySettingsCtx():null,ava:typeof avaSettingsCtx==='function'?avaSettingsCtx():null,owner:typeof ydSettingsCtx==='function'?ydSettingsCtx():null,left:typeof kyStillToDo==='function'?kyStillToDo():null};
@@ -2877,7 +2875,7 @@ function trialsCmdkActions(){
     {type:'Create',label:'Add a paying client',icon:I.money||I.trials||'',sub:'For someone you closed outside a booking',kw:'new paying client create start add plan',run:()=>{closeCmdk();openNewPayingClient();}},
     {type:'Go to',label:'Clients',icon:I.money||I.trials||'',sub:'Every client and where they are',kw:'clients list people paying trials',run:()=>{closeCmdk();render('paying');}},
     {type:'Go to',label:'Inquiries',icon:I.inquiry||'',sub:'Sales calls booked from the website',kw:'inquiries plan paid book a call starter growth scale',run:()=>{closeCmdk();render('inquiries');}},
-    {type:'Go to',label:'Settings',icon:I.gear||'',sub:'Alerts, phone alerts, how everything is running',kw:'settings preferences account log out theme',run:()=>{closeCmdk();render('settings');}},
+    {type:'Go to',label:'Settings',icon:I.gear||'',sub:'Alerts, how everything is running',kw:'settings preferences account log out theme',run:()=>{closeCmdk();render('settings');}},
     {type:'Go to',label:'Alerts',icon:I.bell||'',sub:'Settings › Alerts',kw:'alerts messages machine',run:()=>{closeCmdk();openSettings('alerts');}},
     {type:'Go to',label:'Behind the scenes',icon:I.chart||'',sub:'Every client by stage, every to-do',kw:'behind the scenes board stages',run:()=>{closeCmdk();render('trialsBoard');}},
     {type:'Go to',label:'Is everything running?',icon:I.check||'',sub:'Settings › a quick health check',kw:'status health running machine heartbeat usage',run:()=>{closeCmdk();openSettings('status');}},

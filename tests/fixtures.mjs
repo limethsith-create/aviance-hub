@@ -78,7 +78,7 @@ export const fullHub = {
     heartbeat: { lastTickAt: '2026-10-17T11:59:18Z', ageSec: 42, source: 'cronjob', lastSendAt: '2026-10-17T11:45:00Z' },
     activeClients: 3, openAlerts: 2,
     usage: { redis: { used: 123, limit: 500000, pct: 0 }, places: { used: 120, limit: 1000, pct: 12 }, reoon: { used: 8, limit: 20, pct: 40, remaining: 12 } },
-    setup: { migrated: true, encKey: true, cronSecret: true, telegram: false, healthchecks: false, ownerInbox: true },
+    setup: { migrated: true, encKey: true, cronSecret: true, healthchecks: false, ownerInbox: true },
     others: [{ id: 'aviance', name: 'Aviance', state: 'sending', stateLabel: 'Sending', health: 'green', five: { sent: 5000, replies: 80, positive: 20, booked: 6, qualified: 4 }, todo: [], systems: [] }],
   },
   stages: stagesWith({ intake: [fern], setup: [bright], live: [acme], won: [cobalt] }),
@@ -92,7 +92,7 @@ export const fullHub = {
     { id: 'a2', at: '2026-10-16T08:00:00Z', key: 'dispute', clientId: 'acme-plumbing', title: 'Dispute on a booked call', urgent: false, delivered: false },
   ],
 };
-export const emptyHub = { machine: { ok: true, heartbeat: { lastTickAt: null, ageSec: null, source: null, lastSendAt: null }, activeClients: 0, openAlerts: 0, usage: {}, setup: { migrated: true, encKey: true, cronSecret: true, telegram: true, healthchecks: true, ownerInbox: true }, others: [] }, stages: stagesWith({}), todos: [], alerts: [] };
+export const emptyHub = { machine: { ok: true, heartbeat: { lastTickAt: null, ageSec: null, source: null, lastSendAt: null }, activeClients: 0, openAlerts: 0, usage: {}, setup: { migrated: true, encKey: true, cronSecret: true, healthchecks: true, ownerInbox: true }, others: [] }, stages: stagesWith({}), todos: [], alerts: [] };
 
 export const detail = {
   row: acme,
@@ -688,7 +688,7 @@ export const keysStates = {
 /* GET /api/mc/config as the machine lists it: one row per top-level setting, the fields inside (the hub's eight
    details live in OWNER, ONBOARDCALL, CALENDAR, PAYMENT and REVIEW). */
 const cfgRow = (key, def, value) => ({ key, default: def, value, overridden: JSON.stringify(def) !== JSON.stringify(value), toSet: JSON.stringify(value).includes('null') });
-const OWNER_DEF = { usHours: ['09:00', '17:00'], signerName: null, address: null, email: null, telegramChatId: null };
+const OWNER_DEF = { usHours: ['09:00', '17:00'], signerName: null, address: null, email: null };
 const ONB_DEF = { inbox: null, bookingUrl: null, callMinutes: 30, minNoticeHours: 12, daysAhead: 14 };
 const CAL_DEF = { hours: ['09:00', '17:00'], days: [1, 2, 3, 4, 5], slotMinutes: 30, meetingLink: null, ownerZone: 'Asia/Colombo', usZone: 'America/New_York' };
 export const configStates = {

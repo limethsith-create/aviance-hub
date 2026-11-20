@@ -2,7 +2,7 @@
    Run with:  npm test   (= node --test tests/*.test.mjs)
 
    Same set-up as trials.test.mjs / calendar.test.mjs: the shell's inline script, then trials.js,
-   inquiries.js, calendar.js and push.js, exactly like the browser, with a tiny fake DOM and a fake
+   inquiries.js, calendar.js exactly like the browser, with a tiny fake DOM and a fake
    Supabase client. No network. */
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -43,7 +43,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 /* ───────────── load the shell, then the section scripts ───────────── */
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
-const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'push.js', 'people.js'];
+const FILES = ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'keys.js', 'people.js'];
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 for (const f of FILES) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };

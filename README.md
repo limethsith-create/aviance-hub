@@ -36,19 +36,16 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `keys.js` | The owner's own set-up, so he never opens Vercel: Settings › Keys (one card per service key — status in words, the steps and an "Open …" link, a password box, Test and save / Test / Forget; a value is never shown back) over `GET/POST /api/mc/keys`, and Settings › Your details (name, address, email, the onboarding inbox, call link, PayPal.me, Wise, Clutch — each with its own Save, "Still to fill in: N", the two the first client needs marked in amber) over `GET/POST /api/mc/config` (see `email-distributor/docs/KEYS.md`). Styles in `trials.css`. |
 | `trials.css` | Styles for the Clients screens, on top of the shell's CSS variables (light + dark). |
 | `inquiries.js` | Bookings: the sales calls booked from the website — list, detail, status/notes, Won / Lost, the board strip. |
-| `push.js` | Phone alerts: the panel, turning Web Push on/off with the machine, the quiet re-subscribe after sign-in. |
-| `sw.js` | Service worker (site root, scope `/`): shows the machine's push messages as notifications and opens the hub on a tap. Caches nothing. |
-| `manifest.webmanifest` | Makes the hub installable (Add to Home Screen) — iPhone only allows alerts for installed web apps. |
-| `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | The brand cube from the website, flattened onto white (see *Phone alerts*). |
-| `badge-96.png` | One-colour "A" (white on transparent) for Android's status bar. |
-| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, ⌘K, deep links), the Clients screens, bookings waiting for their sales call (Won / Lost), phone alerts (`push.js`) and the readability floor. |
+| `manifest.webmanifest` | Makes the hub installable (Add to Home Screen) — the hub can sit on a phone's home screen. |
+| `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | The brand cube from the website, flattened onto white (see *Home Screen app*). |
+| `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, ⌘K, deep links), the Clients screens, bookings waiting for their sales call (Won / Lost), and the readability floor. |
 | `tests/simple.test.mjs` | Node tests for the simple hub: the four places and their badges, the one journey, "Needs you", the three questions and the one big button, Settings, deep links, plain words (a banned-word list), and no function name declared twice. |
 | `tests/calendar.test.mjs` | Node tests for the Calendar. |
 | `tests/messages.test.mjs` | Node tests for Messages (each kind of email, escaped; auto-reply labels; reply and bot posts), "Answer Sam's message", the Join Google Meet button and its fallback, Settings › Google Meet (states, the four actions, the return from Google) and Settings › Reply bot (incl. "who are you" / "not now" and the check-back weeks); delivery monitoring: the status line under our emails (each status, amber "not opened yet", red bounce with why, missing fields, escaping), the "hasn't opened" to-do (big button, list line, confirm → `unopenedDone`, reload), the four new alerts, plain words. |
 | `tests/autobuy.test.mjs` | Node tests for CheapInboxes: the big button and the "what to buy" panel (Copy, "Buy this one instead", "I've bought it — check now", one post per click), the card in every status (steps, current step, inboxes, the problem + "Check now", "Wrong domain? Undo"), the Buy & paste fallback with its pointer to Settings, Settings › Inboxes & domains (states, card on file, steps, Save / Test it / Forget, "This is for…" + Link it), plain words, and that nothing can place an order. |
 | `tests/warmup.test.mjs` | Node tests for the warm-up: the circle meter in each state, the helpers' health words, Test / Remove bodies, Add a helper (kinds, steps, password label, the body, greyed out while testing, success and refusal), the trial card, the "Add N warm-up helpers" big button, `#settings/warmup`, the `{view:'settings', section}` to-do, plain words. |
 | `tests/keys.test.mjs` | Node tests for Settings › Keys (cards per status, order, env-set keys without a box, save / test / forget bodies incl. Verifalia's two fields, a refused key keeps what was typed, a saved one is cleared and never drawn, no encryption key) and Settings › Your details (the eight boxes, required marks, "Still to fill in", save / clear bodies for both row shapes, checks), `#settings/keys`, `#settings/details`, ⌘K, the "Is everything running?" pointers, plain words, touch targets. |
-| `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and `sw.js` (run in a sandbox with a fake service-worker global). |
+| `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and the manifest. |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
 | `tests/journey.test.mjs` | The dress rehearsal: the machine's 31 real snapshots of one client's whole journey (the booking → Won → onboarding call → warm-up → the launch call → sending → month two), each drawn with the real hub code on a device set to US Pacific — the Clients list, the three questions and the big button, Messages (with how each email we sent went), the call / inboxes / warm-up / launch-call cards, "What we found" (the brief and the company file), every Behind-the-scenes tab, the Calendar and Settings; plus the moment of the launch call itself and the delivery watch (an unopened "we start on" email, a bounce, a failed send — between two snapshots). Checks: nothing broken or empty on screen, the journey step is the machine's, the big button is what the owner must do, red only when he is needed, plain words, Sri Lanka time with US Eastern beside a call. `HUB_JOURNEY_REPORT=path npm test` writes what the owner sees at every step as plain text. |
 | `tests/journey-fixtures.mjs`, `tests/fixtures/journey/` | A trimmed copy of the machine's snapshots (`email-distributor/tests/fixtures/journey/`) without repeats; `node tests/fixtures/journey/trim.mjs` copies them again. |
@@ -137,7 +134,7 @@ already says the day).
   about** (`deep.topics`: how often they post, the words they use most).
 - **Settings** — named sections, each folds open and says its state in one
   word: **Alerts** (every alert, "Not seen" first, "Mark as seen"; `#alerts`
-  opens it), **Phone alerts**, **Your details** (`#settings/details`), **Keys** (`#settings/keys`), **Google Meet**, **Inboxes & domains**, **Warm-up** (`#settings/warmup` opens it), **Reply bot**, **Is everything running?** (last check-in, last
+  opens it), **Your details** (`#settings/details`), **Keys** (`#settings/keys`), **Google Meet**, **Inboxes & domains**, **Warm-up** (`#settings/warmup` opens it), **Reply bot**, **Is everything running?** (last check-in, last
   email sent, clients running, alerts not seen, paid services used, setup
   still to finish), **Behind the scenes** (the old board: every to-do, all
   clients by stage), **Advanced**
@@ -380,7 +377,7 @@ already says the day).
     newest first — company, name, plan, the booked call in the owner's time
     (the website's own text) with "call in 3 h" / "was 2 days ago", what they
     sell, and a red New marker until someone moves it on.
-  - One inquiry (`#inquiry/{id}`, what the phone alert opens): **Reply by
+  - One inquiry (`#inquiry/{id}`, what a link to it opens): **Reply by
     email** (mailto, subject "Your Aviance call"), their time and time zone,
     email, website, what they sell, plan; **Where it stands** — the stages,
     with an optional note. **Won** asks first, makes them a paying client (the
@@ -397,51 +394,20 @@ already says the day).
     `GET /api/mc/hub` (see HUB-API.md "## Plan inquiries"). An older machine
     without it simply shows no strip and no badge.
 
-- **Phone alerts** — a small panel (Settings → Phone alerts, or ⌘K)
-  that turns on push notifications for this device. See below.
-
 Top bar: Back (on pages inside a place), the page title, ⌘K on a computer
 (find a client, or type what you want to do), and the bell (what needs you:
 urgent to-dos, urgent alerts, call times waiting for your yes).
 
-## Phone alerts (Web Push)
+## Alerts: inside the hub only
 
-Every machine alert can pop up on the owner's iPhone as a normal notification —
-no Telegram, WhatsApp or SMS. It is standard Web Push. On iPhone and iPad it
-only works for the hub **added to the Home Screen and opened from there**
-(iOS 16.4 or later).
+Machine alerts are not sent to the owner's email, phone or Telegram. They show
+in the bell and in Settings › Alerts, and nowhere else. (Phone notifications,
+the service worker and `push.js` were removed on 2026-11-20; a phone that had
+turned them on forgets its old helper the next time it signs in.)
 
-**On the iPhone, once:**
+The hub can still be added to a phone's Home Screen (Share → Add to Home
+Screen); it then opens like an app. Links such as `#trial/{id}` open straight to the page.
 
-1. Open https://aviance.store in **Safari**.
-2. Tap the **Share** button (the square with an arrow pointing up; on newer
-   iPhones it is inside the ••• menu at the bottom), then **Add to Home Screen**
-   → **Add**.
-3. Open **Aviance** from the home screen and **sign in** (the home-screen app
-   keeps its own sign-in, separate from Safari — the login screen says so).
-4. **Settings** (bottom right) → **Phone alerts** → **Set up phone alerts** → **Turn on phone alerts** → **Allow**.
-5. Tap **Send a test**. "Test alert from Aviance" should pop up within seconds.
-
-Tapping an alert opens the trial it is about (`/#trial/{id}`), the inquiry
-(`/#inquiry/{id}`), the Calendar (`/#calendar`), Settings › Alerts (`/#alerts`), Settings › Warm-up (`/#settings/warmup`), Settings › Keys (`/#settings/keys`), Settings › Your details (`/#settings/details`) or the list (`/#trials`) — signing in first if
-needed. Urgent alerts stay on screen until tapped; a repeat of the same alert
-replaces the previous one. If alerts are blocked later: iPhone Settings →
-Notifications → Aviance → Allow Notifications.
-
-How it fits together:
-
-- `push.js` asks the machine for its public key (`GET /api/mc/push/key`, 503
-  until the machine has VAPID keys), asks the phone for permission *inside the
-  tap*, registers `/sw.js` (only then — just looking at the panel registers
-  nothing), subscribes, and posts `{subscription, device}` to
-  `/api/mc/push/subscribe`. "Send a test" → `/api/mc/push/test`; "Turn off" →
-  `/api/mc/push/unsubscribe` and drops the subscription on the phone. After
-  every sign-in it quietly re-posts an existing subscription (endpoints can
-  rotate). All calls use the same Supabase bearer token as the rest of
-  `/api/mc/*`.
-- `sw.js` has no fetch handler and uses no cache, so the hub itself is never
-  served stale; bump `SW_VERSION` when changing it. The push payload is
-  `{title, body, url, tag, urgent, at}`; only hub paths are followed.
 - Deep links (`#trial/{id}`, `#alerts`, `#trials`, `#settings/google?connected=1|error=…`) work on load and on
   `hashchange`; the hash is cleared once handled so the same alert can open it
   again.
@@ -543,10 +509,10 @@ Sign-in needs the real Supabase project.
 ```
 npm test          # node --test tests/*.test.mjs
 HUB_JOURNEY_REPORT=/tmp/journey.txt npm test   # + a plain-text report of every step of the journey
-npm run check     # node --check trials.js, inquiries.js, calendar.js, messages.js, autobuy.js, warmup.js, push.js, sw.js
+npm run check     # node --check trials.js, inquiries.js, calendar.js, messages.js, autobuy.js, warmup.js, keys.js, people.js, ava.js
 ```
 
-The tests load the shell's inline script, `trials.js`, `inquiries.js` and `push.js` into a tiny fake DOM
+The tests load the shell's inline script, `trials.js` and `inquiries.js` into a tiny fake DOM
 with a fake Supabase client, then exercise the router, the admin gate, the
 chart data mapping (null = gap, 0 = a real zero), spam-test verdicts for
 both tools, when growth is and isn't fetched, the simple Clients list (needs-you

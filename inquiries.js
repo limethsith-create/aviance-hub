@@ -131,7 +131,7 @@ function renderInquiries(list, counts, filter, meta) {
   // the chips: Open (every stage still in play) and All; each stage is a tile on the pipeline
   const chips = IQ_FILTERS.filter(([k]) => IQ_CHIPS.includes(k));
   const toolbar = `<div class="toolbar iq-toolbar"><div class="seg iq-filters" role="group" aria-label="Which inquiries">${chips.map(([k, l]) => `<button class="${filter === k ? 'active' : ''}" aria-pressed="${filter === k}" onclick="inquiriesSetFilter('${k}')">${l} · ${nOf(k)}</button>`).join('')}</div><div class="tk-inline iq-refresh">${tkUpdatedStamp(meta.at)}</div></div>` + renderInquiryPipeline(list, filter);
-  if (!list.length) return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'No inquiries yet', "When someone books a call from your website's Book a call form, it shows up here and on your phone.", '', null);
+  if (!list.length) return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'No inquiries yet', "When someone books a call from your website's Book a call form, it shows up here.", '', null);
   // Calls still ahead first (soonest first), then everything else newest first.
   const nowMs = (meta.now || new Date()).getTime();
   const ahead = (q) => { const d = tkParseDate(q.slotStart); return d && d.getTime() >= nowMs - 20 * 60000 ? d.getTime() : null; };

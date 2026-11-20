@@ -2,7 +2,7 @@
    Run with:  npm test   (= node --test tests/*.test.mjs)
 
    Same set-up as trials.test.mjs: the shell's inline script, then trials.js, inquiries.js,
-   calendar.js and push.js, exactly like the browser, with a tiny fake DOM and a fake Supabase
+   calendar.js exactly like the browser, with a tiny fake DOM and a fake Supabase
    client. The machine is a fake fetch that answers like the contract. No network. */
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,7 +44,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'push.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 
@@ -516,9 +516,9 @@ test('Trials list + trial page: a client who asked for a time says "They asked f
   } finally { offline(); calendarStopTimer(); trialsStopTimer(); }
 });
 
-test('files: calendar.js + calendar.css are loaded by index.html (after trials.js, before push.js) and syntax-checked by npm run check', () => {
+test('files: calendar.js + calendar.css are loaded by index.html (after trials.js, before people.js) and syntax-checked by npm run check', () => {
   assert.ok(html.includes('<link rel="stylesheet" href="trials.css">\n<link rel="stylesheet" href="calendar.css">'));
-  assert.ok(html.indexOf('<script src="inquiries.js"></script>') < html.indexOf('<script src="calendar.js"></script>') && html.indexOf('<script src="calendar.js"></script>') < html.indexOf('<script src="push.js"></script>'));
+  assert.ok(html.indexOf('<script src="inquiries.js"></script>') < html.indexOf('<script src="calendar.js"></script>') && html.indexOf('<script src="calendar.js"></script>') < html.indexOf('<script src="people.js"></script>'));
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.ok(pkg.scripts.check.includes('node --check calendar.js'));
   const vercel = JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8'));

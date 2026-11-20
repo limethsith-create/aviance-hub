@@ -44,7 +44,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js', 'push.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 supa.session = { access_token: 'test-token' };
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 
@@ -486,8 +486,8 @@ test('plain words: Settings › Warm-up (every state, a kind picked), the card a
 });
 
 /* ───────────── 7. files, touch targets, the phone ───────────── */
-test('files: warmup.js is loaded after autobuy.js and before push.js and syntax-checked; 44 px+ targets, 16 px boxes, nothing wider than a phone; signing out forgets', () => {
-  assert.ok(html.indexOf('<script src="autobuy.js"></script>') < html.indexOf('<script src="warmup.js"></script>') && html.indexOf('<script src="warmup.js"></script>') < html.indexOf('<script src="push.js"></script>'));
+test('files: warmup.js is loaded after autobuy.js and before people.js and syntax-checked; 44 px+ targets, 16 px boxes, nothing wider than a phone; signing out forgets', () => {
+  assert.ok(html.indexOf('<script src="autobuy.js"></script>') < html.indexOf('<script src="warmup.js"></script>') && html.indexOf('<script src="warmup.js"></script>') < html.indexOf('<script src="people.js"></script>'));
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.ok(pkg.scripts.check.includes('node --check warmup.js'));
   const css = fs.readFileSync(path.join(root, 'trials.css'), 'utf8');
