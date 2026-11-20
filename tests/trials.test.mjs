@@ -55,6 +55,7 @@ const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'trials.js'), 'utf8'), { filename: 'trials.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'inquiries.js'), 'utf8'), { filename: 'inquiries.js' });
+vm.runInThisContext(fs.readFileSync(path.join(root, 'feed.js'), 'utf8'), { filename: 'feed.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'messages.js'), 'utf8'), { filename: 'messages.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'autobuy.js'), 'utf8'), { filename: 'autobuy.js' });
 supa.session = { access_token: 'test-token' }; // boot() has already seen "no session" and shown the login screen
@@ -289,43 +290,23 @@ test('renderBoard: empty board, and hostile names are escaped', () => {
 const between = (html, a, b) => { const i = html.indexOf(a); const j = b ? html.indexOf(b, i + 1) : html.length; return html.slice(i, j < 0 ? html.length : j); };
 const visibleText = (html) => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
 
-test('Clients list: one row per client — company, person, the journey (bar + "Step 2 of 5 — …"), the plain sentence and what is next; the booked sales calls, Needs you, In progress, then a folded Done / not taken', () => {
+test('Clients list: the stage strip (when loaded), then Needs you with a button on each line, then Just happened — no money box, no groups, no add button', () => {
   const html = renderTrialList(simpleHub, { now: NOW });
-  // a booking waiting for its sales call: its own compact row at the top — the business, the match, the Word document, Won / Lost
-  const apps = between(html, '<h3 class="tk-group">Booked a sales call — Won or Lost after the call', '<h3 class="tk-group red">Needs you</h3>');
-  assert.ok(apps.includes('Fern IT') && apps.includes('Before the call (Word)') && apps.includes('>Won</button>') && apps.includes('>Lost</button>') && apps.includes('onclick="downloadApplication(&quot;fern-it&quot;)"'), 'the booking row');
-  const order = ['Bright Dental', 'eCreek IT', 'Delta Roofing', 'Gale Roofing', 'Acme Plumbing', 'Cobalt HVAC', 'Iris Dental'];
-  let last = -1; for (const name of order) { const i = html.indexOf('<span class="tk-person-co">' + name + '</span>'); assert.ok(i > last, 'row order: ' + name); last = i; }
-  assert.equal(count(html, /<button type="button" class="tk-person/g), 7, 'one row per client (the booking has its own row)');
+  for (const gone of ['tk-money-sum', 'Received this month', 'Booked a sales call — Won or Lost after the call', 'In progress — nothing needed from you', 'Done / not taken', 'tkDoneGroup', 'Add a paying client yourself', 'Bookings ·']) assert.ok(!html.includes(gone), 'removed: ' + gone);
+  assert.ok(typeof openNewPayingClient === 'function', 'the ⌘K "Add a paying client" still works');
+  assert.ok(html.indexOf('<h3>Needs you</h3>') >= 0 && html.indexOf('<h3>Needs you</h3>') < html.indexOf('<h3>Just happened</h3>'));
+  const needs = between(html, '<h3>Needs you</h3>', '<h3>Just happened</h3>');
+  // a booking waiting for its sales call: Won / Lost right there, and what we found one tap away
+  assert.ok(needs.includes('Fern IT') && needs.includes('>Won</button>') && needs.includes('>Lost</button>') && needs.includes('trialApproveApplication(&quot;fern-it&quot;)') && needs.includes('openDeclineApplication(&quot;fern-it&quot;)'), 'the booking line');
+  // the rows that need him: a red "You need to…" line and their button
+  assert.equal(count(needs, /class="tk-person-you"/g), 2);
+  assert.ok(needs.includes('<span class="tk-person-you">Sam wrote — answer them</span>') && needs.includes('Answer them</button>'), 'they wrote and nobody answered');
+  assert.ok(needs.includes('onclick="openTrial(&quot;ecreek-it&quot;)"'), 'a line opens that client');
+  for (const calmName of ['Acme Plumbing', 'Cobalt HVAC', 'Iris Dental']) assert.ok(!needs.includes(calmName), calmName + ' needs nothing');
   assert.ok(!html.includes('tk-person-co">Aviance<'), "the owner's own rows are not clients");
-  // needs you: a red heading, then the three rows with a red edge and a red "You need to…" line
-  const needs = between(html, '<h3 class="tk-group red">Needs you</h3>', '<details class="tk-done tk-going"');
-  assert.equal(count(needs, /class="tk-person needs"/g), 2); assert.equal(count(needs, /class="tk-person-you"/g), 2);
-  assert.ok(needs.includes('Sam Test') && needs.includes('Raj Patel'), "the person's name on each row");
-  assert.ok(needs.includes('<span class="tk-person-you">Sam wrote — answer them</span>'), 'they wrote and nobody answered: that is the red line');
-  assert.ok(needs.includes('<span class="tk-person-step">Step 2 of 5 — Onboarding call</span>') && needs.includes('<span class="tk-person-step">Step 3 of 5 — Setting up</span>'));
-  const going = between(html, 'In progress — nothing needed from you</span>', '<details class="tk-done" id="tkDoneGroup"');
-  assert.equal(count(going, /tk-person-you|tk-person needs/g), 0, 'in progress: no red');
-  assert.ok(going.includes('Sending — day 12, 2 calls booked') && going.includes('<span class="tk-person-next">Nothing for you: the Friday update goes out today</span>'));
-  assert.ok(going.includes('Step 4 of 5 — Sending emails</span>') && !going.includes('Day 12 of sending'), 'the plain sentence already says day 12: not said twice');
-  // done / not taken: folded, with a count, remembered when opened
-  const done = between(html, '<details class="tk-done"');
-  assert.ok(done.startsWith('<details class="tk-done" id="tkDoneGroup" ontoggle="trialsDoneToggle(this.open)">'), 'closed by default');
-  assert.ok(done.includes('Done / not taken') && done.includes('<span class="tk-done-count">1</span>') && !done.includes('Cobalt HVAC'), 'only what has nothing left');
-  // stopped, but a to-do is still open (the month-one invoice to mark paid): kept in view, not folded away
-  assert.ok(going.includes('Cobalt HVAC') && going.includes('Stopped') && going.includes('Step 5 of 5 — Stopped'));
-  const iris = between(done, 'Iris Dental', '</button>');
-  assert.ok(iris.includes('<span class="pill grey">Not taken</span>') && !iris.includes('tk-bar5') && !iris.includes('tk-person-say'), 'declined: "Not taken", no journey, no second "Declined"');
-  assert.ok(renderTrialList(simpleHub, { doneOpen: true }).includes('id="tkDoneGroup" open'), 'stays open across the 60-second refresh');
-  trialsDoneToggle(true); assert.equal(tk.doneOpen, true); trialsDoneToggle(false);
-  // clicking a row opens that client (a booking waiting for its sales call opens at what we found)
-  assert.ok(html.includes('onclick="openTrial(&quot;acme-plumbing&quot;)"') && html.includes("onclick=\"openTrial(&quot;fern-it&quot;,null,'application')\""));
-  // kept: adding a client yourself (at the bottom); gone: the old links row, the inquiry strip
-  assert.ok(html.indexOf('onclick="openNewPayingClient()">+ Add a paying client yourself</button>') > html.indexOf('tkDoneGroup'));
-  assert.ok(!html.includes('tk-more') && !html.includes('iq-strip') && !html.includes('openPhoneAlerts'), 'alerts and behind the scenes live in Settings now');
   assert.ok(!/\btrial\b/i.test(visibleText(html)), 'no trial words');
   const calm = renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({ live: [simpleRows.acme] }) }), {});
-  assert.ok(calm.includes("Nothing needs you right now. We'll tell you when something does.") && !calm.includes('Needs you</h3>') && !calm.includes('id="tkDoneGroup"'));
+  assert.ok(calm.includes('<b>Nothing to do</b>') && !calm.includes('feed-need"'));
 });
 
 test('Clients list: the clutter is gone — no stages board, no status strip, no counts, no to-do panel, no sparklines, no jargon', async () => {
@@ -342,7 +323,7 @@ test('Clients list: the clutter is gone — no stages board, no status strip, no
   try {
     render('trials'); await new Promise((r) => setTimeout(r, 5));
     const screen = el('tkHost').innerHTML;
-    assert.ok(screen.includes('tk-person-co">eCreek IT<') && !screen.includes('Heartbeat') && !screen.includes('tk-board'));
+    assert.ok(screen.includes('eCreek IT') && !screen.includes('Heartbeat') && !screen.includes('tk-board'));
     assert.equal(el('psub').textContent, 'Booked sales calls, and every client');
     assert.ok(!calls.some((c) => c[1].includes('/growth')), 'no growth history for the list');
     assert.deepEqual(calls.filter((c) => c[1] === '/api/mc/onboard-calls/check'), [['POST', '/api/mc/onboard-calls/check']], 'the check is asked for once');
@@ -356,17 +337,12 @@ test('Clients list: the clutter is gone — no stages board, no status strip, no
 
 test('Clients list: an older machine without row.simple falls back to the state and the to-dos; an empty list says what to expect', () => {
   const html = renderTrialList(fullHub, { now: NOW });
-  const needs = between(html, 'Needs you</h3>', 'In progress — nothing needed from you</span>');
-  assert.ok(between(html, 'Booked a sales call — Won or Lost after the call', 'Needs you</h3>').includes('Fern IT'), 'a booking waiting for its sales call: its own row at the top');
-  assert.ok(needs.includes('Bright Dental') && needs.includes('Waiting for you to buy') && needs.includes('You need to buy bright-team.com and 2 inboxes, then paste the logins.'), 'an urgent to-do needs you; the red line is that to-do');
-  const going = between(html, 'In progress — nothing needed from you</span>', '<details class="tk-done" id="tkDoneGroup"');
-  assert.ok(going.includes('Acme Plumbing') && going.includes('Sending — Day 12') && going.includes('Decide the dispute on the call with bob@example.com') && going.includes('Ann Lee'));
-  assert.ok(going.includes('Step 4 of 5 — Sending emails'), 'the step comes from the state');
-  assert.ok(going.includes('Cobalt HVAC') && !between(html, '<details class="tk-done"').includes('Cobalt HVAC'), 'stopped, invoice still to mark paid → still in view');
-  const paid = Object.assign({}, fullHub, { stages: fullHub.stages.map((st) => Object.assign({}, st, { clients: st.clients.map((r) => (r.id === 'cobalt-hvac' ? Object.assign({}, r, { todo: [] }) : r)) })) });
-  assert.ok(between(renderTrialList(paid, { now: NOW }), '<details class="tk-done"').includes('Cobalt HVAC'), 'stopped and nothing left → Done');
+  const needs = between(html, '<h3>Needs you</h3>', '<h3>Just happened</h3>');
+  assert.ok(needs.includes('Fern IT') && needs.includes('>Won</button>'), 'a booking waiting for its sales call: Won / Lost right there');
+  assert.ok(needs.includes('Bright Dental') && needs.includes('You need to buy bright-team.com and 2 inboxes, then paste the logins.'), 'an urgent to-do needs you; the red line is that to-do');
+  assert.ok(!needs.includes('Acme Plumbing') && !needs.includes('Cobalt HVAC'), 'running clients are not on the list unless something needs him');
   const e = renderTrialList(emptyHub, { now: NOW });
-  assert.ok(e.includes('No clients yet') && e.includes('When someone books a call on your website') && e.includes('Add a paying client yourself'));
+  assert.ok(e.includes('<b>Nothing to do</b>') && e.includes('Nothing yet'));
   assert.ok(tkSimple({}).label === '—' && tkSimple({ state: 'sending' }).step === 'sending' && tkSimple({ state: 'declined' }).done);
 });
 
@@ -375,9 +351,8 @@ test('Clients list: every value from the machine is escaped, ids only reach the 
     simple: { step: 'sending', company: '<img src=x onerror=alert(1)>', person: '<b onclick=alert(2)>Sam</b>', label: '<script>alert(3)</script>', next: '"><svg onload=alert(4)>', needsYou: true, since: '2026-10-17T00:00:00Z', dayOf30: 3 } });
   const html = renderTrialList(Object.assign({}, simpleHub, { stages: stagesWith({ live: [evil] }) }), {});
   assert.ok(!html.includes('<img src=x') && !html.includes('<b onclick') && !html.includes('<script>alert(3)') && !html.includes('"><svg onload'));
-  assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;') && html.includes('&lt;script&gt;alert(3)&lt;/script&gt;') && html.includes('&quot;&gt;&lt;svg onload=alert(4)&gt;'));
+  assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;') && html.includes('&quot;&gt;&lt;svg onload=alert(4)&gt;'));
   assert.ok(html.includes('onclick="openTrial(&quot;x\\&quot;);alert(1);(\\&quot;&quot;)"'), 'the id is a JSON string inside the handler');
-  assert.ok(html.includes('Step 4 of 5 — Sending emails · Day 3 of sending'), 'Day N of sending while sending, when the sentence does not already say it');
 });
 
 test('the Clients badge counts the clients who need you (red) and new bookings, in the sidebar and the phone tab bar', () => {
@@ -853,7 +828,7 @@ test('machine unreachable on first load: one clear card; a failed refresh keeps 
   trialsIngestHub(fullHub);
   globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => JSON.stringify({ error: 'Unauthorized' }) });
   await loadHub(true);
-  const h = trialsHostHTML('trials'); assert.ok(h.includes("Couldn't refresh — showing what we had") && h.includes('Acme Plumbing'));
+  const h = trialsHostHTML('trials'); assert.ok(h.includes("Couldn't refresh — showing what we had") && h.includes('Bright Dental'));
   globalThis.fetch = ok(fullHub); await loadHub(true);
 });
 
@@ -1580,7 +1555,7 @@ test('everything that used to scroll the client page lands on the right side and
 test('no code opens a tab that is gone: every tab key the hub passes (trialsSetTab, tkOpenSystem, openTrial, the repaints) is one of the nine', () => {
   const keys = new Set(tkSysTabs().map(([k]) => k));
   assert.deepEqual([...keys], ['overview', 'conversations', 'sent', 'calls', 'messages', 'money', 'health', 'leads', 'setup']);
-  const files = ['trials.js', 'messages.js', 'autobuy.js', 'warmup.js', 'calendar.js', 'inquiries.js', 'keys.js', 'people.js', 'index.html'];
+  const files = ['trials.js', 'messages.js', 'autobuy.js', 'warmup.js', 'calendar.js', 'inquiries.js', 'feed.js', 'keys.js', 'people.js', 'index.html'];
   const lit = `(?:'(\\w+)'|"(\\w+)"|\\$\\{tkAttr\\('(\\w+)'\\)\\}|&quot;(\\w+)&quot;)`;
   const pats = [new RegExp(`trialsSetTab\\(${lit}`, 'g'), new RegExp(`trialsRepaintTab\\(${lit}`, 'g'), new RegExp(`tkOpenSystem\\([^,()]+(?:\\([^()]*\\))?\\s*,\\s*${lit}`, 'g'),
     new RegExp(`openTrial\\([^,()]+(?:\\([^()]*\\))?\\s*,\\s*${lit}`, 'g'), new RegExp(`trialTab\\)?\\s*===?\\s*${lit}`, 'g'), new RegExp(`\\bt===${lit}(?:\\|\\|t===${lit})?\\)(?:trials|tk)`, 'g')];

@@ -52,7 +52,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
-for (const f of ['trials.js', 'inquiries.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
+for (const f of ['trials.js', 'inquiries.js', 'feed.js', 'calendar.js', 'messages.js', 'autobuy.js', 'warmup.js']) vm.runInThisContext(fs.readFileSync(path.join(root, f), 'utf8'), { filename: f });
 after(() => { trialsStopTimer(); calendarStopTimer(); });
 const asOwner = () => { authUser = { uid: 'u1', name: 'Owner', role: 'admin', email: 'owner@example.com' }; };
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -209,7 +209,7 @@ for (const s of J) {
     (o.calendar || []).forEach((h, i) => clean(s.step + ' Calendar week ' + i, h));
     (o.meetings || []).forEach((h, i) => clean(s.step + ' meeting panel ' + i, h));
     if (!s.detail) {
-      assert.ok(flat(o.list).includes('No clients yet'), '00: an empty list says so');
+      assert.ok(flat(o.list).includes('Nothing to do'), '00: an empty list says so');
       return;
     }
     clean(s.step + ' trial page', o.page);
@@ -220,17 +220,14 @@ for (const s of J) {
     const sim = s.detail.row.simple;
     const n = TK_STEP_OF[sim.step];
     assert.ok(n >= 1 && n <= 5, s.step + ': a known step (' + sim.step + ')');
-    let rowHtml = '';
+    // the live list: a client shows under "Needs you" (with its button) only when he is needed
+    const needsHtml = o.list.slice(o.list.indexOf('<h3>Needs you</h3>'), o.list.indexOf('<h3>Just happened</h3>'));
+    const lis = needsHtml.split('<li class="feed-need">').slice(1).filter((x) => x.includes('Ridgeline IT'));
+    let rowHtml = lis.join('');
     if (tkIsUnderReview(s.detail.row)) {
-      // a booking waiting for its sales call: just the business, the match, the Word document, Won / Lost
-      const at = o.list.lastIndexOf('<div class="tk-app-row">', o.list.indexOf('Ridgeline IT'));
-      const app = flat(o.list.slice(at, o.list.indexOf('</div></div>', at)));
-      assert.ok(at >= 0 && app.includes('Ridgeline IT') && /\d+% match/.test(app) && app.includes('Before the call (Word)') && app.includes('Won') && app.includes('Lost'), s.step + ': the booking row: ' + app);
-    } else {
-    const rowAt = o.list.lastIndexOf('<button type="button" class="tk-person', o.list.indexOf('Ridgeline IT'));
-    rowHtml = o.list.slice(rowAt, o.list.indexOf('</button>', rowAt));
-    assert.ok(rowHtml.includes('<span class="tk-person-step">Step ' + n + ' of 5 — ' + TK_STEPS[n - 1]), s.step + ': the list says step ' + n + ' — ' + TK_STEPS[n - 1]);
-    assert.equal([...rowHtml.matchAll(/<span class="tk-b5 (\w+)">/g)].map((m) => m[1]).join(','), TK_STEPS.map((_, i) => (i + 1 < n ? 'done' : i + 1 === n ? 'now' : 'todo')).join(','), s.step + ': the small bar');
+      // before the call it is on "Just happened"; once the call time has passed it is on "Needs you" with its buttons right there
+      assert.ok(flat(o.list).includes('Ridgeline IT'), s.step + ': the booking is on the list');
+      if (rowHtml) assert.ok(rowHtml.includes('>Call done</button>') || rowHtml.includes('>Won</button>'), s.step + ': its buttons are right there: ' + flat(rowHtml));
     }
     assert.ok(new RegExp('<li class="now" aria-current="step"><span class="tk-j-dot" aria-hidden="true">' + n + '</span><span class="tk-j-name">' + TK_STEPS[n - 1] + '</span>').test(o.top), s.step + ': the trial page is at step ' + n);
     if (sim.dayOf30 != null) assert.ok(new RegExp('\\b[Dd]ay ' + sim.dayOf30 + '\\b').test(flat(o.top)) && !/\bof 30\b/.test(flat(o.top)), s.step + ': day ' + sim.dayOf30 + ' (no "of 30")');
@@ -254,8 +251,8 @@ for (const s of J) {
     const needs = sim.needsYou || o.act.kind === 'reply' || o.act.kind === 'warmupHelpers';
     const g = tkListGroups(tk.hub);
     assert.equal(g.needs.some((x) => x.row.id === ID), !!sim.needsYou, s.step + ': under "Needs you" exactly when the machine says so');
-    assert.equal(o.list.includes('<h3 class="tk-group red">'), !!sim.needsYou, s.step + ': the red heading');
-    if (!tkIsUnderReview(s.detail.row)) assert.equal(rowHtml.includes('tk-person needs') && rowHtml.includes('class="tk-person-you"'), !!sim.needsYou, s.step + ': the red edge and the red line');
+    if (!tkIsUnderReview(s.detail.row)) assert.equal(rowHtml.includes('feed-need-main'), !!sim.needsYou, s.step + ': on the Needs you list exactly when the machine says so');
+    if (!tkIsUnderReview(s.detail.row)) assert.equal(rowHtml.includes('class="tk-person-you"'), !!sim.needsYou, s.step + ': the red line');
     if (sim.needsYou && !tkIsUnderReview(s.detail.row)) assert.match(decode((rowHtml.match(/<span class="tk-person-you">([^<]*)<\/span>/) || [])[1] || ''), sim.needsReply ? /^Dana wrote — answer them$/ : /^You need to [a-z].*\.$/, s.step + ': the red line is an instruction (never "You need to: …")');
     assert.equal(o.top.includes('<section class="card tk-top needs"'), needs, s.step + ': the red edge on the page');
     const reds = [...o.front.matchAll(/class="([^"]*\b(red|late|urgent)\b[^"]*)"/g)].map((m) => m[1]);
@@ -426,7 +423,7 @@ test('times: Sri Lanka time everywhere whatever the device is set to (here US Pa
 test('01 booked: on the list under "Booked a sales call"; the page asks him to read what we found in its own words (not "open it"), scrolls to it, which is open with Won / Lost', () => {
   const o = drawStep(byStep('01'));
   // the list: the business, how well they match, what we found as a Word document, Won / Lost
-  assert.match(flat(o.list), /Booked a sales call — Won or Lost after the call 1 Ridgeline IT Starter \d+% match Before the call \(Word\) ↓ Won Lost Details/, flat(o.list));
+  assert.ok(flat(o.list).includes('Ridgeline IT booked a call'), flat(o.list));
   assert.equal(o.act.say, 'Dana booked a sales call. Read what they sent and what we found before the call. After it, press Won (they become a client and get the onboarding email) or Lost.', 'on the page itself, never "open it"');
   assert.ok(o.page.includes('<div class="section-head tk-section" id="tkSec-application"><h3>Before the sales call</h3>') && o.page.includes('>Won — make them a client</button>') && o.page.includes('>Lost</button>'));
   assert.ok(/\d+ \/100/.test(flat(o.page)) && flat(o.page).includes('Strong fit'), 'the fit score');
@@ -443,7 +440,7 @@ test('05 time requested: the big button opens the Calendar at her request; the l
   const s = byStep('05');
   const o = drawStep(s);
   const mid = s.detail.onboardCall.meetingId;
-  assert.ok(o.list.includes(`onclick="openCalendar(&quot;${mid}&quot;)"><span>Open the Calendar to say yes</span>`), 'the list: a way straight there');
+  assert.ok(o.list.includes(`onclick="openCalendar(&quot;${mid}&quot;)"`) && flat(o.list).includes('asked for a call time. Say yes in the Calendar.'), 'the list: a way straight there');
   assert.ok(!o.page.includes('cal-trial-ask'), 'said once — the big button');
   assert.ok(!flat(o.call).includes('Book by'), 'she asked for a time: the booking deadline is not the news');
   assert.ok(flat(o.call).includes('The email links your booking page. The time they pick comes to your Calendar for your yes.'), 'the machine sends no link of his own: the booking page (not "reply with times")');
@@ -552,7 +549,7 @@ test('24–25 Dana writes: "Answer Dana\'s message" puts the cursor in the reply
 test('27 legal hold: the legal reply itself, then "Clear the hold and send again" — it asks first ("Clear the legal hold and let this client send again?") and posts clearLegalHold; no raw id anywhere', async () => {
   const s = byStep('27');
   const o = drawStep(s);
-  assert.ok(flat(o.list).includes('Sending stopped — a prospect replied with a legal threat You need to read the legal reply, then clear the hold.'));
+  assert.ok(flat(o.list).includes('You need to read the legal reply, then clear the hold.'));
   assert.ok(o.top.includes('<blockquote class="tk-q-quote"><p>“Forwarding this to our attorney. Cease and desist.”</p><footer>alan@ortizlaw140.com · Wed 28 Oct, 8:10 pm your time</footer></blockquote>'));
   assert.ok(flat(o.top).includes('A prospect replied with a legal threat, so sending stopped. They are off every list already. Read what they wrote, then clear the hold to start sending again.'));
   // the machine's to-do detail is a reply id: never shown (Behind the scenes, the bell)
@@ -597,9 +594,13 @@ test('"Needs you" first: the journey\'s rows side by side on one list — the bo
   assert.deepEqual(g.done.map((x) => x.row.id), []);
   const out = renderTrialList(board, { now: new Date(byStep('30').at) });
   const at = (t) => out.indexOf(t);
-  assert.ok(at('Booked a sales call — Won or Lost after the call') < at('Co 01') && at('Co 01') < at('Needs you</h3>') && at('Needs you</h3>') < at('Co 27') && at('Co 05') < at('In progress — nothing needed from you</span>'), 'the booking first, then Needs you, then in progress');
-  assert.equal((out.match(/class="tk-person needs"/g) || []).length, 5);
-  assert.equal((out.match(/class="tk-app-row"/g) || []).length, 1, 'the booking waiting for its sales call: its own row at the top');
+  const needsPart = out.slice(at('<h3>Needs you</h3>'), at('<h3>Just happened</h3>'));
+  assert.ok(needsPart.includes('Co 01') && needsPart.includes('>Won</button>') && needsPart.includes('>Lost</button>'), 'the booking waiting for its sales call: Won / Lost right there');
+  for (const n of ['Co 27', 'Co 24', 'Co 17', 'Co 11', 'Co 05']) assert.ok(needsPart.includes('feed-kind">' + n + '<'), n + ' needs him');
+  for (const n of ['Co 21', 'Co 29', 'Co 30']) assert.ok(!needsPart.includes('feed-kind">' + n + '<'), n + ' is running: not on the list');
+  assert.equal((needsPart.match(/class="tk-person-you"/g) || []).length, 5);
+  const order = ['Co 27', 'Co 24', 'Co 17', 'Co 11', 'Co 05'].map((n) => needsPart.indexOf('feed-kind">' + n + '<'));
+  assert.deepEqual(order.slice().sort((x, y) => x - y), order, 'newest first');
   assert.equal(trialsNavCount(), 5 + ((board.inquiries && board.inquiries.counts && board.inquiries.counts.new) || 0), 'the Clients badge: who needs him + new bookings');
   trialsForget();
 });
