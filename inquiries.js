@@ -190,7 +190,7 @@ function renderInquiry(q, meta) {
       ? `<p class="tk-small muted">They said yes on the call? Press <b>Send the agreement and invoice</b>: both are emailed to them straight away. Once they've paid, press <b>Won</b> and the onboarding email goes out. Or <b>Lost</b> (nothing is emailed).${q.clientId ? ` <span class="tk-linkish" onclick="openTrial(${tkAttr(q.clientId)})">What we found before the call →</span>` : ''}</p>`
       : `<p class="tk-small muted">No website on this booking, so Won can't make them a client from here. Add them with their website instead.</p><div class="tk-inline"><button class="btn ghost" onclick="inquiryAddClient(${tkAttr(id)})">Add them as a paying client</button></div>`;
   const next = IQ_NEXT[q.status] || [];
-  const moveBtn = (s, main) => `<button class="btn${main ? '' : ' ghost'}" onclick="inquirySetStatus(${tkAttr(id)},'${s}')">${esc(s === 'agreement_sent' ? 'Send the agreement and invoice' : IQ_STATUS[s][1])}</button>`;
+  const moveBtn = (s, main) => `<button class="btn${main ? '' : ' ghost'}" onclick="inquirySetStatus(${tkAttr(id)},'${s}')">${esc(s === 'agreement_sent' ? 'Send the agreement and invoice' : s === 'won' && q.status === 'agreement_sent' && q.invoice ? 'They paid' : IQ_STATUS[s][1])}</button>`;
   const others = IQ_STATUSES.filter((s) => s !== q.status && !next.includes(s));
   const path = ['new', 'held', 'contacted', 'agreement_sent', 'won'];
   const at = path.indexOf(q.status);
@@ -273,6 +273,10 @@ function inquirySetStatus(id, status) {
     ? { confirm: 'Mark ' + name + ' as Won? Only once they have paid: they become a paying client and get an email asking them to book the onboarding call.', done: 'Won — ' + name + ' is a client now and was emailed', fail: 'Not marked Won' }
     : status === 'lost' && q && q.clientId ? { confirm: 'Mark ' + name + ' as Lost? Nothing is emailed to them.', done: 'Moved to Lost', fail: 'Not changed' }
       : { done: 'Moved to ' + (IQ_STATUS[status] ? IQ_STATUS[status][1] : label), fail: 'Not changed' };
+  // The invoice sent after the yes is paid: the machine records it, tells you in the hub, and starts onboarding.
+  if (status === 'won' && q && q.status === 'agreement_sent' && q.invoice) {
+    return trialPost('/api/mc/inquiries', { action: 'paid', id }, { confirm: 'Mark ' + name + ' as paid? They move to Won, become a paying client and get the email to book the onboarding call.', done: name + ' paid — onboarding started', fail: 'Not changed' });
+  }
   return trialPost('/api/mc/inquiries', Object.assign({ action: 'status', id, status }, note ? { note } : {}), opts);
 }
 function inquiryAddNote(id) {

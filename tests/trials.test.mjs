@@ -1179,6 +1179,8 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
       const q = recs.find((r) => r.id === body.id);
       if (body.action === 'status' && body.status === 'won' && wonReply) reply = wonReply;
       else if (body.action === 'status') { q.status = body.status; if (body.status === 'won') q.clientId = q.clientId || 'stone-roofing'; if (body.note) q.notes.push({ at: NOW.toISOString(), text: body.note }); reply = { status: 200, body: { ok: true, inquiry: q } }; }
+      if (body.action === 'status' && body.status === 'agreement_sent') q.invoice = { number: 'AV-202611-qmgv1stone', sentAt: NOW.toISOString() };
+      if (body.action === 'paid') { q.status = 'won'; q.clientId = 'stone-roofing'; q.invoice.paidAt = NOW.toISOString(); reply = { status: 200, body: { ok: true, paid: true, first: true, inquiry: q } }; }
       if (body.action === 'note') { q.notes.push({ at: NOW.toISOString(), text: body.text }); reply = { status: 200, body: { ok: true, inquiry: q } }; }
     }
     return { ok: reply.status < 400, status: reply.status, text: async () => JSON.stringify(reply.body) };
@@ -1212,11 +1214,12 @@ test('inquiries: #inquiry/{id} and #inquiries deep links; the list, the detail a
     assert.equal(asked, 'Send Stone Roofing the agreement and the invoice now? Both are emailed to them straight away.');
     assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'agreement_sent' });
     assert.ok(el('toast').innerHTML.includes('Agreement and invoice sent to Stone Roofing'));
-    // Won (after payment): asks first, says what it does, the page links to the new client
+    // They paid the invoice sent after the yes: the big button says so, asks first, posts 'paid'
+    assert.ok(el('tkHost').innerHTML.includes(">They paid</button>"), 'after the yes the big button is They paid');
     await inquirySetStatus('qmgv1stone', 'won');
-    assert.equal(asked, 'Mark Stone Roofing as Won? Only once they have paid: they become a paying client and get an email asking them to book the onboarding call.');
-    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'status', id: 'qmgv1stone', status: 'won' });
-    assert.ok(el('toast').innerHTML.includes('Won — Stone Roofing is a client now and was emailed'));
+    assert.equal(asked, 'Mark Stone Roofing as paid? They move to Won, become a paying client and get the email to book the onboarding call.');
+    assert.deepEqual(calls.filter((c) => c[0] === 'POST').pop()[2], { action: 'paid', id: 'qmgv1stone' });
+    assert.ok(el('toast').innerHTML.includes('Stone Roofing paid — onboarding started'));
     assert.ok(el('tkHost').innerHTML.includes('Open their page →') && el('tkHost').innerHTML.includes('openTrial(&quot;stone-roofing&quot;)'), 'links to the new client');
     // the machine refuses (no website): the reason, nothing moved
     wonReply = { status: 400, body: { error: 'This booking has no website. Add them with “Add a paying client” instead, with their website.' } };
