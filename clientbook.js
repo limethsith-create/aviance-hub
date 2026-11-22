@@ -2,7 +2,7 @@
    clientbook.js — Aviance Hub · the clients and the journey
    ----------------------------------------------------------------------------
    Who every client is, what stage they are at, and what needs a person today.
-   This replaces the old Clients screen (trials.js). It talks to Supabase only,
+   This replaces the old Clients screen. It talks to Supabase only,
    through the shell's `sb` client. There is no other server to call and no
    other server to call it from. Nothing here sends email, buys an inbox, warms
    anything up or touches an API key — those features are gone.

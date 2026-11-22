@@ -363,10 +363,22 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
 
 <script>
 /* ===================== AVIANCE HUB — shell =====================
-   Sign-in, router, the four-place navigation (sidebar on a computer, tab bar
-   on a phone), ⌘K, notifications, theme. Everything the owner sees inside is
-   Clients + Settings in trials.js, Inquiries in inquiries.js, the Calendar
-   in calendar.js, and Messages, Google Meet and the reply bot in messages.js. */
+   Sign-in, the router, the navigation (sidebar on a computer, tab bar on a
+   phone), ⌘K, notifications, theme. The shell draws no screen of its own.
+
+   Each screen lives in one file, loaded by a <script> tag at the end of this
+   page, and reaches the database through the `sb` client below. The hub calls
+   no other server. SCHEMA.md lists every table and which file owns it.
+
+     clientbook.js   clients, stages, the journey        pipeline.js   our enquiries, won and lost
+     meetings.js     the calendar, reminders, no-shows   calling.js    the cold calling desk, do-not-call
+     portal.js       their people, requests, channel     team.js       who works here, the work queue
+     onboarding.js   the gate to day one, invoices       outreach.js   the outreach tool
+     digest.js       today, Friday update, month end     wrapup.js     the ending, handover, deletion
+     finance.js      the money                           settings.js   you, the calendar, the tool behind
+
+   The email sending itself happens in an outside tool, reached only through
+   outreach-adapter.js. No keys are kept here. */
 
 /* Capture the URL hash before supabase-js processes & strips it (password recovery flow) */
 const INITIAL_HASH=location.hash||'';
@@ -412,9 +424,10 @@ function openModal(html){document.getElementById('modal').innerHTML=html;documen
 function closeModal(){document.getElementById('modalWrap').classList.remove('open');}
 document.getElementById('modalWrap').addEventListener('click',e=>{if(e.target.id==='modalWrap')closeModal();});
 
-/* ---- Router: Clients + Settings (trials.js), Inquiries (inquiries.js) and the Calendar (calendar.js) — lazy wrappers, the files load after this.
-   The places are Clients ('paying'), Calendar, Team, Activity and Settings; the rest are pages inside them with a Back button (back).
-   'trials' (the old Trials place) opens Clients. ---- */
+/* ---- Router. Every entry names a function in one of the files above, which
+   load after this script, so each is called through V() rather than directly.
+   The places in the sidebar are set by navItems(); anything else is a page
+   inside one of them and carries a Back button (back). ---- */
 const views={
   home:{fn:()=>V('viewHome'),title:'Today',sub:'Where everything stands'},
   clients:{fn:()=>V('viewClients'),title:'Clients',sub:'Who is where, and what needs you'},

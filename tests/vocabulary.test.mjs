@@ -102,3 +102,23 @@ test('every browser file is syntax-checked by npm run check', () => {
     assert.ok(pkg.scripts.check.includes('node --check ' + f), `${f} is missing from the check script`);
   }
 });
+
+/* The two stage bugs this file exists to catch were both written by someone
+   reading a comment that described the old hub. So the prose is checked too. */
+test('no file mentions a module that was deleted, even in a comment', () => {
+  const RETIRED_FILES = [
+    'trials.js', 'calendar.js', 'inquiries.js', 'messages.js', 'warmup.js',
+    'keys.js', 'autobuy.js', 'seats.js', 'people.js', 'numbers.js',
+    'cleanup.js', 'feed.js', 'stages.js',
+  ];
+  const sources = [...jsFiles, 'index.html'];
+  for (const f of sources) {
+    const src = fs.readFileSync(path.join(root, f), 'utf8');
+    for (const gone of RETIRED_FILES) {
+      assert.ok(
+        !src.includes(gone),
+        `${f} mentions ${gone}, which no longer exists — a stale comment is how the last two bugs got written`
+      );
+    }
+  }
+});
