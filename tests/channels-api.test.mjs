@@ -345,10 +345,10 @@ test('every contract function exists and answers in the {ok,data,error} shape ev
     }
   } finally { fakeSb.from = builder; fakeSb.rpc = rpc0; }
 });
-test('files: channels-api.js is loaded before trials.js and syntax-checked by npm run check; it renders nothing and keeps no secrets', () => {
+test('files: channels-api.js is loaded first and syntax-checked by npm run check; it renders nothing and keeps no secrets', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   assert.ok(html.indexOf('<script src="channels-api.js"></script>') > 0);
-  assert.ok(html.indexOf('<script src="channels-api.js"></script>') < html.indexOf('<script src="trials.js"></script>'));
+  assert.ok(html.indexOf('<script src="channels-api.js"></script>') < html.indexOf('<script src="finance.js"></script>'));
   assert.match(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts.check, /node --check channels-api\.js/);
   const src = fs.readFileSync(path.join(root, 'channels-api.js'), 'utf8');
   assert.ok(!/innerHTML|document\./.test(src));

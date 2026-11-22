@@ -5,12 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Aviance Hub</title>
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="trials.css">
-<link rel="stylesheet" href="calendar.css">
-<link rel="stylesheet" href="numbers.css">
+<link rel="stylesheet" href="clientbook.css">
+<link rel="stylesheet" href="pipeline.css">
+<link rel="stylesheet" href="meetings.css">
+<link rel="stylesheet" href="calling.css">
 <link rel="stylesheet" href="channels.css">
-<link rel="stylesheet" href="stages.css">
-<link rel="stylesheet" href="feed.css">
+<link rel="stylesheet" href="portal.css">
+<link rel="stylesheet" href="team.css">
+<link rel="stylesheet" href="onboarding.css">
+<link rel="stylesheet" href="outreach.css">
+<link rel="stylesheet" href="digest.css">
+<link rel="stylesheet" href="wrapup.css">
+<link rel="stylesheet" href="settings.css">
 <!-- Installable app (Add to Home Screen) -->
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
@@ -357,10 +363,22 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
 
 <script>
 /* ===================== AVIANCE HUB — shell =====================
-   Sign-in, router, the four-place navigation (sidebar on a computer, tab bar
-   on a phone), ⌘K, notifications, theme. Everything the owner sees inside is
-   Clients + Settings in trials.js, Inquiries in inquiries.js, the Calendar
-   in calendar.js, and Messages, Google Meet and the reply bot in messages.js. */
+   Sign-in, the router, the navigation (sidebar on a computer, tab bar on a
+   phone), ⌘K, notifications, theme. The shell draws no screen of its own.
+
+   Each screen lives in one file, loaded by a <script> tag at the end of this
+   page, and reaches the database through the `sb` client below. The hub calls
+   no other server. SCHEMA.md lists every table and which file owns it.
+
+     clientbook.js   clients, stages, the journey        pipeline.js   our enquiries, won and lost
+     meetings.js     the calendar, reminders, no-shows   calling.js    the cold calling desk, do-not-call
+     portal.js       their people, requests, channel     team.js       who works here, the work queue
+     onboarding.js   the gate to day one, invoices       outreach.js   the outreach tool
+     digest.js       today, Friday update, month end     wrapup.js     the ending, handover, deletion
+     finance.js      the money                           settings.js   you, the calendar, the tool behind
+
+   The email sending itself happens in an outside tool, reached only through
+   outreach-adapter.js. No keys are kept here. */
 
 /* Capture the URL hash before supabase-js processes & strips it (password recovery flow) */
 const INITIAL_HASH=location.hash||'';
@@ -389,11 +407,8 @@ const I={
 /* ---- Config ---- */
 const SUPA_URL='https://zjbxnkpktbghhudjbxhk.supabase.co';
 const SUPA_KEY='sb_publishable_WV4FANV2hNsmbzK3DbiLFg_9bjiB8Z1';
-/* The system behind the hub (email-distributor). Override for testing: localStorage.setItem('avianceMachineUrl','http://localhost:3000') */
-const MACHINE_URL=(function(){try{return localStorage.getItem('avianceMachineUrl')||'https://email-distributor.vercel.app'}catch(e){return 'https://email-distributor.vercel.app'}})();
-/* Pages of the full control panel (Mission Control) — opened signed-in, in a new tab (openMachine in trials.js).
-   Listed in Settings › Advanced and in ⌘K. */
-const MACHINE_PAGES=[['/mc/warmup',I.sun,'Warm-up circle'],['/mc/config',I.gear,'Advanced settings'],['/mc/learning',I.chart,'What we learned']];
+/* The hub stands on its own. Everything it knows is in its own database, reached through sb below.
+   It calls no other server. Email sending lives in an outside tool, behind outreach-adapter.js. */
 const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY);
 
 /* ---- State ---- */
@@ -409,26 +424,74 @@ function openModal(html){document.getElementById('modal').innerHTML=html;documen
 function closeModal(){document.getElementById('modalWrap').classList.remove('open');}
 document.getElementById('modalWrap').addEventListener('click',e=>{if(e.target.id==='modalWrap')closeModal();});
 
-/* ---- Router: Clients + Settings (trials.js), Inquiries (inquiries.js) and the Calendar (calendar.js) — lazy wrappers, the files load after this.
-   The places are Clients ('paying'), Calendar, Team, Activity and Settings; the rest are pages inside them with a Back button (back).
-   'trials' (the old Trials place) opens Clients. ---- */
+/* ---- Router. Every entry names a function in one of the files above, which
+   load after this script, so each is called through V() rather than directly.
+   The places in the sidebar are set by navItems(); anything else is a page
+   inside one of them and carries a Back button (back). ---- */
 const views={
-  trials:{fn:()=>viewPaying(),title:'Clients',sub:'Who is where, and what needs you',alias:'paying'},
-  trial:{fn:()=>viewTrial(),title:'Client',sub:'',back:()=>render('paying')},
-  clientSystem:{fn:()=>viewClientSystem(),title:'Email system',sub:'',wide:true,back:()=>currentTrialId?openTrial(currentTrialId):render('paying')},
-  paying:{fn:()=>viewPaying(),title:'Clients',sub:'Booked sales calls, and every client'},
-  trialPurchase:{fn:()=>viewTrialPurchase(),title:'Buy & paste',sub:'Buy the domain and inboxes, then paste the logins',back:()=>currentTrialId?openTrial(currentTrialId):render('paying')},
-  calendar:{fn:()=>viewCalendar(),title:'Calendar',sub:'Every call, in Sri Lanka time'},
-  channels:{fn:()=>typeof viewChannels==='function'?viewChannels():clientLoading(),title:'Channels',sub:()=>hubIsClient()?'Message the Aviance team':'Talk with your team and your clients',wide:true},
-  inquiries:{fn:()=>viewInquiries(),title:'Bookings',sub:'Sales calls booked from the website — mark each one Won or Lost',back:()=>render('paying')},
-  inquiry:{fn:()=>viewInquiry(),title:'Booking',sub:'',back:()=>render('inquiries')},
-  settings:{fn:()=>viewSettings(),title:'Settings',sub:'Your details, keys, alerts, Google Meet, warm-up helpers, the reply bot, and how everything is running'},
-  people:{fn:()=>viewPeople(),title:'Activity',sub:'Who signed in and out, for how long, and what they opened'},
-  numbers:{fn:()=>typeof numbersView==='function'?numbersView():clientLoading(),title:'Numbers',sub:'How your emails are doing'},
-  team:{fn:()=>teamPageView(),title:'Team',sub:'Who is working on what, and which clients each person looks after'},
-  trialsBoard:{fn:()=>viewTrialsBoard(),title:'Behind the scenes',sub:'Every client by stage, every to-do',back:()=>render('settings')},
-  clientPeople:{fn:()=>typeof peopleClientView==='function'?peopleClientView():clientLoading(),title:'People',sub:'Who from your business can sign in',after:()=>{try{peopleClientLoad();}catch(e){}}},
+  home:{fn:()=>V('viewHome'),title:'Today',sub:'Where everything stands'},
+  clients:{fn:()=>V('viewClients'),title:'Clients',sub:'Who is where, and what needs you'},
+  client:{fn:()=>V('viewClient',currentClientId),title:'Client',sub:'',back:()=>render('clients')},
+  needsYou:{fn:()=>V('viewNeedsYou'),title:'Needs you',sub:'What is actually behind',back:()=>render('clients')},
+  enquiries:{fn:()=>V('viewEnquiries'),title:'Bookings',sub:'Sales calls booked from the website \u2014 mark each one Won or Lost'},
+  enquiry:{fn:()=>V('viewEnquiry',currentEnquiryId),title:'Booking',sub:'',back:()=>render('enquiries')},
+  funnel:{fn:()=>V('viewFunnel'),title:'Funnel',sub:'Enquiries, calls, wins',back:()=>render('enquiries')},
+  calendar:{fn:()=>V('viewCalendar'),title:'Calendar',sub:'Every call, in both time zones'},
+  meeting:{fn:()=>V('viewMeeting',currentMeetingId),title:'Meeting',sub:'',back:()=>render('calendar')},
+  noShows:{fn:()=>V('viewNoShows'),title:'No-shows',sub:'And what each one did to the count',back:()=>render('calendar')},
+  calling:{fn:()=>V('viewCalling'),title:'Calling',sub:'The next one to ring'},
+  callTargets:{fn:()=>V('viewCallTargets'),title:'Call list',sub:'Everyone to ring, and where each one got to',back:()=>render('calling')},
+  dnc:{fn:()=>V('viewDnc'),title:'Do not call',sub:'Never dialled again',back:()=>render('calling')},
+  outreach:{fn:()=>V('viewOutreach'),title:'Outreach',sub:'Every client\u2019s email, in one place',wide:true},
+  outreachClient:{fn:()=>V('viewOutreachClient',currentClientId),title:'Outreach',sub:'',wide:true,back:()=>render('outreach')},
+  outreachThread:{fn:()=>V('viewOutreachThread',currentThreadId),title:'Reply',sub:'',back:()=>render('outreach')},
+  channels:{fn:()=>V('viewChannels'),title:'Channels',sub:()=>hubIsClient()?'Message the Aviance team':'Talk with your team and your clients',wide:true},
+  clientChannel:{fn:()=>V('viewClientChannel',currentClientId),title:'Client channel',sub:'',wide:true,back:()=>render('channels')},
+  requests:{fn:()=>V('viewRequests'),title:'Requests',sub:'What clients have asked for'},
+  clientPeople:{fn:()=>V('viewClientPeople',currentClientId),title:'Their people',sub:'Who from their business can sign in',back:()=>render('clients')},
+  onboarding:{fn:()=>V('viewOnboarding'),title:'Onboarding',sub:'What is blocking each new client'},
+  onboardingClient:{fn:()=>V('viewOnboardingClient',currentClientId),title:'Onboarding',sub:'',back:()=>render('onboarding')},
+  billing:{fn:()=>V('viewBilling'),title:'Invoices',sub:'To raise, to send, to chase'},
+  monthEnd:{fn:()=>V('viewMonthEnd'),title:'Month end',sub:'Close the months and settle what is owed',back:()=>render('billing')},
+  friday:{fn:()=>V('viewFriday'),title:'Friday update',sub:'This week\u2019s note to every client'},
+  team:{fn:()=>V('viewTeam'),title:'Team',sub:'Who is here, and who is waiting to be let in'},
+  work:{fn:()=>V('viewWork'),title:'Work',sub:'Every job, by department'},
+  myWork:{fn:()=>V('viewMyWork'),title:'My work',sub:'Just mine',back:()=>render('work')},
+  ending:{fn:()=>V('viewEnding'),title:'Ending',sub:'Clients on their way out, and the final figure'},
+  finalStatement:{fn:()=>V('viewFinalStatement',currentClientId),title:'Final statement',sub:'',back:()=>render('ending')},
+  dataDeletion:{fn:()=>V('viewDataDeletion'),title:'Data deletion',sub:'What goes, and what we keep',back:()=>render('ending')},
+  settings:{fn:()=>V('viewSettings'),title:'Settings',sub:'You, the calendar, and the tool behind the outreach'},
 };
+
+/* Which client, booking, meeting or reply is open. Set by the open* helpers below. */
+let currentClientId=null, currentEnquiryId=null, currentMeetingId=null, currentThreadId=null;
+
+/* Every screen goes through here, so a screen whose file has not loaded yet says so
+   instead of throwing. Each area is one file; see SCHEMA.md. */
+function V(name,arg){
+  const f=typeof window!=='undefined'?window[name]:null;
+  if(typeof f!=='function')return '<div class="card"><div class="empty"><h3>Not loaded</h3><p>This screen\u2019s file did not load. Reload the page, and if it keeps happening tell whoever looks after the hub.</p></div></div>';
+  try{return f(arg)}catch(e){return '<div class="card"><div class="empty"><h3>Something went wrong</h3><p>'+esc((e&&e.message)||'This screen could not be drawn.')+'</p></div></div>'}
+}
+function openClient(id){currentClientId=id;render('client')}
+function openEnquiry(id){currentEnquiryId=id;render('enquiry')}
+function openMeeting(id){currentMeetingId=id;render('meeting')}
+function openThread(id){currentThreadId=id;render('outreachThread')}
+function openClientOutreach(id){currentClientId=id;render('outreachClient')}
+function openClientOnboarding(id){currentClientId=id;render('onboardingClient')}
+function openClientPeople(id){currentClientId=id;render('clientPeople')}
+function openSettings(){render('settings')}
+
+/* The client list, kept here so the channels screen can name a client without
+   loading the whole clients screen. */
+let hubClients=[];
+async function hubLoadClients(){
+  try{const r=await sb.from('clients').select('id,company,contact_name,stage,plan').order('company');hubClients=(r&&r.data)||[];}catch(e){hubClients=[];}
+  return hubClients;
+}
+function tkListRows(){return hubClients.map(c=>({id:c.id,name:c.company,stage:c.stage}))}
+function tkFindRow(id){return tkListRows().find(r=>r.id===id)||null}
+const tk={hub:null};
 function clientLoading(){return '<div class="card client-loading" role="status">Loading…</div>';}
 function hubIsClient(){return !!(authUser&&authUser.role==='client');}
 const CLIENT_VIEWS=['channels','numbers','clientPeople'];
@@ -458,7 +521,7 @@ function render(v){
 }
 
 /* The Back button in the top bar (pages inside one of the four places). */
-function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('paying');}
+function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('clients');}
 
 /* ---- Deep links: #trial/{id}, #system/{id} (a client's email system, Shared › Overview), #system/{id}/{tab} (one of its tabs), #inquiry/{id}, #calendar/{meetingId}, #alerts (Settings › Alerts), #settings, #settings/warmup (Settings › Warm-up),
    #settings/keys (Settings › Keys), #settings/details (Settings › Your details), #inquiries, #calendar, #paying and the old #trials (Clients — what a phone alert opens),
@@ -499,7 +562,7 @@ function goDeepLink(d){
   if(hubIsClient()){try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}closeModal();render(CLIENT_VIEWS.includes(d.view)?d.view:'channels');return true;}
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same alert can open it again
   closeModal();closeCmdk();
-  if(d.view==='trial')openTrial(d.id);else if(d.view==='clientSystem')tkOpenSystem(d.id,d.tab||'overview');else if(d.view==='inquiry')openInquiry(d.id);else if(d.view==='calendar'&&d.id)openCalendar(d.id);
+  if(d.view==='client')openClient(d.id);else if(d.view==='enquiry')openEnquiry(d.id);else if(d.view==='meeting')openMeeting(d.id);else if(d.view==='outreachThread')openThread(d.id);
   else if(d.view==='channels'){if(typeof chv!=='undefined')chv.want=d.id||null;render('channels');}
   else if(d.view==='settings'){if(d.google&&typeof googleReturn==='function')googleReturn(d.google,d.error);openSettings(d.section);}
   else render(d.view);
@@ -513,19 +576,24 @@ function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.s
    times waiting for your yes (amber). The same items fill the sidebar and the phone's tab bar. ---- */
 function navItems(){
   if(hubIsClient())return [
-    {view:'channels',icon:I.inquiry,label:'Channels',badge:''},
-    {view:'numbers',icon:I.chart,label:'Numbers',badge:''},
+    {view:'outreachClient',icon:I.chart,label:'Outreach',badge:''},
+    {view:'channels',icon:I.chat,label:'Channels',badge:''},
     {view:'clientPeople',icon:I.people,label:'People',badge:''},
   ];
-  const pn=typeof peopleNavCount==='function'?peopleNavCount():'';
-  const q=typeof payingNavCount==='function'?payingNavCount():'',c=typeof calNavCount==='function'?calNavCount():'',ch=typeof chvNavCount==='function'?chvNavCount():'';
+  const n=k=>{try{return typeof window[k]==='function'?window[k]():''}catch(e){return ''}};
+  const needs=n('dgNavCount'),cal=n('mtNavCount'),ch=n('chvNavCount'),req=n('ptNavCount'),pend=n('tmNavCount');
   return [
-    {view:'paying',icon:I.money,label:'Clients',short:'Clients',badge:q,tone:'red',badgeTitle:q?q+' need'+(q===1?'s':'')+' you':'',also:['inquiries','inquiry','trial','clientSystem','trialPurchase']},
-    {view:'calendar',icon:I.calendar,label:'Calendar',badge:c,tone:'amber',badgeTitle:c?c+' waiting for your yes':''},
-    {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':''},
-    {view:'team',icon:I.people,label:'Team',badge:''},
-    {view:'people',icon:I.activity,label:'Activity',short:'Activity',badge:pn,tone:pn?'red':'',badgeTitle:pn?pn+' waiting for your approval':'',owner:true},
-    {view:'settings',icon:I.gear,label:'Settings',badge:'',also:['trialsBoard'],owner:true},
+    {view:'home',icon:I.activity,label:'Today',badge:needs,tone:'red',badgeTitle:needs?needs+' need'+(needs===1?'s':'')+' you':''},
+    {view:'clients',icon:I.money,label:'Clients',badge:'',also:['client','needsYou','clientPeople','onboarding','onboardingClient','outreachClient']},
+    {view:'enquiries',icon:I.inquiry,label:'Bookings',badge:'',also:['enquiry','funnel']},
+    {view:'calling',icon:I.sun,label:'Calling',badge:'',also:['callTargets','dnc']},
+    {view:'outreach',icon:I.chart,label:'Outreach',badge:'',also:['outreachThread']},
+    {view:'calendar',icon:I.calendar,label:'Calendar',badge:cal,tone:'amber',badgeTitle:cal?cal+' waiting for your yes':'',also:['meeting','noShows']},
+    {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':'',also:['clientChannel','requests']},
+    {view:'billing',icon:I.money,label:'Invoices',badge:req,tone:'amber',also:['monthEnd','friday','ending','finalStatement','dataDeletion']},
+    {view:'work',icon:I.people,label:'Work',badge:'',also:['myWork']},
+    {view:'team',icon:I.people,label:'Team',badge:pend,tone:pend?'red':'',badgeTitle:pend?pend+' waiting for your approval':'',owner:true},
+    {view:'settings',icon:I.gear,label:'Settings',badge:'',owner:true},
   ].filter(it=>!it.owner||!authUser||authUser.role==='admin');
 }
 function renderNav(){
@@ -598,7 +666,7 @@ function enterApp(){
     if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('channels');
     return;
   }
-  if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('paying');
+  if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('home');
   try{if(typeof peopleSignedIn==='function')peopleSignedIn();}catch(e){}
   try{tkDropOldPhoneAlerts();}catch(e){}
 }
@@ -709,7 +777,6 @@ let cmdkState={items:[],sel:0};
 function cmdkActions(){const a=[];
   if(typeof trialsCmdkActions==='function')a.push(...trialsCmdkActions());
   if(typeof calendarCmdkActions==='function')a.push(...calendarCmdkActions());
-  MACHINE_PAGES.forEach(([path,icon,label])=>a.push({type:'Advanced',label,icon,sub:'Opens the full control panel in a new tab',kw:'advanced machine mission control control panel '+label,run:()=>{closeCmdk();openMachine(path);}}));
   a.push({type:'Command',label:'Switch light / dark',icon:I.moon,sub:'How the hub looks',kw:'theme dark light mode toggle',run:()=>{closeCmdk();toggleTheme();}});
   a.push({type:'Command',label:'Log out',icon:I.logout,sub:'End your session',kw:'log out sign out logout',run:()=>{closeCmdk();logout();}});
   return a;}
@@ -763,19 +830,22 @@ document.addEventListener('keydown',e=>{
 initTheme();
 boot();
 </script>
-<script src="trials.js"></script>
-<script src="inquiries.js"></script>
-<script src="feed.js"></script>
-<script src="calendar.js"></script>
+<script src="finance.js"></script>
+<script src="clientbook.js"></script>
+<script src="pipeline.js"></script>
+<script src="meetings.js"></script>
+<script src="calling.js"></script>
 <script src="channels.js"></script>
-<script src="stages.js"></script>
-<script src="messages.js"></script>
-<script src="autobuy.js"></script>
-<script src="warmup.js"></script>
-<script src="keys.js"></script>
-<script src="people.js"></script>
-<script src="numbers.js"></script>
-<script src="seats.js"></script>
-<script src="cleanup.js"></script>
+<script src="portal.js"></script>
+<script src="team.js"></script>
+<script src="onboarding.js"></script>
+<script src="outreach-adapter.js"></script>
+<script src="outreach-demo.js"></script>
+<script src="outreach-smartlead.js"></script>
+<script src="outreach-instantly.js"></script>
+<script src="outreach.js"></script>
+<script src="digest.js"></script>
+<script src="wrapup.js"></script>
+<script src="settings.js"></script>
 </body>
 </html>

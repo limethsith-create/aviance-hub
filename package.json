@@ -1,9 +1,9 @@
 {
   "name": "aviance-hub",
   "private": true,
-  "description": "Aviance Hub \u2014 the owner's command centre (static site, no build step).",
+  "description": "Aviance Hub — the owner's command centre (static site, no build step).",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check autobuy.js && node --check calendar.js && node --check channels-api.js && node --check channels.js && node --check cleanup.js && node --check feed.js && node --check inquiries.js && node --check keys.js && node --check messages.js && node --check numbers.js && node --check people.js && node --check seats.js && node --check stages.js && node --check trials.js && node --check warmup.js"
+    "check": "node --check calling.js && node --check channels-api.js && node --check channels.js && node --check clientbook.js && node --check digest.js && node --check finance.js && node --check meetings.js && node --check onboarding.js && node --check outreach-adapter.js && node --check outreach-demo.js && node --check outreach-instantly.js && node --check outreach-smartlead.js && node --check outreach.js && node --check pipeline.js && node --check portal.js && node --check settings.js && node --check team.js && node --check wrapup.js"
   }
 }

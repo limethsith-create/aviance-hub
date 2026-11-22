@@ -1,0 +1,72 @@
+/* meetings.css — Aviance Hub · Meetings (meetings.js).
+   Same rules as calendar.css: every colour and size is a token from theme.css,
+   no new colours, nothing under --fs-min. Each time is printed twice (US
+   Eastern big, Sri Lanka under it), so the rows are built around two lines.
+   Everything is prefixed mt- so it cannot collide with anything else. */
+
+/* ── the week ───────────────────────────────────────────────────────────── */
+.mt-week{display:flex;flex-direction:column;gap:12px}
+.mt-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.mt-bar .btn{min-height:44px;justify-content:center}
+.mt-range{font-size:var(--fs-strong);font-weight:600}
+.mt-blockbtn{margin-left:auto}
+.mt-zones,.mt-hours{font-size:var(--fs-small);color:var(--muted);line-height:1.6;margin:0}
+.mt-days{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.mt-day{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;min-width:0;display:flex;flex-direction:column;gap:8px}
+.mt-day>h4{font-size:var(--fs-strong);font-weight:600;margin:0}
+.mt-day.today{border-color:var(--border-strong)}
+.mt-day.past{background:var(--surface-2)}
+.mt-tag{font-size:var(--fs-min);font-weight:600;color:var(--muted)}
+
+/* ── a row: the time twice, then what it is ─────────────────────────────── */
+.mt-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.mt-row,.mt-blockrow{display:flex;align-items:flex-start;gap:12px;width:100%;text-align:left;min-height:44px;
+  padding:8px 10px;background:var(--surface-2);border:1px solid var(--border-soft);border-radius:var(--r-sm);
+  color:var(--text);font:inherit;font-size:var(--fs-base)}
+.mt-row{cursor:pointer}
+.mt-row:hover{border-color:var(--border-strong)}
+.mt-row:focus-visible,.mt-slot:focus-visible{outline:3px solid var(--ring);outline-offset:2px}
+.mt-when{display:flex;flex-direction:column;min-width:7.5em}
+.mt-when b{font-size:var(--fs-base);font-weight:600;line-height:1.35}
+.mt-when small,.mt-when i{font-size:var(--fs-min);font-style:normal;color:var(--muted);line-height:1.4}
+.mt-row-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.mt-row-main b{font-weight:600;overflow-wrap:anywhere}
+.mt-row-main small{font-size:var(--fs-min);color:var(--muted);overflow-wrap:anywhere}
+.mt-effect{color:var(--text)}
+.mt-blockrow{background:var(--surface-3)}
+
+/* ── free slots ─────────────────────────────────────────────────────────── */
+.mt-slots{display:flex;flex-wrap:wrap;gap:6px}
+.mt-slot{display:flex;flex-direction:column;align-items:flex-start;min-height:44px;padding:6px 10px;cursor:pointer;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text);font:inherit}
+.mt-slot:hover{border-color:var(--border-strong);background:var(--surface-2)}
+.mt-slot b{font-size:var(--fs-base);font-weight:600}
+.mt-slot small{font-size:var(--fs-min);color:var(--muted)}
+
+/* ── one meeting ────────────────────────────────────────────────────────── */
+.mt-card{padding:18px 20px}
+.mt-one>h3{font-size:var(--fs-h3);font-weight:600;margin:0 0 6px}
+.mt-big{display:flex;flex-direction:column;gap:2px;margin:0 0 14px}
+.mt-big b{font-size:var(--fs-num-lg);font-weight:600;line-height:1.25}
+.mt-big span{font-size:var(--fs-small);color:var(--muted)}
+.mt-kv{display:grid;grid-template-columns:minmax(8em,auto) 1fr;gap:6px 14px;margin:0 0 14px}
+.mt-kv dt{font-size:var(--fs-small);color:var(--muted)}
+.mt-kv dd{margin:0;font-size:var(--fs-base);overflow-wrap:anywhere}
+.mt-note{display:block;white-space:pre-wrap;line-height:1.55}
+.mt-rem{list-style:none;margin:0 0 14px;padding:0;font-size:var(--fs-small);color:var(--muted);line-height:1.7}
+.mt-acts{display:flex;flex-wrap:wrap;gap:8px}
+.mt-acts .btn{min-height:44px;justify-content:center}
+
+/* ── words, not decoration ──────────────────────────────────────────────── */
+.mt-none{font-size:var(--fs-small);color:var(--muted);line-height:1.6;margin:0}
+.mt-sum{font-size:var(--fs-strong);line-height:1.55;margin:0 0 10px}
+.mt-err{font-size:var(--fs-base);color:var(--red);line-height:1.55;margin:0 0 10px}
+.mt-textbtn{background:none;border:0;padding:0;min-height:44px;color:var(--text);font:inherit;
+  font-size:var(--fs-small);text-decoration:underline;cursor:pointer}
+
+@media (max-width:640px){
+  .mt-days{grid-template-columns:1fr}
+  .mt-blockbtn{margin-left:0}
+  .mt-kv{grid-template-columns:1fr;gap:2px 0}
+  .mt-kv dd{margin-bottom:8px}
+}

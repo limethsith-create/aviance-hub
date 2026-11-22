@@ -1,0 +1,56 @@
+/* ===================== AVIANCE HUB — Pipeline (pipeline.js) =====================
+   Only what pipeline.js needs. Every colour, radius and space is a theme.css variable,
+   so light and dark both work and no new colour is introduced here. */
+
+.pl { display: block; }
+.pl-pad { padding: var(--s4); }
+.pl-small { font-size: var(--fs-small); }
+.pl-section { display: flex; align-items: center; }
+
+/* ---- the lists ---- */
+.pl-list { display: grid; gap: var(--s3); }
+.pl-card { padding: var(--s4); display: grid; gap: var(--s2); cursor: pointer; }
+.pl-card:hover { border-color: var(--border-strong); }
+.pl-card:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.pl-card-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); }
+.pl-who { font-size: var(--fs-strong); font-weight: 650; }
+.pl-when { font-size: var(--fs-small); }
+.pl-sub { font-size: var(--fs-small); }
+.pl-goal { margin: 0; font-size: var(--fs-small); color: var(--muted); }
+
+/* ---- one enquiry ---- */
+.pl-head { display: grid; gap: var(--s2); }
+.pl-acts { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
+.pl-kv { display: grid; grid-template-columns: minmax(120px, 34%) 1fr; gap: var(--s2) var(--s3); align-items: baseline; }
+.pl-kv small { color: var(--muted); font-size: var(--fs-small); }
+.pl-pre { margin: 0; white-space: pre-wrap; }
+
+/* ---- the research brief ---- */
+.pl-brief { display: grid; gap: var(--s4); }
+.pl-brief-sec { display: grid; gap: var(--s2); }
+.pl-brief-sec h4 { margin: 0; font-size: var(--fs-small); font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.pl-brief-sec + .pl-brief-sec { border-top: 1px solid var(--border); padding-top: var(--s4); }
+.pl-nobrief { display: grid; gap: var(--s2); }
+
+/* ---- the outcome ---- */
+.pl-outcome { display: grid; gap: var(--s3); }
+
+/* ---- the funnel: bars built from divs, no chart library ---- */
+.pl-funnel { display: grid; gap: var(--s3); }
+.pl-bars { display: grid; gap: var(--s3); }
+.pl-bar-row { display: grid; grid-template-columns: minmax(96px, 28%) 1fr auto; gap: var(--s3); align-items: center; }
+.pl-bar-label { font-size: var(--fs-small); color: var(--muted); }
+.pl-bar-track { display: block; height: 10px; border-radius: var(--r-xs); background: var(--grid); overflow: hidden; }
+.pl-bar-fill { display: block; height: 100%; min-width: 2px; border-radius: var(--r-xs); background: var(--accent); }
+.pl-bar-num { font-size: var(--fs-num); font-weight: 650; font-variant-numeric: tabular-nums; }
+.pl-rates { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.pl-rate { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: var(--s4); display: grid; gap: var(--s1); }
+.pl-rate b { font-size: var(--fs-num-lg); font-weight: 650; font-variant-numeric: tabular-nums; }
+.pl-rate small { font-size: var(--fs-small); color: var(--muted); }
+
+@media (max-width: 560px) {
+  .pl-kv { grid-template-columns: 1fr; gap: var(--s1); }
+  .pl-rates { grid-template-columns: 1fr; }
+  .pl-bar-row { grid-template-columns: 1fr auto; }
+  .pl-bar-track { grid-column: 1 / -1; }
+}

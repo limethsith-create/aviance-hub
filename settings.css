@@ -1,0 +1,18 @@
+.st-wrap{display:flex;flex-direction:column;gap:2px}
+.st-row{display:flex;gap:16px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border-soft)}
+.st-row:last-of-type{border-bottom:none}
+.st-lab{width:190px;flex:none;font-size:var(--fs-base);color:var(--text)}
+.st-lab small{display:block;color:var(--muted-2);font-size:var(--fs-min);margin-top:2px;font-weight:400}
+.st-fld{flex:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted)}
+.st-fld input[type=text],.st-fld input:not([type]),.st-fld input[type=number],.st-fld select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);font:inherit;font-size:var(--fs-base);padding:8px 10px;min-width:160px}
+.st-fld input[type=number]{max-width:92px}
+.st-ro{color:var(--muted)}
+.st-days{display:flex;gap:12px;flex-wrap:wrap}
+.st-days label{display:flex;align-items:center;gap:5px;color:var(--text);font-size:var(--fs-base);cursor:pointer}
+.st-act{display:flex;align-items:center;gap:12px;padding-top:14px}
+.st-msg{color:var(--muted);font-size:var(--fs-min)}
+.st-err{color:var(--danger,#c0392b);font-size:var(--fs-min);display:block}
+.st-note{color:var(--muted);font-size:var(--fs-min);margin:0 0 12px}
+.st-tab{width:100%;border-collapse:collapse;font-size:var(--fs-base)}
+.st-tab th{text-align:left;color:var(--muted-2);font-size:var(--fs-min);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--border)}
+.st-tab td{padding:9px 8px;border-bottom:1px solid var(--border-soft);color:var(--text);vertical-align:top}

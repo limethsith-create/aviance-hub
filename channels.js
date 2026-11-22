@@ -6,7 +6,7 @@
    Right: the client's numbers (a sheet on a phone).
 
    Data comes ONLY from the ch* functions of channels-api.js (CONTRACT.md "Hub data layer"); each returns
-   {ok, data, error} and never throws. `renderClientNumbers(el, clientId)` (numbers.js) fills the side panel when it exists.
+   {ok, data, error} and never throws. `renderClientNumbers(el, clientId)` fills the side panel when something defines it.
      chListChannels() chMessages(id,{before,limit}) chSend(id,body,files) chEdit chDelete chMarkRead
      chSubscribe(id,{onMessage,onUpdate,onTyping}) → unsubscribe  chTyping(id)  chCreateChannel(name,memberIds)
      chRename chArchive chAddMember chRemoveMember chMembers chEnsureClientChannel(clientId,name) chFileUrl(path)
@@ -14,7 +14,7 @@
    `before` is passed the createdAt of the oldest message shown.
 
    Client mode (authUser.role==='client'): only their own channel, opened straight away, no channel admin.
-   Rules as in trials.js: every string through esc(); links only http/https; ids reach handlers through chvA();
+   House rules: every string through esc(); links only http/https; ids reach handlers through chvA();
    view functions only return HTML; nothing runs at load time. Everything here is prefixed chv / channels. */
 
 /* ===================== 0. STATE ===================== */
