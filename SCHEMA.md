@@ -109,3 +109,42 @@ View **v_outreach_summary** — client_id, client_name, campaigns, running, sent
 - **agreements** — booking_id, client_name*, client_email*, client_company*, plan*, term*, monthly_fee*, status*, gmail_message_id, sent_by, error
 - **agreement_pdfs** — key* (pk), filename*, b64*, updated_at*
 - **workspace_shared / workspace_admin** — id int4, data* jsonb, updated_at
+
+## The words the database will accept
+
+A module holding a word the database refuses does not crash — the write just
+fails, or the count silently reads zero. Three of those were found after the
+rebuild. These lists mirror the live CHECK constraints. **If a migration changes
+one, change it here and in `tests/vocabulary.test.mjs` in the same commit.**
+
+- **clients.stage** / **client_stage_history** — `enquiry, booked, won, onboarding, live, at_risk, paused, ended, lost`
+  (`warming`, `sending`, `setting_up`, `finished` are retired)
+- **meetings.kind** — `discovery, strategy, onboarding, qualified, review, check_in, other`
+  (`qualified` is a booked sales call we delivered: the one that counts toward the guarantee)
+- **meetings.status** — `requested, booked, held, no_show, cancelled` (`confirmed` is retired, now `booked`)
+- **channels.kind** — `team, internal, client`
+- **tasks.department** — the eight: `marketing, sales, onboarding, operations, deliverability, finance, client_success, admin`
+- **discovery_bookings.plan** — `pilot, starter, growth, scale`
+- **discovery_bookings.lost_reason** — `price, timing, no_budget, went_elsewhere, not_a_fit, no_show, ghosted, other`
+
+## What the website may do
+
+The booking page on aviance.online is not signed in, so it acts as `anon`. It is
+allowed exactly two things and nothing else:
+
+- `select * from public.free_slots(days)` — free start times and slot length,
+  **nothing else**: no names, no client ids, no booking ids. It reads the same
+  `calendar_settings` row the hub's Settings screen writes, so changing the
+  working day in the hub changes what the website offers. It subtracts anything
+  in `meetings`, `calendar_blocks` and `discovery_bookings`.
+- `select * from public.v_call_hours` — the working day in words, for the
+  "7am to 9pm Eastern, weekdays" line on the page.
+- `insert into public.discovery_bookings` — guarded by the `website can book`
+  policy: status must be `booked`, no score, no calendar id, and the call must
+  be in the future.
+
+Proven by planting a client, a meeting and a do-not-call row, then reading as
+`anon`: every one came back 0, while `free_slots` correctly dropped the taken
+slot. A unique index (`discovery_bookings_one_per_slot`) means the database
+itself refuses a double booking, which is what lets the page say "someone just
+took that time".
