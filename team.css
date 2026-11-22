@@ -1,0 +1,93 @@
+/* team.css — the team and the work queue (team.js). Every colour and size
+   comes from theme.css; nothing new is invented here, so light and dark both
+   follow the rest of the hub. */
+
+/* ---- shared bits ---- */
+.tm-pad{padding:var(--s4) var(--s5)}
+.tm-muted{color:var(--muted)}
+.tm-small{font-size:var(--fs-small)}
+.tm-num{text-align:right;font-variant-numeric:tabular-nums}
+.tm-scroll{overflow-x:auto}
+
+.tm-head{display:flex;align-items:baseline;gap:var(--s3);margin:var(--s5) 0 var(--s3)}
+.tm-head h3{margin:0;font-size:var(--fs-h3)}
+.tm-count{font-size:var(--fs-min);font-weight:600;color:var(--muted);background:var(--surface-2);
+  border-radius:var(--r-xs);padding:2px var(--s2);font-variant-numeric:tabular-nums}
+.tm-count-late{color:var(--red);background:var(--red-bg)}
+
+.tm-err{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);
+  background:var(--red-bg);color:var(--red);border:1px solid var(--red);
+  border-radius:var(--r);padding:var(--s3) var(--s4);font-size:var(--fs-base)}
+
+/* ---- a person ---- */
+.tm-person{display:flex;align-items:center;gap:var(--s2)}
+.tm-av{display:inline-flex;align-items:center;justify-content:center;flex:none;
+  width:28px;height:28px;border-radius:50%;background:var(--surface-3);color:var(--text);
+  font-size:var(--fs-min);font-weight:650;letter-spacing:.02em}
+.tm-who{display:flex;flex-direction:column;min-width:0}
+.tm-who b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tm-who small{color:var(--muted);font-size:var(--fs-min);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.tm-role{display:inline-block;font-size:var(--fs-min);font-weight:600;padding:2px var(--s2);
+  border-radius:var(--r-xs);color:var(--muted);background:var(--surface-2)}
+.tm-role-admin{color:var(--red);background:var(--red-bg)}
+.tm-role-staff{color:var(--blue);background:var(--blue-bg)}
+.tm-role-viewer{color:var(--muted);background:var(--surface-2)}
+
+/* ---- waiting to be let in: the first thing on the page ---- */
+.tm-pending{border-color:var(--amber)}
+.tm-pending > p{margin:0 0 var(--s3)}
+.tm-prow{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0;border-top:1px solid var(--border)}
+.tm-prow .tm-who{flex:1}
+
+/* ---- everyone ---- */
+.tm-tablecard{padding:0;overflow:hidden}
+.tm-table{width:100%;border-collapse:collapse;font-size:var(--fs-base)}
+.tm-table th{background:var(--surface-2);color:var(--muted);text-align:left;font-weight:600;
+  font-size:var(--fs-min);text-transform:uppercase;letter-spacing:.04em;padding:var(--s2) var(--s3);white-space:nowrap}
+.tm-table td{padding:var(--s2) var(--s3);height:48px;border-top:1px solid var(--border);vertical-align:middle}
+.tm-table th:last-child,.tm-table td:last-child{text-align:right}
+
+/* ---- filters ---- */
+.tm-filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--s3)}
+.tm-field{display:flex;flex-direction:column;gap:var(--s1);font-size:var(--fs-small)}
+.tm-field > span{color:var(--muted);font-size:var(--fs-min)}
+.tm-field select{min-width:170px;padding:6px var(--s2);font:inherit;font-size:var(--fs-base);
+  color:var(--text);background:var(--field);border:1px solid var(--border);border-radius:var(--r-sm)}
+
+/* ---- the board: a column per status ---- */
+.tm-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s3);margin-top:var(--s4);align-items:start}
+.tm-col{display:flex;flex-direction:column;gap:var(--s2);background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--r);padding:var(--s3);min-width:0}
+.tm-col header{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s2)}
+.tm-col header h4{margin:0;font-size:var(--fs-base)}
+.tm-col-blocked{border-color:var(--amber)}
+.tm-col-done{opacity:.85}
+.tm-colempty{margin:var(--s2) 0}
+
+/* ---- a task ---- */
+.tm-card{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--border-strong);
+  border-radius:var(--r-sm);padding:var(--s3);box-shadow:var(--sh)}
+.tm-card h5{margin:0 0 var(--s2);font-size:var(--fs-base);font-weight:600;line-height:1.35}
+.tm-card.tm-p4{border-left-color:var(--amber)}
+.tm-card.tm-p5{border-left-color:var(--red)}
+.tm-card.tm-late{border-left-color:var(--red)}
+.tm-tags{display:flex;flex-wrap:wrap;gap:var(--s1)}
+.tm-tag{font-size:var(--fs-min);color:var(--muted);background:var(--surface-2);
+  border-radius:var(--r-xs);padding:2px var(--s2);white-space:nowrap}
+.tm-tag-client{color:var(--blue);background:var(--blue-bg)}
+.tm-when{font-variant-numeric:tabular-nums}
+.tm-late-tag{color:var(--red);background:var(--red-bg);font-weight:600}
+.tm-cardfoot{display:flex;justify-content:space-between;gap:var(--s2);margin-top:var(--s2)}
+
+/* ---- just mine ---- */
+.tm-mine{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:var(--s3)}
+
+@media (max-width:900px){
+  .tm-board{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:640px){
+  .tm-board{grid-template-columns:1fr}
+  .tm-field select{min-width:0;width:100%}
+  .tm-filters{flex-direction:column;align-items:stretch}
+}

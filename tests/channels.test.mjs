@@ -45,7 +45,7 @@ const fakeSb = { auth: { getSession: async () => ({ data: { session: null } }), 
 globalThis.supabase = { createClient: () => fakeSb };
 
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="trials.js">'));
+const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="finance.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'channels.js'), 'utf8'), { filename: 'channels.js' });
 const chv = vm.runInThisContext('chv');
@@ -350,13 +350,17 @@ test('channel admin: new channel, rename, archive, members, start a client chann
   assert.deepEqual(calls('chArchive')[0], ['chArchive', 'n1']);
   assert.match(el('chvComposer').innerHTML, /archived/i); assert.doesNotMatch(el('chvThread').innerHTML, /chvEditStart/);
   // a client without a channel
+  const shellTkListRows = globalThis.tkListRows, shellTk = globalThis.tk;
   globalThis.tkListRows = () => [{ id: 'blue-sky', name: 'Blue Sky' }]; globalThis.tk = { hub: {} };
   assert.match(chvNoChannelHTML(), /Blue Sky/);
   await chvStartClient('blue-sky');
-  assert.deepEqual(calls('chEnsureClientChannel')[0], ['chEnsureClientChannel', 'blue-sky', 'blue-sky']);
+  /* The shell now resolves a client's real company name (index.html's tkFindRow over
+     the clients table), so the channel is named after the business rather than its id. */
+  assert.deepEqual(calls('chEnsureClientChannel')[0], ['chEnsureClientChannel', 'blue-sky', 'Blue Sky']);
   assert.equal(chv.cur, 'cx');
   assert.doesNotMatch(chvNoChannelHTML(), /Blue Sky/);
-  delete globalThis.tkListRows; delete globalThis.tk;
+  /* The shell defines tkListRows/tk itself now, so put them back rather than deleting them. */
+  globalThis.tkListRows = shellTkListRows; globalThis.tk = shellTk;
 });
 test('errors are plain words with a way to try again', async () => {
   reset(); asOwner(); be.fail.chListChannels = 'The channels did not load.';

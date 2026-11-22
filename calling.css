@@ -1,0 +1,91 @@
+/* calling.css — the cold calling desk and the do-not-call list (calling.js).
+   Every colour and space comes from theme.css. Nothing new is invented here.
+   The desk is set at arm's length: someone is holding a phone while reading it,
+   so the company, the number and the outcome buttons are all big enough to hit
+   without leaning in. */
+
+.cl{display:flex;flex-direction:column;gap:var(--s4,16px);font-variant-numeric:tabular-nums}
+.cl-head{display:flex;justify-content:space-between;align-items:baseline;gap:var(--s3,12px)}
+.cl-head h2{margin:0;font-size:var(--fs-h2)}
+.cl-muted{color:var(--muted);font-size:var(--fs-small,13px)}
+.cl-label{font-size:var(--fs-min,12px);text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.cl-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r,8px);padding:var(--s4,16px)}
+.cl-card-h{display:flex;justify-content:space-between;align-items:baseline;gap:var(--s3,12px);margin-bottom:var(--s3,12px)}
+
+/* today, along the top */
+.cl-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s3,12px)}
+.cl-tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--r,8px);padding:var(--s3,12px) var(--s4,16px)}
+.cl-tile b{display:block;font-size:var(--fs-num-lg,30px);font-weight:650;line-height:1.15;margin-top:4px}
+.cl-pace{margin:0;font-size:var(--fs-strong,15px)}
+.cl-pace.cl-ok{color:var(--green)}
+.cl-pace.cl-behind{color:var(--amber)}
+
+/* the desk itself */
+.cl-desk{display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,1fr);gap:var(--s5,20px)}
+.cl-who{display:flex;flex-direction:column;gap:6px}
+.cl-company{font-size:var(--fs-title,28px);font-weight:700;line-height:1.1}
+.cl-person{font-size:var(--fs-h3,18px)}
+.cl-phone{display:inline-block;margin-top:4px;font-size:40px;font-weight:700;line-height:1.1;letter-spacing:.01em;color:var(--text);text-decoration:none;font-variant-numeric:tabular-nums}
+.cl-phone:hover,.cl-phone:focus-visible{color:var(--brand);text-decoration:underline}
+.cl-when{font-size:var(--fs-strong,15px);font-weight:600;color:var(--muted)}
+.cl-notes-prev{margin:var(--s2,8px) 0 0;font-size:var(--fs-base,14px);color:var(--muted-2,var(--muted));border-left:2px solid var(--border);padding-left:var(--s3,12px)}
+.cl-big{display:block;font-size:var(--fs-title,28px);line-height:1.15}
+.cl-closed p,.cl-wait b{margin:var(--s2,8px) 0 0;display:block}
+.cl-wait{display:flex;flex-direction:column;gap:var(--s3,12px);align-items:flex-start}
+
+.cl-work{display:flex;flex-direction:column;gap:var(--s2,8px)}
+.cl-notes{width:100%;min-height:120px;padding:10px 12px;font:inherit;font-size:var(--fs-strong,15px);
+  background:var(--field,var(--surface-2));color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm,6px);resize:vertical}
+.cl-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2,8px)}
+.cl-input{padding:9px 11px;font:inherit;font-size:var(--fs-strong,15px);background:var(--field,var(--surface-2));
+  color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm,6px)}
+.cl-input:focus-visible,.cl-notes:focus-visible{outline:2px solid var(--ring);outline-offset:1px}
+.cl-secs{width:92px}
+.cl-grow{flex:1;min-width:180px}
+.cl-paste{width:100%;min-height:110px;padding:10px 12px;font-family:var(--mono,monospace);font-size:var(--fs-base,14px);
+  background:var(--field,var(--surface-2));color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm,6px);resize:vertical}
+
+/* the outcome buttons: nine targets, each one easy to hit while on a call */
+.cl-outcomes{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s2,8px);margin-top:var(--s2,8px)}
+.cl-out{min-height:52px;font-size:var(--fs-strong,15px);font-weight:650;padding:0 10px}
+.cl-out-booked{background:var(--green-bg);color:var(--green);border-color:var(--green)}
+.cl-out-not_interested,.cl-out-bad_number{background:var(--surface-2);color:var(--muted)}
+.cl-out-dnc_request{background:var(--red-bg);color:var(--red);border-color:var(--red)}
+.cl-out[disabled]{opacity:.5;cursor:not-allowed}
+
+/* lists */
+.cl-filters{display:flex;flex-wrap:wrap;gap:6px}
+.cl-filter{text-transform:capitalize}
+.cl-filter.on{background:var(--brand);color:var(--brand-ink,#fff);border-color:var(--brand)}
+.cl-table{width:100%;border-collapse:collapse;font-size:var(--fs-base,14px)}
+.cl-table th{background:var(--surface-2);font-size:var(--fs-min,12px);text-transform:uppercase;letter-spacing:.04em;
+  color:var(--muted);text-align:left;padding:8px 12px;font-weight:600}
+.cl-table td{padding:0 12px;height:46px;border-top:1px solid var(--border)}
+.cl-r{text-align:right!important}
+.cl-pill{display:inline-block;font-size:var(--fs-min,12px);font-weight:600;padding:2px 8px;border-radius:var(--r-xs,4px);
+  text-transform:capitalize;color:var(--muted);background:var(--surface-2)}
+.cl-s-new,.cl-s-queued{color:var(--blue);background:var(--blue-bg)}
+.cl-s-calling,.cl-s-callback{color:var(--amber);background:var(--amber-bg)}
+.cl-s-booked{color:var(--green);background:var(--green-bg)}
+.cl-s-dnc,.cl-s-bad_number{color:var(--red);background:var(--red-bg)}
+
+/* import report and messages */
+.cl-report{margin-top:var(--s3,12px);font-size:var(--fs-base,14px)}
+.cl-report-list{list-style:none;margin:var(--s2,8px) 0 0;padding:0}
+.cl-report-list li{display:flex;justify-content:space-between;gap:var(--s3,12px);padding:7px 0;border-top:1px solid var(--border)}
+.cl-r-skipped{color:var(--red)}
+.cl-r-duplicate,.cl-r-not-enough{color:var(--muted)}
+.cl-r-error{color:var(--amber)}
+.cl-warn{margin:0;padding:var(--s3,12px) var(--s4,16px);font-size:var(--fs-base,14px);
+  background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber);border-radius:var(--r,8px)}
+.cl-err{display:flex;align-items:center;justify-content:space-between;gap:var(--s3,12px);
+  background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:var(--r,8px);
+  padding:var(--s3,12px) var(--s4,16px);font-size:var(--fs-base,14px)}
+.cl-err-line{margin:0;min-height:1em;color:var(--red);font-size:var(--fs-base,14px)}
+
+@media (max-width:900px){
+  .cl-strip{grid-template-columns:repeat(2,1fr)}
+  .cl-desk{grid-template-columns:1fr}
+  .cl-outcomes{grid-template-columns:repeat(2,1fr)}
+  .cl-phone{font-size:34px}
+}
