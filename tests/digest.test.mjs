@@ -396,3 +396,35 @@ test('the real view columns: v_money {invoiced, paid, owed} and a month row with
   const close = (await dgMonthClose(NOW)).data;
   assert.deepEqual(close.months.map((x) => [x.monthId, x.multiplierWords]), [['m1', '2x']]);
 });
+
+/* ───────────── dress rehearsal: Today tells the truth about bookings and money ───────────── */
+test('dgHome: website calls booked this week count (not previews, not cancelled); money not yet due is "Awaiting", not "Chase"', async () => {
+  tables.discovery_bookings = [
+    { id: 'd1', call_at: '2026-11-19T15:00:00Z', source: 'aviance.online', status: 'booked' },
+    { id: 'd2', call_at: '2026-11-19T16:00:00Z', source: 'preview', status: 'booked' },
+    { id: 'd3', call_at: '2026-11-19T17:00:00Z', source: 'aviance.online', status: 'cancelled' },
+    { id: 'd4', call_at: '2026-11-02T17:00:00Z', source: 'aviance.online', status: 'booked' },
+  ];
+  finance.invoices = [{ id: 'i1', status: 'sent', amount: 3000, due_on: '2026-12-01' }];
+  finance.money = { owed: 3000 };
+  let d = (await dgHome(NOW)).data;
+  assert.equal(d.calls.bookedThisWeek, 1); assert.equal(d.calls.websiteThisWeek, 1);
+  let t = text(dgRenderHome(d));
+  assert.ok(t.includes('Calls booked this week 1 1 from the website'), t);
+  assert.ok(t.includes('Awaiting $3,000 (due Dec 1)') && !t.includes('Chase'), t);
+
+  finance.invoices = [{ id: 'i1', status: 'sent', amount: 3000, due_on: '2026-11-10' }, { id: 'i2', status: 'sent', amount: 1500, due_on: '2026-12-05' }];
+  d = (await dgHome(NOW)).data;
+  t = text(dgRenderHome(d));
+  assert.ok(t.includes('Chase $3,000 overdue') && t.includes('Awaiting $1,500 (due Dec 5)'), t);
+});
+
+test('dgHome: a client in onboarding with no inputs signed off shows under Needs a person', async () => {
+  finance.clients = [liveClient({ id: 'c7', company: 'Brightline Plumbing', stage: 'onboarding', day1_on: null }), liveClient({ id: 'c8', company: 'Done Co', stage: 'onboarding', day1_on: null })];
+  tables.client_profiles = [{ client_id: 'c8', signed_off_at: '2026-11-19T10:00:00Z' }];
+  const d = (await dgHome(NOW)).data;
+  assert.deepEqual(d.onboardingWaiting, [{ clientId: 'c7', company: 'Brightline Plumbing' }]);
+  const h = dgRenderHome(d);
+  assert.ok(text(h).includes('Onboarding: Brightline Plumbing — waiting on their inputs'));
+  assert.ok(h.includes("dgOpenClient('c7')"));
+});

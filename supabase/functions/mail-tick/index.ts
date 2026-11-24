@@ -66,7 +66,7 @@ Deno.serve(async () => {
 
   for (const r of rows) {
     const link = String(r.meet_link ?? "").trim();
-    const makeMeeting = r.kind === "booking_confirmation" && !!r.booking_id && !isGoogleMeet(link);
+    const makeMeeting = r.kind === "booking_confirmation" && (!!r.booking_id || !!r.meeting_id) && !isGoogleMeet(link);
 
     // A reminder with no link at all is held, never sent broken.
     if (!makeMeeting && r.needs_meet_link && !link) {
@@ -98,7 +98,7 @@ Deno.serve(async () => {
       if (makeMeeting) {
         answer = await callScript({
           mode: "meeting",
-          ref: r.booking_id,
+          ref: r.booking_id || r.meeting_id,
           toEmail: r.guest_email || r.to_email,
           toName: r.guest_name || r.to_name || "",
           startsAt: r.starts_at,
@@ -110,9 +110,10 @@ Deno.serve(async () => {
         if (answer.ok && !answer.meetLink) answer = { ok: false, error: "Google made the event but gave no Meet link." };
         if (answer.ok) {
           usedLink = String(answer.meetLink);
-          await sb.from("discovery_bookings")
+          // a website booking, or a meeting booked in Aviance OS (a client's kickoff, one added by hand)
+          await sb.from(r.booking_id ? "discovery_bookings" : "meetings")
             .update({ meet_link: usedLink, calendar_event_id: answer.eventId ?? null })
-            .eq("id", r.booking_id);
+            .eq("id", r.booking_id || r.meeting_id);
         }
       } else {
         answer = await callScript({

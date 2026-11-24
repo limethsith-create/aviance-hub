@@ -807,7 +807,7 @@ test('the history reads as dated sentences, whoever wrote the line', () => {
   assert.equal(cbEventWords({area:'stage', event:'moved', detail:{from:'won', to:'onboarding', note:'Inputs agreed'}}),
     'Moved from Won to Onboarding — Inputs agreed');
   assert.equal(cbEventWords({area:'stage', event:'moved', detail:{to:'won'}}), 'Moved to Won');
-  assert.equal(cbEventWords({area:'client', event:'added', detail:{plan:'growth'}}), 'Added as a client on the growth plan.');
+  assert.equal(cbEventWords({area:'client', event:'added', detail:{plan:'growth'}}), 'Added as a client on the Growth plan.');
   /* another module's line: its own words when it gave any */
   assert.equal(cbEventWords({area:'invoice', event:'sent', detail:{words:'Invoice AV-2026-11 sent for $3,000.'}}), 'Invoice AV-2026-11 sent for $3,000.');
   assert.equal(cbEventWords({area:'meeting', event:'no_show', detail:{note:'Sam did not join'}}), 'no show — Sam did not join');
@@ -847,9 +847,16 @@ test('cbRenderInvoices: number, amount, status, and Paid only on the ones we are
   const h = cbRenderInvoices({id:'c1'}, INVOICES, {admin:true});
   const t = text(h);
   for (const w of ['Invoices', 'AV-2026-0007', '$2,700', 'Sent', 'AV-2026-0003', '$300', 'Paid', 'Overdue', 'Draft']) assert.ok(t.includes(w), 'missing: ' + w);
-  assert.ok(h.includes('onclick="cbMarkPaid(&quot;c1&quot;,&quot;i-1&quot;)"'), 'a sent invoice has Paid');
-  assert.ok(h.includes('cbMarkPaid(&quot;c1&quot;,&quot;i-3&quot;)'), 'an overdue invoice has Paid');
-  assert.ok(!h.includes('&quot;i-2&quot;') && !h.includes('&quot;i-4&quot;'), 'a paid or draft one has no button');
+  assert.ok(h.includes('onclick="cbAskPaid(&quot;c1&quot;,&quot;i-1&quot;)"'), 'a sent invoice has Paid, which asks first');
+  assert.ok(h.includes('cbAskPaid(&quot;c1&quot;,&quot;i-3&quot;)'), 'an overdue invoice has Paid');
+  assert.ok(!h.includes('cbAskPaid(&quot;c1&quot;,&quot;i-2&quot;)') && !h.includes('cbAskPaid(&quot;c1&quot;,&quot;i-4&quot;)'), 'a paid or draft one has no Paid');
+  assert.ok(h.includes('cbViewInvoice(&quot;i-2&quot;)') && h.includes('cbViewInvoice(&quot;i-4&quot;)'), 'every invoice can be viewed');
+  assert.equal(h.split('>Resend</button>').length - 1, 2, 'Resend on the two still owed');
+  assert.match(t, /Click Paid when their money has arrived/);
+  /* nothing owed: no hint about Paid; a paid first invoice says when the welcome went */
+  const settled = cbRenderInvoices({id:'c1'}, [{...INVOICES[1], is_first:true}], {admin:true});
+  assert.ok(!/Click Paid/.test(text(settled)), text(settled));
+  assert.match(text(settled), /Welcome email sent 5 Oct/);
   assert.equal(h.split('>Paid</button>').length - 1, 2);
   assert.ok(!/undefined|NaN|\[object/.test(h));
 
@@ -879,7 +886,7 @@ test('Paid on the client page calls the mark_paid rule, never a table update, an
   tables['invoices.select'] = () => ({data:[INVOICES[0]], error:null});
   await cbLoadOne('c1', true);
   cbOpenId = 'c1';
-  assert.ok(viewClient().includes('cbMarkPaid(&quot;c1&quot;,&quot;i-1&quot;)'), 'a just-won client shows its first invoice with Paid');
+  assert.ok(viewClient().includes('cbAskPaid(&quot;c1&quot;,&quot;i-1&quot;)'), 'a just-won client shows its first invoice with Paid');
 
   tables['rpc.mark_paid'] = () => ({data:{invoice_id:'i-1', client_id:'c1', welcome_sent:true}, error:null});
   let r = await cbMarkPaid('c1', 'i-1');
@@ -897,4 +904,89 @@ test('Paid on the client page calls the mark_paid rule, never a table update, an
   r = await cbMarkPaid('c1', 'i-1');
   assert.deepEqual(r, {ok:false, data:null, error:'That invoice is already paid.'});
   assert.equal(toasts.at(-1), 'That invoice is already paid.');
+});
+
+/* ═════════════ dress rehearsal: what a won client is waiting on, and the page's new links ═════════════ */
+test('cbWaiting: an unsigned agreement and an unpaid first invoice read as "Waiting on", urgent only once overdue', () => {
+  const now = Date.parse('2026-11-24T12:00:00Z');
+  const ag = {client_id:'c1', status:'sent'}, inv = {client_id:'c1', status:'sent', due_on:'2026-12-01'};
+  assert.deepEqual(cbWaiting(client({stage:'won'}), ag, inv, now), {code:'waiting', urgent:false, text:'Waiting on: agreement signature · payment (due 1 Dec)'});
+  assert.equal(cbWaiting(client({stage:'won'}), {status:'signed'}, inv, now).text, 'Waiting on: payment (due 1 Dec)');
+  const late = cbWaiting(client({stage:'onboarding'}), {status:'signed'}, {status:'sent', due_on:'2026-11-20'}, now);
+  assert.equal(late.urgent, true); assert.match(late.text, /overdue since 20 Nov/);
+  assert.equal(cbWaiting(client({stage:'won'}), {status:'signed'}, {status:'paid'}, now), null);
+  assert.equal(cbWaiting(client({stage:'ended'}), ag, inv, now), null, 'an ended client waits on nothing');
+  /* and it counts in Need a person */
+  const r = cbRow(client({stage:'won', updated_at:new Date(now).toISOString()}), {agreements:{c1:ag}, firstInvoices:{c1:inv}, now});
+  assert.ok(r.needs >= 1 && r.flags.some(f => f.code === 'waiting'));
+  const page = cbRenderClients([r], {});
+  assert.match(text(page), /Need a person 1/);
+  assert.match(text(page), /Growth/, 'the plan is capitalised in the list');
+});
+
+test('the client page: phone, role, agreement, the booking and the channel, Message them and the onboarding checklist', async () => {
+  tables['clients.select'] = () => ({data:[client({stage:'won', booking_id:'b-7'})], error:null});
+  tables['client_agreements.select'] = () => ({data:[{id:'a1', client_id:'c1', status:'signed', signed_name:'Sam Stone', signed_at:'2026-11-24T10:00:00Z'}], error:null});
+  tables['client_people.select'] = () => ({data:[{id:'p1', client_id:'c1', phone:'+1 512 555 0100', role:'Owner', is_primary:true}], error:null});
+  tables['channels.select'] = () => ({data:[{id:'ch-1', name:'Stone Roofing', client_id:'c1', kind:'client'}], error:null});
+  await cbLoadOne('c1', true);
+  cbOpenId = 'c1';
+  const h = viewClient(), t = text(h);
+  for (const w of ['Phone +1 512 555 0100', 'Their role Owner', 'Agreement Signed by Sam Stone on 24 Nov', 'Open the discovery call', 'Open Stone Roofing', 'Message them', 'Onboarding checklist', 'Growth · monthly'])
+    assert.ok(t.includes(w), 'missing: ' + w + ' in ' + t);
+  assert.ok(h.includes('cbOpenBooking(&quot;b-7&quot;)') && h.includes('cbOpenChannel(&quot;ch-1&quot;)'));
+  let went = null;
+  globalThis.render = (v) => { went = v; };
+  globalThis.chv = {want:null};
+  assert.equal(cbMessage('c1'), true);
+  assert.equal(went, 'channels'); assert.equal(chv.want, 'ch-1', 'Channels opens on their channel');
+  globalThis.openClientOnboarding = (id) => { went = 'onboarding:' + id; };
+  cbOpenOnboarding('c1'); assert.equal(went, 'onboarding:c1');
+  globalThis.openEnquiry = (id) => { went = 'booking:' + id; };
+  cbOpenBooking('b-7'); assert.equal(went, 'booking:b-7');
+  delete globalThis.render; delete globalThis.chv; delete globalThis.openClientOnboarding; delete globalThis.openEnquiry;
+  assert.equal(cbAgreementWords({status:'sent', created_at:'2026-11-23T10:00:00Z'}), 'Sent 23 Nov, not signed yet');
+  assert.equal(cbAgreementWords(null), '');
+});
+
+test('the mover: the "Why" hint fits the stage, and Move to Live waits for their inputs, saying why', () => {
+  const r = cbRow(client({stage:'onboarding'}), {});
+  const h = cbRenderMover(r);
+  assert.match(h, /placeholder="Inputs signed off on the kickoff call"/);
+  assert.match(h, /<button class="btn" disabled aria-describedby="cbMoveWhyNot">Move to Live<\/button>/);
+  assert.match(text(h), /Live needs their ICP and inputs first/);
+  assert.match(h, /cbDoMove\(&quot;c1&quot;,&quot;won&quot;\)/, 'going back is still allowed');
+  const ready = cbRenderMover(cbRow(client({stage:'onboarding'}), {profiles:{c1:{client_id:'c1', signed_off_at:'2026-11-20'}}}));
+  assert.match(ready, /cbDoMove\(&quot;c1&quot;,&quot;live&quot;\)/);
+  assert.match(cbRenderMover(cbRow(client({stage:'won'}), {})), /placeholder="Agreement signed and first invoice paid"/);
+});
+
+test('Paid asks how the money came, then sends that to mark_paid; View and Resend go through their own rules', async () => {
+  tables['clients.select'] = () => ({data:[client({stage:'won'})], error:null});
+  tables['invoices.select'] = () => ({data:[{...INVOICES[0], amount:3000, is_first:true}], error:null});
+  await cbLoadOne('c1', true);
+  const ask = cbAskPaid('c1', 'i-1');
+  assert.match(text(ask), /Mark \$3,000 paid and send their welcome email/);
+  for (const w of ['Wise', 'Payoneer', 'Bank transfer', 'Other']) assert.ok(ask.includes('>' + w + '<'), w);
+  assert.equal(rpcs.length, 0, 'asking writes nothing');
+  fields.cbPaidVia = 'Wise'; fields.cbPaidRef = 'TX-42';
+  tables['rpc.mark_paid'] = () => ({data:{invoice_id:'i-1', client_id:'c1', welcome_sent:true}, error:null});
+  const r = await cbConfirmPaid('c1', 'i-1');
+  assert.equal(r.ok, true);
+  assert.deepEqual(rpcs.at(-1), {name:'mark_paid', args:{p_invoice:'i-1', p_via:'Wise · TX-42'}});
+  assert.equal(cbPaidVia('Other', ''), 'Other');
+
+  tables['rpc.invoice_link'] = () => ({data:'https://aviance.store/doc.html#i.x.sig', error:null});
+  const opened = {location:{href:''}, close(){}};
+  globalThis.open = () => opened;
+  const v = await cbViewInvoice('i-1');
+  assert.equal(v.ok, true); assert.deepEqual(rpcs.at(-1), {name:'invoice_link', args:{p_invoice:'i-1'}});
+  assert.equal(opened.location.href, 'https://aviance.store/doc.html#i.x.sig');
+  delete globalThis.open;
+  tables['rpc.resend_pack'] = () => ({data:{email:'sam@stone.test', invoice_number:'AV-1'}, error:null});
+  const s = await cbResend('c1');
+  assert.equal(s.ok, true); assert.deepEqual(rpcs.at(-1), {name:'resend_pack', args:{p_client:'c1'}});
+  assert.equal(toasts.at(-1), 'Sent again to sam@stone.test.');
+  tables['rpc.resend_pack'] = () => ({data:null, error:{message:'Only the owner can send the pack again.'}});
+  assert.equal((await cbResend('c1')).error, 'Only the owner can send the pack again.');
 });

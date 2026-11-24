@@ -86,9 +86,19 @@ of "open" words.
 - **client_requests** — client_id*, person_id, kind* [question|change|complaint|dispute|pause|cancel|other], subject*, body, status* [open|in_progress|answered|closed], owner, closed_at
 
 ### Conversations
-- **channels** — name*, purpose, kind* [internal|client], client_id, created_by, archived_at
-- **channel_members** — channel_id*, user_id, person_id (exactly one of the two), member_role* [member|owner], last_read_at, added_at*
-- **channel_messages** — channel_id*, author_user, author_person, body*, attachment_url, edited_at, deleted_at
+- **channels** — name*, purpose, kind* [team|internal|client], client_id (required for client), created_by, archived_at
+- **channel_members** — channel_id*, user_id, person_id (exactly one of the two), member_role* [member|owner], last_read_at, added_at*. Unique (channel_id,user_id) and (channel_id,person_id).
+- **channel_messages** — channel_id*, author_user, author_person, body*, attachment_url, edited_at, deleted_at. A team message has `author_user`; a client's has `author_person` (a `client_people` id). Realtime is on. There is **no `messages` table** and no `chat-files` bucket: the Channels screen sends text only, and shows an `attachment_url` only when it is a web link.
+
+The team's Channels screen (channels.js) reads and writes only through channels-api.js, which uses these
+tables plus four team-only database functions (`supabase/migrations/20261124_channels_rpcs.sql`,
+security definer, refuse unless `is_approved()`):
+- `my_channels()` → jsonb `[{id, name, purpose, kind, client_id, company, archived_at, created_at, last_message_at, last_body, unread}]` — every client channel, plus team/internal ones you belong to or made. `unread` counts others' live messages after your `last_read_at` (never opened = all; not a member = 0).
+- `mark_channel_read(c uuid)` → void — upserts your member row with `last_read_at = now()`.
+- `channel_people(p_ids uuid[])` → jsonb `[{id, name, role, kind: team|client, company}]` — names for login ids (profiles) and client person ids (client_people). A client author is always shown as "Name (Company)" with a Client tag.
+- `ensure_client_channel(p_client_id uuid, p_name text)` → uuid — the client's open channel, or a new one named after the company, with you as owner and every person of that client as a member.
+
+Edits and deletes from the screen only ever touch your own messages (`author_user = auth.uid()`); deleting is a soft delete (`deleted_at`).
 
 ### Work queue
 - **tasks** — title*, detail, department* [marketing|sales|onboarding|operations|deliverability|finance|client_success|admin], client_id, assignee, status* [todo|doing|blocked|done|cancelled], priority* 1-5 (default 3), due_on date, created_by, done_at

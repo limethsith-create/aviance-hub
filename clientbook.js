@@ -47,12 +47,14 @@ const cb = {
   standing: [], exposure: null, owners: {}, history: {}, requests: [], profiles: {},
   one: {}, oneErr: {},          /* one[clientId] = {client, profile, months, events, history} */
   needs: null, needsErr: '',
+  agreements: {}, firstInv: {},  /* newest agreement, and the first invoice, by client id */
   busy: {},
 };
 function cbForget(){
   cb.clients = null; cb.at = 0; cb.err = ''; cb.tried = false;
   cb.standing = []; cb.exposure = null; cb.owners = {}; cb.history = {}; cb.requests = []; cb.profiles = {};
   cb.one = {}; cb.oneErr = {}; cb.needs = null; cb.needsErr = ''; cb.busy = {};
+  cb.agreements = {}; cb.firstInv = {};
 }
 
 /* ===================== 1. PLUMBING (copied from finance.js) ===================== */
@@ -122,6 +124,12 @@ function cbList(items){
 }
 function cbPossessive(n){ const s = cbTrim(n); return s ? s + (/s$/i.test(s) ? "'" : "'s") : 'Their' }
 
+/* "growth" → "Growth": a plan's name, as the owner reads it. */
+function cbPlanWord(p){
+  const k = cbTrim(p).toLowerCase();
+  return ({pilot:'Pilot', starter:'Starter', growth:'Growth', scale:'Scale'})[k] || (k ? k.charAt(0).toUpperCase() + k.slice(1) : '');
+}
+
 function cbStageIndex(key){ return CB_STAGE_KEYS.indexOf(String(key || '')) }
 function cbStage(key){ const i = cbStageIndex(key); return i < 0 ? null : CB_STAGES[i] }
 function cbStageLabel(key){ const s = cbStage(key); return s ? s[1] : (cbTrim(key) || 'Not set') }
@@ -159,6 +167,41 @@ async function cbStageHistory(clientId){
     if (clientId) q = q.eq('client_id', clientId);
     return q.order('at', {ascending:false});
   }, []);
+}
+/* Their agreements, newest first. The team can read these. */
+async function cbAgreements(clientId){
+  return cbRun(() => {
+    let q = sb.from('client_agreements').select('id,client_id,status,signed_name,signed_at,created_at');
+    if (clientId) q = q.eq('client_id', clientId);
+    return q.order('created_at', {ascending:false});
+  }, []);
+}
+/* Each client's first invoice (the one close_won raised). Admin only, like every invoice. */
+async function cbFirstInvoices(){
+  if (!cbIsAdmin()) return cbOk([]);
+  return cbRun(() => sb.from('invoices').select('id,client_id,number,amount,status,due_on,paid_at,is_first,created_at')
+    .eq('is_first', true), []);
+}
+/* The person we talk to there: their phone and their role. */
+async function cbPerson(clientId){
+  if (!clientId) return cbErr('Which client is this about?');
+  return cbRun(() => sb.from('client_people').select('*').eq('client_id', clientId)
+    .order('is_primary', {ascending:false}).limit(1), []);
+}
+/* Their private channel with us, if close_won made one. */
+async function cbChannel(clientId){
+  if (!clientId) return cbErr('Which client is this about?');
+  return cbRun(() => sb.from('channels').select('id,name,kind,client_id,archived_at').eq('client_id', clientId).limit(1), []);
+}
+/* The signed doc.html link to one invoice, for the owner to open. */
+async function cbInvoiceLink(invoiceId){
+  if (!invoiceId) return cbErr('Which invoice is this about?');
+  return cbRun(() => sb.rpc('invoice_link', {p_invoice: invoiceId}), '');
+}
+/* Send the agreement and the invoice again, with fresh links. */
+async function cbResendPack(clientId){
+  if (!clientId) return cbErr('Which client is this about?');
+  return cbRun(() => sb.rpc('resend_pack', {p_client: clientId}), null);
 }
 /* Their invoices, newest first. Only an admin can read invoices, so anyone else
    gets an empty list without the database being asked. */
@@ -444,6 +487,8 @@ function cbRow(client, bag){
     flags.push({code:'inputs', urgent: cbTrim(c.stage) !== 'onboarding', text:
       prof ? 'Their ICP and inputs are not signed off yet.' : 'They have given us no ICP or inputs yet.'});
   }
+  const waiting = cbWaiting(c, (b.agreements || {})[c.id], (b.firstInvoices || {})[c.id], now);
+  if (waiting) flags.push(waiting);
   const limit = cbStageLimit(c.stage);
   if (limit > 0 && sat != null && sat > limit) {
     flags.push({code:'stuck', urgent:false, text:
@@ -469,6 +514,25 @@ function cbRow(client, bag){
     profile: prof, sat: sat, since: sinceAt,
     flags: flags, needs: flags.length, urgent: flags.some(f => f.urgent),
   };
+}
+/* A won client still waiting on us being paid, or on their signature:
+   "Waiting on: agreement signature · payment (due 1 Dec)". Overdue is urgent;
+   before the due date it is only waiting. null when nothing is outstanding. */
+function cbWaiting(client, agreement, invoice, now){
+  const c = client || {};
+  if (['won','onboarding','live','at_risk'].indexOf(cbTrim(c.stage)) < 0) return null;
+  const parts = [];
+  const ag = agreement || null, inv = invoice || null;
+  if (ag && ['signed','void'].indexOf(cbTrim(ag.status)) < 0) parts.push('agreement signature');
+  let late = false;
+  if (inv && ['paid','void'].indexOf(cbTrim(inv.status)) < 0) {
+    const today = new Date(now == null ? Date.now() : now).toISOString().slice(0,10);
+    const due = cbTrim(inv.due_on).slice(0,10);
+    late = cbTrim(inv.status) === 'overdue' || (!!due && due < today);
+    parts.push('payment' + (due ? (late ? ' (overdue since ' + cbDate(due) + ')' : ' (due ' + cbDate(due) + ')') : ''));
+  }
+  if (!parts.length) return null;
+  return {code:'waiting', urgent: late, text: 'Waiting on: ' + parts.join(' · ')};
 }
 /* Every client as a row, newest trouble first. */
 function cbRows(clients, bag){
@@ -540,7 +604,7 @@ function cbRenderRow(r){
       (r.person ? '<span class="cb-person">' + cbE(r.person) + '</span>' : '') +
       (r.owner ? '<span class="cb-owner" title="' + cbE('Looked after by ' + r.owner) + '">' + cbE(r.owner) + '</span>' : '<span class="cb-owner none">Nobody</span>') +
     '</span>' +
-    '<span class="cb-row-plan">' + (r.plan ? cbPill(r.plan + (r.term === '3month' ? ' · 3 months' : ''), 'grey') : '<span class="cb-dim">No plan</span>') + '</span>' +
+    '<span class="cb-row-plan">' + (r.plan ? cbPill(cbPlanWord(r.plan) + (r.term === '3month' ? ' · 3 months' : ''), 'grey') : '<span class="cb-dim">No plan</span>') + '</span>' +
     '<span class="cb-row-stage">' + cbStagePill(r.stage) + '</span>' +
     '<span class="cb-row-calls">' + cbCallsCell(r) + '</span>' +
     '<span class="cb-row-days">' + cbDaysCell(r) + '</span>' +
@@ -588,28 +652,56 @@ function cbRenderClients(rows, meta){
       '</section>').join('');
 }
 
+/* What "Why" might say, for the move forward from each stage. */
+const CB_MOVE_HINTS = {
+  enquiry:'Booked a discovery call', booked:'Said yes on the call', won:'Agreement signed and first invoice paid',
+  onboarding:'Inputs signed off on the kickoff call', live:'Two months short, they want to talk', at_risk:'They asked to stop',
+  ended:'They came back',
+};
+/* Why a move forward cannot happen yet, from what the page already knows. '' when it can. */
+function cbMoveBlock(r, toKey){
+  if (toKey !== 'live') return '';
+  const p = r && r.profile;
+  if (p && p.signed_off_at) return '';
+  return p ? 'Live needs their ICP and inputs signed off first.' : 'Live needs their ICP and inputs first — they have given us none yet.';
+}
 /* The stage mover on a client's page: one step forward, one step back, and a note. */
 function cbRenderMover(r){
   const fwd = cbStageAfter(r.stage), back = cbStageBefore(r.stage);
+  const blocked = fwd ? cbMoveBlock(r, fwd) : '';
   const btn = (key, kind) => key
-    ? '<button class="btn' + (kind === 'back' ? ' ghost' : '') + '" onclick="cbDoMove(' + cbAttr(r.id) + ',' + cbAttr(key) + ')">' +
+    ? '<button class="btn' + (kind === 'back' ? ' ghost' : '') + '"' +
+      (kind !== 'back' && blocked ? ' disabled aria-describedby="cbMoveWhyNot"' : ' onclick="cbDoMove(' + cbAttr(r.id) + ',' + cbAttr(key) + ')"') + '>' +
       cbE((kind === 'back' ? 'Back to ' : 'Move to ') + cbStageLabel(key)) + '</button>'
     : '';
   return '<section class="card cb-mover" id="cbMover">' +
     '<h3>Where are they?</h3>' +
     '<p class="cb-mover-now">' + cbStagePill(r.stage) + ' <span>' + cbE(cbStageMeaning(r.stage)) + '</span></p>' +
     '<label class="cb-lab" for="cbMoveNote">Why (kept in their history)</label>' +
-    '<input id="cbMoveNote" class="cb-in" type="text" maxlength="600" placeholder="Inputs signed off on the call">' +
+    '<input id="cbMoveNote" class="cb-in" type="text" maxlength="600" placeholder="' + cbE(CB_MOVE_HINTS[r.stage] || 'What happened') + '">' +
     '<div class="cb-mover-btns">' + btn(fwd, 'fwd') + btn(back, 'back') + '</div>' +
+    (blocked ? '<p class="cb-dim" id="cbMoveWhyNot">' + cbE(blocked) + '</p>' : '') +
     (!fwd && !back ? '<p class="cb-dim">' + cbE('There is nowhere to move them from here.') + '</p>' : '') +
     '<p class="cb-mover-rule">' + cbE('One stage at a time, forwards or back. Aviance OS will not let a stage be skipped.') + '</p>' +
     '<div class="cb-err" id="cbMoveErr" role="alert"></div>' +
   '</section>';
 }
 
-/* The facts: who they are, what they bought, who looks after them. */
-function cbRenderFacts(r){
+/* Where their agreement stands, in a few words. */
+function cbAgreementWords(ag){
+  if (!ag) return '';
+  const st = cbTrim(ag.status);
+  if (st === 'signed') return 'Signed' + (cbTrim(ag.signed_name) ? ' by ' + cbTrim(ag.signed_name) : '') + (ag.signed_at ? ' on ' + cbDate(ag.signed_at) : '');
+  if (st === 'void') return 'Cancelled';
+  return 'Sent' + (ag.created_at ? ' ' + cbDate(ag.created_at) : '') + ', not signed yet';
+}
+/* The facts: who they are, what they bought, who looks after them, and the way to
+   their booking and their channel. `x` = {person, agreement, channel}. */
+function cbRenderFacts(r, x){
   const c = r.client;
+  const o = x || {};
+  const per = o.person || {};
+  const link = (label, onclick) => '<button type="button" class="cb-link" onclick="' + onclick + '">' + cbE(label) + '</button>';
   const pair = (label, value) => '<div><small>' + cbE(label) + '</small><b>' + (value || '<span class="cb-dim">—</span>') + '</b></div>';
   const site = cbTrim(c.website);
   const url = /^https?:\/\/\S+$/i.test(site) ? site : site ? 'https://' + site : '';
@@ -617,8 +709,13 @@ function cbRenderFacts(r){
     '<h3>The facts</h3>' +
     '<div class="cb-grid">' +
       pair('Who we talk to', cbE(r.person) + (r.email ? '<span class="cb-sub">' + cbE(r.email) + '</span>' : '')) +
+      pair('Phone', cbTrim(per.phone) ? cbE(per.phone) : '') +
+      pair('Their role', cbTrim(per.role) ? cbE(per.role) : '') +
       pair('Website', url ? '<a href="' + cbE(url) + '" target="_blank" rel="noopener noreferrer">' + cbE(site) + '</a>' : '') +
-      pair('Plan', r.plan ? cbE(r.plan + (r.term === '3month' ? ' · 3-month term' : ' · monthly')) : '') +
+      pair('Plan', r.plan ? cbE(cbPlanWord(r.plan) + (r.term === '3month' ? ' · 3-month term' : ' · monthly')) : '') +
+      pair('Agreement', o.agreement ? cbE(cbAgreementWords(o.agreement)) : '') +
+      pair('Their booking', c.booking_id ? link('Open the discovery call', 'cbOpenBooking(' + cbAttr(c.booking_id) + ')') : '') +
+      pair('Their channel', o.channel && o.channel.id ? link('Open ' + (cbTrim(o.channel.name) || 'their channel'), 'cbOpenChannel(' + cbAttr(o.channel.id) + ')') : '') +
       pair('Promised a month', cbE(cbInt(c.calls_promised) + ' calls')) +
       pair('Fee a month', cbE(cbUsd(r.fee))) +
       pair('Looked after by', r.owner ? cbE(r.owner) : '') +
@@ -628,6 +725,10 @@ function cbRenderFacts(r){
       (c.ended_on ? pair('Ended', cbE(cbDate(c.ended_on) + (c.end_reason ? ' · ' + c.end_reason : ''))) : '') +
     '</div>' +
     (cbTrim(c.notes) ? '<p class="cb-notes">' + cbE(c.notes) + '</p>' : '') +
+    '<div class="cb-mover-btns cb-facts-acts">' +
+      '<button class="btn" onclick="cbMessage(' + cbAttr(r.id) + ')">Message them</button>' +
+      '<button class="btn ghost" onclick="cbOpenOnboarding(' + cbAttr(r.id) + ')">Onboarding checklist</button>' +
+    '</div>' +
   '</section>';
 }
 
@@ -698,7 +799,7 @@ function cbEventWords(ev){
     return 'Moved ' + (d.from ? 'from ' + cbStageLabel(d.from) + ' ' : '') + 'to ' + cbStageLabel(d.to) +
       (cbTrim(d.note) ? ' — ' + cbTrim(d.note) : '');
   }
-  if (area === 'client' && name === 'added') return 'Added as a client on the ' + cbTrim(d.plan) + ' plan.';
+  if (area === 'client' && name === 'added') return 'Added as a client on the ' + cbPlanWord(d.plan) + ' plan.';
   /* Anything another module wrote: its own words if it gave any, else the name. */
   if (cbTrim(d.words)) return cbTrim(d.words);
   if (cbTrim(d.note))  return name.replace(/_/g,' ') + ' — ' + cbTrim(d.note);
@@ -736,13 +837,26 @@ function cbRenderInvoices(r, invoices, meta){
       return '<li class="' + cbE(w[0]) + '">' + cbPill(w[1], w[0]) +
         '<span class="cb-month-say"><b>' + cbE(cbTrim(i.number) || 'Invoice') + '</b> · ' + cbE(cbUsd(i.amount)) + '</span>' +
         '<span class="cb-month-when">' + cbE(st === 'paid' ? 'paid ' + cbDate(i.paid_at) : 'due ' + cbDate(i.due_on)) + '</span>' +
-        (owed ? '<button class="btn" onclick="cbMarkPaid(' + cbAttr(r.id) + ',' + cbAttr(i.id) + ')">Paid</button>' : '') +
-        '</li>';
+        '<span class="cb-inv-acts">' +
+        '<button class="btn ghost" onclick="cbViewInvoice(' + cbAttr(i.id) + ')">View</button>' +
+        (owed ? '<button class="btn ghost" onclick="cbResend(' + cbAttr(r.id) + ')">Resend</button>' : '') +
+        (owed ? '<button class="btn" onclick="cbAskPaid(' + cbAttr(r.id) + ',' + cbAttr(i.id) + ')">Paid</button>' : '') +
+        '</span></li>';
     }).join('') + '</ul>' +
-    '<p class="cb-dim">' + cbE('Click Paid when their money has arrived. The first time, that sends their welcome email and their way in.') + '</p>' +
+    (rows.some(i => ['sent','overdue'].indexOf(cbTrim(i.status).toLowerCase()) >= 0)
+      ? '<p class="cb-dim">' + cbE('Click Paid when their money has arrived. The first time, that sends their welcome email and their way in.') + '</p>' : '') +
+    (cbWelcomeAt(rows, m.events) ? '<p class="cb-dim">' + cbE('Welcome email sent ' + cbDate(cbWelcomeAt(rows, m.events)) + '.') + '</p>' : '') +
   '</section>';
 }
 
+/* When their welcome email went: the history says so (mark_paid writes it), or
+   else the day their first invoice was paid. '' while it has not gone. */
+function cbWelcomeAt(invoices, events){
+  const ev = (events || []).find(e => e && cbTrim(e.area) === 'email' && cbTrim(e.event) === 'welcome_sent');
+  if (ev && ev.at) return ev.at;
+  const first = (invoices || []).find(i => i && i.is_first === true && cbTrim(i.status) === 'paid');
+  return first ? (first.paid_at || '') : '';
+}
 /* What needs a person on this one client, said at the top of their page. */
 function cbRenderFlags(r){
   if (!r.flags.length) return cbNote('Nothing here needs you today.', 'green');
@@ -764,7 +878,7 @@ function cbRenderClient(r, months, events, extra){
       '<button class="btn ghost" onclick="render(\'clients\')">All clients</button>' +
     '</header>' +
     cbRenderFlags(r) +
-    cbRenderFacts(r) +
+    cbRenderFacts(r, {person: x.person, agreement: x.agreement, channel: x.channel}) +
     cbRenderMover(r) +
     cbRenderProfile(r) +
     cbRenderMonths(r, months) +
@@ -780,7 +894,7 @@ function cbRenderClient(r, months, events, extra){
     '<section class="card cb-slot" id="cbOutreach" data-cb-client="' + cbE(r.id) + '"></section>' +
     /* invoices: listed here for an admin, with Paid on the ones we are waiting for.
        Refunds are still finance.js's own screen. */
-    cbRenderInvoices(r, x.invoices, {admin: !!x.admin, error: x.invoicesErr}) +
+    cbRenderInvoices(r, x.invoices, {admin: !!x.admin, error: x.invoicesErr, events: events}) +
     // TODO: their people — client_people and portal_invites, and their open requests.
     '<section class="card cb-slot" id="cbPeople" data-cb-client="' + cbE(r.id) + '"></section>' +
     // TODO: handover — what we send them when they leave (handovers).
@@ -822,9 +936,10 @@ async function cbLoadAll(force){
   if (cb.busy.all) return cb.busy.all;
   if (!force && cb.clients && Date.now() - cb.at < CB_RELOAD_MS) return cbOk(cb.clients);
   cb.busy.all = (async () => {
-    const [clients, standing, owners, requests, hist, profiles] = await Promise.all([
+    const [clients, standing, owners, requests, hist, profiles, agreements, firsts] = await Promise.all([
       cbClients(), cbStanding(), cbOwners(), cbOpenRequests(), cbStageHistory(null),
-      cbRun(() => sb.from('client_profiles').select('client_id,signed_off_at,icp'), [])
+      cbRun(() => sb.from('client_profiles').select('client_id,signed_off_at,icp'), []),
+      cbAgreements(null), cbFirstInvoices()
     ]);
     if (!clients.ok) { cb.err = clients.error; cb.at = Date.now(); cb.tried = true; return clients; }
     cb.clients = clients.data || [];
@@ -836,6 +951,11 @@ async function cbLoadAll(force){
     (hist.ok ? hist.data || [] : []).forEach(h => { if (h && h.client_id && !cb.history[h.client_id]) cb.history[h.client_id] = h; });
     cb.profiles = {};
     (profiles.ok ? profiles.data || [] : []).forEach(p => { if (p && p.client_id) cb.profiles[p.client_id] = p; });
+    /* newest agreement first, so the first one seen per client is the one that counts */
+    cb.agreements = {};
+    (agreements.ok ? agreements.data || [] : []).forEach(a => { if (a && a.client_id && !cb.agreements[a.client_id]) cb.agreements[a.client_id] = a; });
+    cb.firstInv = {};
+    (firsts.ok ? firsts.data || [] : []).forEach(i => { if (i && i.client_id && !cb.firstInv[i.client_id]) cb.firstInv[i.client_id] = i; });
     /* A part that did not load is said out loud, not hidden. */
     const bad = [!standing.ok ? 'their months' : '', !requests.ok ? 'their requests' : ''].filter(Boolean);
     cb.err = bad.length ? 'Showing the clients, but ' + cbList(bad) + ' could not be read just now.' : '';
@@ -853,12 +973,13 @@ async function cbLoadOne(clientId, force){
   if (cb.busy[key]) return cb.busy[key];
   if (!force && cb.one[clientId]) return cbOk(cb.one[clientId]);
   cb.busy[key] = (async () => {
-    const [client, profile, months, events, hist, reqs, owners, invs] = await Promise.all([
+    const [client, profile, months, events, hist, reqs, owners, invs, ags, person, channel] = await Promise.all([
       cbClient(clientId), cbProfile(clientId), cbStanding({clientId}), cbEvents(clientId),
       cbStageHistory(clientId), cbOpenRequests(clientId),
       Object.keys(cb.owners || {}).length ? Promise.resolve(cbOk(cb.owners)) : cbOwners(),
-      cbInvoices(clientId)
+      cbInvoices(clientId), cbAgreements(clientId), cbPerson(clientId), cbChannel(clientId)
     ]);
+    const firstRow = (res) => res && res.ok && Array.isArray(res.data) && res.data.length ? res.data[0] : null;
     if (!client.ok) { cb.oneErr[clientId] = client.error; return client; }
     cb.one[clientId] = {
       client: client.data, profile: profile.ok ? profile.data : null,
@@ -866,6 +987,7 @@ async function cbLoadOne(clientId, force){
       history: hist.ok ? hist.data || [] : [], requests: reqs.ok ? reqs.data || [] : [],
       owners: owners.ok ? owners.data || {} : {},
       invoices: invs.ok ? invs.data || [] : [], invoicesErr: invs.ok ? '' : invs.error,
+      agreement: firstRow(ags), person: firstRow(person), channel: firstRow(channel),
       err: [!months.ok ? 'their months' : '', !events.ok ? 'their history' : ''].filter(Boolean).length
         ? 'Some of this page could not be read just now.' : ''
     };
@@ -903,7 +1025,8 @@ function cbGo(clientId){
 /* Everything cbRow() needs about every client, from what is loaded. */
 function cbBag(extra){
   return Object.assign({standing:cb.standing, owners:cb.owners, history:cb.history,
-                        requests:cb.requests, profiles:cb.profiles}, extra || {});
+                        requests:cb.requests, profiles:cb.profiles,
+                        agreements:cb.agreements, firstInvoices:cb.firstInv}, extra || {});
 }
 
 /* ---- the main screen ---- */
@@ -930,10 +1053,19 @@ function viewClient(clientId){
   const r = cbRow(got.client, {
     standing: got.months, owners: got.owners, requests: got.requests,
     profiles: got.profile ? {[id]: got.profile} : {},
-    history: got.history && got.history.length ? {[id]: got.history[0]} : {}
+    history: got.history && got.history.length ? {[id]: got.history[0]} : {},
+    agreements: got.agreement ? {[id]: got.agreement} : {},
+    firstInvoices: cbFirstOf(got.invoices) ? {[id]: cbFirstOf(got.invoices)} : {}
   });
   return (got.err ? cbErrNote(got.err) : '') + cbRenderClient(got.client ? r : null, got.months, got.events,
-    {admin: cbIsAdmin(), invoices: got.invoices, invoicesErr: got.invoicesErr});
+    {admin: cbIsAdmin(), invoices: got.invoices, invoicesErr: got.invoicesErr,
+     agreement: got.agreement, person: got.person, channel: got.channel});
+}
+
+/* Their first invoice, out of all of them: the one marked first, else the oldest. */
+function cbFirstOf(invoices){
+  const rows = (invoices || []).filter(Boolean);
+  return rows.find(i => i.is_first === true) || null;
 }
 
 /* ---- what needs a person today ---- */
@@ -956,15 +1088,99 @@ function cbShowErr(id, msg){
 }
 function cbField(id){ return typeof val === 'function' ? val(id) : '' }
 
+/* How the money came. The choice is kept on the invoice as `paid_via`. */
+const CB_PAID_VIA = ['Wise', 'Payoneer', 'Bank transfer', 'Other'];
+/* Paid asks first: how it came, an optional reference, then one button that says
+   exactly what it will do ("Mark $3,000 paid and send their welcome email"). */
+function cbRenderPaidAsk(clientId, inv, welcomeGone){
+  const i = inv || {};
+  const welcome = i.is_first === true && !welcomeGone;
+  return '<div class="cb-add"><h3>' + cbE('Invoice ' + (cbTrim(i.number) || '') + ' paid?') + '</h3>' +
+    '<label class="cb-lab" for="cbPaidVia">How did it come</label><select id="cbPaidVia" class="cb-in">' +
+      CB_PAID_VIA.map(v => '<option value="' + cbE(v) + '">' + cbE(v) + '</option>').join('') + '</select>' +
+    '<label class="cb-lab" for="cbPaidRef">Reference (if there is one)</label><input id="cbPaidRef" class="cb-in" type="text" maxlength="40" placeholder="The transfer reference">' +
+    '<div class="cb-err" id="cbPaidErr" role="alert"></div>' +
+    '<div class="cb-mover-btns"><button class="btn" onclick="cbConfirmPaid(' + cbAttr(clientId) + ',' + cbAttr(i.id) + ')">' +
+      cbE('Mark ' + cbUsd(i.amount) + ' paid' + (welcome ? ' and send their welcome email' : '')) + '</button>' +
+    '<button class="btn ghost" onclick="closeModal()">Back</button></div></div>';
+}
+function cbAskPaid(clientId, invoiceId){
+  const got = cb.one[clientId];
+  const inv = got && (got.invoices || []).find(i => i && String(i.id) === String(invoiceId));
+  if (!inv) return cbMarkPaid(clientId, invoiceId);
+  const html = cbRenderPaidAsk(clientId, inv, !!cbWelcomeAt(got.invoices, got.events));
+  if (typeof openModal === 'function') openModal(html);
+  return html;
+}
+/* "Wise · REF123" — what goes to mark_paid as p_via. */
+function cbPaidVia(method, ref){
+  const m = cbTrim(method), r = cbTrim(ref);
+  return (m && r ? m + ' · ' + r : m || r).slice(0, 60);
+}
+async function cbConfirmPaid(clientId, invoiceId){
+  const via = cbPaidVia(cbField('cbPaidVia'), cbField('cbPaidRef'));
+  const r = await cbMarkPaid(clientId, invoiceId, via);
+  if (r.ok && typeof closeModal === 'function') closeModal();
+  else if (!r.ok) cbShowErr('cbPaidErr', r.error);
+  return r;
+}
+/* View: the invoice as the client sees it, in a new tab. The tab is opened before
+   the link is asked for, so the browser does not block it. */
+async function cbViewInvoice(invoiceId){
+  let w = null;
+  try { w = typeof window !== 'undefined' && typeof window.open === 'function' ? window.open('', '_blank') : null; } catch (e) { w = null; }
+  const r = await cbInvoiceLink(invoiceId);
+  if (!r.ok || !cbTrim(r.data)) {
+    try { if (w) w.close(); } catch (e) {}
+    cbSay(r.ok ? 'There is no link for that invoice.' : r.error);
+    return r.ok ? cbErr('There is no link for that invoice.') : r;
+  }
+  try { if (w) { w.opener = null; w.location.href = r.data; } else cbSay('Open it here: ' + r.data); } catch (e) {}
+  return r;
+}
+/* Resend: the agreement and the invoice again, to the same person, with fresh links. */
+async function cbResend(clientId){
+  const key = 'resend:' + clientId;
+  if (cb.busy[key]) return cbErr('Still working on it.');
+  cb.busy[key] = true;
+  let r;
+  try { r = await cbResendPack(clientId); } finally { delete cb.busy[key]; }
+  cbSay(r.ok ? 'Sent again to ' + (cbTrim(r.data && r.data.email) || 'them') + '.' : r.error);
+  if (r.ok) { delete cb.one[clientId]; await cbLoadOne(clientId, true); cbPaint(); }
+  return r;
+}
+/* Their discovery call: the Calendar, on that call, with its panel open. */
+function cbOpenBooking(bookingId){
+  if (!bookingId) return false;
+  if (typeof openEnquiry === 'function') { openEnquiry(bookingId); return true; }
+  return false;
+}
+/* Channels, with this channel already open. */
+function cbOpenChannel(channelId){
+  try { if (typeof chv !== 'undefined' && chv) chv.want = channelId || null; } catch (e) {}
+  if (typeof render === 'function') { render('channels'); return true; }
+  return false;
+}
+/* Message them: their channel if we know it, else Channels as it is. */
+function cbMessage(clientId){
+  const got = cb.one[clientId];
+  const ch = got && got.channel;
+  return cbOpenChannel(ch && ch.id ? ch.id : null);
+}
+function cbOpenOnboarding(clientId){
+  if (typeof openClientOnboarding === 'function') { openClientOnboarding(clientId); return true; }
+  if (typeof render === 'function') { render('onboarding'); return true; }
+  return false;
+}
 /* Paid, from the invoice on their page. The database rule does the rest: the
    first payment sends their welcome email and their way in. One at a time. */
-async function cbMarkPaid(clientId, invoiceId){
+async function cbMarkPaid(clientId, invoiceId, via){
   const key = 'paid:' + invoiceId;
   if (cb.busy[key]) return cbErr('Still working on it.');
   cb.busy[key] = true;
   let r;
   try {
-    r = typeof fnMarkInvoicePaid === 'function' ? await fnMarkInvoicePaid(invoiceId) : cbErr('The finance side is not loaded.');
+    r = typeof fnMarkInvoicePaid === 'function' ? await fnMarkInvoicePaid(invoiceId, via) : cbErr('The finance side is not loaded.');
   } finally { delete cb.busy[key]; }
   if (!r.ok) { cbSay(r.error); return r; }
   cbSay(typeof fnPaidWords === 'function' ? fnPaidWords(r.data) : 'Marked paid.');

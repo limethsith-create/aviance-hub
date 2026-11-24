@@ -14,7 +14,8 @@
      - A link token is read from the URL #fragment, kept in memory, and never
        written to storage or a query string.
 
-   Contract: rpc doc_get / doc_sign / invite_peek / portal_home, the
+   Contract: rpc doc_get / doc_sign / invite_peek / portal_home /
+   portal_kickoff_slots / portal_book_kickoff, the
    portal-accept edge function, and the channel_messages table.
    ======================================================================= */
 
@@ -81,7 +82,7 @@ function pcToDate(v){
 }
 function pcDate(v){
   const d = pcToDate(v);
-  return d ? d.getDate() + ' ' + PC_MONTHS[d.getMonth()] + ' ' + d.getFullYear() : '';
+  return d ? PC_MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear() : '';
 }
 function pcTime(v){
   const d = pcToDate(v);
@@ -101,7 +102,7 @@ function pcDayLabel(v, now){
   if (key === pcDayKey(n)) return 'Today';
   const y = new Date(n.getFullYear(), n.getMonth(), n.getDate() - 1);
   if (key === pcDayKey(y)) return 'Yesterday';
-  return PC_DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + PC_MONTHS[d.getMonth()] + (d.getFullYear() === n.getFullYear() ? '' : ' ' + d.getFullYear());
+  return PC_DAYS[d.getDay()] + ', ' + PC_MONTHS[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() === n.getFullYear() ? '' : ', ' + d.getFullYear());
 }
 
 function pcFirstName(name){
@@ -181,6 +182,106 @@ function pcGroupMessages(rows, home, now){
   return days;
 }
 
+/* ---- times for the kickoff and documents --------------------------- */
+
+const PC_ZONE_ABBR = [
+  ['ET', /^(America\/(New_York|Detroit|Indianapolis|Louisville|Kentucky\/.+|Indiana\/(?!Knox$|Tell_City$).+)|US\/(Eastern|Michigan)|EST5EDT|EST)$/],
+  ['CT', /^(America\/(Chicago|Menominee|Indiana\/(Knox|Tell_City)|North_Dakota\/.+)|US\/Central|CST6CDT)$/],
+  ['MT', /^(America\/(Denver|Boise|Phoenix)|US\/(Mountain|Arizona)|MST7MDT|MST)$/],
+  ['PT', /^(America\/Los_Angeles|US\/Pacific|PST8PDT)$/],
+  ['AKT', /^(America\/(Anchorage|Juneau|Sitka|Nome|Yakutat|Metlakatla)|US\/Alaska)$/],
+  ['HT', /^(Pacific\/Honolulu|US\/Hawaii|HST)$/],
+  ['UTC', /^(UTC|Etc\/UTC|GMT|Etc\/GMT|Z)$/],
+];
+
+/* The viewer's own zone, e.g. 'Asia/Colombo'. */
+function pcViewerZone(){
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (e) { return 'UTC'; }
+}
+
+/* 'America/New_York' -> 'ET'; 'Asia/Colombo' -> 'Colombo time'. Same rule as the emails. */
+function pcZoneAbbr(zone){
+  const z = String(zone == null || zone === '' ? 'UTC' : zone).trim();
+  for (const [abbr, re] of PC_ZONE_ABBR) if (re.test(z)) return abbr;
+  return z.replace(/^.*\//, '').replace(/_/g, ' ') + ' time';
+}
+
+/* A moment, read in a zone: {key:'2026-11-27', day:'Fri, Nov 27', time:'10:00 AM'} or null. */
+function pcWhenParts(v, zone){
+  const d = pcToDate(v);
+  if (!d) return null;
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-US', { timeZone: zone || pcViewerZone(), weekday: 'short', month: 'short', day: 'numeric',
+      year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }).formatToParts(d);
+  } catch (e) { return null; }
+  const p = {};
+  parts.forEach((x) => { p[x.type] = x.value; });
+  const months = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
+  const key = p.year + '-' + ('0' + months[p.month]).slice(-2) + '-' + ('0' + p.day).slice(-2);
+  return { key, day: p.weekday + ', ' + p.month + ' ' + p.day, time: p.hour + ':' + p.minute + ' ' + String(p.dayPeriod || '').toUpperCase() };
+}
+
+/* 'Fri, Nov 27 · 10:00 AM ET' — the same words the emails use. */
+function pcWhen(v, zone){
+  const z = zone || pcViewerZone();
+  const w = pcWhenParts(v, z);
+  return w ? w.day + ' · ' + w.time + ' ' + pcZoneAbbr(z) : '';
+}
+
+/* 'Fri, Nov 27 · 8:30 PM' with no zone name, for 'your time'. */
+function pcLocalWhen(v, zone){
+  const w = pcWhenParts(v, zone || pcViewerZone());
+  return w ? w.day + ' · ' + w.time : '';
+}
+
+/* Free slots -> days in the viewer's own time, each slot with its ET time too.
+   [{key, label:'Fri, Nov 27', slots:[{iso, time:'3:30 PM', other:'10:00 AM ET'}]}] */
+function pcKickoffDays(slots, viewerZone, homeZone){
+  const vz = viewerZone || pcViewerZone();
+  const hz = homeZone || 'America/New_York';
+  const same = pcZoneAbbr(vz) === pcZoneAbbr(hz);
+  const days = [];
+  const seen = {};
+  (Array.isArray(slots) ? slots : [])
+    .map((s) => s && pcToDate(s.starts_at))
+    .filter(Boolean)
+    .sort((a, b) => a - b)
+    .forEach((d) => {
+      const iso = d.toISOString();
+      if (seen[iso]) return;
+      seen[iso] = true;
+      const w = pcWhenParts(d, vz);
+      if (!w) return;
+      let day = days[days.length - 1];
+      if (!day || day.key !== w.key) { day = { key: w.key, label: w.day, slots: [] }; days.push(day); }
+      const o = same ? null : pcWhenParts(d, hz);
+      day.slots.push({ iso, time: w.time, other: o ? o.time + ' ' + pcZoneAbbr(hz) : '' });
+    });
+  return days;
+}
+
+/* Escape, then mark any [text still to fill in] so an owner previewing notices it. */
+function pcFillHtml(text){
+  return pcEsc(text).replace(/\[([^\[\]]{1,400})\]/g, '<mark class="pc-fill">[$1]</mark>');
+}
+
+/* Print without holding up the click that asked for it. */
+function pcPrint(){
+  if (typeof window === 'undefined' || typeof window.print !== 'function') return false;
+  setTimeout(function(){ try { window.print(); } catch (e) { /* the browser said no */ } }, 60);
+  return true;
+}
+
+/* Bank details a client may see: never an admin reminder in [brackets]. */
+function pcPayDetails(pay){
+  const p = pay || {};
+  const wise = typeof p.wise_details === 'string' && p.wise_details.trim() && p.wise_details.trim().charAt(0) !== '[' ? p.wise_details : '';
+  const link = pcSafeUrl(p.payoneer_link);
+  const ready = p.ready === false ? false : !!(wise || link);
+  return { ready, wise: ready ? wise : '', link: ready ? link : '' };
+}
+
 /* ---- HTML builders (everything escaped) ----------------------------- */
 
 function pcLogoHtml(){
@@ -200,7 +301,29 @@ function pcLoadingHtml(){
 }
 function pcParasHtml(body){
   const list = Array.isArray(body) ? body : (body == null || body === '' ? [] : [body]);
-  return list.map((p) => `<p>${pcEsc(p)}</p>`).join('');
+  return list.map((p) => `<p>${pcFillHtml(p)}</p>`).join('');
+}
+
+const PC_PDF_NOTE = '<p class="pc-small pc-noprint pc-pdf-note">To download a PDF, press the button and choose “Save as PDF” as the printer.</p>';
+function pcPrintHtml(){
+  return `<p class="pc-noprint pc-docfoot"><button type="button" class="pc-btn pc-btn-line" data-pc-print>Print or save as PDF</button></p>${PC_PDF_NOTE}`;
+}
+
+/* The two signature lines: the client's (signed, or still to sign) opposite Aviance's. */
+function pcSignaturesHtml(doc){
+  const d = doc || {};
+  const t = d.terms || {};
+  const company = d.company || 'your company';
+  const ours = (Array.isArray(t.signatures) ? t.signatures : []).filter((x) => x && typeof x === 'object');
+  const a = ours[0] || { label: 'For Aviance', name: '[YOUR NAME]', role: 'Founder', org: 'Aviance' };
+  const signed = d.status === 'signed';
+  const theirs = signed
+    ? `<p class="pc-signature">${pcEsc(d.signed_name)}</p><p class="pc-sig-who">${pcEsc(d.signed_name)}</p><p class="pc-sig-org">${pcEsc(company)}${d.signed_at ? ' · ' + pcEsc(pcDate(d.signed_at)) : ''}</p>`
+    : `<p class="pc-signature pc-signature-empty" aria-hidden="true">&nbsp;</p><p class="pc-sig-who">Signs below</p><p class="pc-sig-org">${pcEsc(company)}</p>`;
+  return `<section class="pc-sigs" aria-label="Signatures">
+    <div class="pc-sig"><p class="pc-tag">For ${pcEsc(company)}</p>${theirs}</div>
+    <div class="pc-sig"><p class="pc-tag">${pcEsc(a.label || 'For Aviance')}</p><p class="pc-signature pc-signature-ours">${pcFillHtml(a.name || '[YOUR NAME]')}</p><p class="pc-sig-who">${pcFillHtml(a.name || '[YOUR NAME]')}, ${pcEsc(a.role || 'Founder')}</p><p class="pc-sig-org">${pcEsc(a.org || 'Aviance')}</p></div>
+  </section>`;
 }
 
 function pcAgreementHtml(doc){
@@ -208,21 +331,20 @@ function pcAgreementHtml(doc){
   const t = d.terms || {};
   const company = d.company || 'your company';
   const parties = (Array.isArray(t.parties) ? t.parties : [])
-    .map((p) => `<div class="pc-party"><dt class="pc-tag">${pcEsc(p && p.label)}</dt><dd>${pcEsc(p && p.value)}</dd></div>`).join('');
+    .map((p) => `<div class="pc-party"><dt class="pc-tag">${pcEsc(p && p.label)}</dt><dd>${pcFillHtml(p && p.value)}</dd></div>`).join('');
   const sections = (Array.isArray(t.sections) ? t.sections : [])
     .map((s, i) => `<section class="pc-sec"><h2><span class="pc-num">${i + 1}</span>${pcEsc(String((s && s.h) || "").replace(/^\s*\d+[.)]\s*/, ""))}</h2>${pcParasHtml(s && s.body)}</section>`).join('');
   let foot;
   if (d.status === 'signed') {
-    foot = `<section class="pc-signed" id="pcSigned" tabindex="-1" aria-label="Signature">
+    foot = `${pcSignaturesHtml(d)}<section class="pc-signed" id="pcSigned" tabindex="-1" aria-label="Signed">
       <p class="pc-tag pc-red">Signed</p>
-      <p class="pc-signature">${pcEsc(d.signed_name)}</p>
       <p class="pc-signed-line">Signed by ${pcEsc(d.signed_name)} on ${pcEsc(pcDate(d.signed_at))}</p>
-      <p class="pc-noprint"><button type="button" class="pc-btn pc-btn-line" data-pc-print>Print or save as PDF</button></p>
+      ${pcPrintHtml()}
     </section>`;
   } else if (d.status === 'void') {
     foot = `<section class="pc-signed"><p class="pc-tag">Withdrawn</p><p class="pc-signed-line">This agreement has been withdrawn and can no longer be signed. Reply to our email if you were expecting to sign it.</p></section>`;
   } else {
-    foot = `<form class="pc-sign pc-noprint" id="pcSignForm" novalidate>
+    foot = `${pcSignaturesHtml(d)}<form class="pc-sign pc-noprint" id="pcSignForm" novalidate>
       <p class="pc-tag pc-red">Sign</p>
       <label class="pc-label" for="pcSignName">Type your full name to sign</label>
       <input class="pc-input pc-input-sign" id="pcSignName" name="name" type="text" autocomplete="name" maxlength="120" required aria-describedby="pcSignErr">
@@ -235,54 +357,119 @@ function pcAgreementHtml(doc){
   return `<main class="pc-wrap pc-doc">
     <header class="pc-dochead">${pcLogoHtml()}<p class="pc-tag">Agreement</p></header>
     <h1 class="pc-h1" tabindex="-1">${pcEsc(t.title || 'Service agreement')}</h1>
-    ${t.intro ? `<p class="pc-lede">${pcEsc(t.intro)}</p>` : ''}
+    ${t.intro ? `<p class="pc-lede">${pcFillHtml(t.intro)}</p>` : ''}
     ${parties ? `<dl class="pc-parties">${parties}</dl>` : ''}
     <div class="pc-terms">${sections}</div>
     ${foot}
   </main>`;
 }
 
+/* 'Unpaid' | 'Paid' | 'Overdue' | 'Void' | 'Draft' — the database's word wins. */
+function pcStatusWord(inv){
+  const d = inv || {};
+  if (typeof d.status_word === 'string' && d.status_word.trim()) return d.status_word.trim();
+  return { paid: 'Paid', void: 'Void', draft: 'Draft', overdue: 'Overdue' }[d.status] || 'Unpaid';
+}
+
 function pcInvoiceHtml(doc){
   const d = doc || {};
   const from = d.from || {};
   const to = d.bill_to || {};
-  const pay = d.pay || {};
   const cur = d.currency || 'USD';
   const built = pcInvoiceLines(d);
   const paid = d.status === 'paid';
   const dead = d.status === 'void';
+  const word = pcStatusWord(d);
+  const pay = pcPayDetails(d.pay);
   const rows = built.lines.map((l) => `<tr${l.credit ? ' class="pc-credit"' : ''}><td>${pcEsc(l.label)}</td><td class="pc-amt">${pcEsc(pcMoney(l.amount, cur))}</td></tr>`).join('');
   let stamp = '';
   if (paid) stamp = `<p class="pc-stamp pc-stamp-paid"><strong>Paid</strong>${d.paid_at ? `<span>${pcEsc(pcDate(d.paid_at))}</span>` : ''}</p>`;
-  else if (dead) stamp = '<p class="pc-stamp"><strong>Void</strong></p>';
-  else if (d.status === 'overdue') stamp = '<p class="pc-stamp"><strong>Overdue</strong></p>';
-  else if (d.status === 'draft') stamp = '<p class="pc-stamp"><strong>Draft</strong></p>';
-  const link = pcSafeUrl(pay.payoneer_link);
+  else if (word === 'Void' || word === 'Overdue' || word === 'Draft') stamp = `<p class="pc-stamp"><strong>${pcEsc(word)}</strong></p>`;
   const meta = [
     ['Number', d.number],
     ['Issued', pcDate(d.issued_on)],
     [paid ? 'Paid' : 'Due', paid ? pcDate(d.paid_at) : pcDate(d.due_on)],
+    ['Status', word],
+    ['Terms', paid ? '' : d.terms],
   ].filter((m) => m[1]).map((m) => `<div><dt class="pc-tag">${m[0]}</dt><dd>${pcEsc(m[1])}</dd></div>`).join('');
-  const addr = (o, keys) => keys.map((k) => o[k]).filter(Boolean).map((v, i) => `<p${i ? '' : ' class="pc-strong"'}>${pcEsc(v)}</p>`).join('');
-  const how = paid || dead ? '' : `<section class="pc-pay" aria-labelledby="pcPayH">
+  /* until the owner fills in the company details, a client sees just 'Aviance' */
+  const fromKeys = from.ready === false ? ['legal_name', 'email', 'phone'] : ['legal_name', 'address', 'email', 'phone'];
+  const fromVals = Object.assign({}, from, from.ready === false ? { legal_name: 'Aviance' } : {});
+  const addr = (o, keys) => keys.map((k) => o[k]).filter(Boolean).map((v, i) => `<p${i ? '' : ' class="pc-strong"'}>${pcFillHtml(v)}</p>`).join('');
+  let how = '';
+  if (!paid && !dead) {
+    how = pay.ready
+      ? `<section class="pc-pay" aria-labelledby="pcPayH">
       <h2 class="pc-tag pc-red" id="pcPayH">How to pay</h2>
-      <p class="pc-pay-lede">Pay by bank transfer with the details below${d.number ? `, and put <strong>${pcEsc(d.number)}</strong> as the reference` : ''}.</p>
-      <pre class="pc-pre">${pcEsc(pay.wise_details)}</pre>
-      ${link ? `<p class="pc-noprint"><a class="pc-btn" href="${pcEsc(link)}" target="_blank" rel="noopener noreferrer">Pay by card</a></p>` : ''}
+      ${pay.wise ? `<p class="pc-pay-lede">Pay by bank transfer with the details below${d.number ? `, and put <strong>${pcEsc(d.number)}</strong> as the reference` : ''}.</p>
+      <pre class="pc-pre">${pcEsc(pay.wise)}</pre>` : ''}
+      ${pay.link ? `<p class="pc-noprint"><a class="pc-btn" href="${pcEsc(pay.link)}" target="_blank" rel="noopener noreferrer">Pay by card</a></p>` : ''}
+    </section>`
+      : `<section class="pc-pay pc-pay-later" aria-labelledby="pcPayH">
+      <h2 class="pc-tag pc-red" id="pcPayH">Payment details</h2>
+      <p class="pc-pay-lede">We’ll send these to you directly. Reply to our email if you need them now.</p>
     </section>`;
+  }
   return `<main class="pc-wrap pc-doc pc-invoice">
     <header class="pc-dochead">${pcLogoHtml()}<p class="pc-tag">${paid ? 'Receipt' : 'Invoice'}</p></header>
     <div class="pc-invtop"><h1 class="pc-h1" tabindex="-1">${paid ? 'Receipt' : 'Invoice'}</h1>${stamp}</div>
     <dl class="pc-meta">${meta}</dl>
     <div class="pc-two">
-      <div><p class="pc-tag">From</p>${addr(from, ['legal_name', 'address', 'email'])}</div>
+      <div><p class="pc-tag">From</p>${addr(fromVals, fromKeys)}</div>
       <div><p class="pc-tag">Bill to</p>${addr(to, ['company', 'contact_name', 'contact_email'])}</div>
     </div>
+    ${d.service ? `<p class="pc-service"><span class="pc-tag">Service</span><span class="pc-service-t">${pcEsc(d.service)}</span></p>` : ''}
     <table class="pc-lines"><thead><tr><th scope="col" class="pc-tag">Description</th><th scope="col" class="pc-tag pc-amt">Amount</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="pc-total"><p class="pc-tag">${paid ? 'Total paid' : 'Total due'}${cur ? ' · ' + pcEsc(String(cur).toUpperCase()) : ''}</p><p class="pc-total-n">${pcEsc(pcMoney(built.total, cur))}</p></div>
     ${how}
-    <p class="pc-noprint pc-docfoot"><button type="button" class="pc-btn pc-btn-line" data-pc-print>Print or save as PDF</button></p>
+    ${pcPrintHtml()}
   </main>`;
+}
+
+/* The portal's top card: book the kickoff, or what was booked.
+   k is what portal_kickoff_slots returned; ui = {viewerZone, day, pick, busy, error}. */
+function pcKickoffHtml(k, ui){
+  const s = k || {};
+  const o = ui || {};
+  const home = s.zone || 'America/New_York';
+  const vz = o.viewerZone || pcViewerZone();
+  if (s.booked && s.booked.starts_at) {
+    const b = s.booked;
+    const start = pcToDate(b.starts_at);
+    const end = start ? new Date(start.getTime() + (Number(b.minutes) || 45) * 60000) : null;
+    if (b.status === 'held' || (end && end < (pcToDate(o.now) || new Date()))) return '';
+    const link = pcSafeUrl(b.meet_link);
+    const local = pcZoneAbbr(vz) === pcZoneAbbr(home) ? '' : pcLocalWhen(b.starts_at, vz) + ' your time';
+    return `<section class="pc-kick pc-kick-done" aria-label="Your kickoff">
+      <div><p class="pc-tag pc-red">Kickoff booked</p>
+      <p class="pc-kick-when">Kickoff: ${pcEsc(pcWhen(b.starts_at, home))}</p>
+      ${local ? `<p class="pc-small">${pcEsc(local)}</p>` : ''}</div>
+      ${link ? `<a class="pc-btn" href="${pcEsc(link)}" target="_blank" rel="noopener noreferrer">Join the call</a>` : ''}
+    </section>`;
+  }
+  const days = pcKickoffDays(s.slots, vz, home);
+  if (!days.length) {
+    return `<section class="pc-kick" aria-labelledby="pcKickH"><h2 class="pc-kick-h" id="pcKickH">Book your kickoff</h2>
+      <p class="pc-small">There are no free times in the next few days. Message us below and we’ll find one.</p></section>`;
+  }
+  const day = days.find((x) => x.key === o.day) || days[0];
+  const pick = o.pick ? days.reduce((all, x) => all.concat(x.slots), []).find((x) => x.iso === o.pick) : null;
+  const tabs = days.map((x) => `<button type="button" class="pc-day-btn" data-pc-day="${pcEsc(x.key)}" aria-pressed="${x.key === day.key ? 'true' : 'false'}">${pcEsc(x.label)}</button>`).join('');
+  const times = day.slots.map((x) => `<button type="button" class="pc-slot" data-pc-slot="${pcEsc(x.iso)}" aria-pressed="${pick && pick.iso === x.iso ? 'true' : 'false'}">${pcEsc(x.time)}${x.other ? `<span>${pcEsc(x.other)}</span>` : ''}</button>`).join('');
+  const sameZone = pcZoneAbbr(vz) === pcZoneAbbr(home);
+  const confirm = pick ? `<div class="pc-kick-confirm" role="group" aria-label="Confirm your kickoff">
+      <p><strong>Book ${pcEsc(pcWhen(pick.iso, home))}?</strong>${sameZone ? '' : ` <span class="pc-small">(${pcEsc(pcLocalWhen(pick.iso, vz))} your time)</span>`}</p>
+      <button type="button" class="pc-btn" data-pc-book="${pcEsc(pick.iso)}"${o.busy ? ' disabled' : ''}>${o.busy ? 'Booking…' : 'Book it'}</button>
+      <button type="button" class="pc-btn pc-btn-quiet" data-pc-unpick>Change</button>
+    </div>` : '';
+  return `<section class="pc-kick" aria-labelledby="pcKickH">
+    <h2 class="pc-kick-h" id="pcKickH">Book your kickoff</h2>
+    <p class="pc-small">45 minutes with the Aviance team to agree your ideal customer profile. Times are in your time${sameZone ? '' : ', with ' + pcEsc(pcZoneAbbr(home)) + ' beside them'}.</p>
+    <div class="pc-days" role="group" aria-label="Day">${tabs}</div>
+    <div class="pc-slots" role="group" aria-label="Time on ${pcEsc(day.label)}">${times}</div>
+    ${confirm}
+    <p class="pc-err" role="alert" aria-live="assertive">${pcEsc(o.error || '')}</p>
+  </section>`;
 }
 
 function pcThreadHtml(days){
@@ -352,6 +539,21 @@ async function pcDocSign(token, name, agent){
   return r;
 }
 
+/* ---- data: the kickoff ---------------------------------------------- */
+
+async function pcKickoff(days){
+  const r = await pcRpc('portal', 'portal_kickoff_slots', { p_days: Number(days) > 0 ? Math.min(Number(days), 21) : 10 });
+  if (r.ok && !(r.data && typeof r.data === 'object' && (Array.isArray(r.data.slots) || r.data.booked))) return pcErr('We could not load the free times. Please try again.');
+  return r;
+}
+async function pcBookKickoff(iso){
+  const d = pcToDate(iso);
+  if (!d) return pcErr('Pick a time first.');
+  const r = await pcRpc('portal', 'portal_book_kickoff', { p_start: d.toISOString() });
+  if (r.ok && !(r.data && r.data.starts_at)) return pcErr('We could not confirm the booking. Refresh the page to check.');
+  return r;
+}
+
 /* ---- data: joining -------------------------------------------------- */
 
 /* Always answers with the peek shape: {ok:true,email,company,name} or {ok:false,reason}. */
@@ -364,7 +566,7 @@ async function pcInvitePeek(token){
 }
 function pcInviteMessage(reason){
   if (reason === 'used') return 'This link has already been used. Sign in instead.';
-  if (reason === 'expired') return 'This link has expired. Reply to our email and we will send a new one.';
+  if (reason === 'expired') return 'This link has expired. Reply to our email and we\'ll send a fresh link.';
   return PC_DEAD_LINK;
 }
 async function pcAccept(token, password){
