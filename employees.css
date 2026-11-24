@@ -1,41 +1,40 @@
-/* employees.css — the owner's Employees screen (prefix emp). Same look as the rest of the hub:
-   theme.css / polish.css variables only, no new colours, no new fonts. */
+/* employees.css — the owner's Employees screen (prefix emp). A slim strip of names on the left,
+   one chat filling the rest. theme.css / polish.css variables only: no new colours, no new fonts,
+   and no transition longer than 150ms. */
 .emp{display:flex;flex-direction:column;gap:var(--s4,16px)}
 .emp-top{margin-bottom:0}
-.emp-grid{display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr);gap:var(--s4,16px);align-items:start}
-.emp-side{display:flex;flex-direction:column;gap:var(--s3,12px);min-width:0}
-.emp-main{min-width:0}
-.emp-bar{display:flex;align-items:center;gap:var(--s2,8px);flex-wrap:wrap}
-.emp-hint{margin:0;margin-right:auto;color:var(--muted);font-size:var(--fs-small)}
+.emp-grid{display:grid;grid-template-columns:minmax(200px,220px) minmax(0,1fr);gap:var(--s4,16px);align-items:start}
+.emp-strip{min-width:0}
+.emp-main{min-width:0;display:flex;flex-direction:column;gap:var(--s3,12px)}
 
-/* the list */
-.emp-list{display:flex;flex-direction:column;gap:var(--s2,8px)}
-.emp-row{display:flex;flex-direction:column;gap:2px;width:100%;box-sizing:border-box;text-align:left;cursor:pointer;
-  padding:var(--s3,12px);min-height:44px;font:inherit;color:var(--text);
-  background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm,7px);box-shadow:var(--sh)}
+/* ---- the strip: a name, a dot, an unread count ---- */
+.emp-list{display:flex;flex-direction:column;gap:2px;padding:var(--s2,8px);background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--r,10px);box-shadow:var(--sh)}
+.emp-row{display:flex;align-items:center;gap:var(--s2,8px);width:100%;box-sizing:border-box;text-align:left;
+  cursor:pointer;padding:0 var(--s2,8px);min-height:40px;font:inherit;color:var(--text);
+  background:none;border:0;border-radius:var(--r-sm,7px);transition:background .12s,color .12s}
 .emp-row:hover{background:var(--surface-2)}
-.emp-row.on{box-shadow:inset 2px 0 0 var(--brand),var(--sh);background:var(--surface);border-color:var(--border-strong)}
-.emp-row:focus-visible{outline:2px solid var(--text);outline-offset:2px}
-.emp-rtop{display:flex;align-items:center;gap:var(--s2,8px)}
-.emp-rname{font-size:var(--fs-strong);font-weight:600;overflow-wrap:anywhere}
-.emp-rtop .badge{margin-left:auto}
-.emp-remail{color:var(--muted);font-size:var(--fs-small);overflow-wrap:anywhere}
-.emp-rmeta{display:flex;align-items:center;gap:var(--s2,8px);flex-wrap:wrap;margin-top:2px}
-.emp-rseen{color:var(--muted);font-size:var(--fs-min)}
-.emp-tag{font-family:var(--mono);font-size:var(--fs-min);text-transform:uppercase;letter-spacing:.06em;padding:2px 6px;
-  border:1px solid var(--border);border-radius:var(--r-xs,5px);color:var(--muted)}
-.emp-tag.ok{color:var(--green);background:var(--green-bg);border-color:transparent}
-.emp-tag.wait{color:var(--amber);background:var(--amber-bg);border-color:transparent}
-.emp-tag.off{color:var(--red);background:var(--red-bg);border-color:transparent}
+.emp-row.on{background:var(--surface-2);box-shadow:inset 2px 0 0 var(--brand)}
+.emp-row:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+.emp-rname{flex:1;min-width:0;font-size:var(--fs-base);font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.emp-row.on .emp-rname{font-weight:650}
+.emp-row .badge{flex:none}
 .emp-none{padding:var(--s4,16px);color:var(--muted);font-size:var(--fs-small)}
 
-/* nothing picked, or nobody added yet */
+/* ---- the presence dot: green now, amber within the hour, grey after, hollow if she never signed in ---- */
+.emp-dot{flex:none;width:9px;height:9px;border-radius:999px;background:var(--border-strong);box-sizing:border-box}
+.emp-dot.on{background:var(--green)}
+.emp-dot.recent{background:var(--amber)}
+.emp-dot.off{background:var(--border-strong)}
+.emp-dot.never{background:transparent;border:1.5px solid var(--border-strong)}
+
+/* ---- nothing picked, or nobody added yet ---- */
 .emp-blank{padding:var(--s6,32px) var(--s5,24px);text-align:center}
 .emp-blank h3{margin:0 0 var(--s2,8px);font-size:var(--fs-h3)}
 .emp-blank p{margin:0 0 var(--s3,12px);color:var(--muted);max-width:52ch;margin-inline:auto}
 
-/* add an employee */
-.emp-add{padding:var(--s4,16px);display:flex;flex-direction:column;gap:var(--s2,8px)}
+/* ---- add an employee (a small panel above the chat, opened from the ⋯ menu) ---- */
+.emp-add{padding:var(--s4,16px);display:flex;flex-direction:column;gap:var(--s2,8px);max-width:46ch}
 .emp-add h3{margin:0 0 var(--s1,4px);font-size:var(--fs-h3)}
 .emp-add input{width:100%;box-sizing:border-box;padding:8px 10px;font:inherit;font-size:var(--fs-base)}
 .emp-lab{font-weight:600;font-size:var(--fs-small)}
@@ -44,17 +43,36 @@
   border-radius:var(--r-xs,5px);font-size:var(--fs-small)}
 .emp-acts{display:flex;gap:var(--s2,8px);flex-wrap:wrap;align-items:center}
 
-/* the person who is open */
+/* ---- the chat ---- */
 .emp-panel{display:flex;flex-direction:column;gap:var(--s3,12px)}
-.emp-phead{padding:var(--s4,16px);display:flex;gap:var(--s3,12px);flex-wrap:wrap;align-items:flex-start}
-.emp-pwho{min-width:0;flex:1}
-.emp-pname{margin:0;font-size:var(--fs-h2)}
-.emp-pmail{margin:2px 0 0;color:var(--muted);font-size:var(--fs-small);overflow-wrap:anywhere}
-.emp-pmeta{display:flex;align-items:center;gap:var(--s2,8px);flex-wrap:wrap;margin:var(--s2,8px) 0 0}
-.emp-pacts{display:flex;gap:var(--s2,8px);flex-wrap:wrap}
-.emp-ask{padding:var(--s3,12px);background:var(--amber-bg);color:var(--amber);border-radius:var(--r-sm,7px);
-  display:flex;flex-direction:column;gap:var(--s2,8px)}
+.emp-chat{padding:0;display:flex;flex-direction:column;min-height:420px}
+.emp-head{display:flex;align-items:flex-start;gap:var(--s3,12px);padding:var(--s3,12px) var(--s4,16px);
+  border-bottom:1px solid var(--border)}
+.emp-hwho{min-width:0;flex:1}
+.emp-hname{margin:0;display:flex;align-items:center;gap:var(--s2,8px);font-size:var(--fs-h3);overflow-wrap:anywhere}
+.emp-hsub{margin:2px 0 0;display:flex;flex-wrap:wrap;gap:var(--s2,8px);color:var(--muted);font-size:var(--fs-small)}
+.emp-hmail{overflow-wrap:anywhere}
+.emp-hseen{color:var(--muted)}
+.emp-hmore{position:relative;flex:none}
+.emp-more{width:32px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  font:inherit;font-size:var(--fs-strong);line-height:1;color:var(--muted);background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--r-sm,7px);transition:background .12s,border-color .12s,color .12s}
+.emp-more:hover{background:var(--surface-2);border-color:var(--border-strong);color:var(--text)}
+.emp-more:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.emp-menu{position:absolute;top:calc(100% + 4px);right:0;z-index:20;min-width:200px;display:flex;flex-direction:column;
+  padding:var(--s1,4px);background:var(--surface);border:1px solid var(--border-strong);
+  border-radius:var(--r-sm,7px);box-shadow:var(--sh-lg)}
+.emp-mi{text-align:left;padding:8px 10px;min-height:36px;cursor:pointer;font:inherit;font-size:var(--fs-small);
+  color:var(--text);background:none;border:0;border-radius:var(--r-xs,5px);transition:background .12s}
+.emp-mi:hover:not([disabled]){background:var(--surface-2)}
+.emp-mi[disabled]{color:var(--muted);cursor:default}
+.emp-mi:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+
+/* inline "are you sure" — confirm() is never used */
+.emp-ask{margin:var(--s3,12px) var(--s4,16px) 0;padding:var(--s3,12px);background:var(--amber-bg);color:var(--amber);
+  border-radius:var(--r-sm,7px);display:flex;flex-direction:column;gap:var(--s2,8px)}
 .emp-ask p{margin:0;font-size:var(--fs-small)}
+.emp-chat>.emp-bad,.emp-chat>.emp-code{margin:var(--s3,12px) var(--s4,16px) 0}
 
 /* the code, shown once */
 .emp-code{padding:var(--s4,16px);display:flex;flex-direction:column;gap:var(--s3,12px);border:1px solid var(--border-strong)}
@@ -64,10 +82,9 @@
 .emp-code-val:focus-visible{outline:2px solid var(--text);outline-offset:2px}
 .emp-code-warn{margin:0;color:var(--muted);font-size:var(--fs-small);max-width:60ch}
 
-/* the chat */
-.emp-chat{padding:0;display:flex;flex-direction:column;min-height:320px}
+/* the thread */
 .emp-thread{flex:1;display:flex;flex-direction:column;gap:var(--s2,8px);padding:var(--s4,16px);
-  max-height:46vh;overflow-y:auto;overscroll-behavior:contain}
+  max-height:52vh;overflow-y:auto;overscroll-behavior:contain}
 .emp-msg{display:flex;align-items:flex-end;gap:var(--s2,8px);max-width:min(72ch,88%)}
 .emp-msg.mine{align-self:flex-end;flex-direction:row-reverse}
 .emp-bub{padding:var(--s2,8px) var(--s3,12px);background:var(--surface-2);border-radius:var(--r,10px);min-width:0}
@@ -80,6 +97,20 @@
   text-decoration:underline;cursor:pointer;overflow-wrap:anywhere;text-align:left}
 .emp-file:focus-visible{outline:2px solid var(--text);outline-offset:2px}
 .emp-seen{margin:0;align-self:flex-end;color:var(--muted);font-size:var(--fs-min)}
+
+/* delete on one message: only there when the message is hovered or something in it has focus */
+.emp-del{flex:none;opacity:0;padding:0 2px;background:none;border:0;font:inherit;font-size:var(--fs-min);
+  color:var(--muted);text-decoration:underline;cursor:pointer;transition:opacity .12s,color .12s}
+.emp-msg:hover .emp-del,.emp-msg:focus-within .emp-del{opacity:1}
+.emp-del:hover{color:var(--red)}
+.emp-del:focus-visible{opacity:1;outline:2px solid var(--text);outline-offset:2px}
+.emp-dask{flex:none;display:flex;align-items:center;gap:6px;color:var(--muted);font-size:var(--fs-min)}
+.emp-link{background:none;border:0;padding:0;font:inherit;font-size:var(--fs-min);color:var(--text);
+  text-decoration:underline;cursor:pointer}
+.emp-link[disabled]{color:var(--muted);cursor:default}
+.emp-link:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+
+/* the send box */
 .emp-comp{flex:none;display:flex;flex-direction:column;gap:var(--s2,8px);padding:var(--s3,12px) var(--s4,16px) var(--s4,16px);
   border-top:1px solid var(--border)}
 .emp-box{width:100%;box-sizing:border-box;min-height:56px;padding:var(--s2,8px) var(--s3,12px);font:inherit;
@@ -91,14 +122,18 @@
   text-decoration:underline;cursor:pointer}
 .emp-tip{margin-left:auto}
 
+/* ---- narrow: the strip sits above the chat, scrolling sideways ---- */
 @media (max-width:860px){
   .emp-grid{grid-template-columns:minmax(0,1fr)}
+  .emp-list{flex-direction:row;gap:var(--s2,8px);overflow-x:auto;overscroll-behavior-x:contain}
+  .emp-row{width:auto;flex:none;max-width:48vw}
+  .emp-row.on{box-shadow:inset 0 -2px 0 var(--brand)}
   .emp-tip{display:none}
 }
 @media (max-width:480px){
-  .emp-phead,.emp-add{padding:var(--s3,12px)}
-  .emp-pacts{width:100%}
-  .emp-pacts .btn,.emp-acts .btn{flex:1;justify-content:center}
+  .emp-head,.emp-add{padding:var(--s3,12px)}
+  .emp-acts .btn{flex:1;justify-content:center}
   .emp-thread{max-height:none;padding:var(--s3,12px)}
   .emp-msg{max-width:100%}
+  .emp-del{opacity:1}
 }

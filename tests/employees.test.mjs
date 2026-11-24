@@ -40,6 +40,7 @@ function builder(table) {
   const b = {
     select(c) { st.cols = c || ''; return b; },
     insert(p) { st.op = 'insert'; st.payload = p; return b },
+    update(p) { st.op = 'update'; st.payload = p; return b },
     eq(c, v) { st.filters.push(['eq', c, v]); return b }, is(c, v) { st.filters.push(['is', c, v]); return b },
     order() { return b }, limit() { return b },
     single() { st.single = true; return b },
@@ -101,7 +102,9 @@ vm.runInContext(SRC + `
   empEmptyHTML,empAddFormHTML,empRowHTML,empListHTML,empCodeHTML,empAskHTML,empMsgHTML,
   empChatHTML,empComposerHTML,empPanelHTML,empScreenHTML,empCtx,viewEmployees,empBodyHTML,
   empForcePaint,empOpen,empCloseOpen,empForgetCode,empCodeHide,empCopyCode,empCodeGo,
-  empIsOwner,EMP_NOT_READY,EMP_CODE_NOT_READY,EMP_FILES_NOT_READY,EMP_BUCKET,EMP_BODY_MAX};`,
+  empIsOwner,EMP_NOT_READY,EMP_CODE_NOT_READY,EMP_FILES_NOT_READY,EMP_BUCKET,EMP_BODY_MAX,
+  empMenuHTML,empHeadHTML,empPresence,empDotHTML,empDeleteMessage,empClearChannel,
+  empMenuToggle,empMenuClose,empDelGo,empClearGo};`,
   sandbox, { filename: 'employees.js' });
 const A = sandbox.api;
 
@@ -176,7 +179,7 @@ test('the empty states say what to do next, not "no data"', async () => {
   reset();
   const none = A.empEmptyHTML([]);
   assert.match(none, /No one works here yet/);
-  assert.match(none, /Add employee/);
+  assert.match(none, /Add an employee/);
   assert.match(none, /nothing else in Aviance/, 'it says what she will and will not see');
   const some = A.empEmptyHTML([{ id: 's1' }]);
   assert.match(some, /Pick someone/);
@@ -190,7 +193,7 @@ test('the empty states say what to do next, not "no data"', async () => {
   assert.match(A.empChatHTML([], { msgsLoaded: false }), /Loading the messages/);
   // the whole screen with nobody on it still offers the one useful button
   const screen = A.empScreenHTML([], A.empCtx());
-  assert.match(screen, /Nobody yet/);
+  assert.match(screen, /Nobody is set up yet/);
   assert.match(screen, /onclick="empAddOpen\(\)"/);
 });
 
@@ -345,15 +348,18 @@ test('the code is not left anywhere in the page once the panel closes', async ()
 test('generating a code: he is asked first when there already is one, and a failure says why', async () => {
   await loaded();
   // she already has a code: the button asks before it re-keys
-  const panel = A.empPanelHTML(A.emp.list.find((s) => s.id === 's1'), A.empCtx());
-  assert.match(panel, />\s*Reset code<\/button>/);
-  assert.match(panel, /empAskYes\('reset'/);
+  const her = A.emp.list.find((s) => s.id === 's1');
+  // the actions live in the "..." menu now, out of the way of the chat
+  const menu = A.empMenuHTML(her, Object.assign(A.empCtx(), { menuOpen: 's1' }));
+  assert.match(menu, /Reset code/);
+  assert.match(menu, /empAskYes\('reset'/);
+  assert.doesNotMatch(A.empPanelHTML(her, A.empCtx()), /Reset code<\/button>/, 'not loose on the screen');
   const ask = A.empAskHTML('reset', { id: 's1', name: NASTY });
   assert.match(ask, /Her old code stops working straight away/);
   assert.ok(ask.includes(sandbox.esc(NASTY)));
   // she has none yet: it goes straight through
-  const fresh = A.empPanelHTML(A.emp.list.find((s) => s.id === 's3'), A.empCtx());
-  assert.match(fresh, />\s*Generate access code<\/button>/);
+  const fresh = A.empMenuHTML(A.emp.list.find((s) => s.id === 's3'), Object.assign(A.empCtx(), { menuOpen: 's3' }));
+  assert.match(fresh, /Generate access code/);
   assert.match(fresh, /empCodeGo\(/);
 
   // a failure shows the reason and leaves no half-written code about
@@ -565,9 +571,9 @@ test('revoking, re-activating and marking read each ask the database the right t
   rpcs.staff_list = () => ({ data: ROWS(), error: null });
   await A.empFetchList();
   const revoked = A.empRow(ROWS()[2]);
-  const panel = A.empPanelHTML(revoked, A.empCtx());
-  assert.match(panel, />\s*Let her back in<\/button>/);
-  assert.match(panel, /empRevokeGo\(&quot;s3&quot;,'active'\)/);
+  const menu = A.empMenuHTML(revoked, Object.assign(A.empCtx(), { menuOpen: 's3' }));
+  assert.match(menu, /Let her back in/);
+  assert.match(menu, /empRevokeGo\(&quot;s3&quot;,'active'\)/);
 });
 
 /* ───────────── the owner's side of the chat ───────────── */
@@ -631,10 +637,12 @@ test('the screen is the list, the open person and nothing from anyone else', asy
   A.empOpen('s1');
   await tick();
   const h = el('empRoot').innerHTML;
-  assert.match(h, /3 people/);
   assert.match(h, /class="emp-row on"/, 'the open row is marked');
   assert.ok(h.includes(sandbox.esc(NASTY)));
-  assert.match(h, /Reset code/); assert.match(h, /Revoke access/); assert.match(h, /Welcome page/);
+  assert.doesNotMatch(h, /\d+ people/, 'the strip is names only, no counts');
+  // the actions are one menu press away, not spread over the screen
+  const menu = A.empMenuHTML(A.emp.list.find((x) => x.id === 's1'), Object.assign(A.empCtx(), { menuOpen: 's1' }));
+  for (const w of ['Reset code', 'Revoke access', 'Welcome page', 'Clear this chat', 'Add an employee']) assert.match(menu, new RegExp(w));
   // the chat he is looking at is hers, and the poll was started for her channel alone
   assert.equal(A.emp.open, 's1');
   const reads = calls.filter((c) => c.table === 'channel_messages');
@@ -649,4 +657,67 @@ test('the screen is the list, the open person and nothing from anyone else', asy
   assert.equal(A.emp.count, 0);
   assert.equal(A.emp.timer, null);
   assert.equal(A.emp.chatTimer, null, 'no poll is left running after a sign-out');
+});
+
+/* ---- deleting, clearing, and the presence dot (the redesigned screen) ---- */
+
+test('deleting one message is a soft delete, in her channel only', async () => {
+  await loaded(); A.empOpen('s1'); await tick();
+  calls.length = 0;
+  const r = await A.empDeleteMessage('ch-1', 'm-2');
+  assert.equal(r.ok, true);
+  const up = calls.find((c) => c.table === 'channel_messages' && c.op === 'update');
+  assert.ok(up, 'it updates rather than deleting the row');
+  assert.ok(up.payload.deleted_at, 'the row is marked deleted, so her page drops it');
+  assert.equal(up.payload.body, '', 'and the words are gone');
+  const where = JSON.stringify(up.filters);
+  assert.match(where, /ch-1/, 'always pinned to the open channel');
+  assert.match(where, /m-2/, 'and to that one message');
+});
+
+test('clearing the chat touches every message in that channel and no other', async () => {
+  await loaded(); A.empOpen('s1'); await tick();
+  calls.length = 0;
+  const r = await A.empClearChannel('ch-1');
+  assert.equal(r.ok, true);
+  const up = calls.find((c) => c.table === 'channel_messages' && c.op === 'update');
+  assert.ok(up.payload.deleted_at);
+  const where = JSON.stringify(up.filters);
+  assert.match(where, /ch-1/);
+  assert.match(where, /deleted_at/, 'the ones already gone are left alone');
+  assert.doesNotMatch(where, /"id"/, 'no single message is singled out');
+});
+
+test('both deletes ask first, and say so in plain words', () => {
+  const one = A.empAskHTML('del', { id: 'm-2' });
+  const all = A.empAskHTML('clear', { id: 's1', name: 'Vera' });
+  for (const h of [one, all]) {
+    assert.match(h, /Yes/); assert.match(h, /No/);
+    assert.doesNotMatch(h, /confirm\(/);
+  }
+  assert.match(all + one, /chat|message/i);
+});
+
+test('the presence dot: green now, amber lately, grey a while ago, hollow never', () => {
+  const now = Date.now();
+  assert.equal(A.empPresence(new Date(now - 30 * 1000).toISOString()).tone, 'on');
+  assert.equal(A.empPresence(new Date(now - 20 * 60 * 1000).toISOString()).tone, 'recent');
+  assert.equal(A.empPresence(new Date(now - 5 * 60 * 60 * 1000).toISOString()).tone, 'off');
+  assert.equal(A.empPresence(null).tone, 'never');
+  assert.match(A.empPresence(new Date(now - 30 * 1000).toISOString()).text, /Online now/);
+  assert.match(A.empPresence(null).text, /Not signed in yet/);
+  // the dot is readable by a screen reader, not colour alone
+  const dot = A.empDotHTML(null);
+  assert.match(dot, /aria-label="[^"]*Not signed in yet/);
+  assert.match(A.empDotHTML(new Date(now - 30 * 1000).toISOString()), /emp-dot on/);
+});
+
+test('a row in the strip is her name, her dot and her unread count — nothing else', () => {
+  const row = A.empRowHTML({ id: 's1', name: 'Vera Emmanuel Gabriel', email: 'v@example.com',
+    status: 'active', unread: 3, lastSeenAt: new Date().toISOString() }, { openId: 's1' });
+  assert.match(row, /Vera Emmanuel Gabriel/);
+  assert.match(row, /emp-dot on/);
+  assert.match(row, /3/);
+  assert.doesNotMatch(row, /v@example\.com/, 'the email belongs in the chat header, not the strip');
+  assert.doesNotMatch(row, /Reset code|Revoke|Welcome page/, 'no actions loose in the strip');
 });
