@@ -500,7 +500,8 @@ function renderPlOutcome(d) {
 }
 
 /* One booking: where it stands, the brief, and their answers. `meta.head` is the top of
-   the panel when the caller has its own (the Calendar does, with both clocks on it). */
+   the panel when the caller has its own (the Calendar does, with both clocks on it), and
+   `meta.brief` is the brief already laid out when the caller draws that too. */
 function renderPlEnquiry(d, meta) {
   meta = meta || {};
   const now = meta.now || new Date();
@@ -523,7 +524,7 @@ function renderPlEnquiry(d, meta) {
   return head
     + `<div class="section-head pl-section"><h3>Where it stands</h3></div>` + renderPlOutcome(d)
     + `<div class="section-head pl-section"><h3>What we found out</h3>${d.research && d.research.state === 'done' ? '<span class="pill green">Brief ready</span>' : ''}</div>`
-    + renderPlBrief(d.sections, d.research, id)
+    + (typeof meta.brief === 'string' ? meta.brief : renderPlBrief(d.sections, d.research, id))
     + `<div class="section-head pl-section"><h3>What they told us</h3></div>` + answers;
 }
 

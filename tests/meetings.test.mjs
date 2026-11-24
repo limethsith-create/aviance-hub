@@ -84,7 +84,7 @@ function builder(table) {
 }
 function run(c) {
   const bad = fail[c.table + '.' + c.op] || fail[c.table];
-  if (bad) return { data: null, error: { message: bad } };
+  if (bad) return { data: null, error: typeof bad === 'object' ? bad : { message: bad } };
   const rows = db[c.table] || (db[c.table] = []);
   let out;
   if (c.op === 'insert') {
@@ -133,7 +133,9 @@ const host = (id) => el(id).innerHTML;
 const visible = (h) => String(h).replace(/<[^>]*>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim();
 const BROKEN = /\bundefined\b|\bNaN\b|\[object Object\]|Invalid Date/;
 
-beforeEach(() => { resetDb(); mtForget(); plForget(); toasts.length = 0; Object.keys(elements).forEach((k) => { elements[k].innerHTML = ''; elements[k].value = ''; elements[k].textContent = ''; }); });
+/* the older tests were written against the month, so each test starts there; the default
+   (week) and remembering the choice have their own test */
+beforeEach(() => { resetDb(); localStorage._s = { avianceCalView: 'month' }; mtForget(); plForget(); toasts.length = 0; Object.keys(elements).forEach((k) => { elements[k].innerHTML = ''; elements[k].value = ''; elements[k].textContent = ''; }); });
 
 /* ───────────── the rules come from the row ───────────── */
 test('the rules are read from calendar_settings, never hard-coded; a missing row falls back to the live values', async () => {
@@ -376,7 +378,9 @@ test('every screen draws with zero rows in the database', async () => {
   assert.match(visible(month), /Mon Tue Wed Thu Fri Sat Sun/, 'a weekday header, Monday first');
   assert.match(visible(month), /Call hours/);
   assert.match(visible(month), /Every time is Sri Lanka time/);
-  assert.match(visible(month), /Pilot.*Starter.*Growth.*Scale.*No plan yet/, 'the legend');
+  assert.ok(!month.includes('mt-legend'), 'the colour key is not drawn until it is asked for');
+  assert.match(month, /aria-label="What the colours mean"/);
+  assert.match(month, /onclick="mtOpenAdd\(\)">Add meeting</);
   assert.ok(!/need an outcome —|needs? an outcome<\/button>/.test(month), 'nothing is waiting, so no line about it');
   assert.ok(!BROKEN.test(visible(month)), visible(month));
 
@@ -385,6 +389,7 @@ test('every screen draws with zero rows in the database', async () => {
   assert.match(visible(week), /23 – 29 Nov 2026/);
   assert.match(visible(week), /Nothing booked this week yet/);
   assert.ok(week.includes('mt-wk-col') && week.includes('mt-agenda'), 'the grid and the phone list are both there');
+  assert.equal(colsOf(week).length, 5, 'Monday to Friday, with nothing to put on the weekend');
   assert.ok(!BROKEN.test(visible(week)), visible(week));
 
   const one = viewMeeting('does-not-exist');
@@ -493,39 +498,63 @@ test('more than three calls in a day: three chips, then "+2 more", which opens t
   for (let i = 0; i < 5; i++) assert.ok(visible(host('mtCalHost')).includes('Co ' + i));
 });
 
-test('days are the owner\'s days: 16:00 UTC Friday is Friday 9:30 pm in Colombo, 20:00 UTC Friday is SATURDAY 1:30 am', async () => {
+test('the month keeps the owner\'s days; the week is by business day: 16:00 UTC Friday and 01:00 UTC Saturday (8 pm ET Friday) are both in the FRIDAY column', async () => {
   settingsRow(); at('2026-11-24T06:00:00.000Z');
   db.discovery_bookings.push(
-    bk({ id: 'fri', company: 'Friday Co', call_at: '2026-11-27T16:00:00.000Z' }),
-    bk({ id: 'sat', company: 'Saturday Co', call_at: '2026-11-27T20:00:00.000Z' }),
+    bk({ id: 'fri', company: 'Friday Co', call_at: '2026-11-27T16:00:00.000Z' }),      // Fri 11:00 am ET · Fri 9:30 pm Colombo
+    bk({ id: 'sat', company: 'Saturday Co', call_at: '2026-11-27T20:00:00.000Z' }),    // Fri 3:00 pm ET · SAT 1:30 am Colombo
+    bk({ id: 'late', company: 'Late Co', call_at: '2026-11-28T01:00:00.000Z' }),       // Fri 8:00 pm ET · SAT 6:30 am Colombo
   );
   const r = await mtCal('week', '2026-11-24');
-  const fri = r.data.events.find((e) => e.id === 'fri'), sat = r.data.events.find((e) => e.id === 'sat');
+  const by = (id) => r.data.events.find((e) => e.id === id);
+  const fri = by('fri'), sat = by('sat'), late = by('late');
+  // the owner's day and time are still on every call (the month uses them) …
   assert.deepEqual([fri.dayKey, fri.time, mtWeekday(fri.dayKey)], ['2026-11-27', '9:30 pm', 5]);
   assert.deepEqual([sat.dayKey, sat.time, mtWeekday(sat.dayKey)], ['2026-11-28', '1:30 am', 6]);
-  assert.deepEqual(r.data.byDay['2026-11-27'].map((e) => e.id), ['fri']);
-  assert.deepEqual(r.data.byDay['2026-11-28'].map((e) => e.id), ['sat']);
+  // … and so is the business day and the US Eastern time (the week uses those)
+  assert.deepEqual([fri.usKey, fri.usTime, fri.bizMin], ['2026-11-27', '11:00 am', 660]);
+  assert.deepEqual([sat.usKey, sat.usTime], ['2026-11-27', '3:00 pm']);
+  assert.deepEqual([late.usKey, late.usTime, late.time, late.dayKey], ['2026-11-27', '8:00 pm', '6:30 am', '2026-11-28']);
+  assert.equal(fri.both, '9:30 pm SL · 11:00 am ET');
+  assert.deepEqual(r.data.keys, ['2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26', '2026-11-27'], 'five business days; no weekend column, because nothing falls on a US Saturday');
+  assert.deepEqual(r.data.byDay['2026-11-27'].map((e) => e.id), ['fri', 'sat', 'late'], 'one unbroken Friday');
+  assert.equal(r.data.byDay['2026-11-28'], undefined);
 
-  // the week grid: Friday is the fifth column, Saturday the sixth, each block at its own time
+  // drawn: Friday is the fifth column and holds all three, each at its own time, placed by percentage
   mt.view = 'week'; mt.day = '2026-11-24'; await mtLoadCal();
-  const cols = colsOf(host('mtCalHost'));
-  assert.equal(cols.length, 7);
-  assert.ok(cols[4].includes('Friday Co') && !cols[4].includes('Saturday Co'));
-  assert.ok(cols[5].includes('Saturday Co') && !cols[5].includes('Friday Co'));
-  assert.match(cols[4], /class="mt-ev [^"]*" style="top:1032px;height:24px/, '9:30 pm is 21.5 hours down, and 30 minutes tall');
-  assert.match(cols[5], /class="mt-ev [^"]*" style="top:72px;height:24px/, '1:30 am is 1.5 hours down');
+  const h = host('mtCalHost'), cols = colsOf(h);
+  assert.equal(cols.length, 5);
+  for (const co of ['Friday Co', 'Saturday Co', 'Late Co']) { assert.ok(cols[4].includes(co), co + ' is in the Friday column'); assert.ok(!cols.slice(0, 4).join('').includes(co)); }
+  assert.match(cols[4], /class="mt-ev [^"]*" style="top:28\.571%;--mt-h:3\.571%;left:0%;width:100%"[^>]*>(?:(?!<\/button>).)*Friday Co/, '11 am ET is 4 of the 14 hours down, and half an hour tall');
+  assert.match(cols[4], /top:92\.857%;--mt-h:3\.571%[^>]*>(?:(?!<\/button>).)*Late Co/, '8 pm ET is 13 of the 14 hours down');
+  // both times on the block, the owner's first, and both in its tooltip
+  const block = cols[4].split('<button').find((x) => x.includes('Friday Co'));
+  assert.match(block, /<small>9:30 pm<i> · 11:00 am ET<\/i><\/small>/);
+  assert.match(block, /title="Fri 9:30 pm SL · Fri 11:00 am ET · Friday Co/);
+  assert.match(cols[4].split('<button').find((x) => x.includes('Late Co')), /title="Sat 6:30 am SL · Fri 8:00 pm ET · Late Co/, 'the tooltip says which of the owner\'s days it is');
+  // the column header: the US date, and the Sri Lanka dates it runs over
+  const head = h.slice(h.indexOf('class="mt-wk-head"'), h.indexOf('class="mt-wk-body"'));
+  assert.match(visible(head), /> SL ET Mon 23 Nov SL Mon 23 → Tue 24 Tue 24 Nov/);
+  assert.match(visible(head), /Fri 27 Nov SL Fri 27 → Sat 28 <div$/);
+  assert.ok(!/px/.test(h.slice(h.indexOf('class="mt-wk-body"'), h.indexOf('class="mt-agenda"'))), 'nothing in the grid is placed in pixels');
 
-  // the month grid puts them in the same two days
+  // the month grid still puts them on the owner's days, the Sri Lanka time on the chip and both in the tooltip
   await mtSetView('month');
-  const h = host('mtCalHost');
-  assert.ok(cellOf(h, '2026-11-27').includes('Friday Co') && !cellOf(h, '2026-11-27').includes('Saturday Co'));
-  assert.ok(cellOf(h, '2026-11-28').includes('Saturday Co'));
-  assert.match(cellOf(h, '2026-11-28'), /1:30 am/);
+  const m = host('mtCalHost');
+  assert.ok(cellOf(m, '2026-11-27').includes('Friday Co') && !cellOf(m, '2026-11-27').includes('Saturday Co'));
+  assert.ok(cellOf(m, '2026-11-28').includes('Saturday Co'));
+  assert.match(cellOf(m, '2026-11-28'), /<span class="mt-chip-t">1:30 am<\/span>/);
+  assert.match(cellOf(m, '2026-11-28'), /title="Sat 1:30 am SL · Fri 3:00 pm ET · Saturday Co/);
 
-  // the owner's zone comes from calendar_settings, not from this machine and not from an offset
+  // a call on a US Saturday brings a Saturday column with it
+  db.discovery_bookings.push(bk({ id: 'wk', company: 'Weekend Co', call_at: '2026-11-28T15:00:00.000Z' }));
+  const w = await mtCal('week', '2026-11-24');
+  assert.deepEqual(w.data.keys.slice(5), ['2026-11-28']);
+
+  // the zones come from calendar_settings, not from this machine and not from an offset
   mtForget(); settingsRow({ owner_zone: 'America/Los_Angeles' }); at('2026-11-24T06:00:00.000Z');
   const la = (await mtCal('week', '2026-11-27')).data.events.find((e) => e.id === 'sat');
-  assert.deepEqual([la.dayKey, la.time], ['2026-11-27', '12:00 pm']);
+  assert.deepEqual([la.dayKey, la.time, la.ownerShort], ['2026-11-27', '12:00 pm', 'PT']);
 });
 
 test('the month grid: November 2026 starts on Monday 26 October and is whole weeks; the titles read like a calendar', async () => {
@@ -667,37 +696,51 @@ test('needs an outcome: flagged on the call, counted above the grid, and the cou
 });
 
 /* ───────────── the week grid ───────────── */
-test('the week grid: free times open the booking form, a block is a hatched band you can remove, and there is a now line', async () => {
-  settingsRow(); at('2026-11-24T06:00:00.000Z');            // Tuesday 11:30 am in Colombo
-  db.discovery_bookings.push(bk({ id: 'b1', company: 'Acme Roofing', plan: 'starter', call_at: '2026-11-25T15:00:00.000Z' }));   // Wed 8:30 pm Colombo
-  db.calendar_blocks.push({ id: 'blk1', starts_at: '2026-11-25T18:00:00.000Z', ends_at: '2026-11-25T19:30:00.000Z', reason: 'dentist' });   // Wed 11:30 pm → Thu 1:00 am Colombo
+test('the week grid: only the hours calls can happen, both clocks down the side, a hatched block you can remove, a now line, and free times that open the form', async () => {
+  settingsRow(); at('2026-11-24T16:30:00.000Z');            // Tuesday 11:30 am Eastern · 10:00 pm in Colombo
+  db.discovery_bookings.push(bk({ id: 'b1', company: 'Acme Roofing', plan: 'starter', call_at: '2026-11-25T15:00:00.000Z' }));   // Wed 10 am ET
+  db.calendar_blocks.push({ id: 'blk1', starts_at: '2026-11-25T18:00:00.000Z', ends_at: '2026-11-25T19:30:00.000Z', reason: 'dentist' });   // Wed 1:00–2:30 pm ET
   mt.view = 'week'; mt.day = '2026-11-24'; await mtLoadCal();
   const h = host('mtCalHost'), cols = colsOf(h);
-  assert.match(visible(h), /12 pm/); assert.match(visible(h), /11 pm/); assert.match(visible(h), /1 am/);
-  assert.equal((h.match(/class="mt-wk-axis"/g) || []).length, 1);
-  assert.match(h, /style="height:1152px;--mt-hour:48px"/, 'all 24 hours, not a 9-to-5');
+  // 14 rows — 7 am to 9 pm Eastern — never 24
+  assert.match(h, /class="mt-wk" id="mtWk" style="--mt-rows:14;--mt-n:5"/);
+  assert.equal(mt.cal.win.rows, 14);
+  const axis = (cls) => visible(h.slice(h.indexOf('class="mt-wk-axis ' + cls), h.indexOf('</div>', h.indexOf('class="mt-wk-axis ' + cls))).replace(/^[^>]*>/, ''));
+  assert.equal(axis('mt-ax-own'), '5:30 pm 6:30 pm 7:30 pm 8:30 pm 9:30 pm 10:30 pm 11:30 pm 12:30 am 1:30 am 2:30 am 3:30 am 4:30 am 5:30 am 6:30 am');
+  assert.equal(axis('mt-ax-us'), '7 am 8 am 9 am 10 am 11 am 12 pm 1 pm 2 pm 3 pm 4 pm 5 pm 6 pm 7 pm 8 pm');
+  assert.match(h, /<span class="mt-wk-zh" title="Sri Lanka time">SL<\/span><span class="mt-wk-zh" title="US Eastern time">ET<\/span>/, 'the two time columns are headed SL and ET');
+  assert.equal((h.match(/class="mt-wk-axis /g) || []).length, 2);
+  assert.ok(!h.includes('mtWkScroll') && !/overflow-y/.test(h), 'no box inside the page that scrolls');
   assert.match(cols[1], /^ today"/, 'Tuesday is today');
-  assert.match(cols[1], /class="mt-now" style="top:552px"/, 'the now line sits at 11:30 am');
+  assert.match(cols[1], /class="mt-now" style="top:32\.143%"/, 'the now line sits at 11:30 am Eastern: 4.5 of 14 hours down');
   assert.equal((h.match(/class="mt-now"/g) || []).length, 1);
-  // the block runs over midnight, so it is drawn on both days
-  assert.match(cols[2], /class="mt-blk mt-hatch" style="top:1128px;height:24px"/);
-  assert.match(cols[3], /class="mt-blk mt-hatch" style="top:0px;height:48px"/);
+  // the block is one band in one column — a business day is never cut in two
+  assert.match(cols[2], /class="mt-blk mt-hatch" style="top:42\.857%;height:10\.714%"/);
+  assert.equal((h.match(/class="mt-blk mt-hatch"/g) || []).length, 1);
   assert.match(cols[2], /Blocked · dentist/); assert.match(cols[2], /mtUnblockClick\('blk1'\)/);
-  // free times are there to click, never where the booking or the block is
-  const free = [...h.matchAll(/class="mt-free"[^>]*onclick="mtPickSlot\('([^']+)'\)"/g)].map((m) => m[1]);
+  // free times are there to click, never where the booking or the block is, and they open the one form
+  const free = [...h.matchAll(/class="mt-free"[^>]*onclick="event\.stopPropagation\(\);mtAddAt\('([^']+)'\)"/g)].map((m) => m[1]);
   assert.ok(free.length > 50, 'a working week of free times');
   assert.ok(!free.includes('2026-11-25T15:00:00.000Z'), 'the booked time is not offered');
   assert.ok(!free.includes('2026-11-25T18:00:00.000Z') && !free.includes('2026-11-25T19:00:00.000Z'), 'nor the blocked ones');
   assert.ok(free.includes('2026-11-25T15:30:00.000Z'));
-  mtPickSlot('2026-11-25T15:30:00.000Z');
-  assert.match(visible(host('modal')), /Book this time/);
-  assert.match(visible(host('modal')), /9:00 pm Sri Lanka/);
-  el('mtKind').value = 'strategy';
-  const made = await mtSubmitBook();
-  assert.equal(made.ok, true); assert.equal(db.meetings.length, 1);
-  assert.ok(visible(host('mtCalHost')).includes('Strategy'), 'the calendar redrew with the new call');
-  // where the grid opens: an hour above the first call of the week
-  assert.equal(mtScrollMin(mt.cal), 20 * 60 + 30 - 60);
+  assert.match(h, /title="Free — 9:00 pm SL · 10:30 am ET\. Click to add a meeting\."/);
+  mtAddAt('2026-11-25T15:30:00.000Z');
+  let f = host('modal');
+  assert.match(visible(f), /Add meeting/);
+  assert.match(f, /id="mtAddDate" type="date" value="2026-11-25"/); assert.match(f, /id="mtAddTime" type="time" step="300" value="21:00"/, 'the time is typed in Sri Lanka time');
+  assert.match(f, /<output id="mtAddEt"[^>]*>Wed 25 Nov · 10:30 am<\/output>/, 'with the Eastern time beside it');
+  assert.match(visible(f), /This time will also be taken off your public booking page\./);
+  // a click on empty time in a column works out the slot under the pointer
+  const colEl = { getBoundingClientRect: () => ({ top: 100, height: 700 }) };
+  mtColClick({ clientY: 100 + 700 * (4.6 / 14), currentTarget: colEl, target: colEl }, '2026-11-26');   // 4.6 hours down Thursday: 11:36 am ET → the 11:30 slot
+  f = host('modal');
+  assert.match(f, /id="mtAddDate" type="date" value="2026-11-26"/); assert.match(f, /id="mtAddTime" type="time" step="300" value="22:00"/);
+  assert.match(f, /Thu 26 Nov · 11:30 am/);
+  assert.equal(mtColClick({ clientY: 0, currentTarget: colEl }, 'not-a-day'), null);
+  // a day in the month opens the same form on that date
+  mtCellTap('2026-12-03');
+  assert.match(host('modal'), /id="mtAddDate" type="date" value="2026-12-03"/);
   // unblocking redraws without the band
   await mtUnblockClick('blk1');
   assert.ok(!host('mtCalHost').includes('mt-blk mt-hatch'));
@@ -708,6 +751,69 @@ test('the week grid: free times open the booking form, a block is a hatched band
   const blocked = await mtSubmitBlock();
   assert.equal(blocked.ok, true);
   assert.equal(db.calendar_blocks[0].starts_at, '2026-11-26T16:30:00.000Z', '10 pm in Colombo');
+
+  // the stylesheet: the grid's height comes from the window, its rows are equal shares, and nothing inside it scrolls
+  const css = fs.readFileSync(path.join(root, 'meetings.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const wk = css.slice(css.indexOf('.mt-wk{'), css.indexOf('}', css.indexOf('.mt-wk{')));
+  assert.match(wk, /height:calc\(100dvh - var\(--mt-top,\d+px\)\)/);
+  const minRow = Number(/min-height:calc\((\d+)px \+ var\(--mt-rows,14\)\*(\d+)px\)/.exec(wk)[2]), minHead = Number(/min-height:calc\((\d+)px/.exec(wk)[1]);
+  assert.ok(minHead + 14 * minRow <= 450, 'fourteen hours fit well inside a 700px-tall window');
+  assert.match(css, /\.mt-wk-axis\{[^}]*grid-template-rows:repeat\(var\(--mt-rows,14\),minmax\(0,1fr\)\)/);
+  assert.match(css, /\.mt-wk-col\{[^}]*background-size:100% calc\(100% \/ var\(--mt-rows,14\)\)/);
+  const week = css.slice(css.indexOf('.mt-wk{'), css.indexOf('.mt-agenda{display:none}'));
+  assert.ok(!/overflow-y|overflow:auto|overflow:scroll|max-height/.test(week), 'the week has no scroller of its own');
+  assert.match(css, /\.mt-ev\{[^}]*height:var\(--mt-h\)/);
+  assert.match(css, /\.mt-ev:hover,\.mt-ev:focus-visible\{[^}]*height:auto;min-height:var\(--mt-h\)/, 'a short call opens out to show its times when pointed at');
+});
+
+test('the hours the week shows come from calendar_settings, in both zones, through Intl: November and July differ by an hour on the Sri Lanka side', async () => {
+  settingsRow();
+  const st = (await mtSettings()).data;
+  const nov = mtHourWindow(st, '2026-11-23', []);
+  assert.deepEqual([nov.startMin, nov.endMin, nov.rows], [420, 1260, 14]);
+  assert.deepEqual([nov.fromUs, nov.toUs, nov.fromOwner, nov.toOwner], ['7 am', '9 pm', '5:30 pm', '7:30 am'], 'EST: 7 am–9 pm is 5:30 pm–7:30 am in Colombo');
+  assert.deepEqual(nov.hours[4], { min: 660, us: '11 am', owner: '9:30 pm' });
+  assert.deepEqual([nov.usShort, nov.ownerShort], ['ET', 'SL']);
+  const jul = mtHourWindow(st, '2026-07-06', []);
+  assert.deepEqual([jul.fromUs, jul.toUs, jul.fromOwner, jul.toOwner], ['7 am', '9 pm', '4:30 pm', '6:30 am'], 'EDT: the same US hours are an hour earlier in Colombo');
+  assert.deepEqual(jul.hours.map((x) => x.owner).slice(0, 3), ['4:30 pm', '5:30 pm', '6:30 pm']);
+  assert.equal(jul.rows, 14);
+  // other rules, other hours — nothing is hard-coded
+  const odd = mtHourWindow(mtCleanSettings({ open_time: '09:30', close_time: '12:15', us_zone: 'America/Chicago', owner_zone: 'Europe/London' }), '2026-11-23', []);
+  assert.deepEqual([odd.startMin, odd.endMin, odd.rows, odd.fromUs, odd.fromOwner, odd.usShort], [540, 780, 4, '9 am', '3 pm', 'CT']);
+  assert.ok(odd.ownerShort.length > 0 && !BROKEN.test(odd.ownerShort), 'a zone with no short name of ours takes Intl\'s');
+  const code = SRC.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/[+-]\s*5\.5\b|330\s*\*\s*60|19800|GMT\+5|UTC\+5/.test(code), 'no fixed Sri Lanka offset anywhere');
+
+  // it widens — to whole hours — only as far as something outside it needs
+  assert.deepEqual([mtHourWindow(st, '2026-11-23', [[390, 420]]).startMin, mtHourWindow(st, '2026-11-23', [[390, 420]]).rows], [360, 15]);
+  assert.deepEqual([mtHourWindow(st, '2026-11-23', [[1290, 1335]]).endMin, mtHourWindow(st, '2026-11-23', [[1290, 1335]]).toUs], [1380, '11 pm']);
+  assert.deepEqual([mtHourWindow(st, '2026-11-23', [[0, 1440]]).rows, mtHourWindow(st, '2026-11-23', [[600, 630]]).rows], [24, 14]);
+
+  // drawn from real rows: a hand-added meeting at 5:15 am Eastern on Tuesday stretches the week to start at 5 am
+  at('2026-11-23T05:00:00.000Z');
+  db.meetings.push({ id: 'early', kind: 'other', title: 'Early bird', starts_at: '2026-11-24T10:15:00.000Z', minutes: 30, status: 'booked' });
+  let r = await mtCal('week', '2026-11-24');
+  assert.deepEqual([r.data.win.startMin, r.data.win.endMin, r.data.win.rows, r.data.win.fromOwner, r.data.win.fromUs], [300, 1260, 16, '3:30 pm', '5 am']);
+  assert.equal(r.data.cols[1].start, Date.parse('2026-11-24T10:00:00.000Z'), 'every column starts at 5 am Eastern');
+  mt.view = 'week'; mt.day = '2026-11-24'; await mtLoadCal();
+  assert.match(host('mtCalHost'), /style="--mt-rows:16;--mt-n:5"/);
+  assert.match(colsOf(host('mtCalHost'))[1], /style="top:1\.563%;--mt-h:3\.125%[^>]*>(?:(?!<\/button>).)*Early bird/);
+  // a block outside the hours widens it too; a block of whole days off does not turn the week into 24-hour columns
+  db.meetings = [];
+  db.calendar_blocks.push({ id: 'late', starts_at: '2026-11-26T02:00:00.000Z', ends_at: '2026-11-26T03:30:00.000Z', reason: 'late' });   // Wed 9:00–10:30 pm ET
+  r = await mtCal('week', '2026-11-24');
+  assert.deepEqual([r.data.win.startMin, r.data.win.endMin], [420, 1380]);
+  db.calendar_blocks = [{ id: 'away', starts_at: '2026-11-25T00:00:00.000Z', ends_at: '2026-11-28T00:00:00.000Z', reason: 'away' }];
+  r = await mtCal('week', '2026-11-24');
+  assert.deepEqual([r.data.win.startMin, r.data.win.endMin, r.data.keys.length], [420, 1260, 5]);
+  mt.view = 'week'; mt.day = '2026-11-24'; await mtLoadCal();
+  assert.equal((host('mtCalHost').match(/class="mt-blk mt-hatch"/g) || []).length, 4, 'the days off are still hatched, clipped to the hours shown');
+  // July, drawn: the same 14 rows, an hour earlier down the Sri Lanka side
+  db.calendar_blocks = []; at('2026-07-06T05:00:00.000Z');
+  mt.day = '2026-07-07'; await mtLoadCal();
+  assert.match(visible(host('mtCalHost')), /SL ET Mon 6 Jul SL Mon 6 → Tue 7/);
+  assert.match(host('mtCalHost'), /class="mt-wk-axis mt-ax-own"[^>]*><span>4:30 pm<\/span>/);
 });
 
 test('two calls at the same time sit side by side, not on top of each other', () => {
@@ -758,7 +864,7 @@ test('a website booking\'s panel: who, plan, both clocks, the link, their answer
   let h = host('modal'), t = visible(h);
   for (const w of ['Acme Roofing', 'Dana Smith · Founder', 'G · Growth', 'Call booked', 'Score 72', '30 minutes',
     'Fri 27 Nov · 9:30 pm Sri Lanka', 'Fri 27 Nov · 10:00 am US Central — their time',
-    'Join the call', 'Copy the link', 'No brief yet', 'Research this one',
+    'Fri 27 Nov · 11:00 am US Eastern', 'Join the call', 'Copy the link', 'Research not ready yet', 'Research this one',
     'Commercial roofs', '$20k a job', 'Referrals', '5 more a week', '+1 555 0100', 'Tried outbound before', 'More booked calls',
     'Call done', 'Nobody came', 'Won', 'Lost'])
     assert.ok(t.includes(w), 'the panel shows: ' + w);
@@ -872,7 +978,7 @@ test('a meeting\'s panel keeps what the meeting page offers: done, no-show, canc
   mt.view = 'week'; mt.day = '2026-11-23'; await mtLoadCal();
   await mtOpenEvent('meeting:m1');
   let h = host('modal'), t = visible(h);
-  for (const w of ['Northwind', 'Ravi Perera', 'Strategy call', 'S · Starter', 'Mon 23 Nov · 8:30 pm Sri Lanka', 'Mon 23 Nov · 9:00 am US Central — their time',
+  for (const w of ['Northwind', 'Ravi Perera', 'Strategy call', 'S · Starter', 'Mon 23 Nov · 8:30 pm Sri Lanka', 'Mon 23 Nov · 9:00 am US Central — their time', 'Mon 23 Nov · 10:00 am US Eastern',
     '30 minutes', 'Join the call', 'Copy the link', '24 hours before: sent Sun 22 Nov · 8:30 pm Sri Lanka', '1 hour before: not sent yet', 'Call done', 'No-show', 'Cancel', 'Move the call'])
     assert.ok(t.includes(w), 'the panel shows: ' + w);
   assert.ok(!h.includes('<b>hi</b>') && h.includes('&lt;b&gt;hi'), 'escaped');
@@ -937,7 +1043,7 @@ test('the Bookings tab is gone, the Funnel is reached from the Calendar, and an 
   openEnquiry('far');
   assert.equal(currentView, 'calendar');
   await tick(); await tick();
-  assert.equal(mt.view, 'week'); assert.equal(mt.day, '2026-12-19');
+  assert.equal(mt.view, 'week'); assert.equal(mt.day, '2026-12-18', 'its business day: Friday 3 pm Eastern');
   assert.match(visible(host('mtCalHost')), /14 – 20 Dec 2026/);
   assert.ok(visible(host('mtCalHost')).includes('Faraway Co'));
   assert.match(visible(host('modal')), /Faraway Co/);
@@ -947,7 +1053,7 @@ test('the Bookings tab is gone, the Funnel is reached from the Calendar, and an 
     mtForget(); settingsRow(); at('2026-11-24T06:00:00.000Z'); el('modal').innerHTML = '';
     assert.equal(goDeepLink({ view, id: 'far' }), true);
     await tick(); await tick();
-    assert.equal(currentView, 'calendar'); assert.equal(mt.day, '2026-12-19');
+    assert.equal(currentView, 'calendar'); assert.equal(mt.day, '2026-12-18');
     assert.match(visible(host('modal')), /Faraway Co/);
   }
   // a link to a booking that has gone still opens the calendar, and says so
@@ -977,19 +1083,24 @@ test('on a phone: dots and a count per day with the picked day listed underneath
   h = host('mtCalHost');
   assert.match(cellOf(h, '2026-11-25'), /^ sel"/);
   const under = h.slice(h.indexOf('class="mt-under"'));
-  assert.match(visible(under), /Wed 25 Nov/); assert.match(visible(under), /8:30 pm Acme Roofing/); assert.match(visible(under), /Open this day/);
+  assert.match(visible(under), /Wed 25 Nov/); assert.match(visible(under), /8:30 pm 10:00 am ET Acme Roofing/, 'Sri Lanka time, then Eastern'); assert.match(visible(under), /Open this day/);
   assert.match(under, /class="mt-row mt-evrow mt-plan-pilot is-booking"/);
 
-  // the week: a strip of seven days and one day's list, with its free times to tap
+  // the week: a strip of business days and one day's list, with its free times to tap
+  db.discovery_bookings.push(bk({ id: 'b2', company: 'Night Owl Co', call_at: '2026-11-25T23:00:00.000Z' }));   // Wed 6 pm ET · THURSDAY 4:30 am Colombo
   await mtGoWeek('2026-11-25');
   h = host('mtCalHost');
   const agenda = h.slice(h.indexOf('class="mt-agenda"'));
-  assert.equal((agenda.match(/class="mt-strip-d/g) || []).length, 7);
+  assert.equal((agenda.match(/class="mt-strip-d/g) || []).length, 5, 'Monday to Friday');
+  assert.match(agenda, /class="mt-strip" style="--mt-n:5"/);
   assert.match(agenda, /class="mt-strip-d sel"[^>]*aria-pressed="true"/);
-  assert.match(visible(agenda), /Wed 25 Nov/); assert.match(visible(agenda), /Acme Roofing/);
+  assert.match(visible(agenda), /Wed 25 Nov Sri Lanka: Wed 25 → Thu 26/, 'the day is a business day, and says which Sri Lanka days it runs over');
+  assert.match(visible(agenda), /Wed 8:30 pm 10:00 am ET Acme Roofing/);
+  assert.match(visible(agenda), /Thu 4:30 am 6:00 pm ET Night Owl Co/, 'the same business day, the next morning in Colombo — and the row says so');
   assert.ok(agenda.includes('class="mt-slot"'), 'free times to tap');
+  assert.match(agenda, /class="mt-slot" title="[^"]* SL · [^"]* ET" onclick="mtAddAt\('/, 'a free time opens the form for a new meeting');
   assert.match(agenda, /ontouchstart="mtSwipeStart\(event\)" ontouchend="mtSwipeEnd\(event\)"/);
-  // the day arrows, and a swipe, move one day; past Sunday it reads the next week
+  // the day arrows, and a swipe, move one business day; past Friday it reads the next week, back past Monday the one before
   mtDayMove(1);
   assert.equal(mt.day, '2026-11-26');
   mtSwipeStart({ touches: [{ clientX: 300, clientY: 100 }] });
@@ -998,10 +1109,11 @@ test('on a phone: dots and a count per day with the picked day listed underneath
   mtSwipeStart({ touches: [{ clientX: 100, clientY: 100 }] });
   mtSwipeEnd({ changedTouches: [{ clientX: 120, clientY: 300 }] });
   assert.equal(mt.day, '2026-11-27', 'scrolling down is not a swipe');
-  mt.day = '2026-11-29'; mt.cal.day = '2026-11-29';
   await mtDayMove(1);
-  assert.equal(mt.day, '2026-11-30');
+  assert.equal(mt.day, '2026-11-30', 'after Friday comes Monday, not an empty Saturday');
   assert.match(visible(host('mtCalHost')), /30 Nov – 6 Dec 2026/);
+  await mtDayMove(-1);
+  assert.equal(mt.day, '2026-11-27', 'and back to Friday');
 
   // the stylesheet: under 700px the grids give way, and the things you tap are 44px
   const css = fs.readFileSync(path.join(root, 'meetings.css'), 'utf8');
@@ -1016,6 +1128,287 @@ test('on a phone: dots and a count per day with the picked day listed underneath
   assert.ok(/grid-template-columns:repeat\(7,minmax\(0,1fr\)\)/.test(css), 'seven columns that shrink instead of pushing the page sideways');
 });
 
+/* ───────────── the colour key, behind the three dots ───────────── */
+test('the colour key is not drawn until the three-dots button is pressed; outside clicks and Escape close it', async () => {
+  settingsRow(); at('2026-11-24T06:00:00.000Z');
+  db.discovery_bookings.push(bk({ id: 'b1', company: 'Acme Roofing', plan: null, call_at: '2026-11-25T15:00:00.000Z' }));
+  for (const view of ['week', 'month']) {
+    mt.view = view; mt.day = '2026-11-24'; await mtLoadCal();
+    let h = host('mtCalHost');
+    assert.ok(!h.includes('mt-legend') && !h.includes('id="mtKey"'), view + ': no key on the page');
+    assert.ok(!/Hatched band|Red outline/.test(visible(h)));
+    const bar = h.slice(h.indexOf('class="mt-bar"'));
+    assert.match(bar, /^class="mt-bar"><div class="mt-keywrap"><button type="button" class="btn ghost mt-ic mt-dotsbtn" aria-label="What the colours mean"/, 'the first thing in the toolbar');
+    assert.match(bar, /aria-expanded="false" aria-controls="mtKey" onclick="mtToggleLegend\(\)"><svg[^>]*aria-hidden="true">(<circle [^>]*\/>){3}<\/svg><\/button><\/div>/, 'three dots drawn as an svg, no emoji');
+    assert.equal(mtToggleLegend(), true);
+    h = host('mtCalHost');
+    assert.match(h, /aria-expanded="true"/);
+    assert.match(visible(h.slice(h.indexOf('id="mtKey"'), h.indexOf('class="mt-nav"'))), /P Pilot S Starter G Growth Sc Scale – No plan yet Red outline — needs an outcome Hatched band — blocked time/);
+    for (const k of ['pilot', 'starter', 'growth', 'scale', 'none']) assert.ok(h.includes('class="mt-sw mt-plan-' + k + '"'), 'a swatch for ' + k);
+    assert.equal(mtToggleLegend(), false);
+    assert.ok(!host('mtCalHost').includes('mt-legend'));
+    // a click inside it leaves it open; a click anywhere else, or Escape, closes it
+    mtToggleLegend();
+    assert.equal(mtLegendOutside({ target: { closest: (q) => (q === '.mt-keywrap' ? {} : null) } }), false);
+    assert.ok(host('mtCalHost').includes('mt-legend'));
+    assert.equal(mtLegendOutside({ target: { closest: () => null } }), true);
+    assert.ok(!host('mtCalHost').includes('mt-legend'));
+    mtToggleLegend();
+    assert.equal(mtLegendKey({ key: 'a' }), false);
+    assert.equal(mtLegendKey({ key: 'Escape' }), true);
+    assert.ok(!host('mtCalHost').includes('mt-legend') && mt.legend === false);
+    assert.equal(mtLegendOutside({ target: null }), false, 'closed: nothing to do');
+  }
+  // the colours themselves are untouched: a call still takes its plan's class
+  assert.ok(host('mtCalHost').includes('class="mt-chip mt-plan-none is-booking"'));
+});
+
+/* ───────────── the owner's own meetings ───────────── */
+test('mtAddOwn: a title is required, the email and the link are checked, and a time a website booking holds is refused', async () => {
+  settingsRow(); at('2026-11-24T06:00:00.000Z');
+  db.discovery_bookings.push(bk({ id: 'web', company: 'Website Co', call_at: '2026-11-27T16:00:00.000Z', minutes: 30 }));
+  db.meetings.push({ id: 'm0', kind: 'strategy', starts_at: '2026-11-27T18:00:00.000Z', minutes: 30, status: 'booked' });
+  const ok = { title: 'Accountant', startsAt: '2026-11-26T16:00:00.000Z' };
+  const no = async (over, re) => { const r = await mtAddOwn(Object.assign({}, ok, over)); assert.deepEqual([r.ok, r.data], [false, null], JSON.stringify(over)); assert.match(r.error, re); };
+  await no({ title: '' }, /Give the meeting a title/);
+  await no({ title: '   ' }, /Give the meeting a title/);
+  await no({ title: 'x'.repeat(161) }, /too long/);
+  await no({ guestName: 'n'.repeat(121) }, /too long/);
+  for (const bad of ['nope', 'a@b', 'a b@c.com', '@c.com', 'a@.c']) await no({ guestEmail: bad }, /email address does not look right/);
+  for (const bad of ['http://meet.google.com/abc', 'meet.google.com/abc', 'javascript:alert(1)', 'https://', 'https://a b']) await no({ meetLink: bad }, /has to start with https:\/\//);
+  await no({ startsAt: 'whenever' }, /Pick the day and the time/);
+  await no({ minutes: 10 }, /15, 30, 45, 60 or 90/);
+  await no({ plan: 'enterprise' }, /not one of the plans/);
+  // taken by a website booking — the same start, or only overlapping it — or by another meeting
+  await no({ startsAt: '2026-11-27T16:00:00.000Z' }, /^There is already a call at that time\.$/);
+  await no({ startsAt: '2026-11-27T15:45:00.000Z' }, /^There is already a call at that time\.$/);
+  await no({ startsAt: '2026-11-27T18:15:00.000Z', minutes: 15 }, /^There is already a call at that time\.$/);
+  assert.equal(db.meetings.length, 1, 'nothing was written by any refusal');
+  assert.equal(calls.filter((c) => c.table === 'meetings' && c.op === 'insert').length, 0);
+  // if what is taken cannot be read, it does not guess
+  fail['discovery_bookings'] = 'the bookings would not load';
+  assert.equal((await mtAddOwn(ok)).error, 'the bookings would not load');
+  delete fail['discovery_bookings'];
+
+  // the plain case: everything optional left out
+  const r = await mtAddOwn(ok);
+  assert.equal(r.ok, true); assert.equal(r.error, ''); assert.equal(r.data.warning, '');
+  assert.deepEqual(r.data.meeting, Object.assign({}, r.data.meeting, { client_id: null, booking_id: null, kind: 'other', title: 'Accountant', guest_name: null, guest_email: null, plan: null,
+    starts_at: '2026-11-26T16:00:00.000Z', minutes: 30, time_zone: 'America/New_York', status: 'booked', meet_link: null, notes: null }));
+  // everything filled in, trimmed
+  const full = await mtAddOwn({ title: '  Quarterly review ', guestName: ' Nimal Silva ', guestEmail: ' nimal@example.com ', startsAt: '2026-11-26T17:00:00.000Z', minutes: 90, plan: 'Growth', meetLink: ' https://meet.google.com/abc-defg-hij ' });
+  assert.equal(full.ok, true);
+  assert.deepEqual([full.data.meeting.title, full.data.meeting.guest_name, full.data.meeting.guest_email, full.data.meeting.minutes, full.data.meeting.plan, full.data.meeting.meet_link],
+    ['Quarterly review', 'Nimal Silva', 'nimal@example.com', 90, 'growth', 'https://meet.google.com/abc-defg-hij']);
+});
+
+test('mtAddOwn takes any time — 3 am on a Sunday, outside call hours, with no notice — where mtBook still refuses; a block only warns; a duplicate key becomes a plain sentence', async () => {
+  settingsRow({ min_notice_h: 12 }); at('2026-11-28T20:00:00.000Z');          // Sunday 1:30 am in Colombo
+  const sun3am = mtZoneToUtc('2026-11-29', '03:00', 'Asia/Colombo').toISOString();
+  assert.equal(sun3am, '2026-11-28T21:30:00.000Z', '4:30 pm on a US Saturday, an hour and a half from now');
+  const book = await mtBook({ kind: 'discovery', startsAt: sun3am });
+  assert.equal(book.ok, false); assert.match(book.error, /not one of your calling days/, 'the bookable slots keep their rules');
+  const r = await mtAddOwn({ title: 'Call with dad', startsAt: sun3am });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(db.meetings[0].starts_at, sun3am); assert.equal(db.meetings[0].kind, 'other');
+  // midnight Eastern on a weekday, and a time that has already gone: also his to add
+  assert.equal((await mtAddOwn({ title: 'Midnight', startsAt: '2026-12-01T05:00:00.000Z' })).ok, true);
+  assert.equal((await mtAddOwn({ title: 'Last week, for the record', startsAt: '2026-11-20T10:00:00.000Z' })).ok, true);
+  // mtBook itself was not loosened
+  assert.match((await mtBook({ kind: 'discovery', startsAt: '2026-12-01T05:00:00.000Z' })).error, /already taken|outside your call hours/);
+  assert.match((await mtBook({ kind: 'discovery', startsAt: '2026-12-01T06:00:00.000Z' })).error, /outside your call hours/);
+
+  // on blocked time: added, with a warning
+  db.calendar_blocks.push({ id: 'blk', starts_at: '2026-12-02T15:00:00.000Z', ends_at: '2026-12-02T17:00:00.000Z', reason: 'school' });
+  const w = await mtAddOwn({ title: 'Over the block', startsAt: '2026-12-02T16:00:00.000Z' });
+  assert.equal(w.ok, true); assert.match(w.data.warning, /inside a block you marked as busy/);
+  assert.equal(db.meetings.filter((m) => m.title === 'Over the block').length, 1);
+
+  // the unique index answering: code 23505, or only its message
+  const before = db.meetings.length;
+  fail['meetings.insert'] = { code: '23505', message: 'duplicate key value violates unique constraint "meetings_starts_at_live_key"' };
+  let d = await mtAddOwn({ title: 'Clash', startsAt: '2026-12-03T16:00:00.000Z' });
+  assert.deepEqual([d.ok, d.data, d.error], [false, null, 'There is already a call at that time.']);
+  fail['meetings.insert'] = 'duplicate key value violates unique constraint "x"';
+  d = await mtAddOwn({ title: 'Clash', startsAt: '2026-12-03T16:00:00.000Z' });
+  assert.equal(d.error, 'There is already a call at that time.');
+  fail['meetings.insert'] = { code: '42501', message: 'permission denied for table meetings' };
+  d = await mtAddOwn({ title: 'Clash', startsAt: '2026-12-03T16:00:00.000Z' });
+  assert.deepEqual([d.ok, d.error], [false, 'permission denied for table meetings'], 'any other error is passed on as it is');
+  delete fail['meetings.insert'];
+  assert.equal(db.meetings.length, before);
+  // moving one of his own meetings is as free as adding it; the clash sentence is the same
+  const own = db.meetings.find((m) => m.title === 'Midnight');
+  assert.equal((await mtReschedule(own.id, '2026-12-05T08:00:00.000Z')).ok, true, 'a Saturday, 3 am Eastern');
+  fail['meetings.update'] = { code: '23505', message: 'duplicate key' };
+  assert.equal((await mtReschedule(own.id, '2026-12-05T09:00:00.000Z')).error, 'There is already a call at that time.');
+  delete fail['meetings.update'];
+});
+
+test('a hand-added meeting is on the calendar at once, in its plan\'s colour under its own title, and its panel has the person, the email, both times, the link and the buttons', async () => {
+  settingsRow({ meeting_link: 'https://meet.google.com/own-room' }); at('2026-11-24T06:00:00.000Z');
+  db.clients.push({ id: 'c1', company: 'Northwind', contact_name: 'Ravi Perera', plan: 'scale' });
+  mt.view = 'week'; mt.day = '2026-11-24'; await mtLoadCal();
+  mtOpenAdd();
+  let f = host('modal');
+  for (const id of ['mtAddTitle', 'mtAddName', 'mtAddEmail', 'mtAddDate', 'mtAddTime', 'mtAddEt', 'mtAddLen', 'mtAddPlan', 'mtAddLink', 'mtAddErr']) assert.ok(f.includes('id="' + id + '"'), 'the form has ' + id);
+  assert.match(f, /id="mtAddDate" type="date" value="2026-11-24"/); assert.match(f, /id="mtAddTime" type="time" step="300" value="12:00"/, 'it opens on the next half hour, Sri Lanka time');
+  assert.match(f, /<option value="15">15 minutes<\/option><option value="30" selected>30 minutes<\/option><option value="45">45 minutes<\/option><option value="60">60 minutes<\/option><option value="90">90 minutes<\/option>/);
+  assert.match(f, /<option value="">No plan<\/option><option value="pilot">Pilot<\/option><option value="starter">Starter<\/option><option value="growth">Growth<\/option><option value="scale">Scale<\/option>/);
+  assert.match(visible(f), /Time \(SL\) US Eastern \(ET\) Tue 24 Nov · 1:30 am/);
+  assert.match(f, /oninput="mtAddEtLine\(\)"/);
+  // the Eastern time follows what is typed
+  el('mtAddDate').value = '2026-11-27'; el('mtAddTime').value = '21:30';
+  assert.equal(mtAddEtLine(), 'Fri 27 Nov · 11:00 am'); assert.equal(el('mtAddEt').textContent, 'Fri 27 Nov · 11:00 am');
+  el('mtAddTime').value = '';
+  assert.equal(mtAddEtLine(), 'Pick a day and a time');
+  // submitting with nothing typed says what is missing, and writes nothing
+  let r = await mtSubmitAdd();
+  assert.equal(r.ok, false); assert.equal(el('mtAddErr').textContent, 'Pick the day and the time first.');
+  el('mtAddTime').value = '21:30';
+  r = await mtSubmitAdd();
+  assert.equal(r.ok, false); assert.match(el('mtAddErr').textContent, /Give the meeting a title/);
+  assert.equal(db.meetings.length, 0);
+
+  el('mtAddTitle').value = 'Growth plan <review>'; el('mtAddName').value = 'Nimal Silva'; el('mtAddEmail').value = 'nimal@example.com';
+  el('mtAddLen').value = '45'; el('mtAddPlan').value = 'growth'; el('mtAddLink').value = '';
+  r = await mtSubmitAdd();
+  assert.equal(r.ok, true, r.error);
+  assert.ok(toasts.includes('Added to your calendar'));
+  const row = db.meetings[0];
+  assert.deepEqual([row.kind, row.title, row.guest_name, row.guest_email, row.plan, row.starts_at, row.minutes, row.status, row.client_id],
+    ['other', 'Growth plan <review>', 'Nimal Silva', 'nimal@example.com', 'growth', '2026-11-27T16:00:00.000Z', 45, 'booked', null]);
+  assert.equal(row.meet_link, 'https://meet.google.com/own-room', 'no link typed: the room from the rules (the database fills one in when there is none at all)');
+  // on the calendar straight away, same week, growth colour, its own title
+  assert.equal(mt.view, 'week'); assert.equal(mt.day, '2026-11-24');
+  const ev = mt.cal.events.find((e) => e.key === 'meeting:' + row.id);
+  assert.deepEqual([ev.title, ev.who, ev.email, ev.plan, ev.planClass, ev.kindWord, ev.time, ev.usTime, ev.usKey], ['Growth plan <review>', 'Nimal Silva', 'nimal@example.com', 'growth', 'mt-plan-growth', '', '9:30 pm', '11:00 am', '2026-11-27']);
+  const cols = colsOf(host('mtCalHost'));
+  assert.match(cols[4], /class="mt-ev mt-plan-growth is-meeting short"[^>]*><b>Growth plan &lt;review&gt;<\/b><span class="mt-tagp" title="Growth">G<\/span><small>9:30 pm<i> · 11:00 am ET<\/i><\/small>/);
+  assert.ok(!host('mtCalHost').includes('<review>'), 'escaped');
+  // no plan → grey; and a client's plan and name are still the fallback when the meeting has none of its own
+  await mtAddOwn({ title: 'No plan on this', startsAt: '2026-11-26T16:00:00.000Z' });
+  db.meetings.push({ id: 'm-cl', client_id: 'c1', kind: 'review', starts_at: '2026-11-25T16:00:00.000Z', minutes: 30, status: 'booked' },
+    { id: 'm-both', client_id: 'c1', kind: 'review', title: 'Renewal chat', guest_name: 'Their CFO', plan: 'pilot', starts_at: '2026-11-25T17:00:00.000Z', minutes: 30, status: 'booked' });
+  await mtLoadCal();
+  const by = (t) => mt.cal.events.find((e) => e.title === t);
+  assert.equal(by('No plan on this').planClass, 'mt-plan-none');
+  assert.deepEqual([by('Northwind').who, by('Northwind').planClass, by('Northwind').kindWord], ['Ravi Perera', 'mt-plan-scale', 'Review']);
+  assert.deepEqual([by('Renewal chat').who, by('Renewal chat').planClass, by('Renewal chat').company], ['Their CFO', 'mt-plan-pilot', 'Northwind'], 'its own title, guest and plan win over the client\'s');
+  // the month too
+  await mtSetView('month');
+  assert.match(cellOf(host('mtCalHost'), '2026-11-27'), /class="mt-chip mt-plan-growth is-meeting" title="Fri 9:30 pm SL · Fri 11:00 am ET · Growth plan &lt;review&gt; · Growth · Booked"[^>]*>(?:(?!<\/button>).)*<span class="mt-chip-t">9:30 pm<\/span><span class="mt-chip-n">Growth plan &lt;review&gt;/);
+
+  // its panel
+  await mtSetView('week');
+  await mtOpenEvent('meeting:' + row.id);
+  const h = host('modal'), t = visible(h);
+  for (const w of ['Growth plan', 'Title', 'A meeting you added', 'Nimal Silva', 'nimal@example.com', 'G · Growth', 'Fri 27 Nov · 9:30 pm Sri Lanka', 'Fri 27 Nov · 11:00 am US Eastern — their time',
+    '45 minutes', 'Join the call', 'Copy the link', 'Call done', 'No-show', 'Cancel', 'Move the call'])
+    assert.ok(t.includes(w), 'the panel shows: ' + w);
+  assert.ok(h.includes('Growth plan &lt;review&gt;'));
+  assert.match(h, /<a href="mailto:nimal@example\.com">nimal@example\.com<\/a>/);
+  assert.match(h, /href="https:\/\/meet\.google\.com\/own-room"/);
+  assert.ok(!h.includes('<review>'), 'escaped');
+  assert.ok(!BROKEN.test(t), t);
+  // and its buttons work like any other call's
+  el('mtMoveTo').value = '2026-11-29T03:00';                // Sunday 3 am in Colombo: his own meeting may go there
+  assert.equal((await mtMoveClick(row.id)).ok, true);
+  assert.equal(db.meetings[0].starts_at, '2026-11-28T21:30:00.000Z');
+  at('2026-11-29T06:00:00.000Z');
+  assert.equal((await mtHeldClick(row.id)).ok, true); assert.equal(db.meetings[0].status, 'held');
+  // a time taken shows the sentence in the form, and the form stays
+  el('mtAddTitle').value = 'Second'; el('mtAddDate').value = '2026-11-26'; el('mtAddTime').value = '21:30'; el('mtAddEmail').value = ''; el('mtAddName').value = ''; el('mtAddPlan').value = ''; el('mtAddLen').value = '30';
+  r = await mtSubmitAdd();
+  assert.equal(r.ok, false); assert.equal(el('mtAddErr').textContent, 'There is already a call at that time.');
+});
+
+/* ───────────── which view it opens on ───────────── */
+test('the Calendar opens on the week, and remembers the view last chosen', async () => {
+  settingsRow(); at('2026-11-24T06:00:00.000Z');
+  localStorage._s = {}; mtForget();
+  assert.equal(mtSavedView(), 'week'); assert.equal(mt.view, 'week');
+  viewCalendar(); await tick(); await tick();
+  assert.equal(mt.cal.view, 'week');
+  assert.match(host('mtCalHost'), /class="mt-cal mt-view-week"/);
+  assert.match(host('mtCalHost'), /<button type="button" class="active" aria-pressed="true" onclick="mtSetView\('week'\)">Week<\/button>/);
+  assert.match(visible(host('mtCalHost')), /23 – 29 Nov 2026/);
+  // choosing the month is remembered …
+  await mtSetView('month');
+  assert.equal(localStorage.getItem('avianceCalView'), 'month');
+  mtForget(); settingsRow(); at('2026-11-24T06:00:00.000Z');
+  assert.equal(mt.view, 'month');
+  viewCalendar(); await tick(); await tick();
+  assert.match(host('mtCalHost'), /class="mt-cal mt-view-month"/);
+  // … and so is going back to the week, by the switch or by opening a day
+  await mtSetView('week');
+  assert.equal(localStorage.getItem('avianceCalView'), 'week');
+  await mtSetView('month'); await mtGoWeek('2026-11-25');
+  assert.equal(localStorage.getItem('avianceCalView'), 'week');
+  // anything odd in storage, or no storage at all, is the week — and nothing throws
+  localStorage._s = { avianceCalView: 'year' }; assert.equal(mtSavedView(), 'week');
+  const real = globalThis.localStorage;
+  globalThis.localStorage = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+  try {
+    assert.equal(mtSavedView(), 'week');
+    assert.doesNotThrow(() => mtSaveView('month'));
+    mtForget(); settingsRow(); at('2026-11-24T06:00:00.000Z');
+    assert.equal(mt.view, 'week');
+    assert.equal((await mtSetView('month')).ok, true, 'the view still changes; it is only not remembered');
+  } finally { globalThis.localStorage = real; }
+  assert.match(SRC, /try\{ return localStorage\.getItem\(MT_VIEW_KEY\)/); assert.match(SRC, /try\{ localStorage\.setItem\(MT_VIEW_KEY/);
+  // today in the week is the business day: after 9 pm Eastern it is already the next one
+  assert.equal(mtBizToday(mtSettingsNow(), new Date('2026-11-24T06:00:00.000Z')), '2026-11-24', 'Tue 1 am Eastern');
+  assert.equal(mtBizToday(mtSettingsNow(), new Date('2026-11-25T01:59:00.000Z')), '2026-11-24', 'Tue 8:59 pm Eastern');
+  assert.equal(mtBizToday(mtSettingsNow(), new Date('2026-11-25T02:00:00.000Z')), '2026-11-25', 'Tue 9 pm Eastern: the day has closed');
+});
+
+/* ───────────── the research brief in the panel ───────────── */
+test('a booking\'s panel lays the research brief out to be read — one-liner, score, pains, call plan, red flags, the agents that ran — and says "Research not ready yet" when there is none', async () => {
+  settingsRow(); at('2026-11-24T06:00:00.000Z');
+  db.plan_prices = PRICES.map((p) => Object.assign({}, p));
+  db.discovery_bookings.push(bk({ id: 'b1', score: 81 }));
+  await mtOpenEvent('booking:b1');
+  let t = visible(host('modal'));
+  assert.match(t, /What we found out Research not ready yet The research engine has not written a brief for this booking\. Their own answers are below\. Research this one/);
+  assert.ok(!/Pains|Call plan|Red flags/.test(t));
+  // the shape the research engine writes
+  db.research_briefs = [{ booking_id: 'b1', writer: 'writer', ms: 9000,
+    agents: [{ agent: 'site', label: 'Website reader', ok: true, ms: 4200, summary: 'Read 6 pages' }, { agent: 'reviews', label: 'Reviews', ok: false, ms: 900, summary: 'No <b>review</b> pages' }, { agent: 'news', ok: true }],
+    brief: { one_liner: 'Commercial roofer, 20 staff, referrals only.', bant: { score: 78, verdict: 'Good fit', need: 'More commercial leads', budget: '$3k a month is fine', timing: 'This quarter', authority: 'Owner' },
+      pain_hypotheses: [{ pain: 'Referrals have dried up', evidence: 'Said so on the form' }, { pain: 'No outbound at all' }, 'Slow winters'],
+      closer_plan: { label: 'Lead with referrals', clarify: ['How many jobs a month?', 'Who follows up?'], past_pain: ['Tried an agency in 2024'], reinforce: 'They want predictable calls', objections: ['Price'], sell_the_vacation: 'Ten calls a month without lifting a finger' },
+      red_flags: ['Owner is the only closer'], what_they_sell: 'Commercial roofs', recommended_plan: 'growth', _writer_note: 'short site' } }];
+  await mtOpenBooking('b1');
+  const h = host('modal'); t = visible(h);
+  const briefAt = h.indexOf('class="card pl-pad pl-brief mt-brief"');
+  assert.ok(briefAt > 0);
+  const b = visible(h.slice(briefAt, h.indexOf('What they told us')).replace(/^[^>]*>/, ''));
+  assert.match(b, /^Commercial roofer, 20 staff, referrals only\. Score Booking score 81 · Research score 78 — Good fit Need More commercial leads Budget \$3k a month is fine Timing This quarter Authority Owner Pains Referrals have dried up — Said so on the form No outbound at all Slow winters Call plan Label Lead with referrals Clarify How many jobs a month\? Who follows up\? Past pain Tried an agency in 2024 Reinforce They want predictable calls Objections Price Sell the vacation Ten calls a month without lifting a finger Red flags Owner is the only closer Research agents that ran Website reader ran in 4\.2 s Read 6 pages Reviews did not finish in 0\.9 s No b review \/b pages news ran/, b);
+  assert.match(b, /What they sell Commercial roofs/); assert.match(b, /Recommended plan growth/); assert.match(b, /short site/, 'whatever else the brief holds is still listed');
+  assert.ok(!h.includes('<b>review</b>') && h.includes('&lt;b&gt;review'), 'escaped');
+  assert.match(t, /Brief ready/); assert.ok(!t.includes('Research not ready yet'));
+  assert.ok(!BROKEN.test(t), t);
+  // no red flags is said, not left out; and an empty brief is "not ready"
+  db.research_briefs = [{ booking_id: 'b1', brief: { one_liner: 'Short one.', red_flags: [] } }];
+  await mtOpenBooking('b1');
+  assert.match(visible(host('modal')), /Short one\. Score Booking score 81 Red flags None found\. Research agents that ran The brief does not say which agents ran\./);
+  for (const empty of [{}, [], '', null]) {
+    db.research_briefs = [{ booking_id: 'b1', brief: empty }];
+    await mtOpenBooking('b1');
+    assert.match(visible(host('modal')), /Research not ready yet/, JSON.stringify(empty));
+    assert.ok(!visible(host('modal')).includes('Brief ready'), 'the pill at the top agrees');
+  }
+  // research that is running, or that fell over, says so under the same plain heading
+  db.research_briefs = [];
+  db.research_log = [{ id: 1, booking_id: 'b1', at: new Date().toISOString(), event: { status: 'running' } }];
+  await mtOpenBooking('b1');
+  assert.match(visible(host('modal')), /Research not ready yet The research engine is working on this one/);
+  // the pure renderer never throws, whatever it is handed
+  for (const d of [null, undefined, {}, { brief: 7 }, { brief: { brief: 'text' } }, { brief: { brief: [1, { a: 1 }] } }, { brief: { brief: { bant: 5, pain_hypotheses: 'one', closer_plan: 'call them', red_flags: { a: 1 }, one_liner: { x: 1 } }, agents: 'none' } }, { brief: { brief: { bant: [1], closer_plan: [['a'], null] }, agents: [null, 3, {}] } }])
+    assert.ok(!BROKEN.test(visible(mtRenderBrief(d))), JSON.stringify(d) + ' → ' + visible(mtRenderBrief(d)));
+});
+
 /* ───────────── the house rules ───────────── */
 test('plain browser JavaScript, no imports, and every global prefixed mt', () => {
   assert.ok(!/\brequire\(|^\s*import\s|^\s*export\s/m.test(SRC), 'no imports, no build step');
@@ -1024,7 +1417,7 @@ test('plain browser JavaScript, no imports, and every global prefixed mt', () =>
   const odd = names.filter((n) => !/^(mt|MT_)/.test(n) && !['viewCalendar', 'viewMeeting', 'viewNoShows'].includes(n));
   assert.deepEqual(odd, [], 'every global is mt-prefixed, apart from the three screens the shell names');
   assert.ok(typeof viewCalendar === 'function' && typeof viewMeeting === 'function' && typeof viewNoShows === 'function');
-  for (const f of ['mtSlots', 'mtBook', 'mtReschedule', 'mtCancel', 'mtDue', 'mtMarkReminded', 'mtHeld', 'mtNoShow', 'mtBlock', 'mtUnblock', 'mtEvents', 'mtCal', 'mtNavCount'])
+  for (const f of ['mtAddOwn', 'mtHourWindow', 'mtSlots', 'mtBook', 'mtReschedule', 'mtCancel', 'mtDue', 'mtMarkReminded', 'mtHeld', 'mtNoShow', 'mtBlock', 'mtUnblock', 'mtEvents', 'mtCal', 'mtNavCount'])
     assert.equal(typeof globalThis[f], 'function', f);
   assert.ok(!/email-distributor|machineFetch|MACHINE_URL/.test(SRC));
   // the css reuses theme tokens; the only colours it brings are the plan colours, each defined as a --mt- variable

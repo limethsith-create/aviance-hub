@@ -71,7 +71,7 @@ time: the hub's slot finder treats any booking that is not `cancelled` as taken.
 (the research engine), then `held`, `no_show`, `won`, `lost` or `cancelled`. A
 booking is open unless it is `won`, `lost` or `cancelled` — never test for a list
 of "open" words.
-- **meetings** — client_id, booking_id, kind*, starts_at* timestamptz, minutes*, time_zone*, status*, meet_link, calendar_event_id, invited_at, reminded_24h_at, reminded_1h_at, held_at, notes
+- **meetings** — client_id, booking_id, kind*, starts_at* timestamptz, minutes* (15–240), time_zone*, status*, meet_link (a trigger fills in a stand-in room when it is left empty), calendar_event_id, invited_at, reminded_24h_at, reminded_1h_at, held_at, notes, title (≤160), guest_name (≤120), guest_email (a valid email or null), plan [null|pilot|starter|growth|scale]. **Unique index on starts_at for every meeting that is not `cancelled`**, so two live meetings can never start at the same instant; a clash comes back as duplicate key (23505) and the Calendar says "There is already a call at that time." A meeting the owner adds by hand (meetings.js `mtAddOwn`) is `kind = 'other'` with its own `title`, `guest_name`, `guest_email` and `plan`; the Calendar colours it by that `plan` and falls back to the client's company and plan when a meeting has none of its own. `kind = 'qualified'` requires `client_id`.
 - **calendar_settings** — id int4 (single row, id=1), open_time* ('07:00'), close_time* ('21:00'), days* int4[] ({1,2,3,4,5}), slot_minutes* (30), min_notice_h*, days_ahead*, us_zone* ('America/New_York'), owner_zone* ('Asia/Colombo'), meeting_link, updated_at*
 - **calendar_blocks** — starts_at* timestamptz, ends_at* timestamptz, reason
 

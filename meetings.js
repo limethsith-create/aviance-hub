@@ -1,8 +1,8 @@
 /* ===================== AVIANCE OS — Meetings =====================
    The Calendar: the one place every call lives. Website bookings
    (discovery_bookings) and the calls booked here (meetings) are read together,
-   turned into one event shape and drawn as a real calendar — a month grid and
-   a week grid, coloured by plan. Clicking a call opens its panel; that is
+   turned into one event shape and drawn as a real calendar — a week of
+   business days and a month grid, coloured by plan. Clicking a call opens its panel; that is
    where a booking is marked done, a no-show, won or lost. Also here: booking,
    blocking time, reminders, no-shows, and whether a booked call counts.
 
@@ -33,9 +33,11 @@
      - Times are stored in UTC. Every conversion goes through Intl.DateTimeFormat
        with a timeZone, so US daylight saving is always right. There is no fixed
        offset anywhere in this file.
-     - The calendar is drawn in the owner's zone (calendar_settings.owner_zone):
-       every time on it, and which day a call sits on. The prospect's own time
-       is shown beside it in the call's panel. The browser's zone is never used.
+     - Every time is shown both ways: the owner's zone first
+       (calendar_settings.owner_zone), US Eastern (us_zone) beside it. The month
+       is laid out by the owner's days; the week by US business days, because
+       the working day crosses midnight in the owner's zone (see section 9).
+       The browser's zone is never used.
      - A booking is open unless pipeline.js says it is closed (plIsOpen). There
        is no list of "open" words here; one once hid every real booking.
      - Render functions are pure (data in, HTML out) and must draw with zero rows.
@@ -82,12 +84,20 @@ const MT_NO_PLAN = {word:'No plan yet', tag:'–'};
 const MT_KIND_SHORT = {discovery:'Discovery', strategy:'Strategy', onboarding:'Onboarding', qualified:'Booked sales call', review:'Review', check_in:'Check-in', other:'Call'};
 const MT_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const MT_GRID_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-const MT_HOUR_PX = 48;          /* one hour of the week grid */
+/* The short name of a zone, for the week's two time columns and beside a time.
+   Only names: every offset still comes from Intl. A zone not listed here takes
+   Intl's own short name. */
+const MT_ZONE_SHORT = {'Asia/Colombo':'SL','America/New_York':'ET','America/Chicago':'CT','America/Denver':'MT','America/Los_Angeles':'PT','America/Phoenix':'AZ'};
+const MT_LENGTHS = [15,30,45,60,90];   /* how long a meeting added by hand can be */
+const MT_MIN_BLOCK = 30;        /* a shorter call is still drawn this tall, so its name fits */
+const MT_VIEW_KEY = 'avianceCalView';  /* localStorage: the view last chosen */
+const MT_TAKEN = 'There is already a call at that time.';
+const MT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const MT_CHIP_MAX = 3;          /* calls shown in a month cell before "+N more" */
 const MT_GRACE_MIN = 20;        /* how long after its start a call may sit unmarked */
 
-const mt = {settings:null, view:'month', day:null, cal:null, needOnly:false, open:null, want:null, seq:0,
-            one:null, noshows:null, err:'', now:null, busy:false};
+const mt = {settings:null, view:'week', viewRead:false, day:null, cal:null, needOnly:false, legend:false, open:null, want:null, seq:0,
+            one:null, noshows:null, err:'', now:null, busy:false, bound:false};
 
 /* ===================== 1. PLUMBING (as finance.js) ===================== */
 
@@ -167,6 +177,17 @@ function mtTime(d,zone){ const p=mtPartsOf(mtFmt(zone,'time'),d); return p.hour+
 function mtDayName(d,zone){ const p=mtPartsOf(mtFmt(zone,'day'),d); return p.weekday+' '+p.day+' '+p.month }
 function mtWeekdayName(d,zone){ return mtPartsOf(mtFmt(zone,'day'),d).weekday }
 function mtZoneName(z){ return MT_ZONE_NAMES[z] || String(z||'').split('/').pop().replace(/_/g,' ') }
+/* "SL", "ET" — or whatever Intl calls a zone we have no short name for. */
+function mtZoneShort(z){
+  if(Object.prototype.hasOwnProperty.call(MT_ZONE_SHORT, z)) return MT_ZONE_SHORT[z];
+  try{
+    const p = new Intl.DateTimeFormat('en-US',{timeZone:z,timeZoneName:'short'}).formatToParts(mtNow()).find(x=>x.type==='timeZoneName');
+    return p ? p.value : mtZoneName(z);
+  }catch(e){ return mtZoneName(z) }
+}
+/* "7 am", "5:30 pm" — the hour axis has no room for ":00". */
+function mtShortTime(d,zone){ return mtTime(d,zone).replace(':00','') }
+function mtMinHm(min){ return mtPad(Math.floor(min/60))+':'+mtPad(min%60) }
 function mtKeyDay(k){ const p=mtKeyParts(k); return p?mtDayName(new Date(Date.UTC(p[0],p[1]-1,p[2],12)),'UTC'):'' }
 /* One instant, both ways round: US Eastern (where the prospects are) and Sri
    Lanka (where the person running this sits). The weekday is on both, because
@@ -345,9 +366,10 @@ async function mtSlots(dateISO){
   if(!busy.ok) return busy;
   return mtOk(mtSlotsOn(dateISO, st, busy.data.taken, now));
 }
-/* The free slots between two instants, keyed by the OWNER's date — what the
-   week grid draws. One read of what is taken, however many days it covers. */
-async function mtRangeSlots(fromMs, toMs){
+/* The free slots between two instants, keyed by the owner's date — or, with
+   by='us', by the US date, which is what the week of business days draws.
+   One read of what is taken, however many days it covers. */
+async function mtRangeSlots(fromMs, toMs, by){
   const got = await mtSettings(); if(!got.ok) return got;
   const st = got.data, now = mtNow();
   const busy = await mtBusy(new Date(fromMs - 864e5).toISOString(), new Date(toMs + 864e5).toISOString());
@@ -358,7 +380,8 @@ async function mtRangeSlots(fromMs, toMs){
   for(let i = 0; i < 45 && k && k <= last; i++, k = mtAddDays(k,1)){
     mtSlotsOn(k, st, busy.data.taken, now).forEach(s=>{
       const t = Date.parse(s.startsAt);
-      if(t >= fromMs && t < toMs) (out[s.lkDate] = out[s.lkDate] || []).push(s);
+      const key = by === 'us' ? s.usDate : s.lkDate;
+      if(t >= fromMs && t < toMs) (out[key] = out[key] || []).push(s);
     });
   }
   return mtOk(out);
@@ -405,6 +428,66 @@ async function mtBook(b){
   }).select().single(), null);
 }
 
+/* A duplicate-key answer from the database: the unique index on starts_at. */
+function mtIsDup(e){ return !!e && (String(e.code||'') === '23505' || /duplicate key/i.test(String(e.message||''))) }
+
+/* Add one of the owner's own meetings, by hand. It is his calendar, so it may be
+   at ANY time — the call hours, calling days and notice that mtBook keeps for
+   bookable slots do not apply here. It still refuses a time another call or a
+   website booking already holds, and only warns (data.warning) when it lands on
+   blocked time. The row is kind 'other'; its colour comes from its plan.
+   o: {title, guestName, guestEmail, startsAt, minutes, plan, meetLink} */
+async function mtAddOwn(a){
+  const o = a && typeof a==='object' ? a : {};
+  const got = await mtSettings(); if(!got.ok) return got;
+  const st = got.data;
+
+  const title = String(o.title==null?'':o.title).trim();
+  if(!title) return mtErr('Give the meeting a title first.');
+  if(title.length > 160) return mtErr('That title is too long — keep it under 160 characters.');
+  const guest = String(o.guestName==null?'':o.guestName).trim();
+  if(guest.length > 120) return mtErr('That name is too long — keep it under 120 characters.');
+  const email = String(o.guestEmail==null?'':o.guestEmail).trim();
+  if(email && !MT_EMAIL_RE.test(email)) return mtErr('That email address does not look right. Fix it, or leave it empty.');
+  const d = mtParseDate(o.startsAt);
+  if(!d) return mtErr('Pick the day and the time first.');
+  const raw = o.minutes==null || o.minutes==='' ? 30 : Number(o.minutes);
+  if(!Number.isInteger(raw) || raw < 15 || raw > 240) return mtErr('A meeting can be 15, 30, 45, 60 or 90 minutes long.');
+  const planIn = String(o.plan==null?'':o.plan).trim();
+  if(planIn && !mtPlanKey(planIn)) return mtErr('That is not one of the plans. Pick Pilot, Starter, Growth or Scale, or leave it empty.');
+  const link = String(o.meetLink==null?'':o.meetLink).trim();
+  if(link && !/^https:\/\/\S+$/i.test(link)) return mtErr('The Google Meet link has to start with https://');
+
+  const startMs = d.getTime(), endMs = startMs + raw*60000;
+  const busy = await mtBusy(new Date(startMs).toISOString(), new Date(endMs).toISOString());
+  if(!busy.ok) return busy;
+  const hits = (busy.data.taken||[]).filter(t => mtOverlap(startMs, endMs, t.from, t.to));
+  if(hits.some(t => t.kind !== 'block')) return mtErr(MT_TAKEN);
+  const warning = hits.length ? 'Added — but that time is inside a block you marked as busy.' : '';
+
+  let res;
+  try{
+    res = await sb.from('meetings').insert({
+      client_id:   null,
+      booking_id:  null,
+      kind:        'other',
+      title,
+      guest_name:  guest || null,
+      guest_email: email || null,
+      plan:        mtPlanKey(planIn) || null,
+      starts_at:   new Date(startMs).toISOString(),
+      minutes:     raw,
+      time_zone:   st.us_zone,
+      status:      'booked',
+      meet_link:   link || st.meeting_link || null,
+      notes:       null
+    }).select().single();
+  }catch(e){ return mtIsDup(e) ? mtErr(MT_TAKEN) : mtErr(e) }
+  if(!res) return mtErr('No answer from the database.');
+  if(res.error) return mtIsDup(res.error) ? mtErr(MT_TAKEN) : mtErr(res.error);
+  return mtOk({meeting: res.data, warning});
+}
+
 /* One meeting by id. */
 async function mtMeeting(id){
   const r = await mtRun(() => sb.from('meetings').select('*').eq('id', id).maybeSingle(), null);
@@ -414,7 +497,9 @@ async function mtMeeting(id){
 }
 
 /* Move a call. The same window and clash checks as booking, and the reminder
-   stamps are cleared so the nudges go out again for the new time. */
+   stamps are cleared so the nudges go out again for the new time. A meeting the
+   owner added by hand (kind 'other') may move to any time, as it could be added
+   at any time; it still cannot land on another call. */
 async function mtReschedule(id, startsAt){
   const got = await mtSettings(); if(!got.ok) return got;
   const st = got.data;
@@ -427,24 +512,31 @@ async function mtReschedule(id, startsAt){
   const minutes = mtMinutesOf(m, st);
   const startMs = d.getTime();
   if(startMs < mtNow().getTime()) return mtErr('That time has already passed.');
-  const win = mtWindowProblem(startMs, minutes, st);
+  const own = String(m.kind) === 'other';
+  const win = own ? '' : mtWindowProblem(startMs, minutes, st);
   if(win) return mtErr(win);
 
   const busy = await mtBusy(new Date(startMs).toISOString(), new Date(startMs+minutes*60000).toISOString());
   if(!busy.ok) return busy;
   const clash = (busy.data.taken||[]).find(t =>
     mtOverlap(startMs, startMs+minutes*60000, t.from, t.to) &&
-    !(t.kind==='meeting' && String(t.row.id)===String(id)));
+    !(t.kind==='meeting' && String(t.row.id)===String(id)) &&
+    !(own && t.kind==='block'));
   if(clash) return mtErr(clash.kind==='block'
     ? 'That time is blocked out, so the call cannot move there.'
     : 'That time is already taken by another call.');
 
-  return mtRun(() => sb.from('meetings').update({
-    starts_at:        new Date(startMs).toISOString(),
-    status:           'booked',
-    reminded_24h_at:  null,
-    reminded_1h_at:   null
-  }).eq('id', id).select().single(), null);
+  let res;
+  try{
+    res = await sb.from('meetings').update({
+      starts_at:        new Date(startMs).toISOString(),
+      status:           'booked',
+      reminded_24h_at:  null,
+      reminded_1h_at:   null
+    }).eq('id', id).select().single();
+  }catch(e){ return mtErr(e) }
+  if(res && res.error && mtIsDup(res.error)) return mtErr(MT_TAKEN);
+  return mtWrap(res, null);
 }
 
 /* Call off a meeting. A cancelled `qualified` call is also marked as not
@@ -621,6 +713,7 @@ async function mtMeetings(fromIso, toIso, opts){
   }, []);
 }
 /* ---- one shape for every call ---- */
+function mtText(v){ return v==null ? '' : String(v).trim() }
 function mtPlanKey(p){ const k = String(p==null?'':p).toLowerCase(); return Object.prototype.hasOwnProperty.call(MT_PLANS,k) ? k : '' }
 function mtPlanClass(p){ return 'mt-plan-'+(mtPlanKey(p)||'none') }
 function mtPlanTag(p){ const k = mtPlanKey(p); return k ? MT_PLANS[k].tag : MT_NO_PLAN.tag }
@@ -630,11 +723,16 @@ function mtMeetingNeedsOutcome(m, now){
   const d = mtParseDate(m && m.starts_at), s = String((m && m.status) || 'booked');
   return !!d && (s==='booked' || s==='requested') && (now||mtNow()).getTime() - d.getTime() > MT_GRACE_MIN*60000;
 }
-/* The part every event shares: where it sits in the owner's day. */
+/* The part every event shares: where it sits in the owner's day (the month),
+   which US business day it belongs to (the week), and its time both ways. */
 function mtEventShape(e, d, st){
-  const z = st.owner_zone, p = mtParts(d, z);
+  const z = st.owner_zone, p = mtParts(d, z), u = mtParts(d, st.us_zone);
   e.startsAt = d.toISOString(); e.startMs = d.getTime(); e.endMs = e.startMs + e.minutes*60000;
   e.dayKey = mtDayKey(d, z); e.time = mtTime(d, z); e.minuteOfDay = p.h*60 + p.mi;
+  e.usKey = mtDayKey(d, st.us_zone); e.usTime = mtTime(d, st.us_zone); e.bizMin = u.h*60 + u.mi;
+  e.ownerShort = mtZoneShort(z); e.usShort = mtZoneShort(st.us_zone);
+  e.ownerDow = mtWeekdayName(d, z); e.usDow = mtWeekdayName(d, st.us_zone);
+  e.both = e.time+' '+e.ownerShort+' · '+e.usTime+' '+e.usShort;
   e.planClass = mtPlanClass(e.plan); e.tag = mtPlanTag(e.plan); e.planWord = mtPlanWord(e.plan);
   return e;
 }
@@ -654,16 +752,19 @@ function mtEventOfBooking(b, st, now){
     hasBrief: b.has_brief===true, row:b
   }, d, s);
 }
-/* A call booked here as an event. It takes its client's name and plan colour. */
+/* A call booked here as an event. Its own title, guest and plan come first (a
+   meeting added by hand has them); otherwise it takes its client's name and
+   plan colour, as before. */
 function mtEventOfMeeting(m, st, now, client){
   const d = mtParseDate(m && m.starts_at);
   if(!m || m.id==null || !d || !mtHoldsTime(m)) return null;
   const s = st || mtSettingsNow(), c = client || null, S = mtStatusOf(m.status||'booked');
   return mtEventShape({
     key:'meeting:'+m.id, source:'meeting', id:m.id, minutes:mtMinutesOf(m,s),
-    title:String((c && c.company) || mtKindWord(m.kind)), who:String((c && c.contact_name) || ''), company:String((c && c.company) || ''),
-    plan:mtPlanKey(c && c.plan), status:String(m.status||'booked'), statusWord:S.word, pill:S.pill,
-    kind:String(m.kind||''), kindWord:MT_KIND_SHORT[String(m.kind||'')] || 'Call', meetLink:m.meet_link||'',
+    title:String(mtText(m.title) || (c && c.company) || mtKindWord(m.kind)), who:String(mtText(m.guest_name) || (c && c.contact_name) || ''), company:String((c && c.company) || ''),
+    email:mtText(m.guest_email),
+    plan:mtPlanKey(m.plan) || mtPlanKey(c && c.plan), status:String(m.status||'booked'), statusWord:S.word, pill:S.pill,
+    kind:String(m.kind||''), kindWord:String(m.kind)==='other' && mtText(m.title) ? '' : (MT_KIND_SHORT[String(m.kind||'')] || 'Call'), meetLink:m.meet_link||'',
     open: ['booked','requested'].indexOf(String(m.status||'booked')) >= 0,
     needsOutcome: mtMeetingNeedsOutcome(m, now||mtNow()),
     hasBrief:false, row:m
@@ -719,29 +820,131 @@ function mtCalTitle(view, keys, day){
   if(a[1] !== b[1]) return a[2]+' '+sm(a[1])+' – '+b[2]+' '+sm(b[1])+' '+b[0];
   return a[2]+' – '+b[2]+' '+sm(b[1])+' '+b[0];
 }
-/* The calendar for a month or a week around `dayKey` (a date in the OWNER's
-   zone). Days are the owner's days: a call at 20:00 UTC on a Friday sits on
-   Saturday in Colombo, because that is when the owner takes it. */
+/* ---- the week, by BUSINESS DAY ----
+   Calls happen in the US working day (open_time→close_time in us_zone). Seen
+   from the owner's zone that window crosses midnight: 7 am–9 pm Eastern is
+   about 5:30 pm to 7:30 am the next morning in Colombo. A week drawn by the
+   owner's calendar days would therefore cut every working day in two, half at
+   the bottom of one column and half at the top of the next, and would need all
+   24 hours to show them.
+
+   So each column of the week is one US business day, running top to bottom
+   from open to close. That is the only layout in which a column is one
+   unbroken stretch of time, nothing is split, and the whole week fits in one
+   window with no scrolling. The header gives the US date and the owner's dates
+   the column spans; the two time columns on the left give every hour in both
+   zones. A call's column is its US date (us_zone), never the owner's date. */
+
+/* The business day that is "today": the US date, moving on to the next one
+   once that day's call hours have closed. */
+function mtBizToday(st, now){
+  const k = mtDayKey(now, st.us_zone);
+  const close = mtZoneToUtc(k, st.close_time, st.us_zone);
+  return close && now.getTime() >= close.getTime() ? mtAddDays(k, 1) : k;
+}
+/* The hours the week shows: the call hours from the rules, widened to whole
+   hours and to whatever `spans` ([fromMin,toMin] in US wall-clock minutes of
+   their day) fall outside them. Never all 24 hours unless something forces it.
+   Every label is worked out through Intl for `refKey` (a US date), so the
+   owner's side moves by an hour when US daylight saving does. */
+function mtHourWindow(st, refKey, spans){
+  let lo = mtHmMin(st.open_time), hi = mtHmMin(st.close_time);
+  (spans||[]).forEach(x=>{
+    const a = Number(x && x[0]), b = Number(x && x[1]);
+    if(Number.isFinite(a)) lo = Math.min(lo, a);
+    if(Number.isFinite(b)) hi = Math.max(hi, b);
+  });
+  lo = Math.max(0, Math.floor(lo/60)*60); hi = Math.min(1440, Math.ceil(hi/60)*60);
+  if(hi <= lo) hi = Math.min(1440, lo+60);
+  const label = (min) => {
+    const d = mtZoneToUtc(refKey, mtMinHm(min), st.us_zone);
+    return d ? {min, us:mtShortTime(d, st.us_zone), owner:mtShortTime(d, st.owner_zone)} : {min, us:'', owner:''};
+  };
+  const hours = []; for(let m = lo; m < hi; m += 60) hours.push(label(m));
+  const end = label(hi);
+  return {startMin:lo, endMin:hi, rows:hours.length, hours,
+          fromUs:hours[0].us, fromOwner:hours[0].owner, toUs:end.us, toOwner:end.owner,
+          usShort:mtZoneShort(st.us_zone), ownerShort:mtZoneShort(st.owner_zone)};
+}
+/* The week of business days around `dayKey` (a US date). */
+async function mtCalWeek(st, dayKey, now){
+  const uz = st.us_zone, oz = st.owner_zone;
+  const today = mtBizToday(st, now);
+  const want = mtKeyOk(dayKey) ? dayKey : today;
+  const all = mtWeekKeys(want);
+  const from = mtZoneToUtc(all[0], '00:00', uz), to = mtZoneToUtc(mtAddDays(all[6],1), '00:00', uz);
+  if(!from || !to) return mtErr('Your time zone is not set properly, so the calendar cannot be drawn.');
+  const ev = await mtEvents(from.toISOString(), to.toISOString());
+  if(!ev.ok) return ev;
+  const sl = await mtRangeSlots(from.getTime(), to.getTime(), 'us');
+  if(!sl.ok) return sl;
+
+  const byAll = {}; all.forEach(k=>{ byAll[k] = [] });
+  ev.data.events.forEach(e=>{ if(byAll[e.usKey]) byAll[e.usKey].push(e) });
+  /* the calling days from the rules, plus any other day that has a call on it */
+  let keys = all.filter(k => st.days.indexOf(mtWeekday(k)) >= 0 || byAll[k].length);
+  if(!keys.length) keys = all.slice(0,5);
+  const byDay = {}; keys.forEach(k=>{ byDay[k] = byAll[k] });
+
+  /* what the hours have to stretch to: every call, and every block shorter than
+     a day (a block of days off is clipped to the hours shown, not allowed to
+     turn the week into 24-hour columns) */
+  const spans = [];
+  keys.forEach(k => byDay[k].forEach(e => spans.push([e.bizMin, Math.min(1440, e.bizMin + e.minutes)])));
+  const dayStart = all.map(k => mtZoneToUtc(k, '00:00', uz).getTime()).concat([to.getTime()]);
+  const blocksByDay = {}; all.forEach(k=>{ blocksByDay[k] = [] });
+  (ev.data.blocks||[]).forEach(b=>{
+    const a = mtParseDate(b.starts_at), e = mtParseDate(b.ends_at);
+    if(!a || !e || e <= a) return;
+    const short = e.getTime() - a.getTime() < 864e5;
+    all.forEach((k,i)=>{
+      const s0 = Math.max(a.getTime(), dayStart[i]), e0 = Math.min(e.getTime(), dayStart[i+1]);
+      if(e0 <= s0) return;
+      blocksByDay[k].push({block:b, s0, e0, from:mtTime(new Date(s0),oz), to:mtTime(new Date(e0),oz)});
+      if(short && keys.indexOf(k) >= 0) spans.push([Math.floor((s0-dayStart[i])/60000), Math.ceil((e0-dayStart[i])/60000)]);
+    });
+  });
+  const win = mtHourWindow(st, keys[0], spans);
+  const dayNum = (d) => { const p = mtPartsOf(mtFmt(oz,'day'), d); return p.weekday+' '+p.day };
+  const cols = keys.map(k=>{
+    const start = mtZoneToUtc(k, mtMinHm(win.startMin), uz).getTime();
+    const end = start + (win.endMin - win.startMin)*60000;
+    const a = dayNum(new Date(start)), z = dayNum(new Date(end));
+    return {key:k, start, end, usLabel:mtKeyDay(k), ownerFrom:a, ownerTo:z, ownerSpan: a===z ? a : a+' → '+z,
+            ownerLabel: win.ownerShort+' '+(a===z ? a : a+' → '+z)};
+  });
+  let day = want;
+  if(keys.indexOf(day) < 0){ const before = keys.filter(k => k <= want); day = before.length ? before[before.length-1] : keys[0] }
+  return mtOk({
+    st, view:'week', day, today, keys, allKeys:all, month:day.slice(0,7),
+    title: mtCalTitle('week', all, day), from:from.toISOString(), to:to.toISOString(),
+    events: ev.data.events, byDay, blocks: ev.data.blocks||[], blocksByDay, slots: sl.data,
+    need: ev.data.events.filter(e=>e.needsOutcome).length,
+    win, cols, nowMs: now.getTime(), empty: !ev.data.events.length
+  });
+}
+
+/* The calendar for a month or a week around `dayKey`. The month is laid out by
+   the owner's days (a call at 20:00 UTC on a Friday sits on Saturday in
+   Colombo, because that is when the owner takes it) and `dayKey` is a date in
+   the owner's zone. The week is laid out by US business days (above) and
+   `dayKey` is a US date. */
 async function mtCal(view, dayKey){
   const got = await mtSettings(); if(!got.ok) return got;
   const st = got.data, z = st.owner_zone, now = mtNow();
+  if(view === 'week') return mtCalWeek(st, dayKey, now);
   const today = mtDayKey(now, z);
   const day = mtKeyOk(dayKey) ? dayKey : today;
-  const v = view === 'week' ? 'week' : 'month';
-  const grid = v === 'month' ? mtMonthGrid(day.slice(0,7)) : null;
-  const keys = grid ? grid.keys : mtWeekKeys(day);
+  const v = 'month';
+  const grid = mtMonthGrid(day.slice(0,7));
+  const keys = grid.keys;
   const from = mtZoneToUtc(keys[0], '00:00', z);
   const to   = mtZoneToUtc(mtAddDays(keys[keys.length-1],1), '00:00', z);
   if(!from || !to) return mtErr('Your time zone is not set properly, so the calendar cannot be drawn.');
 
   const ev = await mtEvents(from.toISOString(), to.toISOString());
   if(!ev.ok) return ev;
-  let slots = {};
-  if(v === 'week'){
-    const s = await mtRangeSlots(from.getTime(), to.getTime());
-    if(!s.ok) return s;
-    slots = s.data;
-  }
+  const slots = {};
   const byDay = {}; keys.forEach(k=>{ byDay[k] = [] });
   ev.data.events.forEach(e=>{ if(byDay[e.dayKey]) byDay[e.dayKey].push(e) });
 
@@ -813,6 +1016,7 @@ function mtStatusOf(s){ return MT_STATUS[String(s||'')] || {word:String(s||'—'
 function mtWho(m, client){
   const o = m || {}, c = client || null;
   if(c && (c.company || c.contact_name)) return String(c.company || c.contact_name);
+  if(mtText(o.guest_name)) return mtText(o.guest_name);
   if(o.client_id) return 'Client ' + String(o.client_id).slice(0,8);
   if(o.booking_id) return 'Booking ' + String(o.booking_id).slice(0,8);
   return 'No client on this one';
@@ -827,19 +1031,18 @@ function mtTwoTimes(w, st){
 
 /* A free time, in the owner's time first and the prospect's side under it. */
 function mtRenderSlot(s){
-  return '<button type="button" class="mt-slot" onclick="mtPickSlot('+mtJsArg(s.startsAt)+')">'
+  return '<button type="button" class="mt-slot" title="'+esc(s.lk+' '+mtZoneShort(s.ownerZone)+' · '+s.us+' '+mtZoneShort(s.usZone))+'" onclick="mtAddAt('+mtJsArg(s.startsAt)+')">'
        + '<b>'+esc(s.lk)+'</b><small>'+esc(s.us)+' '+esc(mtZoneName(s.usZone))+'</small></button>';
 }
 /* A string into an onclick handler, quoted and escaped — never raw. */
 function mtJsArg(v){ return "'"+String(v==null?'':v).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\u0022').replace(/</g,'\\u003c').replace(/&/g,'\\u0026')+"'" }
 /* One instant in one zone, in words: "Fri 27 Nov · 9:30 pm Sri Lanka". */
 function mtWhenIn(d, zone){ return mtDayName(d,zone)+' · '+mtTime(d,zone)+' '+mtZoneName(zone) }
-function mtHourWord(h){ return (h%12||12)+(h<12?' am':' pm') }
 function mtCount(n, one, many){ return n+' '+(n===1?one:many) }
 
 /* What a call is, in one line — the tooltip, and what a screen reader hears. */
 function mtEventLine(ev){
-  return ev.time+' · '+ev.title+(ev.kindWord?' · '+ev.kindWord:'')+' · '+ev.planWord+' · '+ev.statusWord
+  return ev.ownerDow+' '+ev.time+' '+ev.ownerShort+' · '+ev.usDow+' '+ev.usTime+' '+ev.usShort+' · '+ev.title+(ev.kindWord?' · '+ev.kindWord:'')+' · '+ev.planWord+' · '+ev.statusWord
        + (ev.needsOutcome?' · needs an outcome':'');
 }
 function mtEventClass(ev){
@@ -856,11 +1059,13 @@ function mtRenderChip(ev){
        + (ev.kindWord?'<span class="mt-chip-k">'+esc(ev.kindWord)+'</span>':'')
        + mtPlanTagHTML(ev)+'</button>';
 }
-/* A call as a full row: the phone's list of a day. */
-function mtRenderEventRow(ev){
-  const sub = [ev.who && ev.who!==ev.title ? ev.who : '', ev.kindWord || 'Discovery call', ev.minutes+' min'].filter(Boolean).join(' · ');
-  return '<li><button type="button" class="mt-row mt-evrow '+mtEventClass(ev)+'" aria-label="'+esc(mtEventLine(ev))+'" onclick="mtOpenEvent('+mtJsArg(ev.key)+')">'
-       + '<span class="mt-when"><b>'+esc(ev.time)+'</b></span>'
+/* A call as a full row: the phone's list of a day. The owner's time first, US
+   Eastern under it. `withDay` puts the owner's weekday on it — a business day
+   runs over two of the owner's days, so the list has to say which. */
+function mtRenderEventRow(ev, withDay){
+  const sub = [ev.who && ev.who!==ev.title ? ev.who : '', ev.kindWord || (ev.source==='booking' ? 'Discovery call' : 'Meeting'), ev.minutes+' min'].filter(Boolean).join(' · ');
+  return '<li><button type="button" class="mt-row mt-evrow '+mtEventClass(ev)+'" title="'+esc(mtEventLine(ev))+'" aria-label="'+esc(mtEventLine(ev))+'" onclick="mtOpenEvent('+mtJsArg(ev.key)+')">'
+       + '<span class="mt-when"><b>'+(withDay===true?esc(ev.ownerDow)+' ':'')+esc(ev.time)+'</b><small>'+esc(ev.usTime+' '+ev.usShort)+'</small></span>'
        + '<span class="mt-row-main"><b>'+esc(ev.title)+'</b><small>'+esc(sub)+'</small>'
        + (ev.needsOutcome?'<small class="mt-needword">Needs an outcome</small>':'')+'</span>'
        + mtPlanTagHTML(ev)+'<span class="pill '+esc(ev.pill)+'">'+esc(ev.statusWord)+'</span></button></li>';
@@ -876,16 +1081,19 @@ function mtShown(cal){
   cal.keys.forEach(k=>{ out[k] = (cal.byDay[k]||[]).filter(e=>!only || e.needsOutcome) });
   return out;
 }
-/* One day as a list — under the month grid on a phone, and the phone's week. */
+/* One day as a list — under the month grid on a phone (one of the owner's
+   days), and the phone's week (one business day: `opts.biz`). */
 function mtRenderDayList(cal, key, shown, opts){
   const o = opts || {};
   const list = (shown[key]||[]), blocks = (cal.blocksByDay[key]||[]), slots = o.slots ? (cal.slots[key]||[]) : [];
-  return '<section class="mt-daylist"><h4>'+esc(mtKeyDay(key))+(key===cal.today?' <span class="mt-tag">Today</span>':'')+'</h4>'
+  const col = o.biz ? (cal.cols||[]).find(c=>c.key===key) : null;
+  return '<section class="mt-daylist"><h4>'+esc(mtKeyDay(key))+(key===cal.today?' <span class="mt-tag">Today</span>':'')
+       + (col?' <span class="mt-tag">'+esc(mtZoneName(cal.st.owner_zone)+': '+col.ownerSpan)+'</span>':'')+'</h4>'
        + (list.length || blocks.length
-           ? '<ul class="mt-list">'+blocks.map(mtRenderBlockRow).join('')+list.map(mtRenderEventRow).join('')+'</ul>'
+           ? '<ul class="mt-list">'+blocks.map(mtRenderBlockRow).join('')+list.map(e=>mtRenderEventRow(e, !!o.biz)).join('')+'</ul>'
            : '<p class="mt-none">No calls on this day.</p>')
        + (o.slots ? (slots.length
-           ? '<h5>Free times — tap one to book a call</h5><div class="mt-slots">'+slots.map(mtRenderSlot).join('')+'</div>'
+           ? '<h5>Free times — tap one to add a meeting</h5><div class="mt-slots">'+slots.map(mtRenderSlot).join('')+'</div>'
            : '<p class="mt-none">No free times on this day.</p>') : '')
        + (o.openDay ? '<div class="mt-acts"><button type="button" class="btn ghost" onclick="mtGoWeek('+mtJsArg(key)+')">Open this day</button></div>' : '')
        + '</section>';
@@ -916,11 +1124,12 @@ function mtRenderMonth(cal, shown){
 }
 /* Calls that overlap sit side by side: which lane each takes, and how many lanes
    its cluster needs. `list` is soonest first. */
-function mtLanes(list){
+function mtLanes(list, field){
+  const f = field || 'minuteOfDay';
   const out = []; let group = [], ends = [], groupEnd = -1;
   const flush = () => { group.forEach(g=>{ g.lanes = ends.length }); out.push.apply(out, group); group = []; ends = []; groupEnd = -1 };
   (list||[]).forEach(ev=>{
-    const a = ev.minuteOfDay, b = Math.min(1440, a + Math.max(ev.minutes, 25));
+    const a = ev[f], b = Math.min(1440, a + Math.max(ev.minutes, MT_MIN_BLOCK));
     if(group.length && a >= groupEnd) flush();
     let lane = ends.findIndex(e=>e<=a);
     if(lane < 0){ lane = ends.length; ends.push(b) } else ends[lane] = b;
@@ -930,104 +1139,130 @@ function mtLanes(list){
   flush();
   return out;
 }
-/* Where the week grid opens: an hour above the first call, else around now,
-   else around the start of the working day as the owner's clock has it. */
-function mtScrollMin(cal){
-  let first = null;
-  cal.keys.forEach(k=>(cal.byDay[k]||[]).forEach(e=>{ if(first===null || e.minuteOfDay<first) first = e.minuteOfDay }));
-  if(first === null && cal.keys.indexOf(cal.today) >= 0) first = cal.nowMin;
-  if(first === null){
-    const open = mtZoneToUtc(mtDayKey(mtNow(), cal.st.us_zone), cal.st.open_time, cal.st.us_zone);
-    if(open){ const p = mtParts(open, cal.st.owner_zone); first = p.h*60+p.mi }
-  }
-  return Math.max(0, (first===null?480:first) - 60);
-}
-/* The week: seven day columns against an hour axis, all 24 hours, because the
-   working day (US Eastern) runs from the evening into the next morning in
-   Colombo. A call is a block at its time, as tall as it is long. */
+function mtPct(n){ return Math.round(n*1000)/1000 }
+/* The week: one column per US business day (see section 9 for why), against
+   two time columns — the owner's zone and US Eastern. Only the hours calls can
+   happen are drawn, and everything is placed by percentage, so the grid takes
+   whatever height the window has (meetings.css) and nothing scrolls. A call is
+   a block at its time, as tall as it is long; a short one still gets one line
+   for its name, and shows its times when hovered. */
 function mtRenderWeekGrid(cal, shown){
-  const px = MT_HOUR_PX/60, H = 24*MT_HOUR_PX;
-  const box = (a, len) => 'top:'+(Math.round(a*px*10)/10)+'px;height:'+(Math.round(len*px*10)/10)+'px';
-  const head = '<div class="mt-wk-head"><span class="mt-wk-gutter"></span>'+cal.keys.map((key,i)=>{
-    const n = (shown[key]||[]).length;
-    return '<button type="button" class="mt-wk-dayh'+(key===cal.today?' today':'')+'" aria-label="'+esc(mtKeyDay(key)+', '+mtCount(n,'call','calls'))+'"'
-         + ' onclick="mtPickDay('+mtJsArg(key)+')"><small>'+MT_GRID_DAYS[i]+'</small><b>'+mtKeyParts(key)[2]+'</b></button>';
-  }).join('')+'</div>';
-  let axis = '';
-  for(let h = 1; h < 24; h++) axis += '<span style="top:'+(h*MT_HOUR_PX)+'px">'+mtHourWord(h)+'</span>';
-  const cols = cal.keys.map(key=>{
-    const blocks = (cal.blocksByDay[key]||[]).map(b=>
-      '<div class="mt-blk mt-hatch" style="'+box(b.fromMin, b.toMin-b.fromMin)+'" title="'+esc('Blocked '+b.from+' to '+b.to+(b.block.reason?' · '+b.block.reason:''))+'">'
-      + '<span>Blocked'+(b.block.reason?' · '+esc(b.block.reason):'')+'</span>'
-      + '<button type="button" class="mt-blk-x" onclick="mtUnblockClick('+mtJsArg(b.block.id)+')">Unblock</button></div>').join('');
+  const win = cal.win, cols = cal.cols || [], n = cols.length;
+  const oName = mtZoneName(cal.st.owner_zone), uName = mtZoneName(cal.st.us_zone);
+  const box = (s, e, col) => {
+    const a = Math.max(s, col.start), b = Math.min(e, col.end), span = col.end - col.start;
+    return b > a ? 'top:'+mtPct((a-col.start)/span*100)+'%;height:'+mtPct((b-a)/span*100)+'%' : '';
+  };
+  const head = '<div class="mt-wk-head"><span class="mt-wk-zh" title="'+esc(oName+' time')+'">'+esc(win.ownerShort)+'</span>'
+    + '<span class="mt-wk-zh" title="'+esc(uName+' time')+'">'+esc(win.usShort)+'</span>'
+    + cols.map(col=>{
+        const c = (shown[col.key]||[]).length;
+        return '<button type="button" class="mt-wk-dayh'+(col.key===cal.today?' today':'')+'"'
+             + ' title="'+esc(col.usLabel+' in '+uName+' — '+col.ownerSpan+' in '+oName)+'"'
+             + ' aria-label="'+esc(col.usLabel+' '+uName+', '+oName+' '+col.ownerSpan+', '+mtCount(c,'call','calls'))+'"'
+             + (col.key===cal.today?' aria-current="date"':'')
+             + ' onclick="mtPickDay('+mtJsArg(col.key)+')"><b>'+esc(col.usLabel)+'</b><small>'+esc(col.ownerLabel)+'</small></button>';
+      }).join('')+'</div>';
+  const axis = (cls, f, name) => '<div class="mt-wk-axis '+cls+'" aria-label="'+esc(name+' time')+'">'
+    + win.hours.map(h=>'<span>'+esc(h[f])+'</span>').join('')+'</div>';
+  const body = cols.map(col=>{
+    const key = col.key;
+    const blocks = (cal.blocksByDay[key]||[]).map(b=>{
+      const at = box(b.s0, b.e0, col);
+      return at ? '<div class="mt-blk mt-hatch" style="'+at+'" title="'+esc('Blocked '+b.from+' to '+b.to+(b.block.reason?' · '+b.block.reason:''))+'">'
+        + '<span>Blocked'+(b.block.reason?' · '+esc(b.block.reason):'')+'</span>'
+        + '<button type="button" class="mt-blk-x" onclick="event.stopPropagation();mtUnblockClick('+mtJsArg(b.block.id)+')">Unblock</button></div>' : '';
+    }).join('');
     const free = (cal.slots[key]||[]).map(sl=>{
-      const p = mtParts(new Date(sl.startsAt), cal.st.owner_zone);
-      return '<button type="button" class="mt-free" style="'+box(p.h*60+p.mi, sl.minutes)+'" onclick="mtPickSlot('+mtJsArg(sl.startsAt)+')"'
-           + ' title="'+esc('Free — '+sl.lk+' ('+sl.us+' '+mtZoneName(sl.usZone)+'). Click to book a call.')+'"'
-           + ' aria-label="'+esc('Book a call at '+sl.lk+' on '+mtKeyDay(key))+'"></button>';
+      const t = Date.parse(sl.startsAt), at = box(t, t + sl.minutes*60000, col);
+      return at ? '<button type="button" class="mt-free" style="'+at+'" onclick="event.stopPropagation();mtAddAt('+mtJsArg(sl.startsAt)+')"'
+           + ' title="'+esc('Free — '+sl.lk+' '+win.ownerShort+' · '+sl.us+' '+win.usShort+'. Click to add a meeting.')+'"'
+           + ' aria-label="'+esc('Add a meeting at '+sl.lk+' '+win.ownerShort+', '+sl.us+' '+win.usShort+', '+col.usLabel)+'"></button>' : '';
     }).join('');
-    const evs = mtLanes(shown[key]||[]).map(l=>{
-      const ev = l.ev, w = 100/l.lanes;
-      return '<button type="button" class="mt-ev '+mtEventClass(ev)+(l.len<40?' short':'')+'" style="'+box(l.top, l.len)+';left:'+(Math.round(l.lane*w*10)/10)+'%;width:'+(Math.round(w*10)/10)+'%"'
-           + ' title="'+esc(mtEventLine(ev))+'" aria-label="'+esc(mtEventLine(ev))+'" onclick="mtOpenEvent('+mtJsArg(ev.key)+')">'
+    const evs = mtLanes(shown[key]||[], 'bizMin').map(l=>{
+      const ev = l.ev, w = 100/l.lanes, at = box(ev.startMs, ev.startMs + l.len*60000, col);
+      return at ? '<button type="button" class="mt-ev '+mtEventClass(ev)+(ev.minutes<60?' short':'')+'" style="'+at.replace(';height:', ';--mt-h:')+';left:'+mtPct(l.lane*w)+'%;width:'+mtPct(w)+'%"'
+           + ' title="'+esc(mtEventLine(ev))+'" aria-label="'+esc(mtEventLine(ev))+'" onclick="event.stopPropagation();mtOpenEvent('+mtJsArg(ev.key)+')">'
            + '<b>'+esc(ev.title)+'</b>'+mtPlanTagHTML(ev)
-           + '<small>'+esc(ev.time)+(ev.kindWord?' · '+esc(ev.kindWord):'')+(ev.open?'':' · '+esc(ev.statusWord))+'</small></button>';
+           + '<small>'+esc(ev.time)+'<i> · '+esc(ev.usTime+' '+ev.usShort)+'</i>'
+           + (ev.kindWord?' · '+esc(ev.kindWord):'')+(ev.open?'':' · '+esc(ev.statusWord))+'</small></button>' : '';
     }).join('');
-    const now = key===cal.today ? '<div class="mt-now" style="top:'+(Math.round(cal.nowMin*px*10)/10)+'px" title="Now"></div>' : '';
-    return '<div class="mt-wk-col'+(key===cal.today?' today':'')+'">'+blocks+free+evs+now+'</div>';
+    const now = cal.nowMs >= col.start && cal.nowMs < col.end
+      ? '<div class="mt-now" style="top:'+mtPct((cal.nowMs-col.start)/(col.end-col.start)*100)+'%" title="Now"></div>' : '';
+    return '<div class="mt-wk-col'+(key===cal.today?' today':'')+'" onclick="mtColClick(event,'+mtJsArg(key)+')">'+blocks+free+evs+now+'</div>';
   }).join('');
-  /* the phone: one day at a time, with the week as a strip of days to tap */
-  const strip = cal.keys.map((key,i)=>{
-    const list = shown[key]||[];
+  /* the phone: one business day at a time, with the week as a strip of days to tap */
+  const strip = cols.map(col=>{
+    const key = col.key, list = shown[key]||[], d = mtKeyDay(key).split(' ');
     return '<button type="button" class="mt-strip-d'+(key===cal.day?' sel':'')+(key===cal.today?' today':'')+'"'
-         + ' aria-label="'+esc(mtKeyDay(key)+', '+mtCount(list.length,'call','calls'))+'"'+(key===cal.day?' aria-pressed="true"':'')
-         + ' onclick="mtPickDay('+mtJsArg(key)+')"><small>'+MT_GRID_DAYS[i]+'</small><b>'+mtKeyParts(key)[2]+'</b>'
+         + ' aria-label="'+esc(col.usLabel+', '+mtCount(list.length,'call','calls'))+'"'+(key===cal.day?' aria-pressed="true"':'')
+         + ' onclick="mtPickDay('+mtJsArg(key)+')"><small>'+esc(d[0])+'</small><b>'+esc(d[1])+'</b>'
          + '<span class="mt-dots'+(list.some(e=>e.needsOutcome)?' need':'')+'">'+list.slice(0,MT_CHIP_MAX).map(e=>'<i class="mt-dot '+e.planClass+'"></i>').join('')+'</span></button>';
   }).join('');
-  return '<div class="mt-wk"><div class="mt-wk-scroll" id="mtWkScroll">'+head
-       + '<div class="mt-wk-body" style="height:'+H+'px;--mt-hour:'+MT_HOUR_PX+'px"><div class="mt-wk-axis">'+axis+'</div>'+cols+'</div></div></div>'
+  return '<div class="mt-wk" id="mtWk" style="--mt-rows:'+win.rows+';--mt-n:'+n+'">'+head
+       + '<div class="mt-wk-body">'+axis('mt-ax-own','owner',oName)+axis('mt-ax-us','us',uName)+body+'</div></div>'
        + '<div class="mt-agenda" ontouchstart="mtSwipeStart(event)" ontouchend="mtSwipeEnd(event)">'
-       + '<div class="mt-strip">'+strip+'</div>'
+       + '<div class="mt-strip" style="--mt-n:'+n+'">'+strip+'</div>'
        + '<div class="mt-agenda-nav"><button type="button" class="btn ghost mt-ic" onclick="mtDayMove(-1)" aria-label="The day before">‹</button>'
        + '<button type="button" class="btn ghost mt-ic" onclick="mtDayMove(1)" aria-label="The day after">›</button></div>'
-       + mtRenderDayList(cal, cal.day, shown, {slots:true})+'</div>';
+       + mtRenderDayList(cal, cal.day, shown, {slots:true, biz:true})+'</div>';
 }
+/* What the colours mean. Not drawn until the three-dots button asks for it. */
 function mtRenderLegend(){
   const sw = (cls, tag, word) => '<li><span class="mt-sw '+cls+'">'+esc(tag)+'</span>'+esc(word)+'</li>';
-  return '<ul class="mt-legend" aria-label="What the colours mean">'
+  return '<div class="mt-key" id="mtKey" role="group" aria-label="What the colours mean"><ul class="mt-legend">'
        + Object.keys(MT_PLANS).map(k=>sw('mt-plan-'+k, MT_PLANS[k].tag, MT_PLANS[k].word)).join('')
        + sw('mt-plan-none', MT_NO_PLAN.tag, MT_NO_PLAN.word)
-       + '<li><span class="mt-sw mt-hatch"></span>Blocked</li>'
-       + '<li><span class="mt-needdot"></span>Needs an outcome</li></ul>';
+       + '<li><span class="mt-sw mt-sw-need"></span>Red outline — needs an outcome</li>'
+       + '<li><span class="mt-sw mt-hatch"></span>Hatched band — blocked time</li></ul>'
+       + '<p class="mt-none">A call takes its colour from its plan.</p></div>';
 }
-/* The whole calendar: toolbar, legend, what needs an outcome, then the grid.
-   Draws with zero rows. */
+/* The whole calendar: toolbar (the colour key behind its three dots), what
+   needs an outcome, then the grid. Draws with zero rows. */
 function mtRenderCal(cal){
   if(!cal || !Array.isArray(cal.keys) || !cal.keys.length) return '<div class="card mt-card"><p class="mt-none">Nothing to show yet.</p></div>';
   const st = cal.st || mtSettingsNow(), week = cal.view === 'week', unit = week ? 'week' : 'month';
-  const shown = mtShown(cal), only = !!cal.needOnly && cal.need > 0;
+  const shown = mtShown(cal), only = !!cal.needOnly && cal.need > 0, key = !!cal.legend;
   const seg = (v, word) => '<button type="button" class="'+(cal.view===v?'active':'')+'" aria-pressed="'+(cal.view===v)+'" onclick="mtSetView(\''+v+'\')">'+word+'</button>';
+  const dots = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
   const bar = '<div class="mt-bar">'
+    + '<div class="mt-keywrap"><button type="button" class="btn ghost mt-ic mt-dotsbtn" aria-label="What the colours mean" title="What the colours mean"'
+    + ' aria-expanded="'+key+'" aria-controls="mtKey" onclick="mtToggleLegend()">'+dots+'</button>'+(key?mtRenderLegend():'')+'</div>'
     + '<div class="mt-nav"><button type="button" class="btn ghost mt-ic" onclick="mtCalMove(-1)" aria-label="The '+unit+' before">‹</button>'
     + '<button type="button" class="btn ghost" onclick="mtCalToday()">Today</button>'
     + '<button type="button" class="btn ghost mt-ic" onclick="mtCalMove(1)" aria-label="The '+unit+' after">›</button></div>'
     + '<h3 class="mt-title" aria-live="polite">'+esc(cal.title)+'</h3>'
-    + '<div class="seg mt-seg" role="group" aria-label="Month or week">'+seg('month','Month')+seg('week','Week')+'</div>'
+    + '<div class="seg mt-seg" role="group" aria-label="Week or month">'+seg('week','Week')+seg('month','Month')+'</div>'
     + '<div class="mt-tools"><button type="button" class="btn ghost" onclick="mtOpenFunnel()">Funnel</button>'
-    + '<button type="button" class="btn ghost" onclick="mtOpenBlock()">Block time</button></div></div>';
+    + '<button type="button" class="btn ghost" onclick="mtOpenBlock()">Block time</button>'
+    + '<button type="button" class="btn" onclick="mtOpenAdd()">Add meeting</button></div></div>';
   const need = cal.need > 0
     ? '<button type="button" class="mt-needline'+(only?' on':'')+'" aria-pressed="'+only+'" onclick="mtToggleNeed()"><span class="mt-needdot"></span>'
       + (only ? 'Showing only the '+cal.need+' that '+(cal.need===1?'needs':'need')+' an outcome — show every call'
               : cal.need+' '+(cal.need===1?'needs':'need')+' an outcome')+'</button>'
     : '';
-  return '<div class="mt-cal mt-view-'+unit+'">'+bar+mtRenderLegend()+need
-       + '<p class="mt-hours">Every time is '+esc(mtZoneName(st.owner_zone))+' time. '+esc(mtHoursLine(st))
-       + (st.fallback?' (the saved rules could not be read, so these are the usual ones)':'')+'</p>'
-       + (cal.empty?'<p class="mt-none">Nothing booked this '+unit+' yet.'+(week?' Click a free time to book a call.':'')+'</p>':'')
+  /* the week says its hours on its two time columns, so the line of words is
+     kept for the month — every line above the week grid is height it loses */
+  const hours = week
+    ? (st.fallback?'<p class="mt-hours">The saved rules could not be read, so these are the usual call hours.</p>':'')
+    : '<p class="mt-hours">Every time is '+esc(mtZoneName(st.owner_zone))+' time. '+esc(mtHoursLine(st))
+      + (st.fallback?' (the saved rules could not be read, so these are the usual ones)':'')+'</p>';
+  return '<div class="mt-cal mt-view-'+unit+'">'+bar+need+hours
+       + (cal.empty?'<p class="mt-none">Nothing booked this '+unit+' yet.'+(week?' Click any time to add a meeting.':'')+'</p>':'')
        + (week ? mtRenderWeekGrid(cal, shown) : mtRenderMonth(cal, shown))+'</div>';
 }
-/* One meeting: who, when (the owner's time, then theirs), the link, the
-   reminders, and the buttons — done, no-show, cancel, move. */
+/* The two or three lines under a call's name: the owner's time in bold, the
+   other person's own time, and US Eastern whenever that is not already one of
+   the two — so both clocks are always there. */
+function mtBigWhen(d, st, theirs, extra){
+  if(!d) return '<p class="mt-big"><b>No time on this one</b></p>';
+  return '<p class="mt-big"><b>'+esc(mtWhenIn(d, st.owner_zone))+'</b><span>'+esc(mtWhenIn(d, theirs))+' — their time</span>'
+       + (theirs !== st.us_zone && st.owner_zone !== st.us_zone ? '<span>'+esc(mtWhenIn(d, st.us_zone))+'</span>' : '')
+       + (extra||'')+'</p>';
+}
+/* One meeting: its title and who it is with, when (the owner's time, then
+   theirs, and US Eastern), the link, the reminders, and the buttons — done,
+   no-show, cancel, move. */
 function mtRenderMeeting(data){
   if(!data || !data.meeting) return '<div class="card mt-card"><p class="mt-none">That meeting is not on the calendar any more.</p></div>';
   const m = data.meeting, st = data.st || mtSettingsNow(), c = data.client || null;
@@ -1035,7 +1270,8 @@ function mtRenderMeeting(data){
   const status = String(m.status||'booked');
   const theirs = mtZoneOk(m.time_zone) ? m.time_zone : st.us_zone;
   const link = /^https:\/\//i.test(String(m.meet_link||'')) ? String(m.meet_link) : '';
-  const plan = mtPlanKey(c && c.plan);
+  const plan = mtPlanKey(m.plan) || mtPlanKey(c && c.plan);
+  const title = mtText(m.title), guest = mtText(m.guest_name), mail = mtText(m.guest_email);
   const rem = [
     ['24 hours before', m.reminded_24h_at],
     ['1 hour before',   m.reminded_1h_at]
@@ -1044,13 +1280,15 @@ function mtRenderMeeting(data){
     return '<li>'+esc(lbl)+': '+(r?'sent '+esc(mtWhenIn(r, st.owner_zone)):'not sent yet')+'</li>';
   }).join('');
   const kv = [
-    ['Who', esc(mtWho(m, c))+(c && c.contact_name && c.company ? ' · '+esc(c.contact_name) : '')],
-    ['What', esc(mtKindWord(m.kind))],
+    ['Who', esc(mtWho(m, c))+(c && c.contact_name && c.company ? ' · '+esc(c.contact_name) : '')+(c && guest ? ' · '+esc(guest) : '')],
+    ['What', esc(String(m.kind)==='other' && title ? 'A meeting you added' : mtKindWord(m.kind))],
     ['Plan', '<span class="mt-planchip '+mtPlanClass(plan)+'">'+esc(mtPlanTag(plan))+' · '+esc(mtPlanWord(plan))+'</span>'],
     ['Status', mtPill(status)+(mtMeetingNeedsOutcome(m)?' <span class="pill red">Needs an outcome</span>':'')],
     ['How long', esc(mtMinutesOf(m,st)+' minutes')],
     ['Link', link?'<a href="'+esc(link)+'" target="_blank" rel="noopener noreferrer">Join the call</a> · <button type="button" class="mt-textbtn" onclick="mtCopy('+mtJsArg(link)+')">Copy the link</button>':'No link on this one yet']
   ];
+  if(title) kv.unshift(['Title', esc(title)]);
+  if(mail) kv.splice(title?2:1, 0, ['Email', MT_EMAIL_RE.test(mail) ? '<a href="mailto:'+esc(mail)+'">'+esc(mail)+'</a>' : esc(mail)]);
   if(m.notes) kv.push(['Notes','<span class="mt-note">'+esc(m.notes)+'</span>']);
   if(String(m.kind)==='qualified') kv.push(['The money side', data.call
     ? (data.call.happened ? 'Counted as delivered for the month.' : 'Not counted for the month.')
@@ -1067,8 +1305,8 @@ function mtRenderMeeting(data){
          + '<div id="mtMoveErr" class="login-err"></div></div>';
   }
   return '<div class="card mt-card mt-one">'
-    + '<h3>'+esc(mtKindWord(m.kind))+'</h3>'
-    + (d?'<p class="mt-big"><b>'+esc(mtWhenIn(d, st.owner_zone))+'</b><span>'+esc(mtWhenIn(d, theirs))+' — their time</span></p>':'<p class="mt-big"><b>No time on this one</b></p>')
+    + '<h3>'+esc(title || mtKindWord(m.kind))+'</h3>'
+    + mtBigWhen(d, st, theirs)
     + '<dl class="mt-kv">'+kv.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+v+'</dd>').join('')+'</dl>'
     + '<h4>Reminders</h4><ul class="mt-rem">'+rem+'</ul>'
     + (acts.length?'<div class="mt-acts">'+acts.join('')+'</div>':'')
@@ -1089,7 +1327,7 @@ function mtRenderBookingHead(d, st){
   const pills = (typeof plStatusPill==='function' ? plStatusPill(b.status) : '')
     + (need?'<span class="pill red">Needs an outcome</span>':'')
     + (score===''?'':'<span class="pill blue" title="What the research engine scored them">Score '+esc(String(score))+'</span>')
-    + (state==='done'?'<span class="pill green">Brief ready</span>':'<span class="pill grey">No brief yet</span>');
+    + (state==='done' && mtBriefHas(d)?'<span class="pill green">Brief ready</span>':'<span class="pill grey">Research not ready yet</span>');
   const kv = [
     ['Who', esc(b.name||'No name given')+(b.role?' · '+esc(b.role):'')],
     ['Company', (site?'<a href="'+esc(site)+'" target="_blank" rel="noopener noreferrer">'+esc(b.company||b.website)+'</a>':esc(b.company||'Not given'))],
@@ -1097,9 +1335,7 @@ function mtRenderBookingHead(d, st){
     ['How long', esc(mtMinutesOf(b,s)+' minutes')]
   ];
   return '<div class="mt-ph"><div class="mt-ph-pills">'+pills+'</div>'
-    + (at?'<p class="mt-big"><b>'+esc(mtWhenIn(at, s.owner_zone))+'</b><span>'+esc(mtWhenIn(at, theirs))+' — their time</span>'
-        + (typeof plRel==='function'?'<span>'+esc(plRel(at, mtNow()))+'</span>':'')+'</p>'
-        :'<p class="mt-big"><b>No time on this one</b></p>')
+    + mtBigWhen(at, s, theirs, at && typeof plRel==='function' ? '<span>'+esc(plRel(at, mtNow()))+'</span>' : '')
     + '<dl class="mt-kv">'+kv.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+v+'</dd>').join('')+'</dl>'
     + (link
         ? '<div class="mt-acts"><a class="btn" href="'+esc(link)+'" target="_blank" rel="noopener noreferrer">Join the call</a>'
@@ -1113,19 +1349,140 @@ function mtPanelHTML(title, sub, body){
        + '<div class="modal-body mt-panel">'+body+'</div>'
        + '<div class="modal-foot mt-acts"><button type="button" class="btn ghost" onclick="mtClosePanel()">Close</button></div>';
 }
+/* ---- the research brief, laid out to be read before the call ----
+   research_briefs.brief is written by the research engine, so nothing in it is
+   taken on trust: every part is looked for, drawn if it is there and skipped if
+   it is not, and whatever else the brief holds is listed at the end through
+   pipeline.js (plBriefSections) so nothing is hidden. Never throws. */
+function mtBriefText(v){
+  if(v == null) return '';
+  if(typeof v === 'string') return v.trim();
+  if(typeof v === 'number' || typeof v === 'boolean') return String(v);
+  try{ return typeof plFlat === 'function' ? plFlat(v, 3) : JSON.stringify(v) }catch(e){ return '' }
+}
+function mtBriefList(v){
+  const arr = Array.isArray(v) ? v : (v == null || v === '' ? [] : [v]);
+  return arr.map(x=>x).filter(x => x != null && x !== '');
+}
+function mtBriefTitle(k){ return typeof plTitle === 'function' ? plTitle(k) : String(k||'').replace(/_/g,' ') }
+function mtBriefSec(title, inner){ return inner ? '<div class="pl-brief-sec mt-brief-sec"><h4>'+esc(title)+'</h4>'+inner+'</div>' : '' }
+function mtBriefUl(items){ return items.length ? '<ul class="mt-brief-ul">'+items.map(x=>'<li>'+x+'</li>').join('')+'</ul>' : '' }
+/* Is there a brief with anything in it? */
+function mtBriefHas(d){
+  const row = d && d.brief && typeof d.brief === 'object' ? d.brief : null, raw = row ? row.brief : null;
+  return raw != null && raw !== '' && !(typeof raw === 'object' && !Object.keys(raw).length);
+}
+/* `d` is what plBooking returns: d.brief is the research_briefs row or null. */
+function mtRenderBrief(d){
+  const row = d && d.brief && typeof d.brief === 'object' ? d.brief : null;
+  const raw = row ? row.brief : null;
+  const id = d && d.booking ? d.booking.id : '';
+  if(!mtBriefHas(d)){
+    const st = (d && d.research && d.research.state) || 'none';
+    const why = st === 'running' ? 'The research engine is working on this one. The brief shows up here when it is written.'
+      : st === 'failed' ? 'The research engine started on this one and did not finish.'
+      : st === 'done' || st === 'empty' ? 'The research engine wrote a brief with nothing in it.'
+      : 'The research engine has not written a brief for this booking. Their own answers are below.';
+    return '<div class="card pl-pad pl-nobrief mt-nobrief"><b>Research not ready yet</b><p class="muted">'+esc(why)+'</p>'
+      + (typeof plResearchNow === 'function' ? '<div class="pl-acts"><button type="button" class="btn ghost" onclick="plResearchNow('+mtJsArg(id)+')">Research this one</button></div>' : '')
+      + '</div>';
+  }
+  if(typeof raw !== 'object' || Array.isArray(raw))
+    return '<div class="card pl-pad pl-brief mt-brief">'+(typeof raw === 'string'
+      ? '<p class="pl-pre">'+esc(raw)+'</p>'
+      : mtBriefUl(mtBriefList(raw).map(x=>esc(mtBriefText(x)))))+'</div>';
+
+  const used = {};
+  const take = (...names) => { for(const n of names){ if(raw[n] != null && raw[n] !== ''){ used[n] = 1; return raw[n] } } return null };
+  const kvs = (obj, skip) => {
+    if(!obj || typeof obj !== 'object' || Array.isArray(obj)) return '';
+    const rows = Object.keys(obj).filter(k => (skip||[]).indexOf(k) < 0 && obj[k] != null && obj[k] !== '').map(k=>{
+      const v = obj[k];
+      const body = Array.isArray(v) ? mtBriefUl(mtBriefList(v).map(x=>esc(mtBriefText(x)))) : esc(mtBriefText(v));
+      return body ? '<small>'+esc(mtBriefTitle(k))+'</small><span>'+body+'</span>' : '';
+    }).join('');
+    return rows ? '<div class="pl-kv">'+rows+'</div>' : '';
+  };
+
+  const one = mtBriefText(take('one_liner','oneLiner','summary'));
+  /* the score: the booking's own, and what the brief says about fit */
+  const bant = take('bant','score','fit');
+  const sc = d && d.score !== '' && d.score != null ? String(d.score) : '';
+  const bantScore = bant && typeof bant === 'object' && !Array.isArray(bant) && bant.score != null && bant.score !== '' ? String(bant.score) : (bant != null && typeof bant !== 'object' ? String(bant) : '');
+  const verdict = bant && typeof bant === 'object' && !Array.isArray(bant) ? mtBriefText(bant.verdict) : '';
+  const scoreLine = [sc !== '' ? 'Booking score '+sc : '', bantScore !== '' ? 'Research score '+bantScore : ''].filter(Boolean).join(' · ');
+  const score = (scoreLine ? '<p class="mt-brief-score"><b>'+esc(scoreLine)+'</b>'+(verdict?' — '+esc(verdict):'')+'</p>' : (verdict?'<p class="mt-brief-score">'+esc(verdict)+'</p>':''))
+    + kvs(bant, ['score','verdict']);
+
+  const pains = mtBriefUl(mtBriefList(take('pain_hypotheses','pains','pain_points')).map(x=>{
+    if(x && typeof x === 'object' && !Array.isArray(x)){
+      const p = mtBriefText(x.pain || x.title || x.name || x.hypothesis), ev = mtBriefText(x.evidence || x.why || x.detail);
+      return p || ev ? '<b>'+esc(p || ev)+'</b>'+(p && ev ? '<span class="muted"> — '+esc(ev)+'</span>' : '') : esc(mtBriefText(x));
+    }
+    return esc(mtBriefText(x));
+  }).filter(Boolean));
+
+  const planRaw = take('closer_plan','call_plan','plan');
+  const plan = planRaw && typeof planRaw === 'object' && !Array.isArray(planRaw) ? kvs(planRaw)
+    : Array.isArray(planRaw) ? mtBriefUl(mtBriefList(planRaw).map(x=>esc(mtBriefText(x))))
+    : planRaw != null ? '<p class="pl-pre">'+esc(mtBriefText(planRaw))+'</p>' : '';
+
+  const flagsRaw = take('red_flags','redFlags','flags');
+  used.red_flags = 1;
+  const flagItems = mtBriefList(flagsRaw).map(x=>esc(mtBriefText(x))).filter(Boolean);
+  const flags = flagItems.length ? mtBriefUl(flagItems) : '<p class="muted">None found.</p>';
+
+  /* which research agents ran: research_briefs.agents */
+  const agents = mtBriefUl(mtBriefList(row.agents).map(a=>{
+    if(!a || typeof a !== 'object') return esc(mtBriefText(a));
+    const name = mtBriefText(a.label || a.agent || a.name) || 'An agent';
+    const ok = a.ok === false ? 'did not finish' : 'ran';
+    const secs = Number(a.ms) > 0 ? ' in '+(Math.round(Number(a.ms)/100)/10)+' s' : '';
+    const sum = mtBriefText(a.summary);
+    return '<b>'+esc(name)+'</b> <span class="'+(a.ok === false ? 'mt-needword' : 'muted')+'">'+esc(ok+secs)+'</span>'+(sum?'<span class="mt-brief-sum">'+esc(sum)+'</span>':'');
+  }).filter(Boolean));
+
+  /* everything else the brief holds, in pipeline.js's own layout */
+  const rest = {}; Object.keys(raw).forEach(k=>{ if(!used[k]) rest[k] = raw[k] });
+  let more = '';
+  try{
+    const secs = typeof plBriefSections === 'function' ? plBriefSections({brief:rest}) : [];
+    more = secs.map(sx => '<div class="pl-brief-sec mt-brief-sec">'+(sx.title?'<h4>'+esc(sx.title)+'</h4>':'')
+      + (sx.text?'<p class="pl-pre">'+esc(sx.text)+'</p>':'')
+      + (sx.lines && sx.lines.length ? '<div class="pl-kv">'+sx.lines.map(l=>'<small'+(l.label?'':' aria-hidden="true"')+'>'+esc(l.label||'·')+'</small><span>'+esc(l.value)+'</span>').join('')+'</div>' : '')
+      + '</div>').join('');
+  }catch(e){ more = '' }
+
+  return '<div class="card pl-pad pl-brief mt-brief">'
+    + (one ? '<p class="mt-brief-one">'+esc(one)+'</p>' : '')
+    + mtBriefSec('Score', score)
+    + mtBriefSec('Pains', pains)
+    + mtBriefSec('Call plan', plan)
+    + mtBriefSec('Red flags', flags)
+    + mtBriefSec('Research agents that ran', agents || (row.writer ? '<p class="muted">Written by '+esc(String(row.writer))+'.</p>' : '<p class="muted">The brief does not say which agents ran.</p>'))
+    + more + '</div>';
+}
+
 /* A website booking's panel. `d` is what pipeline.js's plBooking returns; the
-   outcome buttons, the brief and their answers are pipeline.js's own renderers. */
+   outcome buttons and their answers are pipeline.js's own renderers, and the
+   brief is laid out by mtRenderBrief above. */
 function mtRenderBookingPanel(d, st, error){
   if(!d || !d.booking)
     return mtPanelHTML('Booking', '', '<p class="mt-err" role="alert">'+esc(error||'That booking is not here any more.')+'</p>');
   const b = d.booking;
+  /* a brief row with nothing in it is not a brief: nothing on the panel calls it ready */
+  if(!mtBriefHas(d) && d.research && d.research.state === 'done') d = Object.assign({}, d, {research: Object.assign({}, d.research, {state:'empty'})});
   let body;
   try{
     body = typeof renderPlEnquiry==='function'
-      ? renderPlEnquiry(d, {head: mtRenderBookingHead(d, st), now: mtNow()})
+      ? renderPlEnquiry(d, {head: mtRenderBookingHead(d, st), brief: mtBriefSafe(d), now: mtNow()})
       : mtRenderBookingHead(d, st);
   }catch(e){ body = mtRenderBookingHead(d, st)+'<p class="mt-err" role="alert">The rest of this booking could not be drawn.</p>' }
   return mtPanelHTML(String(b.company||b.name||'Booking'), 'Booked on the website'+(b.source && b.source!=='website'?' · '+b.source:''), body);
+}
+function mtBriefSafe(d){
+  try{ return mtRenderBrief(d) }
+  catch(e){ return '<div class="card pl-pad pl-nobrief"><b>The brief could not be drawn</b><p class="muted">It is saved, but it is in a shape this screen cannot read.</p></div>' }
 }
 /* The recent no-shows and what each one did to the month's count. Zero rows is
    the good case, and it says so. */
@@ -1158,23 +1515,72 @@ function mtPaint(id, html){
   try{ const h = document.getElementById(id); if(h) h.innerHTML = html; }catch(e){}
 }
 
+/* The view last chosen, from this browser. Week unless Month was picked. */
+function mtSavedView(){
+  try{ return localStorage.getItem(MT_VIEW_KEY) === 'month' ? 'month' : 'week' }catch(e){ return 'week' }
+}
+function mtSaveView(v){ try{ localStorage.setItem(MT_VIEW_KEY, v === 'month' ? 'month' : 'week') }catch(e){} return v }
 function viewCalendar(){
+  if(!mt.viewRead){ mt.viewRead = true; mt.view = mtSavedView(); }
   if(mt.want){ const w = mt.want; mt.want = null; mtGoTo(w); }
   else mtLoadCal();
   return mtHost('mtCalHost', mt.cal ? mtRenderCal(mt.cal) : mtLoading('Loading your calendar…'));
 }
-/* Draw what is loaded. The week grid keeps its place when only the picture
-   changed, and opens at the first call when the dates did. */
-function mtPaintCal(fresh){
-  let at = null;
-  try{ const sc = document.getElementById('mtWkScroll'); if(sc && !fresh) at = sc.scrollTop; }catch(e){}
-  if(mt.cal) mt.cal.needOnly = mt.needOnly;
-  mtPaint('mtCalHost', mt.cal ? mtRenderCal(mt.cal) : mtErrorHTML(mt.err, 'mtLoadCal()'));
+/* Give the week grid exactly the height the window has left, so the whole
+   working day shows with no scrolling. The stylesheet does the sum
+   (100dvh − --mt-top); this only measures what sits above and below the grid.
+   When even the smallest rows will not fit, the grid keeps its minimum height
+   and the page itself scrolls — never a box inside it. */
+function mtFit(){
   try{
-    const sc = document.getElementById('mtWkScroll');
-    if(sc && mt.cal && mt.cal.view==='week') sc.scrollTop = at!=null && at>0 ? at : mtScrollMin(mt.cal)*MT_HOUR_PX/60;
+    const g = document.getElementById('mtWk'), c = document.getElementById('content');
+    if(!g || !c || typeof g.getBoundingClientRect !== 'function' || typeof window === 'undefined') return false;
+    const r = g.getBoundingClientRect(), cr = c.getBoundingClientRect();
+    if(!(r.width > 0)) return false;                       // the phone: the grid is not drawn
+    const pad = parseFloat(window.getComputedStyle(c).paddingBottom) || 0;
+    const above = r.top + (c.scrollTop || 0);
+    const below = Math.max(0, window.innerHeight - cr.bottom) + Math.max(0, pad - 16);   // the grid's -16px margin (meetings.css) takes back part of the padding
+    g.style.setProperty('--mt-top', Math.ceil(above + below + 1)+'px');
+    return true;
+  }catch(e){ return false }
+}
+/* The listeners the calendar needs, added the first time it is drawn — nothing
+   runs when the file loads. */
+function mtBind(){
+  if(mt.bound) return;
+  try{
+    if(typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('resize', mtFit);
+    if(typeof document !== 'undefined' && typeof document.addEventListener === 'function'){
+      document.addEventListener('click', mtLegendOutside);
+      document.addEventListener('keydown', mtLegendKey);
+    }
+    mt.bound = true;
   }catch(e){}
+}
+/* Draw what is loaded. */
+function mtPaintCal(){
+  if(mt.cal){ mt.cal.needOnly = mt.needOnly; mt.cal.legend = mt.legend; }
+  mtPaint('mtCalHost', mt.cal ? mtRenderCal(mt.cal) : mtErrorHTML(mt.err, 'mtLoadCal()'));
+  mtBind(); mtFit();
   try{ if(typeof renderNav==='function') renderNav(); }catch(e){}
+}
+/* ---- the colour key behind the three dots ---- */
+function mtToggleLegend(force){
+  mt.legend = typeof force === 'boolean' ? force : !mt.legend;
+  mtPaintCal();
+  return mt.legend;
+}
+function mtLegendOutside(e){
+  if(!mt.legend) return false;
+  const t = e && e.target;
+  try{ if(t && typeof t.closest === 'function' && t.closest('.mt-keywrap')) return false }catch(x){}
+  mtToggleLegend(false);
+  return true;
+}
+function mtLegendKey(e){
+  if(!mt.legend || !e || e.key !== 'Escape') return false;
+  mtToggleLegend(false);
+  return true;
 }
 /* Read the month or week on screen and draw it. A slower, older answer never
    paints over a newer one. */
@@ -1185,10 +1591,15 @@ async function mtLoadCal(keep){
   mt.err = r.ok ? '' : r.error;
   mt.cal = r.ok ? r.data : null;
   if(r.ok){ mt.day = r.data.day; mt.view = r.data.view; }
-  mtPaintCal(!keep);
+  mtPaintCal();
   return r;
 }
-function mtToday(){ return mtDayKey(mtNow(), mtSettingsNow().owner_zone) }
+/* Today as the view on screen counts days: a business day in the week, one of
+   the owner's days in the month. */
+function mtToday(){
+  const st = mtSettingsNow();
+  return mt.view === 'week' ? mtBizToday(st, mtNow()) : mtDayKey(mtNow(), st.owner_zone);
+}
 function mtCalMove(n){
   const day = mtKeyOk(mt.day) ? mt.day : mtToday();
   if(mt.view === 'week') mt.day = mtAddDays(day, 7*n);
@@ -1200,24 +1611,37 @@ function mtCalMove(n){
   return mtLoadCal();
 }
 function mtCalToday(){ mt.day = mtToday(); return mtLoadCal(); }
-function mtSetView(v){ mt.view = v === 'week' ? 'week' : 'month'; if(!mtKeyOk(mt.day)) mt.day = mtToday(); return mtLoadCal(); }
-function mtGoWeek(key){ mt.view = 'week'; if(mtKeyOk(key)) mt.day = key; return mtLoadCal(); }
+function mtSetView(v){ mt.view = mtSaveView(v === 'month' ? 'month' : 'week'); if(!mtKeyOk(mt.day)) mt.day = mtToday(); return mtLoadCal(); }
+function mtGoWeek(key){ mt.view = mtSaveView('week'); if(mtKeyOk(key)) mt.day = key; return mtLoadCal(); }
 /* Pick a day. Inside what is already loaded it only redraws; outside, it reads. */
 function mtPickDay(key){
   if(!mtKeyOk(key)) return null;
   mt.day = key;
   const c = mt.cal;
-  if(c && c.keys.indexOf(key) >= 0 && (c.view === 'week' || key.slice(0,7) === c.month)){ c.day = key; mtPaintCal(false); return mtOk(c); }
+  if(c && c.keys.indexOf(key) >= 0 && (c.view === 'week' || key.slice(0,7) === c.month)){ c.day = key; mtPaintCal(); return mtOk(c); }
   return mtLoadCal();
 }
-function mtDayMove(n){ return mtPickDay(mtAddDays(mtKeyOk(mt.day) ? mt.day : mtToday(), n)) }
+/* One day on. In the week that is the next business day shown — past the last
+   one it reads the next week, past the first the week before. */
+function mtDayMove(n){
+  const c = mt.cal, day = mtKeyOk(mt.day) ? mt.day : mtToday();
+  if(c && c.view === 'week' && mt.view === 'week' && Array.isArray(c.allKeys)){
+    const i = c.keys.indexOf(day), j = i + (n < 0 ? -1 : 1);
+    if(i >= 0 && j >= 0 && j < c.keys.length) return mtPickDay(c.keys[j]);
+    mt.day = mtAddDays(c.allKeys[0], n < 0 ? -1 : 7);
+    return mtLoadCal();
+  }
+  return mtPickDay(mtAddDays(day, n));
+}
 function mtIsPhone(){
   try{ return typeof window!=='undefined' && typeof window.matchMedia==='function' && !!window.matchMedia('(max-width:699px)').matches }catch(e){ return false }
 }
 /* The day number: on a phone it picks the day (listed under the grid); on a
    computer it opens that week. */
 function mtDayClick(key){ return mtIsPhone() ? mtPickDay(key) : mtGoWeek(key) }
-function mtCellTap(key){ return mtIsPhone() ? mtPickDay(key) : null }
+/* The rest of a day's cell: on a phone it picks the day; on a computer it opens
+   the form for a new meeting on that date. */
+function mtCellTap(key){ return mtIsPhone() ? mtPickDay(key) : mtOpenAdd({date:key}) }
 function mtSwipeStart(e){ const t = e && e.touches && e.touches[0]; mt.sx = t ? t.clientX : null; mt.sy = t ? t.clientY : null }
 function mtSwipeEnd(e){
   const t = e && e.changedTouches && e.changedTouches[0];
@@ -1225,7 +1649,7 @@ function mtSwipeEnd(e){
   const dx = t.clientX - mt.sx, dy = t.clientY - mt.sy; mt.sx = null;
   return Math.abs(dx) > 60 && Math.abs(dx) > 2*Math.abs(dy) ? mtDayMove(dx < 0 ? 1 : -1) : null;
 }
-function mtToggleNeed(){ mt.needOnly = !mt.needOnly; mtPaintCal(false); return mt.needOnly }
+function mtToggleNeed(){ mt.needOnly = !mt.needOnly; mtPaintCal(); return mt.needOnly }
 function mtOpenFunnel(){ if(typeof render === 'function') render('funnel'); return true }
 
 /* ---- the panel a call opens in ---- */
@@ -1280,7 +1704,7 @@ async function mtGoTo(key){
     const r = await mtMeeting(id);
     if(r.ok) when = mtParseDate(r.data.starts_at);
   }
-  if(when){ mt.view = 'week'; mt.day = mtDayKey(when, st.owner_zone); }
+  if(when){ mt.view = 'week'; mt.day = mtDayKey(when, st.us_zone); }   // its business day
   const cal = await mtLoadCal();
   if(id && (kind === 'booking' || kind === 'meeting')) await mtOpenEvent(k);
   return cal;
@@ -1313,7 +1737,8 @@ async function mtLoadMeeting(id){
   const data = {meeting:m, when: mtBothZones(m.starts_at, st), call, client, st};
   mt.one = {id, data};
   mtPaint('mtOneHost', mtRenderMeeting(data));
-  if(mt.open === 'meeting:'+id) mtShowPanel(mtPanelHTML(mtWho(m, client), mtKindWord(m.kind), mtRenderMeeting(data)));
+  if(mt.open === 'meeting:'+id) mtShowPanel(mtPanelHTML(mtText(m.title) || mtWho(m, client),
+    String(m.kind)==='other' && mtText(m.title) ? 'A meeting you added' : mtKindWord(m.kind), mtRenderMeeting(data)));
   return mtOk(data);
 }
 /* After a button changed a meeting: the meeting again, then the calendar. */
@@ -1397,38 +1822,88 @@ async function mtUnblockClick(id){
   if(r.ok) await mtLoadCal(true);
   return r;
 }
-/* Clicking a free slot: the booking panel, prefilled with that time. */
-function mtPickSlot(startsAt){
-  mt.pick = String(startsAt||'');
-  if(typeof openModal === 'function') openModal(mtRenderBookForm(startsAt));
-  return mt.pick;
+/* ---- add one of the owner's own meetings ----
+   One form, reached three ways: the Add meeting button, a click on any empty
+   time in the week, and a day in the month (which fills in that date). The
+   time is typed in the owner's zone; the US Eastern time is shown beside it
+   and follows as it is typed. */
+function mtHm(d, zone){ const p = mtParts(d, zone); return mtPad(p.h)+':'+mtPad(p.mi) }
+/* What the form opens on: {date, time} in the owner's zone. */
+function mtAddDefaults(preset){
+  const st = mtSettingsNow(), oz = st.owner_zone, p = preset || {};
+  let d = mtParseDate(p.startsAt);
+  if(d) return {date:mtDayKey(d,oz), time:mtHm(d,oz)};
+  if(mtKeyOk(p.date)){
+    /* a date with no time: when call hours open on that date's evening */
+    const open = mtZoneToUtc(p.date, st.open_time, st.us_zone);
+    return {date:p.date, time: open ? mtHm(open,oz) : '09:00'};
+  }
+  d = new Date(Math.ceil((mtNow().getTime()+60000)/1800000)*1800000);     // the next half hour
+  return {date:mtDayKey(d,oz), time:mtHm(d,oz)};
 }
-function mtRenderBookForm(startsAt){
-  const st = mtSettingsNow(), w = mtBothZones(startsAt, st);
-  return '<div class="modal-head"><div><h3>Book this time</h3><p>'+esc(w?w.both:'')+'</p></div></div>'
-    + '<div class="modal-body">'
-    + '<div class="field"><label for="mtKind">What kind of call</label><select id="mtKind">'
-    + Object.keys(MT_KINDS).map(k=>'<option value="'+esc(k)+'">'+esc(MT_KINDS[k])+'</option>').join('')
-    + '</select></div>'
-    + '<div class="field"><label for="mtClient">Client id (if they are a client)</label><input id="mtClient" autocomplete="off"></div>'
-    + '<div class="field"><label for="mtNotes">Notes</label><textarea id="mtNotes" rows="3" maxlength="2000"></textarea></div>'
-    + '<div id="mtBookErr" class="login-err"></div></div>'
+/* "Fri 27 Nov · 11:00 am" in US Eastern for a date and time in the owner's zone. */
+function mtAddEtText(date, time){
+  const st = mtSettingsNow(), d = mtZoneToUtc(date, time, st.owner_zone);
+  return d ? mtDayName(d, st.us_zone)+' · '+mtTime(d, st.us_zone) : 'Pick a day and a time';
+}
+function mtAddEtLine(){
+  const t = mtAddEtText(val('mtAddDate'), val('mtAddTime'));
+  try{ const e = document.getElementById('mtAddEt'); if(e) e.textContent = t }catch(x){}
+  return t;
+}
+function mtRenderAddForm(preset){
+  const st = mtSettingsNow(), v = mtAddDefaults(preset);
+  const oName = mtZoneName(st.owner_zone), uName = mtZoneName(st.us_zone);
+  return '<div class="modal-head"><div><h3>Add meeting</h3><p>One of your own, at any time you like. The time is '+esc(oName)+' time.</p></div></div>'
+    + '<div class="modal-body mt-add">'
+    + '<div class="field"><label for="mtAddTitle">Title</label><input id="mtAddTitle" type="text" maxlength="160" autocomplete="off" required></div>'
+    + '<div class="field row2"><div><label for="mtAddName">Person\u2019s name</label><input id="mtAddName" type="text" maxlength="120" autocomplete="off"></div>'
+    + '<div><label for="mtAddEmail">Email (optional)</label><input id="mtAddEmail" type="email" maxlength="254" autocomplete="off"></div></div>'
+    + '<div class="mt-add-when"><div class="field"><label for="mtAddDate">Date</label><input id="mtAddDate" type="date" value="'+esc(v.date)+'" oninput="mtAddEtLine()" onchange="mtAddEtLine()"></div>'
+    + '<div class="field"><label for="mtAddTime">Time ('+esc(mtZoneShort(st.owner_zone))+')</label><input id="mtAddTime" type="time" step="300" value="'+esc(v.time)+'" oninput="mtAddEtLine()" onchange="mtAddEtLine()"></div>'
+    + '<div class="field mt-add-et"><label for="mtAddEt">'+esc(uName)+' ('+esc(mtZoneShort(st.us_zone))+')</label><output id="mtAddEt" for="mtAddDate mtAddTime" aria-live="polite">'+esc(mtAddEtText(v.date, v.time))+'</output></div></div>'
+    + '<div class="field row2"><div><label for="mtAddLen">Length</label><select id="mtAddLen">'
+    + MT_LENGTHS.map(n=>'<option value="'+n+'"'+(n===30?' selected':'')+'>'+n+' minutes</option>').join('')+'</select></div>'
+    + '<div><label for="mtAddPlan">Plan (optional)</label><select id="mtAddPlan"><option value="">No plan</option>'
+    + Object.keys(MT_PLANS).map(k=>'<option value="'+esc(k)+'">'+esc(MT_PLANS[k].word)+'</option>').join('')+'</select></div></div>'
+    + '<div class="field"><label for="mtAddLink">Google Meet link (optional)</label><input id="mtAddLink" type="url" placeholder="https://meet.google.com/…" autocomplete="off"></div>'
+    + '<p class="mt-none">This time will also be taken off your public booking page.</p>'
+    + '<div id="mtAddErr" class="login-err" role="alert"></div></div>'
     + '<div class="modal-foot mt-acts"><button type="button" class="btn ghost" onclick="closeModal()">Close</button>'
-    + '<button type="button" class="btn" onclick="mtSubmitBook()">Book it</button></div>';
+    + '<button type="button" class="btn" onclick="mtSubmitAdd()">Add meeting</button></div>';
 }
-async function mtSubmitBook(){
-  const start = mt.pick;
-  if(!start) return errEl('mtBookErr','Pick a time first.');
-  const r = await mtDo(() => mtBook({
-    kind: val('mtKind') || 'discovery',
-    clientId: val('mtClient') || null,
-    startsAt: start,
-    notes: val('mtNotes')
-  }), 'Booked');
-  if(!r.ok) return errEl('mtBookErr', r.error);
-  if(typeof closeModal==='function') closeModal();
-  mt.pick = null;
-  await mtLoadCal(true);
+function mtOpenAdd(preset){
+  const html = mtRenderAddForm(preset);
+  if(typeof openModal === 'function') openModal(html);
+  return html;
+}
+function mtAddAt(startsAt){ return mtOpenAdd({startsAt}) }
+/* A click on empty time in a week column: the form, on the slot under the pointer. */
+function mtColClick(e, key){
+  const c = mt.cal;
+  if(!c || c.view !== 'week' || !e) return null;
+  const col = (c.cols||[]).find(x => x.key === key), box = e.currentTarget;
+  if(!col || !box || typeof box.getBoundingClientRect !== 'function') return null;
+  const r = box.getBoundingClientRect();
+  if(!(r.height > 0)) return null;
+  const f = Math.min(0.9999, Math.max(0, (e.clientY - r.top)/r.height));
+  const step = c.st.slot_minutes*60000;
+  return mtAddAt(new Date(col.start + Math.floor(f*(col.end-col.start)/step)*step).toISOString());
+}
+async function mtSubmitAdd(){
+  const st = mtSettingsNow();
+  const at = mtZoneToUtc(val('mtAddDate'), val('mtAddTime'), st.owner_zone);
+  if(!at){ errEl('mtAddErr', 'Pick the day and the time first.'); return mtErr('Pick the day and the time first.'); }
+  const len = val('mtAddLen');
+  const r = await mtDo(() => mtAddOwn({
+    title: val('mtAddTitle'), guestName: val('mtAddName'), guestEmail: val('mtAddEmail'),
+    startsAt: at.toISOString(), minutes: len === '' ? 30 : Number(len),
+    plan: val('mtAddPlan'), meetLink: val('mtAddLink')
+  }), 'Added to your calendar');
+  if(!r.ok){ errEl('mtAddErr', r.error); return r; }
+  if(r.data && r.data.warning && typeof toast === 'function') toast(r.data.warning);
+  if(typeof closeModal === 'function') closeModal();
+  await mtLoadCal(true);                 // the same week, with the new meeting on it
   return r;
 }
 function mtOpenBlock(){
@@ -1464,7 +1939,7 @@ async function mtSubmitBlock(){
 
 /* Forget everything read so far (used by the tests and by signing out). */
 function mtForget(){
-  mt.settings = null; mt.view = 'month'; mt.day = null; mt.cal = null; mt.needOnly = false;
+  mt.settings = null; mt.view = mtSavedView(); mt.viewRead = true; mt.day = null; mt.cal = null; mt.needOnly = false; mt.legend = false;
   mt.open = null; mt.want = null; mt.seq++; mt.one = null;
-  mt.noshows = null; mt.err = ''; mt.now = null; mt.busy = false; mt.pick = null;
+  mt.noshows = null; mt.err = ''; mt.now = null; mt.busy = false;
 }
