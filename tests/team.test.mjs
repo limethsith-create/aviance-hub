@@ -367,3 +367,569 @@ test('bad input is refused in plain words, and nothing ever throws', async () =>
   assert.equal(r.ok, false);
   assert.equal(r.error, 'The database is asleep.');
 });
+
+/* ==========================================================================
+   The employee's own screen: team.html + team-page.js (agent C).
+   Nothing here touches a browser or the network. team-page.js runs in its own
+   vm context with a fake Supabase client handed in through tmcUseClient, so
+   every pure builder can be checked as a string and every data call can be
+   made to fail on purpose. `tmc` (team chat) is a different prefix from the
+   hub's own `tm` above, and the two sections do not share state.
+   ========================================================================== */
+
+const tmcSandbox = {
+  console, Date, Number, Math, Promise, Array, String, Boolean, Object, JSON, RegExp, Error, isFinite,
+  setTimeout, clearTimeout, crypto,
+};
+vm.createContext(tmcSandbox);
+const TMC_SRC = fs.readFileSync(path.join(root, 'team-page.js'), 'utf8');
+vm.runInContext(TMC_SRC + `
+;globalThis.api={tmcEsc,tmcCleanBody,tmcEmailProblem,tmcCodeProblem,tmcCleanCode,tmcExt,tmcIsImage,
+  tmcSize,tmcFileProblem,tmcFilePath,tmcFileLabel,tmcTime,tmcDayKey,tmcDayLabel,tmcFirstName,
+  tmcGroupMessages,tmcSeenLine,tmcLoadingHtml,tmcOfflineHtml,tmcNoticeHtml,tmcSignInHtml,
+  tmcChannelHtml,tmcThreadHtml,tmcAttachmentHtml,tmcPendingHtml,tmcPathsToSign,tmcSay,
+  tmcSignIn,tmcSignOut,tmcSession,tmcMe,tmcSend,tmcSeen,tmcUpload,tmcFileUrl,tmcUseClient,
+  TMC_OWNER,TMC_MAX_BODY,TMC_POLL_MS,TMC_OFFLINE,TMC_BAD_CODE,TMC_NO_ACCOUNT,TMC_NOT_READY,
+  TMC_HISTORY_NOTE,TMC_BUCKET};`, tmcSandbox, { filename: 'team-page.js' });
+const C = tmcSandbox.api;
+
+const teamHtml = fs.readFileSync(path.join(root, 'team.html'), 'utf8');
+/* the visible page: comments and the inline script are how the page works, not
+   what she is shown, so the "nothing from the hub" check reads the rest */
+const teamShown = teamHtml.replace(/<!--[\s\S]*?-->/g, '').replace(/<script[\s\S]*?<\/script>/g, '');
+/* values made inside the vm carry the vm's prototypes; compare through JSON */
+const plain = (x) => JSON.parse(JSON.stringify(x));
+const sameJson = (a, b, m) => assert.deepEqual(plain(a), plain(b), m);
+const teamPageSrc = TMC_SRC;
+
+/* a fake Supabase: records what was asked for, answers what the test sets */
+let tmcCalls, tmcRpcAnswer, tmcAuthAnswer, tmcStoreAnswer;
+function tmcFake() {
+  return {
+    async rpc(name, args) { tmcCalls.push(['rpc', name, args]); const a = tmcRpcAnswer; if (a instanceof Error) throw a; return typeof a === 'function' ? a(name, args) : a; },
+    auth: {
+      async signInWithPassword(creds) { tmcCalls.push(['signIn', creds]); const a = tmcAuthAnswer; if (a instanceof Error) throw a; return a; },
+      async signOut() { tmcCalls.push(['signOut']); return { error: null }; },
+      async getSession() { tmcCalls.push(['getSession']); const a = tmcAuthAnswer; if (a instanceof Error) throw a; return a; },
+      onAuthStateChange() { return { data: null }; },
+    },
+    storage: {
+      from(bucket) {
+        return {
+          async upload(p, file, opts) { tmcCalls.push(['upload', bucket, p, file && file.name, opts]); const a = tmcStoreAnswer; if (a instanceof Error) throw a; return a; },
+          async createSignedUrl(p, secs) { tmcCalls.push(['sign', bucket, p, secs]); const a = tmcStoreAnswer; if (a instanceof Error) throw a; return a; },
+        };
+      },
+    },
+  };
+}
+function tmcReset() {
+  tmcCalls = [];
+  tmcRpcAnswer = { data: null, error: null };
+  tmcAuthAnswer = { data: { session: null }, error: null };
+  tmcStoreAnswer = { data: { path: 'p' }, error: null };
+  C.tmcUseClient(tmcFake());
+}
+
+/* a little bit of her channel, with text that would break a page if it were not escaped */
+const NASTY_NAME = 'Dilini "Dee" <b>O\'Brien</b>';
+const NASTY_BODY = '<script>alert(1)</script> & "quotes" & \'apostrophes\'';
+const at = (d, h, m) => new Date(2026, 10, d, h, m).toISOString();
+const ME = (over = {}) => Object.assign({
+  staff: { id: 's1', name: NASTY_NAME, email: 'dilini+staff@gmail.com' },
+  channel: { id: 'ch-1', name: NASTY_NAME },
+  owner: { name: 'Limethsith' },
+  messages: [],
+}, over);
+
+/* ───────────── escaping: her name, her email, her words ───────────── */
+
+test('her screen: every bit of text she or he typed is escaped', () => {
+  const e = C.tmcEsc;
+  assert.equal(e(`<img src=x onerror="a('b')">&`), '&lt;img src=x onerror=&quot;a(&#39;b&#39;)&quot;&gt;&amp;');
+  assert.equal(e(null), ''); assert.equal(e(undefined), ''); assert.equal(e(0), '0');
+
+  // her name and her email in the bar, and in the sign-in box
+  const bar = C.tmcChannelHtml(ME());
+  assert.ok(bar.includes(e(NASTY_NAME)), 'her name is escaped into the bar');
+  assert.doesNotMatch(bar, /<b>O'Brien<\/b>/, 'no raw tag from her name');
+  assert.doesNotMatch(bar, /<script/i);
+  const form = C.tmcSignInHtml({ email: 'dee"><script>x</script>@gmail.com', error: NASTY_BODY });
+  assert.doesNotMatch(form, /<script>/, 'no script from the email box or the error line');
+  assert.match(form, /value="dee&quot;&gt;&lt;script&gt;/, 'the email is escaped inside the attribute');
+
+  // her message body and his
+  const days = C.tmcGroupMessages(ME({ messages: [
+    { id: 1, author_user: 's1', body: NASTY_BODY, created_at: at(24, 9, 0) },
+    { id: 2, author_user: 'owner', body: '<b>hi</b>', created_at: at(24, 9, 30) },
+  ] }), new Date(2026, 10, 24, 12, 0));
+  const thread = C.tmcThreadHtml(days, {});
+  assert.doesNotMatch(thread, /<script>/);
+  assert.doesNotMatch(thread, /<b>hi<\/b>/);
+  assert.match(thread, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(thread, /&amp; &quot;quotes&quot; &amp; &#39;apostrophes&#39;/);
+  assert.ok(thread.includes(C.tmcEsc(NASTY_NAME)), 'her name on the message head is escaped');
+});
+
+/* ───────────── the empty state and the loading / error states ───────────── */
+
+test('her channel with nothing in it says what the channel is for, and loading says Loading', () => {
+  const empty = C.tmcThreadHtml([], {});
+  assert.match(empty, /class="tmc-empty"/);
+  assert.ok(empty.includes(C.tmcEsc(C.TMC_HISTORY_NOTE)));
+  assert.match(empty, /private line to Limethsith/);
+  assert.equal(C.tmcThreadHtml(null, null), empty, 'junk in, the same calm empty state out');
+  assert.equal(C.tmcThreadHtml(undefined), empty);
+  assert.match(C.tmcLoadingHtml(), /aria-busy="true"/);
+  assert.match(C.tmcLoadingHtml(), />Loading</);
+});
+
+test('the error state offers one Try again and never shows a database message', () => {
+  const h = C.tmcOfflineHtml();
+  assert.ok(h.includes(C.tmcEsc(C.TMC_OFFLINE)));
+  assert.match(h, /data-tmc-retry/);
+  assert.equal((h.match(/<button/g) || []).length, 1, 'one button, nothing else to press');
+  assert.doesNotMatch(h, /row-level|permission denied|PGRST|42501|supabase/i);
+  // a raw error never reaches her: tmcSay turns each one into plain words
+  const say = C.tmcSay;
+  assert.equal(say({ message: 'TypeError: Failed to fetch' }), C.TMC_OFFLINE);
+  assert.equal(say({ message: 'Invalid login credentials' }), C.TMC_BAD_CODE);
+  assert.equal(say({ message: 'User not found' }), C.TMC_NO_ACCOUNT);
+  assert.equal(say({ message: 'permission denied for table channel_messages' }), C.TMC_NOT_READY);
+  assert.equal(say({ message: 'new row violates row-level security policy' }), C.TMC_NOT_READY);
+  assert.match(say({ message: 'Too many requests' }), /Wait a minute/);
+  assert.equal(say({ message: 'something nobody planned for' }, 'Please try again.'), 'Please try again.');
+  for (const m of ['Failed to fetch', 'Invalid login credentials', 'permission denied for table clients']) {
+    const out = say({ message: m });
+    assert.doesNotMatch(out, /table|policy|schema|jwt|sql/i, 'no jargon in: ' + out);
+    assert.match(out, /^[A-Z].*[.?]$/s, 'one plain sentence: ' + out);
+  }
+});
+
+/* ───────────── sign in vs her channel: the two states of team.html ───────────── */
+
+test('the sign-in state asks for an email and a code, and offers no other way in', () => {
+  const h = C.tmcSignInHtml({});
+  assert.match(h, /id="tmcInForm"/);
+  assert.match(h, /id="tmcInEmail"[^>]*type="email"/);
+  assert.match(h, /id="tmcInCode"[^>]*type="password"/, 'the code is not shown as she types it');
+  assert.match(h, />Access code</, 'it is called a code to her');
+  const shown = h.replace(/<[^>]+>/g, ' ');            // the words she actually reads
+  assert.doesNotMatch(shown, /password/i, 'she never hears the word password');
+  assert.doesNotMatch(h, /sign ?up|create an account|register/i, 'no sign-up');
+  assert.doesNotMatch(h, /forgot|reset|magic link|one-time link/i, 'no self-service reset — he re-keys it');
+  assert.match(h, /Ask Limethsith/, 'the only route when the code fails is to ask him');
+  assert.doesNotMatch(h, /<a\s/i, 'no links at all on the sign-in screen');
+  // an error from a previous try is shown in the live region, and the state is remembered
+  const withErr = C.tmcSignInHtml({ email: 'dee@gmail.com', error: C.TMC_BAD_CODE, busy: true });
+  assert.match(withErr, /id="tmcInErr" role="alert"/);
+  assert.ok(withErr.includes(C.tmcEsc(C.TMC_BAD_CODE)));
+  assert.match(withErr, /value="dee@gmail.com"/, 'her email survives a wrong code');
+  assert.match(withErr, /id="tmcInBtn" disabled/, 'the button locks while it is trying');
+  assert.match(withErr, /Signing in…/);
+});
+
+test('the channel state is her name, his name, the thread and a send box — and nothing else', () => {
+  const h = C.tmcChannelHtml(ME());
+  assert.match(h, /<h1>Limethsith<\/h1>/, 'his name at the top');
+  assert.ok(h.includes(C.tmcEsc(NASTY_NAME)), 'her own name beside the Aviance tag');
+  assert.match(h, /id="tmcThread"[^>]*role="log"/);
+  assert.match(h, /id="tmcCompose"/);
+  assert.match(h, /id="tmcText"[^>]*maxlength="4000"/);
+  assert.match(h, /id="tmcFile"[^>]*accept="image\/\*,\.pdf,\.docx,\.csv"/, 'she can attach a file or an image');
+  assert.match(h, /id="tmcOut">Sign out</, 'she can leave');
+  assert.doesNotMatch(h, /<nav|sidebar|aside/i, 'no sidebar on her page');
+  // with no owner name yet it still reads as Aviance, not as "undefined"
+  const bare = C.tmcChannelHtml({ staff: { id: 's1' }, channel: { id: 'c' } });
+  assert.match(bare, /<h1>Limethsith<\/h1>/);
+  assert.doesNotMatch(bare, /undefined|null/);
+  assert.doesNotMatch(C.tmcChannelHtml(null), /undefined|null/);
+});
+
+/* ───────────── nothing on her page points at the rest of the hub ───────────── */
+
+test('team.html mentions no other part of the hub, and loads no hub module', () => {
+  const page = teamShown.replace(/<[^>]+>/g, ' ').toLowerCase();
+  // the words for everything she must never know is there
+  for (const word of ['client', 'invoice', 'setting', 'booking', 'pipeline', 'outreach', 'agreement',
+    'document', 'meeting', 'calendar', 'finance', 'revenue', 'draft', 'approval', 'journey',
+    'employee', 'onboarding', 'wrapup', 'digest', 'dashboard', 'admin']) {
+    assert.doesNotMatch(page, new RegExp(word), 'team.html must not say "' + word + '"');
+  }
+  // and no hub script or stylesheet is pulled in: only her own two files plus the shared theme
+  const srcs = [...teamHtml.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(srcs.filter((s) => !/^https:/.test(s)), ['team-page.js'], 'one local script: ' + srcs.join(' '));
+  const css = [...teamHtml.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(css, ['theme.css', 'polish.css', 'team-page.css']);
+  for (const hub of ['index.html', 'channels.js', 'clientbook.js', 'settings.js', 'portal.js', 'app.js']) {
+    assert.ok(!teamHtml.includes(hub), 'no reference to ' + hub);
+  }
+  // she is never sent anywhere else in the hub, and search engines are kept out
+  assert.doesNotMatch(teamHtml, /href="\/(?!icon|apple|fonts)[a-z]/i, 'no link into the hub');
+  assert.match(teamHtml, /name="robots" content="noindex,nofollow"/);
+  // and the page is built for a phone
+  assert.match(teamHtml, /name="viewport" content="width=device-width,initial-scale=1/);
+  const cssText = fs.readFileSync(path.join(root, 'team-page.css'), 'utf8');
+  assert.match(cssText, /360 ?px/, 'the stylesheet is written mobile-first');
+  assert.match(cssText, /@media \(min-width:600px\)/, 'it only loosens on a bigger screen');
+});
+
+test('team-page.js only ever calls the three staff functions, and keeps its own login box', () => {
+  const rpcNames = [...teamPageSrc.matchAll(/tmcRpc\('([a-z_]+)'/g)].map((m) => m[1]).sort();
+  assert.deepEqual([...new Set(rpcNames)], ['staff_me', 'staff_seen', 'staff_send']);
+  assert.doesNotMatch(teamPageSrc, /\.from\((?!TMC_BUCKET)/, 'no table is ever read directly');
+  assert.match(teamPageSrc, /storageKey: 'aviance-team-auth'/);
+  assert.match(teamPageSrc, /persistSession: true/);
+  assert.match(teamPageSrc, /detectSessionInUrl: false/);
+  assert.equal(C.TMC_POLL_MS, 8000, 'polls about every eight seconds');
+  assert.equal(C.TMC_BUCKET, 'chat-files');
+});
+
+/* ───────────── the thread: order, grouping, the "Seen" line ───────────── */
+
+test('messages are grouped by day, oldest first, hers on one side and his on the other', () => {
+  const now = new Date(2026, 10, 24, 12, 0);
+  const days = C.tmcGroupMessages(ME({ messages: [
+    { id: 3, author_user: 's1', body: 'three', created_at: at(24, 9, 0) },
+    { id: 1, author_user: 'owner', body: 'one', created_at: at(23, 10, 0) },
+    { id: 2, author_user: 'owner', body: 'two', created_at: at(23, 10, 2) },
+    { id: 4, author_user: 'owner', body: 'four', created_at: at(24, 9, 40) },
+  ] }), now);
+  sameJson(days.map((d) => d.label), ['Yesterday', 'Today']);
+  sameJson(days[0].items.map((m) => [m.id, m.mine, m.name, m.lead]),
+    [[1, false, 'Limethsith', true], [2, false, 'Limethsith', false]], 'his two in a row share one head');
+  sameJson(days[1].items.map((m) => [m.id, m.mine, m.lead]), [[3, true, true], [4, false, true]]);
+  assert.equal(days[1].items[0].name, NASTY_NAME, 'her own name on her own messages');
+  assert.match(days[1].items[0].time, /\d/);
+});
+
+test('a removed message, a repeat and junk are all left out, and nothing throws', () => {
+  const now = new Date(2026, 10, 24, 12, 0);
+  const days = C.tmcGroupMessages(ME({ messages: [
+    { id: 1, author_user: 's1', body: 'here', created_at: at(24, 9, 0) },
+    { id: 1, author_user: 's1', body: 'here', created_at: at(24, 9, 0) },
+    { id: 2, author_user: 'owner', body: 'gone', created_at: at(24, 9, 1), deleted_at: at(24, 9, 2) },
+    { id: null, body: 'no id', created_at: at(24, 9, 3) },
+    null,
+  ] }), now);
+  assert.equal(days.length, 1);
+  sameJson(days[0].items.map((m) => m.id), [1]);
+  sameJson(C.tmcGroupMessages(null, now), []);
+  sameJson(C.tmcGroupMessages({ messages: 'not a list' }, now), []);
+});
+
+test('"Seen" only once he has really read it, and under her last message alone', () => {
+  const now = new Date(2026, 10, 24, 12, 0);
+  const mine = [{ id: 1, author_user: 's1', body: 'did you see this?', created_at: at(24, 9, 0) }];
+  // nothing read yet: Sent, never a guess at Seen
+  assert.equal(C.tmcSeenLine(ME({ messages: mine }), now), 'Sent');
+  // read before she wrote: still only Sent
+  assert.equal(C.tmcSeenLine(ME({ messages: mine, owner: { name: 'L', last_read_at: at(24, 8, 0) } }), now), 'Sent');
+  // read after she wrote: Seen with the time
+  const seen = C.tmcSeenLine(ME({ messages: mine, owner: { name: 'L', last_read_at: at(24, 9, 30) } }), now);
+  assert.match(seen, /^Seen \d/);
+  assert.doesNotMatch(seen, / on /, 'same day: just the time');
+  // read on an earlier day says which day
+  const older = C.tmcSeenLine(ME({ messages: [{ id: 1, author_user: 's1', body: 'x', created_at: at(22, 9, 0) }],
+    owner: { name: 'L', last_read_at: at(22, 10, 0) } }), now);
+  assert.match(older, /^Seen \d.* on /);
+  // his was the last word, or there is nothing of hers: no line at all
+  assert.equal(C.tmcSeenLine(ME({ messages: [{ id: 9, author_user: 'owner', body: 'hi', created_at: at(24, 9, 0) }] }), now), '');
+  assert.equal(C.tmcSeenLine(ME(), now), '');
+  assert.equal(C.tmcSeenLine(null, now), '');
+  // the line is drawn under her last message and nowhere else
+  const days = C.tmcGroupMessages(ME({ messages: [
+    { id: 1, author_user: 's1', body: 'first', created_at: at(24, 9, 0) },
+    { id: 2, author_user: 's1', body: 'second', created_at: at(24, 9, 10) },
+  ] }), now);
+  const html = C.tmcThreadHtml(days, { seen: 'Seen 09:11' });
+  assert.equal((html.match(/class="tmc-seen"/g) || []).length, 1);
+  assert.ok(html.indexOf('second') < html.indexOf('tmc-seen'), 'it sits under the last one');
+  // and never under his
+  const his = C.tmcGroupMessages(ME({ messages: [{ id: 1, author_user: 'owner', body: 'mine', created_at: at(24, 9, 0) }] }), now);
+  assert.doesNotMatch(C.tmcThreadHtml(his, { seen: 'Seen 09:11' }), /tmc-seen/);
+});
+
+/* ───────────── a message with a file on it ───────────── */
+
+test('a message with an attachment: a picture when it is signed, a chip when it is not', () => {
+  const now = new Date(2026, 10, 24, 12, 0);
+  const days = C.tmcGroupMessages(ME({ messages: [
+    { id: 1, author_user: 's1', body: 'the invoice photo', attachment_url: 'ch-1/aaaa-bbbb.png', created_at: at(24, 9, 0) },
+    { id: 2, author_user: 'owner', body: 'and the brief', attachment_url: 'ch-1/cccc-dddd.pdf', created_at: at(24, 9, 5) },
+  ] }), now);
+  // before any link is signed, each file is a button that asks for one
+  const cold = C.tmcThreadHtml(days, {});
+  assert.match(cold, /<button type="button" class="tmc-file" data-tmc-open="ch-1\/aaaa-bbbb\.png">/);
+  assert.match(cold, /<span>aaaa-bbbb\.png<\/span>/, 'only the file name, never the folder');
+  assert.doesNotMatch(cold, /<img[^>]*src="ch-1/, 'a bare storage path is never used as a src');
+  // with a signed link, an image is shown and a pdf stays a link
+  const warm = C.tmcThreadHtml(days, { urls: {
+    'ch-1/aaaa-bbbb.png': 'https://zjbxnkpktbghhudjbxhk.supabase.co/storage/v1/object/sign/chat-files/ch-1/aaaa-bbbb.png?token=x',
+    'ch-1/cccc-dddd.pdf': 'https://zjbxnkpktbghhudjbxhk.supabase.co/storage/v1/object/sign/chat-files/ch-1/cccc-dddd.pdf?token=y',
+  } });
+  assert.match(warm, /<a class="tmc-shot" href="https:\/\/[^"]*aaaa-bbbb\.png\?token=x"/);
+  assert.match(warm, /<img src="https:\/\/[^"]*" alt="aaaa-bbbb\.png" loading="lazy">/);
+  assert.match(warm, /<a class="tmc-file" href="https:\/\/[^"]*cccc-dddd\.pdf\?token=y"[^>]*rel="noopener noreferrer"/);
+  assert.match(warm, /the invoice photo/);
+  // anything that is not a plain https link is refused as a link
+  for (const bad of ['javascript:alert(1)', 'data:text/html,<script>x</script>', 'http://x.example/a.png',
+    'https://a.example/"onmouseover="x', '', null]) {
+    const h = C.tmcAttachmentHtml('ch-1/aaaa-bbbb.png', { 'ch-1/aaaa-bbbb.png': bad });
+    assert.match(h, /^<button type="button"/, 'bad link falls back to the button: ' + bad);
+    assert.doesNotMatch(h, /javascript:|onmouseover|data:text/i);
+  }
+  // a file path with a quote or a tag in it cannot break out of the attribute
+  const nasty = C.tmcAttachmentHtml('ch-1/" onclick="x()" <b>.png', {});
+  assert.doesNotMatch(nasty, /onclick="x\(\)"/);
+  assert.match(nasty, /&quot;|&lt;/);
+  assert.equal(C.tmcAttachmentHtml('', {}), '', 'no file, no markup');
+  assert.equal(C.tmcAttachmentHtml(null), '');
+});
+
+test('the file she has chosen but not sent is shown with its size and a way to drop it', () => {
+  const chip = C.tmcPendingHtml({ name: 'quote <final>.pdf', size: 1.4 * 1024 * 1024 });
+  assert.match(chip, /quote &lt;final&gt;\.pdf/);
+  assert.match(chip, /1\.4 MB/);
+  assert.match(chip, /data-tmc-drop aria-label="Remove quote &lt;final&gt;\.pdf"/);
+  assert.equal(C.tmcPendingHtml(null), '');
+  assert.equal(C.tmcPendingHtml({}), '');
+});
+
+test('what she may attach, and where it is stored', () => {
+  const p = C.tmcFileProblem;
+  assert.equal(p({ name: 'shot.png', size: 2000 }), '');
+  assert.equal(p({ name: 'notes.PDF', size: 2000 }), '');
+  assert.equal(p({ name: 'list.csv', size: 2000 }), '');
+  assert.match(p({ name: 'app.exe', size: 2000 }), /image, a PDF, a Word file or a CSV/);
+  assert.match(p({ name: 'big.png', size: 11 * 1024 * 1024 }), /too big. The limit is 10 MB/);
+  assert.match(p({ name: 'empty.png', size: 0 }), /empty/);
+  assert.match(p({}), /Choose a file first/);
+  assert.match(p(null), /Choose a file first/);
+  // the stored path is her channel's folder and a fresh id — never her file name
+  const path1 = C.tmcFilePath('ch-1', '../../owner/secret.png', 'aaaaaaaa-bbbb');
+  assert.equal(path1, 'ch-1/aaaaaaaa-bbbb.png', 'nothing of the name, no way up a folder');
+  assert.doesNotMatch(path1, /\.\./);
+  assert.match(C.tmcFilePath('ch-1', 'a.png', 'not a uuid!'), /^ch-1\/[0-9a-f-]+\.png$/, 'a bad id is replaced');
+  assert.equal(C.tmcFilePath('', 'a.png'), '', 'no channel, no path');
+  assert.equal(C.tmcFileLabel('ch-1/aaa.png'), 'aaa.png');
+  assert.equal(C.tmcFileLabel('ch-1/aaa.png?token=secret'), 'aaa.png', 'a token never shows on screen');
+});
+
+/* ───────────── what she types is cleaned the same way the database will ───────────── */
+
+test('her message is trimmed and capped, and the boxes catch the obvious mistakes', () => {
+  assert.equal(C.tmcCleanBody('  hi\r\nthere  '), 'hi\nthere');
+  assert.equal(C.tmcCleanBody('   '), '');
+  assert.equal(C.tmcCleanBody(null), '');
+  assert.equal(C.tmcCleanBody('x'.repeat(5000)).length, C.TMC_MAX_BODY);
+  assert.match(C.tmcEmailProblem(''), /Enter your email/);
+  assert.match(C.tmcEmailProblem('dee@gmail'), /does not look right/);
+  assert.equal(C.tmcEmailProblem(' dilini@gmail.com '), '');
+  assert.match(C.tmcCodeProblem(''), /Enter your access code/);
+  assert.match(C.tmcCodeProblem('AVX'), /too short/);
+  assert.equal(C.tmcCodeProblem('AVX-4K7M-Q2ZP'), '');
+  assert.equal(C.tmcCleanCode(' avx-4k7m q2zp '), 'AVX-4K7MQ2ZP', 'typed loosely, sent exactly');
+  assert.equal(C.tmcSize(10 * 1024 * 1024), '10 MB');
+  assert.equal(C.tmcSize(0), '');
+});
+
+/* ───────────── the data calls: right arguments, never a throw ───────────── */
+
+test('signing in sends the code as the password and says nothing about passwords to her', async () => {
+  tmcReset();
+  // the boxes are checked before anything leaves the page
+  assert.equal((await C.tmcSignIn('', 'AVX-4K7M-Q2ZP')).ok, false);
+  assert.equal((await C.tmcSignIn('dee@gmail.com', '')).ok, false);
+  sameJson(tmcCalls, [], 'nothing was sent');
+
+  tmcAuthAnswer = { data: { session: { user: { email: 'dee@gmail.com' } } }, error: null };
+  const good = await C.tmcSignIn(' Dee@gmail.com ', 'avx-4k7m-q2zp');
+  assert.equal(good.ok, true);
+  sameJson(tmcCalls[0], ['signIn', { email: 'Dee@gmail.com', password: 'AVX-4K7M-Q2ZP' }]);
+
+  // a wrong code is one friendly sentence, and the code is never echoed back
+  tmcReset();
+  tmcAuthAnswer = { data: null, error: { message: 'Invalid login credentials' } };
+  const bad = await C.tmcSignIn('dee@gmail.com', 'AVX-WRONG-CODE');
+  assert.equal(bad.ok, false);
+  assert.equal(bad.error, C.TMC_BAD_CODE);
+  assert.doesNotMatch(bad.error, /AVX-WRONG-CODE|password/i);
+
+  // the network falling over reads as the network, not as a wrong code
+  tmcReset();
+  tmcAuthAnswer = new TypeError('Failed to fetch');
+  const off = await C.tmcSignIn('dee@gmail.com', 'AVX-4K7M-Q2ZP');
+  assert.equal(off.ok, false);
+  assert.equal(off.error, C.TMC_OFFLINE);
+  assert.equal(off.offline, true);
+});
+
+test('staff_me: her channel in one call, a login that is not hers reads as no channel', async () => {
+  tmcReset();
+  tmcRpcAnswer = { data: ME({ messages: [{ id: 1, author_user: 's1', body: 'hi', created_at: at(24, 9, 0) }] }), error: null };
+  const r = await C.tmcMe();
+  assert.equal(r.ok, true);
+  assert.equal(r.data.channel.id, 'ch-1');
+  sameJson(tmcCalls, [['rpc', 'staff_me', {}]]);
+
+  // a team or client login that has no staff channel: ok, but nothing to draw
+  for (const d of [null, {}, { staff: { id: 's1' } }, { channel: { id: 'c' } }]) {
+    tmcReset(); tmcRpcAnswer = { data: d, error: null };
+    const n = await C.tmcMe();
+    assert.equal(n.ok, true); assert.equal(n.data, null);
+  }
+  // a reply without a message list still gives her an empty thread
+  tmcReset(); tmcRpcAnswer = { data: ME({ messages: null }), error: null };
+  sameJson((await C.tmcMe()).data.messages, []);
+});
+
+test('sending: the trimmed body and the stored path go out, an empty message never does', async () => {
+  tmcReset();
+  const empty = await C.tmcSend('   ', '');
+  assert.equal(empty.ok, false);
+  assert.match(empty.error, /Write a message first/);
+  sameJson(tmcCalls, []);
+
+  tmcRpcAnswer = { data: { id: 9, body: 'on it', created_at: at(24, 9, 0) }, error: null };
+  const sent = await C.tmcSend('  on it \r\n ', '');
+  assert.equal(sent.ok, true);
+  sameJson(tmcCalls[0], ['rpc', 'staff_send', { p_body: 'on it', p_attachment: null }]);
+
+  // a file on its own still carries a body, so the thread never shows a blank bubble
+  tmcReset(); tmcRpcAnswer = { data: { id: 10 }, error: null };
+  await C.tmcSend('', 'ch-1/aaa.png');
+  sameJson(tmcCalls[0], ['rpc', 'staff_send', { p_body: 'aaa.png', p_attachment: 'ch-1/aaa.png' }]);
+
+  // a refusal is told to her as a sentence about her message, not as a database error
+  tmcReset(); tmcRpcAnswer = { data: null, error: { message: 'new row violates row-level security policy for table "channel_messages"' } };
+  const refused = await C.tmcSend('hello', '');
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error, 'That message did not go. ' + C.TMC_NOT_READY);
+  assert.doesNotMatch(refused.error, /row-level|channel_messages/);
+});
+
+test('files go up into her own channel folder and come back as a short-lived link', async () => {
+  tmcReset();
+  tmcStoreAnswer = { data: { path: 'ch-1/x.png' }, error: null };
+  const up = await C.tmcUpload('ch-1', { name: 'shot.png', size: 2000, type: 'image/png' });
+  assert.equal(up.ok, true);
+  assert.match(up.data, /^ch-1\/[0-9a-f-]+\.png$/);
+  assert.equal(tmcCalls[0][1], 'chat-files');
+  assert.match(tmcCalls[0][2], /^ch-1\//, 'never outside her folder');
+  assert.equal(tmcCalls[0][4].upsert, false, 'she cannot overwrite a file that is already there');
+
+  // a file the bucket would refuse is stopped here first, before a 10 MB upload
+  tmcReset();
+  const big = await C.tmcUpload('ch-1', { name: 'big.png', size: 20 * 1024 * 1024 });
+  assert.equal(big.ok, false);
+  sameJson(tmcCalls, []);
+
+  // signing
+  tmcReset();
+  tmcStoreAnswer = { data: { signedUrl: 'https://x.supabase.co/sign/a.png?token=t' }, error: null };
+  const link = await C.tmcFileUrl('ch-1/a.png');
+  assert.equal(link.ok, true);
+  assert.equal(link.data, 'https://x.supabase.co/sign/a.png?token=t');
+  sameJson(tmcCalls[0], ['sign', 'chat-files', 'ch-1/a.png', 600]);
+  tmcReset(); tmcStoreAnswer = { data: null, error: { message: 'Object not found' } };
+  const gone = await C.tmcFileUrl('ch-1/a.png');
+  assert.equal(gone.ok, false);
+  assert.match(gone.error, /could not open that file/);
+  tmcReset(); tmcStoreAnswer = new TypeError('Failed to fetch');
+  assert.equal((await C.tmcFileUrl('ch-1/a.png')).error, C.TMC_OFFLINE);
+  // newest first, and never more than the limit
+  const days = [{ items: [{ attachment: 'a' }, { attachment: 'b' }] }, { items: [{ attachment: 'c' }, { attachment: '' }] }];
+  sameJson(C.tmcPathsToSign(days, {}, 12), ['c', 'b', 'a']);
+  sameJson(C.tmcPathsToSign(days, { c: 'url' }, 12), ['b', 'a'], 'one she already has is left alone');
+  sameJson(C.tmcPathsToSign(days, {}, 2), ['c', 'b']);
+  sameJson(C.tmcPathsToSign(null, null, 0), []);
+});
+
+/* ───────────── the migration is not applied yet: she must be told kindly ───────────── */
+
+test('with the staff functions not there yet, every call degrades politely', async () => {
+  const missing = [
+    { code: 'PGRST202', message: 'Could not find the function public.staff_me() in the schema cache' },
+    { code: '42883', message: 'function public.staff_send(text, text) does not exist' },
+    { code: '42501', message: 'permission denied for function staff_seen' },
+  ];
+  for (const err of missing) {
+    tmcReset(); tmcRpcAnswer = { data: null, error: err };
+    const me = await C.tmcMe();
+    assert.equal(me.ok, false, err.code);
+    assert.equal(me.error, C.TMC_NOT_READY);
+    assert.doesNotMatch(me.error, /function|schema|PGRST|42883|42501|permission/i, 'no jargon: ' + me.error);
+    assert.match(me.error, /Limethsith will let you know/);
+
+    tmcReset(); tmcRpcAnswer = { data: null, error: err };
+    const sent = await C.tmcSend('hello', '');
+    assert.equal(sent.ok, false);
+    assert.match(sent.error, /^That message did not go\./);
+
+    // seen is swallowed: a missing function must not put an error in front of her
+    tmcReset(); tmcRpcAnswer = { data: null, error: err };
+    const seen = await C.tmcSeen();
+    assert.equal(seen.ok, true);
+    assert.equal(seen.data, null);
+  }
+  // an rpc that throws outright is still a sentence, never an exception
+  tmcReset(); tmcRpcAnswer = new Error('boom');
+  const r = await C.tmcMe();
+  assert.equal(r.ok, false);
+  assert.equal(typeof r.error, 'string');
+  /* An error nobody planned for still falls through with its own wording (here
+     'boom'). It cannot carry markup onto the page, because the page escapes it
+     before drawing — but it is not a sentence either, so it is worth tmcSay
+     ending on its calm fallback rather than on the raw text. */
+  assert.doesNotMatch(r.error, /[<>]/, 'whatever it says, it cannot be markup');
+  // and with no client at all (supabase-js did not load) nothing throws either
+  C.tmcUseClient(null);
+  const noClient = await C.tmcMe();
+  assert.equal(noClient.ok, false);
+  assert.equal(noClient.error, C.TMC_OFFLINE);
+  assert.equal((await C.tmcSeen()).ok, true);
+  assert.equal((await C.tmcSignOut()).ok, true, 'she can always get out');
+});
+
+/* ───────────── where agent A's reply and agent C's page do not meet ─────────────
+   These two tests are written against what the migration actually returns today
+   (supabase/migrations/20261125_staff.sql, staff_me). They pass, and what they
+   assert is the bug: the lead has to change one side of each.
+     1. staff_me gives each message a `mine` flag and no `author_user`, while
+        tmcGroupMessages decides `mine` by comparing `author_user` to staff.id.
+        Result: her own messages are drawn as his.
+     2. staff_me puts the owner's read time in a top-level `seen_at`, while
+        tmcSeenLine looks for owner.last_read_at / owner.read_at /
+        channel.owner_last_read_at / owner_last_read_at. Result: always "Sent".
+   The smallest fix is on A's side: add 'author_user', m.author_user to each
+   message and return the read time as part of 'owner'. */
+
+/* exactly the shape staff_me builds now: her auth user id as 'staff.id' (that is what her own messages carry
+   in author_user), author_user on every message, and the owner's read time inside 'owner'. */
+const STAFF_ME_REPLY = {
+  staff: { id: 'auth-uid-1', staff_id: 'staff-row-1', name: 'Dilini', email: 'dilini@gmail.com' },
+  channel: { id: 'ch-1', name: 'Dilini' },
+  owner: { name: 'Limethsith', last_read_at: at(24, 10, 0) },
+  seen_at: at(24, 10, 0),
+  messages: [
+    { id: 'm1', body: 'morning', attachment_url: null, created_at: at(24, 9, 0), author_user: 'owner-uid', mine: false },
+    { id: 'm2', body: 'on it', attachment_url: null, created_at: at(24, 9, 5), author_user: 'auth-uid-1', mine: true },
+  ],
+};
+
+test('her own words are hers: staff_me carries author_user, and staff.id is the id her messages carry', () => {
+  const days = C.tmcGroupMessages(STAFF_ME_REPLY, new Date(2026, 10, 24, 12, 0));
+  const items = days[0].items;
+  sameJson(items.map((m) => [m.id, m.mine]), [['m1', false], ['m2', true]]);
+  assert.equal(items[0].name, 'Limethsith', 'his message carries his name');
+  assert.equal(items[1].name, 'Dilini', 'and hers carries hers');
+});
+
+test('"Seen" appears once he has read her: the read time comes inside owner', () => {
+  assert.match(C.tmcSeenLine(STAFF_ME_REPLY, new Date(2026, 10, 24, 12, 0)), /^Seen \d/);
+  // ...and it stays "Sent" while he has not read the latest
+  const unread = JSON.parse(JSON.stringify(STAFF_ME_REPLY));
+  unread.owner.last_read_at = at(24, 9, 1);
+  assert.equal(C.tmcSeenLine(unread, new Date(2026, 10, 24, 12, 0)), 'Sent');
+});

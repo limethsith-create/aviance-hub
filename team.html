@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#F6F7F9">
+<title>Aviance — your channel</title>
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Aviance">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="polish.css">
+<link rel="stylesheet" href="team-page.css">
+<!-- Pinned to one exact version with an integrity hash, as everywhere else in the hub. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script src="team-page.js"></script>
+</head>
+<body>
+<!-- An employee's whole world: sign in with her email and the access code
+     Limethsith gave her, then one channel — him and her, nothing else. No
+     sidebar, no other screen, and no hub module is loaded on this page. What
+     she may read or write is decided by the database (row level security);
+     this page only draws what `staff_me` handed over. -->
+<noscript><main class="tmc-notice"><h1 class="tmc-h1">Please turn on JavaScript.</h1><p class="tmc-lede">This page needs it to open your channel.</p></main></noscript>
+<div id="tmcRoot"></div>
+<script>
+(function(){
+  const root = document.getElementById('tmcRoot');
+  let me = null;            /* what staff_me last said */
+  let drawn = '';           /* the thread HTML on screen, so we only redraw on a change */
+  let urls = {};            /* stored path -> short-lived signed link */
+  let pending = null;       /* a file chosen but not sent yet */
+  let timer = null, loading = false, sendBusy = false, signing = false;
+
+  /* ---- signing in ---- */
+  function showSignIn(message, email){
+    stop();
+    document.title = 'Aviance — sign in';
+    root.innerHTML = tmcSignInHtml({ email: email || '', error: message || '' });
+    const h = root.querySelector('.tmc-h1');
+    if (h) h.focus();
+  }
+
+  async function signIn(form){
+    if (signing) return;
+    const email = form.querySelector('#tmcInEmail').value.trim();
+    const code = form.querySelector('#tmcInCode').value;
+    const err = form.querySelector('#tmcInErr'), btn = form.querySelector('#tmcInBtn');
+    signing = true; btn.disabled = true; btn.textContent = 'Signing in…'; err.textContent = '';
+    const r = await tmcSignIn(email, code);
+    signing = false;
+    if (!r.ok) {
+      btn.disabled = false; btn.textContent = 'Sign in';
+      err.textContent = r.error;
+      const c = form.querySelector('#tmcInCode');
+      if (c) { c.value = ''; c.focus(); }
+      return;
+    }
+    enter(email);
+  }
+
+  async function enter(email){
+    root.innerHTML = tmcLoadingHtml();
+    const r = await tmcMe();
+    if (!r.ok) {
+      if (r.offline) { root.innerHTML = tmcOfflineHtml(); return; }
+      showSignIn(r.error, email);
+      return;
+    }
+    if (!r.data) {
+      /* a real login, but not an employee's: let her go rather than loop */
+      await tmcSignOut();
+      showSignIn(TMC_NO_ACCOUNT, email);
+      return;
+    }
+    me = r.data;
+    showChannel();
+  }
+
+  /* ---- her channel ---- */
+  function showChannel(){
+    const who = (me.owner && me.owner.name) || TMC_OWNER;
+    document.title = who + ' — Aviance';
+    root.innerHTML = tmcChannelHtml(me);
+    drawn = ''; urls = {}; pending = null;
+    draw(true);
+    tmcSeen();
+    signFiles();
+    timer = setInterval(function(){ if (!document.hidden) refresh(false); }, TMC_POLL_MS);
+    const t = document.getElementById('tmcText');
+    if (t && window.matchMedia && window.matchMedia('(min-width:600px)').matches) t.focus();
+  }
+
+  function stop(){
+    if (timer) { clearInterval(timer); timer = null; }
+    me = null; drawn = ''; urls = {}; pending = null;
+  }
+
+  function draw(toBottom){
+    const box = document.getElementById('tmcScroll'), thread = document.getElementById('tmcThread');
+    if (!box || !thread || !me) return;
+    const days = tmcGroupMessages(me, new Date());
+    const html = tmcThreadHtml(days, { urls: urls, seen: tmcSeenLine(me, new Date()) });
+    if (html === drawn && !toBottom) return;
+    /* only follow the thread down when she is already at the bottom */
+    const near = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
+    if (html !== drawn) { thread.innerHTML = html; drawn = html; }
+    if (toBottom || near) box.scrollTop = box.scrollHeight;
+  }
+
+  function drawPending(){
+    const box = document.getElementById('tmcPending');
+    if (box) box.innerHTML = tmcPendingHtml(pending);
+  }
+
+  async function refresh(toBottom){
+    if (!me || loading) return;
+    loading = true;
+    const r = await tmcMe();
+    loading = false;
+    if (!me) return;
+    if (r.ok && r.data) {
+      me = r.data;
+      draw(toBottom);
+      signFiles();
+    } else if (r.ok && !r.data) {
+      /* access was taken away while she had the page open */
+      await tmcSignOut();
+      showSignIn('Your access has ended. Check with ' + TMC_OWNER + '.');
+    } else if (!drawn) {
+      const thread = document.getElementById('tmcThread');
+      if (thread) thread.innerHTML = '<p class="tmc-empty">' + tmcEsc(r.error) + '</p>';
+    }
+  }
+
+  /* Pictures need a link before they can be drawn; the bucket is private, so
+     each one is signed for a few minutes at a time. */
+  async function signFiles(){
+    if (!me) return;
+    const days = tmcGroupMessages(me, new Date());
+    const want = tmcPathsToSign(days, urls, 12);
+    if (!want.length) return;
+    let got = false;
+    for (const p of want) {
+      const r = await tmcFileUrl(p);
+      if (!me) return;
+      if (r.ok) { urls[p] = r.data; got = true; }
+    }
+    if (got) draw(false);
+  }
+
+  /* ---- sending ---- */
+  function grow(el){ el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight + 4, 180) + 'px'; }
+  function count(el){
+    const c = document.getElementById('tmcCount');
+    if (c) c.textContent = el.value.length >= TMC_MAX_BODY - 400 ? el.value.length + ' / ' + TMC_MAX_BODY : '';
+  }
+
+  function pick(file){
+    const err = document.getElementById('tmcSendErr');
+    if (!file) return;
+    const bad = tmcFileProblem(file);
+    if (bad) { pending = null; if (err) err.textContent = bad; drawPending(); return; }
+    pending = file;
+    if (err) err.textContent = '';
+    drawPending();
+    const t = document.getElementById('tmcText');
+    if (t) t.focus();
+  }
+
+  async function send(){
+    if (sendBusy || !me) return;
+    const el = document.getElementById('tmcText');
+    const err = document.getElementById('tmcSendErr'), btn = document.getElementById('tmcSendBtn');
+    const text = tmcCleanBody(el.value);
+    if (!text && !pending) { el.focus(); return; }
+    sendBusy = true; btn.disabled = true; err.textContent = '';
+    let attachment = '';
+    if (pending) {
+      btn.textContent = 'Sending…';
+      const up = await tmcUpload(me.channel.id, pending);
+      if (!up.ok) {
+        sendBusy = false; btn.disabled = false; btn.textContent = 'Send';
+        err.textContent = up.error;
+        return;
+      }
+      attachment = up.data;
+    }
+    const r = await tmcSend(text, attachment);
+    sendBusy = false; btn.disabled = false; btn.textContent = 'Send';
+    if (!r.ok) { err.textContent = r.error; el.focus(); return; }
+    el.value = ''; grow(el); count(el);
+    pending = null; drawPending();
+    const f = document.getElementById('tmcFile');
+    if (f) f.value = '';
+    el.focus();
+    /* show it at once, then let the next poll confirm it */
+    if (me && r.data && r.data.id != null && !me.messages.some(function(x){ return x.id === r.data.id; })) {
+      me.messages = me.messages.concat([r.data]);
+      draw(true);
+    }
+    refresh(true);
+  }
+
+  /* ---- events ---- */
+  root.addEventListener('submit', function(e){
+    if (!e.target) return;
+    if (e.target.id === 'tmcInForm') { e.preventDefault(); signIn(e.target); }
+    if (e.target.id === 'tmcCompose') { e.preventDefault(); send(); }
+  });
+  root.addEventListener('click', async function(e){
+    const t = e.target && e.target.closest ? e.target.closest('#tmcOut,#tmcClip,[data-tmc-drop],[data-tmc-open],[data-tmc-retry]') : null;
+    if (!t) return;
+    if (t.id === 'tmcOut') { stop(); await tmcSignOut(); showSignIn(''); return; }
+    if (t.id === 'tmcClip') { const f = document.getElementById('tmcFile'); if (f) f.click(); return; }
+    if (t.hasAttribute('data-tmc-drop')) {
+      pending = null; drawPending();
+      const f = document.getElementById('tmcFile');
+      if (f) f.value = '';
+      return;
+    }
+    if (t.hasAttribute('data-tmc-open')) {
+      const p = t.getAttribute('data-tmc-open');
+      const err = document.getElementById('tmcSendErr');
+      t.disabled = true;
+      const r = await tmcFileUrl(p);
+      t.disabled = false;
+      if (!r.ok) { if (err) err.textContent = r.error; return; }
+      urls[p] = r.data;
+      window.open(r.data, '_blank', 'noopener');
+      draw(false);
+      return;
+    }
+    boot();
+  });
+  root.addEventListener('keydown', function(e){
+    /* Enter sends, Shift+Enter makes a new line */
+    if (e.target && e.target.id === 'tmcText' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault(); send();
+    }
+  });
+  root.addEventListener('input', function(e){
+    if (!e.target) return;
+    if (e.target.id === 'tmcText') { grow(e.target); count(e.target); }
+    if (e.target.id === 'tmcFile') pick(e.target.files && e.target.files[0]);
+  });
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden && me) { refresh(false); tmcSeen(); } });
+  window.addEventListener('online', function(){ if (me) refresh(false); });
+
+  async function boot(){
+    root.innerHTML = tmcLoadingHtml();
+    const s = await tmcSession();
+    if (!s.ok) { root.innerHTML = tmcOfflineHtml(); return; }
+    if (s.data) enter(s.data.user && s.data.user.email); else showSignIn('');
+  }
+  tmcOnSignedOut(function(){ if (me) showSignIn('You have been signed out. Sign in again to carry on.'); });
+  boot();
+})();
+</script>
+</body>
+</html>

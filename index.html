@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="portal.css">
 <link rel="stylesheet" href="journey.css">
 <link rel="stylesheet" href="drafts.css">
+<link rel="stylesheet" href="employees.css">
 <link rel="stylesheet" href="documents.css">
 <link rel="stylesheet" href="team.css">
 <link rel="stylesheet" href="onboarding.css">
@@ -457,6 +458,7 @@ const views={
   journey:{fn:()=>V('viewJourneyBoard'),title:'Onboarding',sub:'Every new client, from payment to launch',wide:true},
   documents:{fn:()=>V('viewDocuments'),title:'Documents',sub:'Everything a client receives, live'},
   drafts:{fn:()=>V('viewDrafts'),title:'Replies to approve',sub:'What the bot wrote. Nothing goes out until you send it'},
+  employees:{fn:()=>V('viewEmployees'),title:'Employees',sub:'Your staff, how they get in, and your chat with each one',wide:true},
   settings:{fn:()=>V('viewSettings'),title:'Settings',sub:'You, the calendar, and the tool behind the outreach'},
 };
 
@@ -515,6 +517,7 @@ function render(v){
   try{if(typeof mtOnRender==='function')mtOnRender(v);}catch(e){}
   try{if(typeof channelsOnRender==='function')channelsOnRender(v);}catch(e){}
   try{if(typeof peopleOnRender==='function')peopleOnRender(v);}catch(e){}
+  try{if(typeof empOnRender==='function')empOnRender(v);}catch(e){}
   try{if(typeof numbersOnRender==='function')numbersOnRender(v);}catch(e){}
 }
 
@@ -536,6 +539,7 @@ function parseDeepLink(h){
   if(h==='inquiries')return {view:'inquiries'};
   if(h==='calendar')return {view:'calendar'};
   if(h==='drafts')return {view:'drafts'};
+  if(h==='employees')return {view:'employees'};
   if(h==='documents')return {view:'documents'};
   if(h==='onboarding'||h==='journey')return {view:'journey'};
   if(h==='numbers')return {view:'numbers'};
@@ -587,6 +591,7 @@ function navItems(){
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:cal,tone:'amber',badgeTitle:cal?cal+(cal===1?' call needs':' calls need')+' an outcome':'',also:['meeting','noShows','funnel']},
     {view:'clients',icon:I.money,label:'Clients',badge:'',also:['client','needsYou','clientPeople','onboarding','onboardingClient','outreachClient']},
     {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':'',also:['requests']},
+    {view:'employees',icon:I.people,label:'Employees',badge:(typeof empCount==='function'?empCount():0)||'',tone:'red',badgeTitle:'Messages from your staff you haven\u2019t read',owner:true},
     {view:'drafts',icon:I.chat,label:'Replies',badge:(typeof drCount==='function'?drCount():0)||'',tone:'red',badgeTitle:'Replies the bot drafted, waiting for you'},
     {view:'journey',icon:I.activity,label:'Onboarding',badge:(typeof jyLateCount==='function'?jyLateCount():0)||'',tone:'amber',badgeTitle:'Steps running late'},
     {view:'billing',icon:I.money,label:'Invoices',badge:req,tone:'amber',also:['monthEnd','friday','ending','finalStatement','dataDeletion']},
@@ -683,7 +688,7 @@ function showLogin(){
   try{if(typeof mtStopTimer==='function')mtStopTimer();}catch(e){}
   try{if(typeof channelsStopTimer==='function')channelsStopTimer();}catch(e){}
 }
-async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{if(typeof mtForget==='function')mtForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}try{if(typeof draftsForget==='function')draftsForget();if(typeof documentsForget==='function')documentsForget();}catch(e){}try{if(typeof peopleForgetClient==='function')peopleForgetClient();}catch(e){}errEl('loginErr','');showLogin();}
+async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{if(typeof mtForget==='function')mtForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}try{if(typeof draftsForget==='function')draftsForget();if(typeof documentsForget==='function')documentsForget();if(typeof employeesForget==='function')employeesForget();}catch(e){}try{if(typeof peopleForgetClient==='function')peopleForgetClient();}catch(e){}errEl('loginErr','');showLogin();}
 /* ---- Password recovery ---- */
 async function forgotPassword(){
   const email=val('loginEmail').toLowerCase();
@@ -814,6 +819,7 @@ boot();
 <script src="portal.js"></script>
 <script src="journey.js"></script>
 <script src="drafts.js"></script>
+<script src="employees.js"></script>
 <script src="documents.js"></script>
 <script src="team.js"></script>
 <script src="onboarding.js"></script>
