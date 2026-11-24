@@ -400,10 +400,10 @@ test('portal-client.js keeps no token or password in storage', () => {
 /* ───────────── documents v2: brackets, signatures, the calm invoice ───────────── */
 test('brackets stay visible but marked, and everything is still escaped', () => {
   const f = P('pcFillHtml');
-  assert.equal(f('Governed by [the laws of Sri Lanka].'), 'Governed by <mark class="pc-fill">[the laws of Sri Lanka]</mark>.');
-  assert.equal(f('<b>[x]</b>'), '&lt;b&gt;<mark class="pc-fill">[x]</mark>&lt;/b&gt;');
+  assert.equal(f('Governed by [the laws of Sri Lanka].'), 'Governed by the laws of Sri Lanka.');
+  assert.equal(f('<b>[X]</b>'), '&lt;b&gt;<mark class="pc-fill">[X]</mark>&lt;/b&gt;');
   assert.equal(f('no brackets'), 'no brackets');
-  assert.equal(f('[a] and [b]').match(/pc-fill/g).length, 2);
+  assert.equal(f('[A] and [B]').match(/pc-fill/g).length, 2);
   assert.equal(f(null), '');
 });
 test('agreement: Aviance signs opposite the client, by name, as Founder', () => {

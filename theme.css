@@ -9,23 +9,28 @@
 @font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url("/fonts/inter-latin.woff2") format("woff2")}
 :root{
   /* surfaces + text */
-  --bg:#FAFAF9;--surface:#FFFFFF;--surface-2:#F4F4F2;--surface-3:#EAEAE7;
-  --border:#E4E4E0;--border-strong:#CFCFCA;
-  --text:#121314;--muted:#5B5E63;
+  /* cool ink neutrals: a faint navy cast so the page reads as one considered palette, not plain grey */
+  --bg:#F6F7F9;--surface:#FFFFFF;--surface-2:#F1F3F6;--surface-3:#E6E9EF;
+  --border:#E2E6EC;--border-strong:#C9D0DA;
+  --text:#0F1A2B;--muted:#556173;
   /* brand: the Aviance red-orange from the logo */
   --brand:#E0290F;--brand-hover:#C4220B;--brand-ink:#FFFFFF;
   /* the sidebar is ink-dark in both themes */
-  --sidebar:#121314;--sidebar-text:#C9CCD1;--sidebar-active:#FFFFFF;--sidebar-hover:rgba(255,255,255,.06);--sidebar-line:rgba(255,255,255,.10);
+  --sidebar:#0F1B2E;--sidebar-2:#0B1424;--sidebar-text:#BAC4D3;--sidebar-dim:#8693A7;--sidebar-active:#FFFFFF;--sidebar-hover:rgba(255,255,255,.06);--sidebar-on:rgba(255,255,255,.09);--sidebar-line:rgba(255,255,255,.08);
   /* status */
   --green:#0F7B45;--green-bg:#E8F5EE;
   --amber:#9A5B00;--amber-bg:#FFF4DE;
   --red:#C0291A;--red-bg:#FDECEA;
   --blue:#1F5FBF;--blue-bg:#EAF1FC;
   /* shape + depth: shadow only on things that float */
-  --r:8px;--r-sm:6px;--r-xs:4px;
-  --sh:none;
-  --sh-lg:0 8px 24px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.08);
+  --r:10px;--r-sm:7px;--r-xs:5px;
+  /* depth: a whisper under resting cards, a real shadow only on things that float */
+  --sh:0 1px 2px rgba(15,26,43,.04),0 1px 1px rgba(15,26,43,.03);
+  --sh-hover:0 2px 6px rgba(15,26,43,.06),0 1px 2px rgba(15,26,43,.04);
+  --sh-btn:0 1px 2px rgba(15,26,43,.08);
+  --sh-lg:0 12px 32px rgba(15,26,43,.14),0 2px 6px rgba(15,26,43,.06);
   --ring:0 0 0 2px var(--brand);
+  --ring-soft:0 0 0 3px rgba(224,41,15,.16);
   /* type */
   --font:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -34,28 +39,30 @@
   /* spacing, 4px base */
   --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;
   /* chart marks: one series is --brand; the others are for the rare multi-series chart */
-  --c1:#E0290F;--c2:#1F5FBF;--c3:#7A4DB8;--c-none:#8A8D92;--grid:#E4E4E0;--g-a:#7A1305;--g-b:#C4220B;--g-c:#E8472D;
+  --c1:#E0290F;--c2:#1F5FBF;--c3:#7A4DB8;--c-none:#8A8D92;--grid:#E2E6EC;--g-a:#7A1305;--g-b:#C4220B;--g-c:#E8472D;
   /* old names, kept so older CSS keeps working: they point at the tokens above */
   --accent:var(--brand);--accent-d:var(--brand-hover);--accent-soft:rgba(224,41,15,.08);
   --border-soft:var(--border);--field:var(--border-strong);
-  --muted-2:#5B5E63;
+  --muted-2:#556173;
   --urgent-row:#FEF6F5;
   --red-brand:var(--brand);--red-deep:var(--brand);--red-bright:#F0442A;
 }
 body.dark,:root[data-theme="dark"]{
-  --bg:#0E0F11;--surface:#16181B;--surface-2:#1D2024;--surface-3:#262A2F;
-  --border:#2A2E34;--border-strong:#3A3F46;
-  --text:#EDEEF0;--muted:#9CA1A9;
+  --bg:#0B111B;--surface:#111A27;--surface-2:#172232;--surface-3:#1F2C3E;
+  --border:#243145;--border-strong:#34445C;
+  --text:#E8EDF4;--muted:#9AA7BA;
   --brand:#F0442A;--brand-hover:#FF5C42;--brand-ink:#FFFFFF;
-  --sidebar:#0A0B0C;
+  --sidebar:#0A1220;--sidebar-2:#070D18;
+  --sh:0 1px 2px rgba(0,0,0,.25);--sh-hover:0 2px 8px rgba(0,0,0,.35);--sh-btn:0 1px 2px rgba(0,0,0,.3);
+  --ring-soft:0 0 0 3px rgba(240,68,42,.28);
   --green:#3CCB7F;--green-bg:#12281D;
   --amber:#F5B544;--amber-bg:#2A2112;
   --red:#FF6B5B;--red-bg:#2C1513;
   --blue:#6EA2FF;--blue-bg:#13203A;
-  --sh-lg:0 8px 24px rgba(0,0,0,.5),0 1px 2px rgba(0,0,0,.4);
-  --c1:#F0442A;--c2:#6EA2FF;--c3:#B497F0;--c-none:#7A7F87;--grid:#2A2E34;--g-a:#FFD2CA;--g-b:#F57F6C;--g-c:#B8301B;
+  --sh-lg:0 12px 32px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.4);
+  --c1:#F0442A;--c2:#6EA2FF;--c3:#B497F0;--c-none:#7A7F87;--grid:#243145;--g-a:#FFD2CA;--g-b:#F57F6C;--g-c:#B8301B;
   --accent-soft:rgba(240,68,42,.14);
-  --muted-2:#9CA1A9;
+  --muted-2:#9AA7BA;
   --urgent-row:#1E1413;
   --red-bright:#FF5C42;
   color-scheme:dark;

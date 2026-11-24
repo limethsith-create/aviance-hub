@@ -261,9 +261,10 @@ function pcKickoffDays(slots, viewerZone, homeZone){
   return days;
 }
 
-/* Escape, then mark any [text still to fill in] so an owner previewing notices it. */
+/* Escape. The agreement's [bracketed] defaults are real terms (e.g. [5 business days]), so the client reads them as
+   plain text. Only a true gap, [YOUR NAME] or [ALL CAPS], stays marked so it is noticed. */
 function pcFillHtml(text){
-  return pcEsc(text).replace(/\[([^\[\]]{1,400})\]/g, '<mark class="pc-fill">[$1]</mark>');
+  return pcEsc(text).replace(/\[([^\[\]]{1,400})\]/g, (m, t) => /^[A-Z][A-Z0-9 ._'-]*$/.test(t) ? '<mark class="pc-fill">[' + t + ']</mark>' : t);
 }
 
 /* Print without holding up the click that asked for it. */

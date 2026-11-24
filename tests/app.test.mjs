@@ -53,7 +53,7 @@ test('head: manifest, apple-touch-icon, home-screen app tags, theme colour', () 
     '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">',
     '<meta name="apple-mobile-web-app-capable" content="yes">',
     '<meta name="apple-mobile-web-app-title" content="Aviance">',
-    '<meta name="theme-color" content="#FAFAF9" id="themeColor">',
+    '<meta name="theme-color" content="#F6F7F9" id="themeColor">',
   ]) assert.ok(html.includes(tag), tag);
   assert.ok(!html.includes('push.js') && !fs.existsSync(path.join(root, 'sw.js')), 'no phone-alert script or service worker any more');
 });

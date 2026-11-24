@@ -1,0 +1,29 @@
+/* Documents: everything a client receives (documents.js) */
+.dc-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.dc-hint{margin:0;color:var(--muted);font-size:var(--fs-min)}
+.dc-err{color:var(--red,#b42318);margin:8px 0}
+.dc-empty{padding:24px}
+.dc-grid{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:16px;align-items:start}
+.dc-list{position:sticky;top:8px;max-height:calc(100vh - 140px);overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.dc-gname{margin:0 0 4px;font-size:var(--fs-min);text-transform:uppercase;letter-spacing:.04em;color:var(--muted-2,var(--muted))}
+.dc-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:8px 10px;border:none;background:none;font:inherit;color:var(--text);cursor:pointer;border-radius:6px}
+.dc-item:hover{background:var(--surface-2)}
+.dc-item.on{background:var(--surface-2);font-weight:600}
+.dc-item.bad .dc-ititle{color:var(--red,#b42318)}
+.dc-item:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+.dc-isub{font-size:var(--fs-min);color:var(--muted);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.dc-view{padding:16px;min-height:420px}
+.dc-vhead{margin-bottom:12px}
+.dc-tag{font-size:var(--fs-min);color:var(--muted)}
+.dc-vtitle{margin:2px 0 6px;font-size:1.15em}
+.dc-subj{margin:0;font-size:var(--fs-base)}.dc-subj span{color:var(--muted);margin-right:6px}
+.dc-frame{width:100%;height:560px;border:1px solid var(--border,#e5e5e5);border-radius:8px;background:#fff}
+.dc-frame.tall{height:78vh}
+.dc-text{white-space:pre-wrap;font:inherit;background:var(--surface-2);padding:14px;border-radius:8px;margin:0}
+.dc-chat{max-width:520px}
+.dc-bubble{background:var(--surface-2);padding:10px 14px;border-radius:14px 14px 14px 4px;white-space:pre-wrap;display:inline-block}
+.dc-card{margin-top:8px;border:1px solid var(--border,#e5e5e5);border-radius:10px;padding:10px 12px}.dc-card p{margin:4px 0 8px;color:var(--muted)}
+.dc-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.dc-chip{display:inline-block;border:1px solid var(--border,#ddd);border-radius:999px;padding:3px 10px;font-size:var(--fs-min)}
+.dc-note{color:var(--muted);font-size:var(--fs-min);margin-top:10px}
+@media (max-width:820px){.dc-grid{grid-template-columns:1fr}.dc-list{position:static;max-height:none}}

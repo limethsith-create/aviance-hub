@@ -1,0 +1,116 @@
+/* ===================== AVIANCE OS — polish =====================
+   Loaded right after theme.css. Same structure, same text: only finish.
+   One idea: a deep navy "flight deck" sidebar beside a cool, quiet page; the Aviance red-orange stays the single accent.
+   Colours come from theme.css tokens. Transitions are hover/focus only and never longer than 150ms. */
+
+/* ---- type: a calmer, more deliberate scale ---- */
+body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;font-feature-settings:"cv11","ss01"}
+h1,h2,h3,h4{letter-spacing:-.011em;color:var(--text)}
+.page-title h2{font-size:var(--fs-title);font-weight:680;letter-spacing:-.02em;line-height:1.15}
+.page-title p{color:var(--muted);font-size:var(--fs-base);margin-top:4px}
+.section-head h3{font-size:var(--fs-strong);font-weight:650;letter-spacing:-.01em}
+.view{animation:none}
+
+/* ---- sidebar: deep navy with a faint vertical fall-off; a clear active row ---- */
+.sidebar{background:linear-gradient(180deg,var(--sidebar) 0%,var(--sidebar-2) 100%);border-right:1px solid var(--sidebar-line);box-shadow:inset -1px 0 0 rgba(255,255,255,.02)}
+.brand{padding:6px 8px 18px;margin:0 0 6px;border-bottom:1px solid var(--sidebar-line)}
+.logo{border-radius:8px;box-shadow:0 0 0 1px rgba(255,255,255,.08),0 2px 6px rgba(0,0,0,.25)}
+.brand h1{font-size:15px;font-weight:680;letter-spacing:-.01em}
+.nav-item{transition:background .12s,color .12s;color:var(--sidebar-text)}
+.nav-item svg{opacity:.8}
+.nav-item:hover svg,.nav-item.active svg{opacity:1}
+.nav-item.active{background:var(--sidebar-on);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
+.nav-item.active::before{left:-12px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0}
+.nav-item.active svg{color:var(--brand)}
+.nav-group{color:var(--sidebar-dim);text-transform:none;letter-spacing:0;font-size:var(--fs-min);font-weight:600;padding:18px 12px 6px}
+.nav-item .ext{color:var(--sidebar-dim)}
+.sidebar-foot{border-top-color:var(--sidebar-line)}
+.who{border-radius:var(--r-sm);padding:8px}
+.who .meta small{color:var(--sidebar-dim)}
+.avatar{border-radius:999px}
+
+/* ---- top bar: white strip over the cool page, so the page title has a floor ---- */
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:20px 32px 18px}
+.search{background:var(--surface-2);border-color:var(--border);transition:border-color .12s,background .12s}
+.search:hover{border-color:var(--border-strong);background:var(--surface)}
+.kbd{background:var(--surface);box-shadow:0 1px 0 var(--border)}
+.tb-btn{border-color:var(--border);box-shadow:var(--sh-btn);transition:background .12s,border-color .12s}
+.tb-btn:hover{border-color:var(--border-strong)}
+.tb-dot{border-radius:999px;box-shadow:0 0 0 2px var(--surface)}
+@media(max-width:860px){.topbar{background:var(--surface);padding:12px 16px 10px;padding-top:calc(12px + env(safe-area-inset-top))}}
+
+/* ---- surfaces: soft hairline + a whisper of depth, one radius family ---- */
+.card,.tk-person,.tk-app-row,.tk-stages,.tk-key,.tk-allclear,.pp-summary,.pp-row,.jy-board,.cal-grid-wrap{border-color:var(--border);box-shadow:var(--sh)}
+.tk-person,.tk-app-row,.pp-row{transition:background .12s,border-color .12s,box-shadow .12s}
+.tk-person:hover,.tk-app-row:hover{background:var(--surface);border-color:var(--border-strong);box-shadow:var(--sh-hover)}
+/* coloured edges keep their inset stripe and gain the resting shadow */
+.tk-person.needs{box-shadow:inset 3px 0 0 var(--red),var(--sh)}
+.tk-person.needs:hover{box-shadow:inset 3px 0 0 var(--red),var(--sh-hover)}
+.tk-key{background:var(--surface)}
+.tk-key b,.tk-stage b,.pp-summary b,.jy-tile b{letter-spacing:-.02em}
+.tk-stage.on,body.dark .tk-stage.on{background:var(--surface);box-shadow:inset 0 -2px 0 var(--brand)}
+.tk-stage.on b{color:var(--text)}
+
+/* ---- buttons: primary carries a faint top light; secondary is a quiet raised outline ---- */
+.btn{box-shadow:var(--sh-btn),inset 0 1px 0 rgba(255,255,255,.14);letter-spacing:-.003em;transition:background .12s,border-color .12s,color .12s,box-shadow .12s}
+.btn:hover{box-shadow:0 2px 6px rgba(224,41,15,.22),inset 0 1px 0 rgba(255,255,255,.14)}
+.btn.ghost,body.dark .btn.ghost{background:var(--surface);border-color:var(--border-strong);box-shadow:var(--sh-btn)}
+.btn.ghost:hover,body.dark .btn.ghost:hover{background:var(--surface-2);border-color:var(--border-strong);box-shadow:var(--sh-btn)}
+.btn.danger,.btn.ghost.danger{box-shadow:var(--sh-btn)}
+.btn:disabled,.btn:disabled:hover{box-shadow:none}
+.btn:focus-visible{outline:2px solid var(--brand)!important;outline-offset:2px}
+.tk-sysbtn{box-shadow:0 1px 2px rgba(224,41,15,.25),inset 0 1px 0 rgba(255,255,255,.16)}
+.tk-sysbtn:hover{box-shadow:0 4px 12px rgba(224,41,15,.25),inset 0 1px 0 rgba(255,255,255,.16)}
+
+/* ---- segmented controls and tabs ---- */
+.seg{background:var(--surface-2);border-color:var(--border)}
+.seg button{font-weight:550;transition:color .12s,background .12s}
+.seg button.active,body.dark .seg button.active{background:var(--surface);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(15,26,43,.08),inset 0 0 0 1px var(--border)}
+.tk-systab{transition:color .12s,background .12s}
+
+/* ---- badges, counts, pills: rounder and lighter ---- */
+.badge{border-radius:999px;padding:0 7px;letter-spacing:.01em}
+.section-head .count,.tk-done-count{border-radius:999px;background:var(--surface-3);color:var(--muted);font-weight:600}
+.pill{border-radius:999px;padding:3px 10px;font-weight:600;box-shadow:inset 0 0 0 1px rgba(15,26,43,.04)}
+.pill.grey{background:var(--surface-3)}
+.tk-person-owner,.tk-app-plan{border-radius:999px}
+
+/* ---- tables: quiet sentence-case headers, roomy rows, soft hover ---- */
+.tk-table th,.pp-table th{text-transform:none;letter-spacing:0;font-size:var(--fs-small);font-weight:600;color:var(--muted);background:var(--surface-2)}
+.tk-table td,.pp-table td{transition:background .1s}
+.tk-table tbody tr:hover td,.pp-tr:hover td{background:var(--surface-2)}
+.tk-group,.dc-gname{text-transform:none;letter-spacing:0;font-size:var(--fs-small);font-weight:650}
+.jy-tile small{text-transform:none;letter-spacing:0;font-size:var(--fs-small)}
+
+/* ---- forms: sentence-case labels in ink, a soft brand halo on focus ---- */
+.field label,.field.row2>div label{text-transform:none;letter-spacing:0;font-size:var(--fs-small);font-weight:600;color:var(--text);margin-bottom:6px}
+.field input,.field textarea,.field select,input[type=text],input[type=email],input[type=number],input[type=password],input[type=date],input[type=time],input[type=search],select,textarea{border-color:var(--border-strong);box-shadow:0 1px 1px rgba(15,26,43,.03);transition:border-color .12s,box-shadow .12s}
+.field input:hover,.field textarea:hover,.field select:hover{border-color:var(--muted-2)}
+.field input:focus,.field textarea:focus,.field select:focus,input:focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:var(--ring-soft);outline:none}
+.search input:focus,.cmdk-in input:focus{box-shadow:none}
+/* text boxes show the halo instead of the global outline, so focus is one clear ring, not two */
+.field input:focus-visible,.field textarea:focus-visible,.field select:focus-visible,input[type=text]:focus-visible,input[type=email]:focus-visible,input[type=number]:focus-visible,input[type=password]:focus-visible,input[type=date]:focus-visible,input[type=time]:focus-visible,input[type=search]:focus-visible,select:focus-visible,textarea:focus-visible{outline:none!important}
+
+/* ---- floating things ---- */
+.modal-wrap,.cmdk-wrap{background:rgba(11,20,36,.5)}
+.modal,.cmdk,.notif-pop{border-color:var(--border);border-radius:12px;box-shadow:var(--sh-lg);overflow:hidden}
+.modal{overflow-y:auto}
+.modal-head h3{font-size:17px;letter-spacing:-.01em}
+.modal-foot{border-radius:0 0 12px 12px}
+.cmdk-group{text-transform:none;letter-spacing:0;font-size:var(--fs-small)}
+.cmdk-item.sel{background:var(--surface-2);box-shadow:inset 2px 0 0 var(--brand)}
+.toast,body.dark .toast{border-radius:var(--r);border-color:rgba(255,255,255,.08)}
+@media(max-width:860px){.modal{border-radius:12px 12px 0 0}}
+
+/* ---- sign in ---- */
+.login-wrap{border-radius:14px;overflow:hidden}
+.login-aside,body.dark .login-aside{background:linear-gradient(180deg,var(--sidebar) 0%,var(--sidebar-2) 100%)}
+.login-eyebrow{text-transform:none;letter-spacing:0;font-size:var(--fs-small)}
+
+/* ---- phone tab bar ---- */
+@media(max-width:860px){.tabbar{box-shadow:0 -1px 0 var(--border)}.tab.active svg{color:var(--brand)}}
+
+/* ---- dark: the shadows above are tuned through tokens; only the pill edge needs a lighter hand ---- */
+body.dark .pill,:root[data-theme="dark"] .pill{box-shadow:none}
+
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}}
