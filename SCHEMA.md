@@ -174,3 +174,18 @@ Staff-only under RLS; one row per booking or meeting per kind.
 - Secrets live in Supabase (APPS_SCRIPT_URL, APPS_SCRIPT_SECRET) and in the
   script's own properties (SHARED_SECRET). With them missing the job runs as a
   rehearsal and sends nothing.
+
+### The four designed emails
+
+`mail_html(kind, name, at, zone)`, `mail_text(...)` and `mail_subject(...)` build
+the booking confirmation and the day-before, one-hour and five-minute reminders:
+email-safe HTML (tables, inline styles, the logo loaded from
+https://www.aviance.online/logo-180.png) plus a plain-text fallback. Every
+caller goes through `queue_call_mail(kind, email, name, at, zone, booking, meeting, client)`
+so all four always match. Dates and times are written in the person's own time
+zone; `{{MEET_LINK}}` is swapped for that booking's Google Meet link at send time.
+The designs these were built from: "Aviance — booking & reminder emails"
+(https://claude.ai/artifact/KM6PfhSTE2ZqtvvqbX6KUx).
+
+A new booking also starts the research engine (existing trigger), so a test
+booking leaves a research brief behind as well as mail.
