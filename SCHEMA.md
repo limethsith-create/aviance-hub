@@ -63,7 +63,15 @@ and `created_at timestamptz not null default now()` unless said otherwise.
 - **handovers** — client_id*, reason, sent_at, contents* jsonb, data_delete_on date
 
 ### Meetings and the calendar
-- **meetings** — client_id, booking_id, kind*, starts_at* timestamptz, minutes*, time_zone*, status*, meet_link, calendar_event_id, invited_at, reminded_24h_at, reminded_1h_at, held_at, notes
+The Calendar (meetings.js) is the one place every call lives. It reads `meetings`
+**and** `discovery_bookings` and draws both; there is no separate Bookings screen.
+A booking's outcome is still written only by pipeline.js. Both tables hold their
+time: the hub's slot finder treats any booking that is not `cancelled` as taken.
+`discovery_bookings.status` starts as `booked` (the website), becomes `brief_sent`
+(the research engine), then `held`, `no_show`, `won`, `lost` or `cancelled`. A
+booking is open unless it is `won`, `lost` or `cancelled` — never test for a list
+of "open" words.
+- **meetings** — client_id, booking_id, kind*, starts_at* timestamptz, minutes* (15–240), time_zone*, status*, meet_link (a trigger fills in a stand-in room when it is left empty), calendar_event_id, invited_at, reminded_24h_at, reminded_1h_at, held_at, notes, title (≤160), guest_name (≤120), guest_email (a valid email or null), plan [null|pilot|starter|growth|scale]. **Unique index on starts_at for every meeting that is not `cancelled`**, so two live meetings can never start at the same instant; a clash comes back as duplicate key (23505) and the Calendar says "There is already a call at that time." A meeting the owner adds by hand (meetings.js `mtAddOwn`) is `kind = 'other'` with its own `title`, `guest_name`, `guest_email` and `plan`; the Calendar colours it by that `plan` and falls back to the client's company and plan when a meeting has none of its own. `kind = 'qualified'` requires `client_id`.
 - **calendar_settings** — id int4 (single row, id=1), open_time* ('07:00'), close_time* ('21:00'), days* int4[] ({1,2,3,4,5}), slot_minutes* (30), min_notice_h*, days_ahead*, us_zone* ('America/New_York'), owner_zone* ('Asia/Colombo'), meeting_link, updated_at*
 - **calendar_blocks** — starts_at* timestamptz, ends_at* timestamptz, reason
 
@@ -103,7 +111,7 @@ View **v_outreach_summary** — client_id, client_name, campaigns, running, sent
 
 ### Already there, untouched
 - **profiles** — id (= auth user), email, name, role*, approved*, title, loc, init, color, workload, status, phone, emp_no
-- **discovery_bookings** — name*, email*, role, company*, website, city, country, industry, budget, decision_maker, goal, timeline, current_lead_gen, call_at* timestamptz, minutes*, timezone, source, status*, score, calendar_event_id, meet_link, day_before_sent_at
+- **discovery_bookings** — name*, email*, role, company*, website, city, country, industry, budget, decision_maker, goal, timeline, current_lead_gen, capacity, phone, sells, tried_outbound, plan [pilot|starter|growth|scale], call_at* timestamptz, minutes*, timezone, source, status*, score, calendar_event_id, meet_link, lost_reason, lost_at, day_before_sent_at
 - **research_briefs** — booking_id* (pk), brief* jsonb, raw jsonb, agents jsonb, writer, ms  *(the research engine stays)*
 - **research_log** — id int8, at*, booking_id, event jsonb
 - **agreements** — booking_id, client_name*, client_email*, client_company*, plan*, term*, monthly_fee*, status*, gmail_message_id, sent_by, error

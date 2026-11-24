@@ -370,8 +370,8 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
    page, and reaches the database through the `sb` client below. The hub calls
    no other server. SCHEMA.md lists every table and which file owns it.
 
-     clientbook.js   clients, stages, the journey        pipeline.js   our enquiries, won and lost
-     meetings.js     the calendar, reminders, no-shows   calling.js    the cold calling desk, do-not-call
+     clientbook.js   clients, stages, the journey        pipeline.js   website bookings: brief, won/lost, funnel
+     meetings.js     the calendar: every call, outcomes  calling.js    the cold calling desk, do-not-call
      portal.js       their people, requests, channel     team.js       who works here, the work queue
      onboarding.js   the gate to day one, invoices       outreach.js   the outreach tool
      digest.js       today, Friday update, month end     wrapup.js     the ending, handover, deletion
@@ -433,10 +433,8 @@ const views={
   clients:{fn:()=>V('viewClients'),title:'Clients',sub:'Who is where, and what needs you'},
   client:{fn:()=>V('viewClient',currentClientId),title:'Client',sub:'',back:()=>render('clients')},
   needsYou:{fn:()=>V('viewNeedsYou'),title:'Needs you',sub:'What is actually behind',back:()=>render('clients')},
-  enquiries:{fn:()=>V('viewEnquiries'),title:'Bookings',sub:'Sales calls booked from the website \u2014 mark each one Won or Lost'},
-  enquiry:{fn:()=>V('viewEnquiry',currentEnquiryId),title:'Booking',sub:'',back:()=>render('enquiries')},
-  funnel:{fn:()=>V('viewFunnel'),title:'Funnel',sub:'Enquiries, calls, wins',back:()=>render('enquiries')},
-  calendar:{fn:()=>V('viewCalendar'),title:'Calendar',sub:'Every call, in both time zones'},
+  funnel:{fn:()=>V('viewFunnel'),title:'Funnel',sub:'Enquiries, calls, wins',back:()=>render('calendar')},
+  calendar:{fn:()=>V('viewCalendar'),title:'Calendar',sub:'Every call in one place \u2014 click one to see it and mark how it went'},
   meeting:{fn:()=>V('viewMeeting',currentMeetingId),title:'Meeting',sub:'',back:()=>render('calendar')},
   noShows:{fn:()=>V('viewNoShows'),title:'No-shows',sub:'And what each one did to the count',back:()=>render('calendar')},
   calling:{fn:()=>V('viewCalling'),title:'Calling',sub:'The next one to ring'},
@@ -474,7 +472,8 @@ function V(name,arg){
   try{return f(arg)}catch(e){return '<div class="card"><div class="empty"><h3>Something went wrong</h3><p>'+esc((e&&e.message)||'This screen could not be drawn.')+'</p></div></div>'}
 }
 function openClient(id){currentClientId=id;render('client')}
-function openEnquiry(id){currentEnquiryId=id;render('enquiry')}
+/* A website booking has no screen of its own any more: it opens the Calendar on that booking's week, with its panel open. */
+function openEnquiry(id){currentEnquiryId=id;if(typeof mt!=='undefined'&&id)mt.want='booking:'+id;render('calendar')}
 function openMeeting(id){currentMeetingId=id;render('meeting')}
 function openThread(id){currentThreadId=id;render('outreachThread')}
 function openClientOutreach(id){currentClientId=id;render('outreachClient')}
@@ -562,18 +561,18 @@ function goDeepLink(d){
   if(hubIsClient()){try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}closeModal();render(CLIENT_VIEWS.includes(d.view)?d.view:'channels');return true;}
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same alert can open it again
   closeModal();closeCmdk();
-  if(d.view==='client')openClient(d.id);else if(d.view==='enquiry')openEnquiry(d.id);else if(d.view==='meeting')openMeeting(d.id);else if(d.view==='outreachThread')openThread(d.id);
+  if(d.view==='client')openClient(d.id);else if(d.view==='enquiry'||d.view==='inquiry')openEnquiry(d.id);else if(d.view==='enquiries'||d.view==='inquiries')render('calendar');else if(d.view==='meeting')openMeeting(d.id);else if(d.view==='outreachThread')openThread(d.id);
   else if(d.view==='channels'){if(typeof chv!=='undefined')chv.want=d.id||null;render('channels');}
   else if(d.view==='settings'){if(d.google&&typeof googleReturn==='function')googleReturn(d.google,d.error);openSettings(d.section);}
-  else render(d.view);
+  else{if(d.view==='calendar'&&d.id&&typeof mt!=='undefined')mt.want='meeting:'+d.id;render(d.view);}   // #calendar/{meetingId}: that call's week, with its panel open
   return true;
 }
 if(typeof window.addEventListener==='function')window.addEventListener('hashchange',()=>{const d=parseDeepLink(location.hash);if(d)goDeepLink(d);});
 /* The home-screen app (iPhone "Add to Home Screen", or an installed desktop app) */
 function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.standalone===true)||(typeof window.matchMedia==='function'&&window.matchMedia('(display-mode: standalone)').matches);}catch(e){return false}}
 
-/* ---- Navigation: the places in the sidebar. Badges: Clients = how many need you + new bookings (red), Calendar = call
-   times waiting for your yes (amber). The same items fill the sidebar and the phone's tab bar. ---- */
+/* ---- Navigation: the places in the sidebar. Badges: Today = how many need you (red), Calendar = calls that have
+   been and gone with no outcome recorded (amber). Website bookings have no place of their own: they are on the Calendar. The same items fill the sidebar and the phone's tab bar. ---- */
 function navItems(){
   if(hubIsClient())return [
     {view:'outreachClient',icon:I.chart,label:'Outreach',badge:''},
@@ -585,10 +584,9 @@ function navItems(){
   return [
     {view:'home',icon:I.activity,label:'Today',badge:needs,tone:'red',badgeTitle:needs?needs+' need'+(needs===1?'s':'')+' you':''},
     {view:'clients',icon:I.money,label:'Clients',badge:'',also:['client','needsYou','clientPeople','onboarding','onboardingClient','outreachClient']},
-    {view:'enquiries',icon:I.inquiry,label:'Bookings',badge:'',also:['enquiry','funnel']},
     {view:'calling',icon:I.sun,label:'Calling',badge:'',also:['callTargets','dnc']},
     {view:'outreach',icon:I.chart,label:'Outreach',badge:'',also:['outreachThread']},
-    {view:'calendar',icon:I.calendar,label:'Calendar',badge:cal,tone:'amber',badgeTitle:cal?cal+' waiting for your yes':'',also:['meeting','noShows']},
+    {view:'calendar',icon:I.calendar,label:'Calendar',badge:cal,tone:'amber',badgeTitle:cal?cal+(cal===1?' call needs':' calls need')+' an outcome':'',also:['meeting','noShows','funnel']},
     {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':'',also:['clientChannel','requests']},
     {view:'billing',icon:I.money,label:'Invoices',badge:req,tone:'amber',also:['monthEnd','friday','ending','finalStatement','dataDeletion']},
     {view:'work',icon:I.people,label:'Work',badge:'',also:['myWork']},

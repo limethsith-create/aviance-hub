@@ -1,5 +1,6 @@
 /* Tests for our own sales pipeline (pipeline.js): the bookings from the website, the research
-   engine's briefs (read, never written here), and the won / lost outcome.
+   engine's briefs (read, never written here), and the won / lost outcome. There is no Bookings
+   screen: the Calendar draws every booking and opens its panel (tests/meetings.test.mjs).
    Run with:  npm test   (= node --test tests/*.test.mjs)
 
    Same set-up as the other tests: the shell's inline script in a tiny fake DOM, then
@@ -49,6 +50,7 @@ function matches(row, filters) {
     if (f.kind === 'in') return (f.val || []).map(String).includes(String(v));
     if (f.kind === 'gte') return String(v) >= String(f.val);
     if (f.kind === 'lte') return String(v) <= String(f.val);
+    if (f.kind === 'lt') return String(v) < String(f.val);
     return true;
   });
 }
@@ -84,6 +86,7 @@ function builder(table) {
     in(col, val) { q.filters.push({ kind: 'in', col, val }); return api; },
     gte(col, val) { q.filters.push({ kind: 'gte', col, val }); return api; },
     lte(col, val) { q.filters.push({ kind: 'lte', col, val }); return api; },
+    lt(col, val) { q.filters.push({ kind: 'lt', col, val }); return api; },
     order(col, opts) { q.order = { col, ascending: !opts || opts.ascending !== false }; return api; },
     limit(n) { q.limit = n; return api; },
     async maybeSingle() { const r = run(q); return r.error ? r : { data: (r.data || [])[0] || null, error: null }; },
@@ -347,6 +350,50 @@ test('plNoShow: a discovery call nobody turned up to', async () => {
   assert.equal(bad.ok, false); assert.equal(bad.error, 'The database said no.');
 });
 
+test('plHeld: the call happened, which is not yet won or lost', async () => {
+  fresh();
+  db.discovery_bookings = [booking({ id: 'b1', status: 'brief_sent' })];
+  const r = await plHeld('b1');
+  assert.equal(r.ok, true);
+  assert.equal(db.discovery_bookings[0].status, 'held');
+  assert.equal(plIsOpen(db.discovery_bookings[0]), true, 'held is still in play');
+  assert.equal(db.clients.length, 0, 'marking a call done never makes a client');
+  assert.equal((await plHeld('')).ok, false);
+  failTable = 'discovery_bookings';
+  const bad = await plHeld('b1');
+  assert.equal(bad.ok, false); assert.equal(bad.error, 'The database said no.');
+});
+
+test('plBookings can be asked for one span of time, which is what the Calendar does', async () => {
+  fresh();
+  db.discovery_bookings = [
+    booking({ id: 'before', call_at: '2026-11-22T23:59:00.000Z' }),
+    booking({ id: 'in1', call_at: '2026-11-23T00:00:00.000Z', status: 'booked' }),
+    booking({ id: 'in2', call_at: '2026-11-29T23:30:00.000Z', status: 'brief_sent' }),
+    booking({ id: 'after', call_at: '2026-11-30T00:00:00.000Z' }),
+  ];
+  db.research_briefs = [{ booking_id: 'in2', brief: { a: 1 } }];
+  const r = await plBookings({ from: '2026-11-23T00:00:00.000Z', to: '2026-11-30T00:00:00.000Z' });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.data.map((b) => b.id), ['in1', 'in2'], 'the start is in, the end is out');
+  assert.deepEqual(r.data.map((b) => b.has_brief), [false, true]);
+});
+
+test('needs an outcome: the call has gone, the booking is still open, and nobody has said what happened', () => {
+  const now = new Date('2026-11-25T12:00:00Z');
+  const b = (status, call_at) => ({ id: 'x', status, call_at: call_at || '2026-11-25T10:00:00Z' });
+  // the website writes 'booked', the research engine moves it to 'brief_sent' — both are open
+  for (const s of ['booked', 'brief_sent', 'new', 'some_word_nobody_planned_for']) assert.equal(plNeedsOutcome(b(s), now), true, s);
+  // closed, or already answered, is not waiting on anyone
+  for (const s of ['won', 'lost', 'cancelled', 'held', 'no_show', 'contacted', 'agreement_sent']) assert.equal(plNeedsOutcome(b(s), now), false, s);
+  assert.equal(plNeedsOutcome(b('booked', '2026-11-25T11:45:00Z'), now), false, '15 minutes ago is still inside the 20-minute grace');
+  assert.equal(plNeedsOutcome(b('booked', '2026-11-25T11:39:00Z'), now), true, '21 minutes ago is not');
+  assert.equal(plNeedsOutcome(b('booked', '2026-11-26T10:00:00Z'), now), false, 'a call still to come');
+  assert.equal(plNeedsOutcome(null, now), false); assert.equal(plNeedsOutcome({ status: 'booked' }, now), false);
+  // there is no list of "open" words to fall out of step with the database
+  assert.ok(!/s === 'new' \|\| s === 'booked'/.test(SRC));
+});
+
 /* ───────────── 7. the funnel ───────────── */
 test('plFunnel counts rows, and its show rate and win rate add up', async () => {
   fresh();
@@ -398,59 +445,50 @@ test('plFunnel counts rows, and its show rate and win rate add up', async () => 
 /* ───────────── 8. the screens ───────────── */
 test('every screen draws with zero rows in the database', async () => {
   fresh();
-  for (const [view, make] of [['enquiries', viewEnquiries], ['enquiry', () => viewEnquiry('nope')], ['funnel', viewFunnel]]) {
-    const first = make();
-    assert.ok(first.includes('id="plHost"'), view + ': a host to repaint');
-    await tick(); await tick();
-    const h = el('plHost').innerHTML;
-    const t = text(h);
-    assert.ok(t.length, view + ': something is said');
-    assert.ok(!BROKEN.test(t), view + ' reads badly: ' + t);
-    assert.ok(!/<(script|img)\b/i.test(h), view + ': nothing odd in the html');
-  }
-  assert.ok(text(el('plHost').innerHTML).includes('0'), 'the funnel shows zeros');
+  const first = viewFunnel();
+  assert.ok(first.includes('id="plHost"'), 'a host to repaint');
+  await tick(); await tick();
+  const h = el('plHost').innerHTML;
+  const t = text(h);
+  assert.ok(t.length, 'something is said');
+  assert.ok(!BROKEN.test(t), 'the funnel reads badly: ' + t);
+  assert.ok(!/<(script|img)\b/i.test(h), 'nothing odd in the html');
+  assert.ok(t.includes('0'), 'the funnel shows zeros');
   // the pure renderers, with nothing at all
-  assert.ok(text(renderPlEnquiries([], {})).includes('No enquiries yet'));
-  assert.ok(text(renderPlEnquiries(null, {})).includes('No enquiries yet'));
-  assert.ok(text(renderPlEnquiry(null, {})).includes('Enquiry not found'));
+  assert.ok(text(renderPlEnquiry(null, {})).includes('Booking not found'));
   const zero = text(renderPlFunnel((await plFunnel({})).data, {}));
   assert.ok(zero.includes('Show rate') && zero.includes('Win rate') && zero.includes('No enquiries in this period'));
   assert.ok(!renderPlFunnel(null, {}).includes('undefined'));
 });
 
-test('the pipeline screen sorts the work: what is coming, what needs research, what needs an outcome', async () => {
-  fresh();
-  const now = new Date('2026-11-22T12:00:00Z');
-  db.discovery_bookings = [
-    booking({ id: 'soon', company: 'Soon Co', call_at: '2026-11-25T10:00:00Z' }),
-    booking({ id: 'past', company: 'Past Co', call_at: '2026-11-20T10:00:00Z' }),
-    booking({ id: 'old', company: 'Old Co', call_at: '2026-10-01T10:00:00Z', status: 'lost', lost_reason: 'price' }),
-  ];
-  db.research_briefs = [{ booking_id: 'soon', brief: { summary: 'ready' } }];
-  const rows = (await plBookings({})).data;
-  const h = renderPlEnquiries(rows, { now });
-  const t = text(h);
-  assert.ok(t.includes('Coming up') && t.includes('Needs research') && t.includes('Needs an outcome'));
-  assert.ok(t.indexOf('Soon Co') < t.indexOf('Needs research'), 'the coming call is in Coming up');
-  assert.ok(t.includes('Brief ready') && t.includes('No brief yet'));
-  assert.ok(t.includes('Score 72'));
-  assert.ok(!BROKEN.test(t), t);
-  // a company name with html in it is escaped everywhere
-  const nasty = renderPlEnquiries([Object.assign(booking({ id: 'x', company: '<b>Bad</b>' }), { has_brief: false })], { now });
-  assert.ok(!nasty.includes('<b>Bad</b>') && nasty.includes('&lt;b&gt;Bad'));
+test('the Bookings list screen is gone; the data layer and the funnel stay', () => {
+  for (const gone of ['viewEnquiries', 'viewEnquiry', 'renderPlEnquiries', 'renderPlBookingCard', 'plLoadEnquiries', 'plOpenEnquiry'])
+    assert.equal(typeof globalThis[gone], 'undefined', gone + ' should be gone');
+  for (const kept of ['plBookings', 'plBooking', 'plWon', 'plLost', 'plNoShow', 'plHeld', 'plFunnel', 'plBrief', 'plBriefSections', 'plResearchState', 'renderPlBrief', 'renderPlEnquiry', 'viewFunnel'])
+    assert.equal(typeof globalThis[kept], 'function', kept);
+  assert.equal(views.enquiries, undefined); assert.equal(views.enquiry, undefined);
+  assert.ok(views.funnel && views.calendar, 'the funnel and the calendar are still routes');
 });
 
-test('one enquiry: their answers, the brief and the three outcome buttons; a won one offers no second client', async () => {
+test('one booking: their answers, the brief and the outcome buttons; a won one offers no second client', async () => {
   fresh();
   db.discovery_bookings = [booking({ id: 'b1' })];
   db.research_briefs = [{ booking_id: 'b1', brief: { summary: 'Roofer, spends on ads', angles: ['storm season'] } }];
   const d = (await plBooking('b1')).data;
   const h = renderPlEnquiry(d, { now: new Date('2026-11-22T12:00:00Z') });
   const t = text(h);
-  for (const w of ['Acme Roofing', 'Score 72', 'Roofer, spends on ads', 'storm season', 'More booked calls', 'Won', 'Lost', 'Nobody came']) {
+  for (const w of ['Acme Roofing', 'Score 72', 'Roofer, spends on ads', 'storm season', 'More booked calls', 'Won', 'Lost', 'Nobody came', 'Call done']) {
     assert.ok(t.includes(w), 'missing: ' + w);
   }
-  assert.ok(h.includes('plMarkWon(') && h.includes('plMarkLost(') && h.includes('plMarkNoShow('));
+  assert.ok(h.includes('plMarkWon(') && h.includes('plMarkLost(') && h.includes('plMarkNoShow(') && h.includes('plMarkHeld('));
+  // the caller can bring its own top (the Calendar's panel does), and the rest still draws
+  const own = renderPlEnquiry(d, { head: '<p>MY HEAD</p>' });
+  assert.ok(own.includes('MY HEAD') && !own.includes('pl-head') && own.includes('plMarkWon('));
+  // the plan they picked on the website is already chosen, and the new answers are shown
+  const picked = renderPlEnquiry((await plBooking('b1')).data && Object.assign({}, d, { booking: Object.assign({}, d.booking, { plan: 'growth' }) }), {});
+  assert.match(picked, /value="growth" selected/);
+  const more = plAnswers({ name: 'A', sells: 'Roofs', capacity: '5 a week', phone: '+1 555', tried_outbound: false, budget: '$20k' });
+  assert.deepEqual(more.map((a) => a.label + '=' + a.value), ['Name=A', 'Phone=+1 555', 'What they sell=Roofs', 'Deal size=$20k', 'Capacity for new calls=5 a week', 'Tried outbound before=No']);
   assert.ok(h.includes('id="plLossReason"') && /value="went_elsewhere"/.test(h), 'the reasons are the fixed list');
   assert.ok(!/value="too_dear"/.test(h));
   assert.ok(!BROKEN.test(t), t);

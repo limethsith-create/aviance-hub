@@ -1,6 +1,13 @@
 /* ===================== AVIANCE OS — Pipeline (our own sales pipeline) =====================
-   The enquiries that come in from the website, the research we do on each one before the
-   call, and whether we won or lost. Supabase only: no other server, nothing to call out to.
+   The data behind every sales call booked from the website: the booking itself, the
+   research we did on it before the call, and whether we won or lost. Supabase only: no
+   other server, nothing to call out to.
+
+   There is no Bookings screen any more. Every booking is drawn on the Calendar
+   (meetings.js), and clicking one opens a panel there. This file is what that panel
+   stands on: it reads the booking, lays out the brief, draws the outcome buttons and
+   writes the outcome. The one screen left in here is the Funnel, opened from the
+   Calendar's toolbar.
 
    Tables (SCHEMA.md "Already there, untouched" + the money tables):
      discovery_bookings   what they filled in on the website, the booked call, the score
@@ -17,7 +24,7 @@
    `error` is plain words, safe to show a person. Every screen draws with zero rows.
    ================================================================================= */
 
-/* The booking's stage, in pipeline order — the same words as the booking list. */
+/* The booking's stage, in pipeline order. */
 const PL_STATUSES = ['new', 'held', 'no_show', 'contacted', 'agreement_sent', 'won', 'lost'];
 const PL_STATUS_WORDS = {
   new: ['blue', 'Call booked'], booked: ['blue', 'Call booked'], brief_sent: ['blue', 'Call booked'],
@@ -28,7 +35,7 @@ const PL_STATUS_WORDS = {
 /* Finished, one way or another. Everything else is still in play.
    The website writes 'booked' and the research engine moves it on to words of
    its own ('brief_sent', ...), so a booking is open unless it is one of these —
-   a fixed list of open words once hid every real booking from this screen. */
+   a fixed list of open words once hid every real booking. */
 const PL_CLOSED = ['won', 'lost', 'cancelled'];
 /* A call we can honestly say was held. */
 const PL_HELD = ['held', 'contacted', 'agreement_sent', 'won', 'lost'];
@@ -45,7 +52,10 @@ const PL_NEVER_HELD = ['no_show', 'ghosted'];
 const PL_RUNNING_MS = 30 * 60000;
 const PL_BRIEF_DEPTH = 3;
 
-const pl = { list: null, listAt: 0, listErr: null, filter: 'open', one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30 };
+const PL_PLANS = ['pilot', 'starter', 'growth', 'scale'];
+const PL_PLAN_WORDS = { pilot: 'Pilot', starter: 'Starter', growth: 'Growth', scale: 'Scale' };
+
+const pl = { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30 };
 
 /* ---- plumbing (finance.js) ---------------------------------------- */
 
@@ -96,12 +106,15 @@ function plSafeUrl(u) {
 /* ---- the bookings ------------------------------------------------- */
 
 /* The bookings: soonest call first, each with its score and whether a brief exists.
-   {status} is one stage, 'open' for everything still in play, or nothing for all. */
+   {status} is one stage, 'open' for everything still in play, or nothing for all.
+   {from, to} keeps only the calls starting in that span — what the Calendar asks for. */
 async function plBookings(opts) {
   const o = opts || {};
   const got = await plRun(() => {
     let q = sb.from('discovery_bookings').select('*');
     if (o.status && o.status !== 'all' && o.status !== 'open') q = q.eq('status', o.status);
+    if (o.from) q = q.gte('call_at', o.from);
+    if (o.to) q = q.lt('call_at', o.to);
     return q.order('call_at', { ascending: true });
   }, []);
   if (!got.ok) return got;
@@ -134,7 +147,7 @@ async function plBooking(id) {
   if (!id) return plErr('No booking was asked for.');
   const got = await plRun(() => sb.from('discovery_bookings').select('*').eq('id', id).maybeSingle(), null);
   if (!got.ok) return got;
-  if (!got.data) return plErr('That enquiry is not here any more.');
+  if (!got.data) return plErr('That booking is not here any more.');
   const b = got.data;
 
   const brief = await plBrief(id);
@@ -156,13 +169,15 @@ async function plBooking(id) {
 /* What they filled in on the website, in the order it is worth reading. */
 function plAnswers(b) {
   b = b || {};
+  const yesNo = (v) => (v === true ? 'Yes' : v === false ? 'No' : v);
   return [
-    ['Name', b.name], ['Email', b.email], ['Their role', b.role], ['Company', b.company],
+    ['Name', b.name], ['Email', b.email], ['Phone', b.phone], ['Their role', b.role], ['Company', b.company],
     ['Website', b.website], ['Where they are', [b.city, b.country].filter(Boolean).join(', ')],
-    ['Industry', b.industry], ['Budget', b.budget],
-    ['Can they decide', b.decision_maker === true ? 'Yes' : b.decision_maker === false ? 'No' : ''],
-    ['What they want', b.goal], ['When they want it', b.timeline],
-    ['How they get leads today', b.current_lead_gen], ['Came from', b.source],
+    ['Industry', b.industry], ['What they sell', b.sells], ['Deal size', b.budget],
+    ['How they win customers today', b.current_lead_gen], ['Capacity for new calls', b.capacity],
+    ['Tried outbound before', yesNo(b.tried_outbound)],
+    ['Can they decide', yesNo(b.decision_maker)],
+    ['What they want', b.goal], ['When they want it', b.timeline], ['Came from', b.source],
   ].filter(([, v]) => v != null && String(v).trim() !== '').map(([k, v]) => ({ label: k, value: String(v) }));
 }
 
@@ -293,13 +308,13 @@ async function plWon(bookingId, opts) {
   const got = await plRun(() => sb.from('discovery_bookings').select('*').eq('id', bookingId).maybeSingle(), null);
   if (!got.ok) return got;
   const b = got.data;
-  if (!b) return plErr('That enquiry is not here any more.');
+  if (!b) return plErr('That booking is not here any more.');
 
   /* already a client? never make a second one from the same booking */
   const seen = await plRun(() => sb.from('clients').select('*').eq('booking_id', bookingId).limit(1), []);
   if (!seen.ok) return seen;
   if (Array.isArray(seen.data) && seen.data.length) {
-    return plErr(plWho(b) + ' is already a client from this enquiry, so nothing was changed.');
+    return plErr(plWho(b) + ' is already a client from this booking, so nothing was changed.');
   }
 
   /* the price comes from plan_prices */
@@ -332,7 +347,7 @@ async function plWon(bookingId, opts) {
   return plOk({ client: made.data, booking: moved.data });
 }
 
-/* ---- the outcome: lost, and nobody came -------------------------- */
+/* ---- the outcome: lost, held, and nobody came -------------------- */
 
 function plIsLossReason(r) { return PL_LOSS_REASONS.includes(String(r || '')); }
 
@@ -349,6 +364,13 @@ async function plLost(bookingId, reason) {
   return plRun(() => sb.from('discovery_bookings').update({
     status: 'lost', lost_reason: String(reason), lost_at: new Date().toISOString(),
   }).eq('id', bookingId).select().single(), null);
+}
+
+/* The call happened. Whether we won it is a separate answer (plWon / plLost). */
+async function plHeld(bookingId) {
+  if (!bookingId) return plErr('No booking was asked for.');
+  return plRun(() => sb.from('discovery_bookings').update({ status: 'held' })
+    .eq('id', bookingId).select().single(), null);
 }
 
 /* A discovery call nobody turned up to. */
@@ -407,59 +429,24 @@ function plRangeDays(days, now) {
   return { from: from.toISOString(), to: to.toISOString(), days: n };
 }
 
-/* ---- the pipeline screen ----------------------------------------- */
+/* ---- what the Calendar asks about a booking ---------------------- */
 
 function plResearchPill(row) {
   if (row && row.has_brief) return '<span class="pill green">Brief ready</span>';
   return '<span class="pill grey">No brief yet</span>';
 }
-/* A booking whose call has been and gone with nothing recorded. */
+function plPlanWord(p) { return PL_PLAN_WORDS[String(p || '')] || ''; }
+/* A booking whose call has been and gone with nothing recorded about it. It is "open"
+   by plIsOpen — never by a list of open words, which once hid every real booking — and
+   nobody has yet said the call was held or that no one came. */
 function plNeedsOutcome(b, now) {
-  const t = plMs(b && b.call_at); if (!t) return false;
-  const s = String(b && b.status);
-  return (s === 'new' || s === 'booked' || s === 'brief_sent' || s === 'held' || s === 'contacted') && (now || new Date()).getTime() - t > 20 * 60000;
+  const t = plMs(b && b.call_at); if (!t || !plIsOpen(b)) return false;
+  const s = String(b.status);
+  if (PL_HELD.includes(s) || s === 'no_show') return false;
+  return (now || new Date()).getTime() - t > 20 * 60000;
 }
 
-function renderPlBookingCard(b, now) {
-  const go = `plOpenEnquiry(${plAttr(b.id)})`;
-  const score = plScore(b);
-  const when = b.call_at ? `${esc(plWhen(b.call_at))} <span class="muted">· ${esc(plRel(b.call_at, now))}</span>` : '<span class="muted">No call booked</span>';
-  return `<div class="card pl-card" role="button" tabindex="0" onclick="${go}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${go}}">
-    <div class="pl-card-head"><b class="pl-who">${esc(plWho(b))}</b>${plStatusPill(b.status)}${plResearchPill(b)}${score === '' ? '' : `<span class="pill blue pl-score" title="What the research engine scored them">Score ${esc(String(score))}</span>`}</div>
-    <div class="pl-when">${when}</div>
-    ${b.name && b.company ? `<div class="muted pl-sub">${esc(b.name)}${b.role ? ' · ' + esc(b.role) : ''}</div>` : ''}
-    ${b.goal ? `<p class="pl-goal">${esc(String(b.goal).slice(0, 180))}</p>` : ''}
-  </div>`;
-}
-
-/* The pipeline: what is coming, what needs research, what needs an outcome recorded. */
-function renderPlEnquiries(rows, meta) {
-  meta = meta || {};
-  const now = meta.now || new Date();
-  const list = (rows || []).filter((b) => b && b.id != null);
-  if (!list.length) {
-    return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'No enquiries yet',
-      "When someone books a discovery call from the website, they show up here with what we found out about them.",
-      '', null);
-  }
-  const nowMs = now.getTime();
-  const coming = list.filter((b) => plIsOpen(b) && plMs(b.call_at) >= nowMs - 20 * 60000);
-  const needsResearch = list.filter((b) => plIsOpen(b) && !b.has_brief);
-  const needsOutcome = list.filter((b) => plNeedsOutcome(b, now));
-  const rest = list.filter((b) => coming.indexOf(b) < 0 && needsOutcome.indexOf(b) < 0);
-
-  const block = (title, sub, items, empty) => `<div class="section-head pl-section"><h3>${esc(title)}</h3>${items.length ? `<span class="count">${items.length}</span>` : ''}${sub ? `<span class="muted pl-small">${esc(sub)}</span>` : ''}</div>`
-    + (items.length ? `<div class="pl-list">${items.map((b) => renderPlBookingCard(b, now)).join('')}</div>`
-      : `<div class="card pl-pad"><p class="muted">${esc(empty)}</p></div>`);
-
-  return `<div class="pl-pipe"><div class="pl-acts"><button class="btn ghost" onclick="plOpenFunnel()">See the funnel</button></div>
-    ${block('Coming up', 'Soonest first', coming, 'No discovery calls booked.')}
-    ${block('Needs research', 'No brief from the research engine yet', needsResearch, 'Every open enquiry has a brief.')}
-    ${block('Needs an outcome', 'The call has been and gone', needsOutcome, 'Nothing waiting to be marked won or lost.')}
-    ${block('Everything else', '', rest, 'Nothing else.')}</div>`;
-}
-
-/* ---- one enquiry -------------------------------------------------- */
+/* ---- one booking, laid out (the Calendar's panel draws this) ------ */
 
 function renderPlBrief(sections, state, bookingId) {
   const st = (state && state.state) || 'none';
@@ -484,43 +471,60 @@ function renderPlBrief(sections, state, bookingId) {
   </div>`).join('')}</div>`;
 }
 
-/* One enquiry: their answers, the brief, and the won / lost / no-show actions. */
+/* The outcome buttons, or what was decided. Every button here writes through the data
+   functions above; nothing is written from the Calendar itself. */
+function renderPlOutcome(d) {
+  const b = d.booking, id = b.id, s = String(b.status);
+  if (d.client) {
+    return `<div class="card pl-pad pl-outcome"><b>Won — they are a client</b><p class="muted">${esc(d.client.company || '')} is on ${esc(String(d.client.plan || ''))}, ${esc(String(d.client.calls_promised || 0))} calls a month. This booking cannot make a second client.</p></div>`;
+  }
+  if (s === 'lost') {
+    return `<div class="card pl-pad pl-outcome"><b>Lost</b><p class="muted">${esc(b.lost_reason ? plLossWord(b.lost_reason) : 'No reason was recorded.')}</p></div>`;
+  }
+  if (s === 'cancelled') {
+    return `<div class="card pl-pad pl-outcome"><b>Cancelled</b><p class="muted">This call was cancelled, so there is nothing to record.</p></div>`;
+  }
+  const picked = PL_PLANS.includes(String(b.plan)) ? String(b.plan) : '';
+  const said = s === 'held' ? 'The call is marked as done. Did they buy?'
+    : s === 'no_show' ? 'Marked as nobody came. If that was the end of it, mark it lost below.' : '';
+  return `<div class="card pl-pad pl-outcome"><b>How did it go?</b>
+    ${said ? `<p class="muted">${esc(said)}</p>` : ''}
+    <div class="pl-acts">${s === 'held' ? '' : `<button class="btn ghost" onclick="plMarkHeld(${plAttr(id)})">Call done</button>`}
+      ${s === 'no_show' ? '' : `<button class="btn ghost" onclick="plMarkNoShow(${plAttr(id)})">Nobody came</button>`}</div>
+    <div class="field"><label for="plPlan">If they bought, which plan</label><select id="plPlan" data-tk-form><option value="">Pick the plan</option>${PL_PLANS.map((p) => `<option value="${esc(p)}"${p === picked ? ' selected' : ''}>${esc(plPlanWord(p))}</option>`).join('')}</select></div>
+    <div class="field"><label for="plTerm">Term</label><select id="plTerm" data-tk-form><option value="monthly">Month by month</option><option value="3month">Three months up front</option></select></div>
+    <div class="pl-acts"><button class="btn" onclick="plMarkWon(${plAttr(id)})">Won</button></div>
+    <div class="field"><label for="plLossReason">If we lost them, why</label><select id="plLossReason" data-tk-form><option value="">Pick a reason</option>${PL_LOSS_REASONS.map((r) => `<option value="${esc(r)}">${esc(plLossWord(r))}</option>`).join('')}</select></div>
+    <div class="pl-acts"><button class="btn ghost" onclick="plMarkLost(${plAttr(id)})">Lost</button></div>
+    <p class="muted pl-small">The plan sets the number of calls and the fee — both come from the price list, never typed in here.</p></div>`;
+}
+
+/* One booking: where it stands, the brief, and their answers. `meta.head` is the top of
+   the panel when the caller has its own (the Calendar does, with both clocks on it), and
+   `meta.brief` is the brief already laid out when the caller draws that too. */
 function renderPlEnquiry(d, meta) {
   meta = meta || {};
   const now = meta.now || new Date();
   if (!d || !d.booking) {
-    return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'Enquiry not found',
-      'It may have been removed.', 'All enquiries', "render('plEnquiries')");
+    return emptyState((typeof I !== 'undefined' && I.inquiry) || '', 'Booking not found',
+      'It may have been removed.', '', null);
   }
   const b = d.booking, id = b.id, score = d.score;
   const site = plSafeUrl(b.website);
-  const head = `<div class="card pl-pad pl-head">
+  const head = typeof meta.head === 'string' ? meta.head : `<div class="card pl-pad pl-head">
     <div class="pl-card-head"><b class="pl-who">${esc(plWho(b))}</b>${plStatusPill(b.status)}${score === '' ? '' : `<span class="pill blue">Score ${esc(String(score))}</span>`}</div>
     <div class="pl-when">${b.call_at ? `<b>${esc(plWhen(b.call_at))}</b> <span class="muted">· ${esc(plRel(b.call_at, now))}${b.timezone ? ' · ' + esc(b.timezone) : ''}</span>` : '<span class="muted">No call booked</span>'}</div>
     ${b.meet_link && plSafeUrl(b.meet_link) ? `<div class="pl-acts"><a class="btn" href="${esc(plSafeUrl(b.meet_link))}" target="_blank" rel="noopener noreferrer">Join the call</a></div>` : ''}
   </div>`;
-
-  const actions = d.client
-    ? `<div class="card pl-pad pl-outcome"><b>Won — they are a client</b><p class="muted">${esc(d.client.company || '')} is on ${esc(String(d.client.plan || ''))}, ${esc(String(d.client.calls_promised || 0))} calls a month. This enquiry cannot make a second client.</p></div>`
-    : String(b.status) === 'lost'
-      ? `<div class="card pl-pad pl-outcome"><b>Lost</b><p class="muted">${esc(b.lost_reason ? plLossWord(b.lost_reason) : 'No reason was recorded.')}</p></div>`
-      : `<div class="card pl-pad pl-outcome"><b>How did it go?</b>
-        <div class="field"><label for="plPlan">If they bought, which plan</label><select id="plPlan" data-tk-form><option value="">Pick the plan</option><option value="pilot">Pilot</option><option value="starter">Starter</option><option value="growth">Growth</option><option value="scale">Scale</option></select></div>
-        <div class="field"><label for="plTerm">Term</label><select id="plTerm" data-tk-form><option value="monthly">Month by month</option><option value="3month">Three months up front</option></select></div>
-        <div class="pl-acts"><button class="btn" onclick="plMarkWon(${plAttr(id)})">Won</button>
-          <button class="btn ghost" onclick="plMarkNoShow(${plAttr(id)})">Nobody came</button></div>
-        <div class="field"><label for="plLossReason">If we lost them, why</label><select id="plLossReason" data-tk-form><option value="">Pick a reason</option>${PL_LOSS_REASONS.map((r) => `<option value="${esc(r)}">${esc(plLossWord(r))}</option>`).join('')}</select></div>
-        <div class="pl-acts"><button class="btn ghost" onclick="plMarkLost(${plAttr(id)})">Lost</button></div>
-        <p class="muted pl-small">The plan sets the number of calls and the fee — both come from the price list, never typed in here.</p></div>`;
 
   const answers = (d.answers || []).length
     ? `<div class="card pl-pad"><div class="pl-kv">${d.answers.map((a) => `<small>${esc(a.label)}</small><span>${a.label === 'Website' && site ? `<a href="${esc(site)}" target="_blank" rel="noopener noreferrer">${esc(a.value)}</a>` : esc(a.value)}</span>`).join('')}</div></div>`
     : `<div class="card pl-pad"><p class="muted">They did not fill in anything beyond their name and email.</p></div>`;
 
   return head
+    + `<div class="section-head pl-section"><h3>Where it stands</h3></div>` + renderPlOutcome(d)
     + `<div class="section-head pl-section"><h3>What we found out</h3>${d.research && d.research.state === 'done' ? '<span class="pill green">Brief ready</span>' : ''}</div>`
-    + renderPlBrief(d.sections, d.research, id)
-    + `<div class="section-head pl-section"><h3>Where it stands</h3></div>` + actions
+    + (typeof meta.brief === 'string' ? meta.brief : renderPlBrief(d.sections, d.research, id))
     + `<div class="section-head pl-section"><h3>What they told us</h3></div>` + answers;
 }
 
@@ -553,50 +557,28 @@ function renderPlFunnel(f, meta) {
   </div>`;
 }
 
-/* ---- the screens (what the router calls) -------------------------- */
+/* ---- the one screen left here: the funnel -------------------------- */
 
-function plHostHTML(which) {
-  if (which === 'funnel') {
-    if (pl.funnelErr) return `<div class="card pl-pad"><p class="muted">${esc(pl.funnelErr)}</p></div>`;
-    return pl.funnel ? renderPlFunnel(pl.funnel, {}) : plLoadingHTML();
-  }
-  if (which === 'enquiry') {
-    if (pl.oneErr) return `<div class="card pl-pad"><p class="muted">${esc(pl.oneErr)}</p></div>`;
-    return pl.one ? renderPlEnquiry(pl.one, {}) : plLoadingHTML();
-  }
-  if (pl.listErr) return `<div class="card pl-pad"><p class="muted">${esc(pl.listErr)}</p></div>`;
-  return pl.list ? renderPlEnquiries(pl.list, {}) : plLoadingHTML();
+function plHostHTML() {
+  if (pl.funnelErr) return `<div class="card pl-pad"><p class="muted">${esc(pl.funnelErr)}</p></div>`;
+  return pl.funnel ? renderPlFunnel(pl.funnel, {}) : plLoadingHTML();
 }
 function plLoadingHTML() { return '<div class="card pl-pad" role="status"><p class="muted">Loading…</p></div>'; }
-function plRepaint(which) {
+function plRepaint() {
   const h = typeof document !== 'undefined' ? document.getElementById('plHost') : null;
   if (!h) return false;
-  h.innerHTML = plHostHTML(which);
+  h.innerHTML = plHostHTML();
   return true;
 }
-
-function viewEnquiries() {
-  plLoadEnquiries().then(() => plRepaint('enquiries'));
-  return `<div id="plHost" class="pl">${plHostHTML('enquiries')}</div>`;
-}
-function viewEnquiry(id) {
-  if (id != null) pl.oneId = String(id);
-  pl.one = null; pl.oneErr = null;
-  plLoadEnquiry(pl.oneId).then(() => plRepaint('enquiry'));
-  return `<div id="plHost" class="pl">${plHostHTML('enquiry')}</div>`;
-}
 function viewFunnel() {
-  plLoadFunnel(pl.days).then(() => plRepaint('funnel'));
-  return `<div id="plHost" class="pl">${plHostHTML('funnel')}</div>`;
+  plLoadFunnel(pl.days).then(() => plRepaint());
+  return `<div id="plHost" class="pl">${plHostHTML()}</div>`;
 }
 
-async function plLoadEnquiries(status) {
-  const r = await plBookings({ status: status || pl.filter });
-  if (r.ok) { pl.list = r.data || []; pl.listAt = Date.now(); pl.listErr = null; } else { pl.listErr = r.error; }
-  return r;
-}
+/* One booking, read fresh and kept in pl.one — the Calendar's panel draws from it. */
 async function plLoadEnquiry(id) {
-  if (!id) { pl.oneErr = 'No enquiry was asked for.'; return plErr(pl.oneErr); }
+  if (!id) { pl.oneErr = 'No booking was asked for.'; return plErr(pl.oneErr); }
+  pl.oneId = String(id);
   const r = await plBooking(id);
   if (r.ok) { pl.one = r.data; pl.oneErr = null; } else { pl.one = null; pl.oneErr = r.error; }
   return r;
@@ -610,14 +592,13 @@ async function plLoadFunnel(days) {
 
 /* ---- the buttons -------------------------------------------------- */
 
-/* The shell keeps which booking is open (currentEnquiryId) and routes 'enquiry' here. */
-function plOpenEnquiry(id) {
-  if (!id) return;
-  pl.oneId = String(id);
-  if (typeof openEnquiry === 'function') return openEnquiry(String(id));
-  if (typeof render === 'function') render('enquiry');
-}
 function plOpenFunnel() { if (typeof render === 'function') render('funnel'); }
+/* After any outcome is written: read the booking again, then let the Calendar redraw
+   itself and its panel (mtBookingChanged, meetings.js). */
+async function plChanged(id) {
+  await plLoadEnquiry(id);
+  if (typeof mtBookingChanged === 'function') { try { await mtBookingChanged(id); } catch (e) { /* the write itself went through */ } }
+}
 function plPick(id) { const e = typeof document !== 'undefined' ? document.getElementById(id) : null; return e && e.value ? String(e.value).trim() : ''; }
 function plSay(r, good) {
   if (typeof toast === 'function') toast(r && r.ok ? good : (r && r.error) || 'Nothing was changed.');
@@ -628,20 +609,26 @@ async function plMarkWon(id) {
   if (!plan) return plSay(plErr('Pick the plan they bought first.'), '');
   const r = await plWon(id, { plan, term: plPick('plTerm') || 'monthly', owner: (typeof authUser !== 'undefined' && authUser && authUser.uid) || null });
   plSay(r, 'Won — they are a client now.');
-  if (r.ok) { await plLoadEnquiry(id); plRepaint('enquiry'); }
+  if (r.ok) await plChanged(id);
   return r;
 }
 async function plMarkLost(id) {
   const reason = plPick('plLossReason');
   const r = await plLost(id, reason);
   plSay(r, 'Marked lost.');
-  if (r.ok) { await plLoadEnquiry(id); plRepaint('enquiry'); }
+  if (r.ok) await plChanged(id);
   return r;
 }
 async function plMarkNoShow(id) {
   const r = await plNoShow(id);
   plSay(r, 'Marked as nobody came.');
-  if (r.ok) { await plLoadEnquiry(id); plRepaint('enquiry'); }
+  if (r.ok) await plChanged(id);
   return r;
 }
-function plForget() { Object.assign(pl, { list: null, listAt: 0, listErr: null, filter: 'open', one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30 }); }
+async function plMarkHeld(id) {
+  const r = await plHeld(id);
+  plSay(r, 'Marked: the call happened.');
+  if (r.ok) await plChanged(id);
+  return r;
+}
+function plForget() { Object.assign(pl, { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30 }); }
