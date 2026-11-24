@@ -159,11 +159,11 @@ test('pick never throws and refuses junk without calling the database', async ()
 
 test('the scheduling migration carries the meeting-confirmation trigger and D’s functions', () => {
   const sql = fs.readFileSync(path.join(root, 'supabase/migrations/20261124_scheduling.sql'), 'utf8');
-  for (const s of ['create trigger meetings_confirm after insert on public.meetings',
+  for (const s of ['create or replace trigger meetings_confirm after insert on public.meetings',
     'function public.offer_times(p_client uuid, p_kind text) returns uuid',
     'function public.portal_offer_pick(p_offer uuid, p_index int) returns jsonb',
     'function public.offer_match(m public.channel_messages) returns boolean',
-    'create trigger meetings_offer_link after update of meet_link on public.meetings',
+    'create or replace trigger meetings_offer_link after update of meet_link on public.meetings',
     "to_regprocedure('public.precall_request(uuid)')",
     'grant execute on function public.portal_offer_pick(uuid, int) to authenticated']) {
     assert.ok(sql.includes(s), s);
