@@ -210,7 +210,7 @@ function pcAgreementHtml(doc){
   const parties = (Array.isArray(t.parties) ? t.parties : [])
     .map((p) => `<div class="pc-party"><dt class="pc-tag">${pcEsc(p && p.label)}</dt><dd>${pcEsc(p && p.value)}</dd></div>`).join('');
   const sections = (Array.isArray(t.sections) ? t.sections : [])
-    .map((s, i) => `<section class="pc-sec"><h2><span class="pc-num">${i + 1}</span>${pcEsc(s && s.h)}</h2>${pcParasHtml(s && s.body)}</section>`).join('');
+    .map((s, i) => `<section class="pc-sec"><h2><span class="pc-num">${i + 1}</span>${pcEsc(String((s && s.h) || "").replace(/^\s*\d+[.)]\s*/, ""))}</h2>${pcParasHtml(s && s.body)}</section>`).join('');
   let foot;
   if (d.status === 'signed') {
     foot = `<section class="pc-signed" id="pcSigned" tabindex="-1" aria-label="Signature">
