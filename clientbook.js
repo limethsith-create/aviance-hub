@@ -628,7 +628,8 @@ function cbRenderClients(rows, meta){
     return (m.error ? cbErrNote(m.error) : '') +
       cbEmpty('No clients yet', 'When a discovery call is won, add them here and the journey starts at Won.', 'Add a client', 'cbOpenAdd()');
   }
-  const needs = rows.filter(r => r.needs).length;
+  // a client who only has to sign or pay (not late yet) needs nobody: they are not counted here
+  const needs = rows.filter(r => (r.flags || []).some(f => !(f.code === 'waiting' && !f.urgent))).length;
   const stake = rows.reduce((s, r) => s + r.stake, 0);
   const groups = cbGroups(rows);
   return (m.error ? cbErrNote(m.error) : '') +

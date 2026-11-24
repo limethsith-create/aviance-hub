@@ -920,7 +920,7 @@ test('cbWaiting: an unsigned agreement and an unpaid first invoice read as "Wait
   const r = cbRow(client({stage:'won', updated_at:new Date(now).toISOString()}), {agreements:{c1:ag}, firstInvoices:{c1:inv}, now});
   assert.ok(r.needs >= 1 && r.flags.some(f => f.code === 'waiting'));
   const page = cbRenderClients([r], {});
-  assert.match(text(page), /Need a person 1/);
+  assert.match(text(page), /Need a person 0/, "waiting on the client (not late) needs nobody");
   assert.match(text(page), /Growth/, 'the plan is capitalised in the list');
 });
 

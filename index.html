@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="portal.css">
 <link rel="stylesheet" href="journey.css">
 <link rel="stylesheet" href="drafts.css">
+<link rel="stylesheet" href="documents.css">
 <link rel="stylesheet" href="team.css">
 <link rel="stylesheet" href="onboarding.css">
 <link rel="stylesheet" href="outreach.css">
@@ -26,7 +27,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Aviance">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" content="#FAFAF9" id="themeColor">
+<meta name="theme-color" content="#F6F7F9" id="themeColor">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCI+PGRlZnM+PC9kZWZzPjxwb2x5Z29uIHBvaW50cz0iMjgsODggMTAwLDEyOCAxNzIsODggMTcyLDE1MCAxMDAsMTkwIDI4LDE1MCIgZmlsbD0iIzEwMTAxNSIgLz48cG9seWdvbiBwb2ludHM9IjI4LDg4IDEwMCwxMjggMTAwLDE5MCAyOCwxNTAiIGZpbGw9IiMxQzFDMjIiIC8+PHBvbHlnb24gcG9pbnRzPSIxMDAsMTI4IDE3Miw4OCAxNzIsMTUwIDEwMCwxOTAiIGZpbGw9IiMwQTBBMEMiIC8+PHBvbHlnb24gcG9pbnRzPSIzMCw3MiAxMDAsMTEwIDE3MCw3MiAxMDAsMzQiIGZpbGw9IiNFMDI5MEYiIC8+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMC4zNSwtMC4xOSwwLjM1LDAuMTksMzAsNzIpIj48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg0LDQpIHNjYWxlKDAuOTIpIj48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0xMDAgMTggTDE1NiAxNzIgTDEyOCAxNzIgTDExNyAxNDAgTDgzIDE0MCBMNzIgMTcyIEw0NCAxNzIgWiBNOTEgMTE0IEwxMDkgMTE0IEwxMDAgODQgWiIgZmlsbD0iI0ZGRkZGRiIvPjwvZz48L2c+PC9zdmc+">
 <!-- Pinned to one exact version with an integrity hash (checked against the npm package): a changed file on the CDN will not run. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
@@ -262,6 +263,7 @@ body.dark [style*="background:#0000001f"]{background:rgba(255,255,255,.12)!impor
 body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!important}
 </style>
 <link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="polish.css">
 </head>
 <body>
 
@@ -453,6 +455,7 @@ const views={
   finalStatement:{fn:()=>V('viewFinalStatement',currentClientId),title:'Final statement',sub:'',back:()=>render('ending')},
   dataDeletion:{fn:()=>V('viewDataDeletion'),title:'Data deletion',sub:'What goes, and what we keep',back:()=>render('ending')},
   journey:{fn:()=>V('viewJourneyBoard'),title:'Onboarding',sub:'Every new client, from payment to launch',wide:true},
+  documents:{fn:()=>V('viewDocuments'),title:'Documents',sub:'Everything a client receives, live'},
   drafts:{fn:()=>V('viewDrafts'),title:'Replies to approve',sub:'What the bot wrote. Nothing goes out until you send it'},
   settings:{fn:()=>V('viewSettings'),title:'Settings',sub:'You, the calendar, and the tool behind the outreach'},
 };
@@ -533,6 +536,7 @@ function parseDeepLink(h){
   if(h==='inquiries')return {view:'inquiries'};
   if(h==='calendar')return {view:'calendar'};
   if(h==='drafts')return {view:'drafts'};
+  if(h==='documents')return {view:'documents'};
   if(h==='onboarding'||h==='journey')return {view:'journey'};
   if(h==='numbers')return {view:'numbers'};
   if(h==='channels')return {view:'channels'};
@@ -580,16 +584,13 @@ function navItems(){
   const needs=n('dgNavCount'),cal=n('mtNavCount'),ch=n('chvNavCount'),req=n('ptNavCount'),pend=n('tmNavCount');
   return [
     {view:'home',icon:I.activity,label:'Today',badge:needs,tone:'red',badgeTitle:needs?needs+' need'+(needs===1?'s':'')+' you':''},
-    {view:'clients',icon:I.money,label:'Clients',badge:'',also:['client','needsYou','clientPeople','onboarding','onboardingClient','outreachClient']},
-    {view:'calling',icon:I.sun,label:'Calling',badge:'',also:['callTargets','dnc']},
-    {view:'outreach',icon:I.chart,label:'Outreach',badge:'',also:['outreachThread']},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:cal,tone:'amber',badgeTitle:cal?cal+(cal===1?' call needs':' calls need')+' an outcome':'',also:['meeting','noShows','funnel']},
+    {view:'clients',icon:I.money,label:'Clients',badge:'',also:['client','needsYou','clientPeople','onboarding','onboardingClient','outreachClient']},
     {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':'',also:['requests']},
     {view:'drafts',icon:I.chat,label:'Replies',badge:(typeof drCount==='function'?drCount():0)||'',tone:'red',badgeTitle:'Replies the bot drafted, waiting for you'},
     {view:'journey',icon:I.activity,label:'Onboarding',badge:(typeof jyLateCount==='function'?jyLateCount():0)||'',tone:'amber',badgeTitle:'Steps running late'},
     {view:'billing',icon:I.money,label:'Invoices',badge:req,tone:'amber',also:['monthEnd','friday','ending','finalStatement','dataDeletion']},
-    {view:'work',icon:I.people,label:'Work',badge:'',also:['myWork']},
-    {view:'team',icon:I.people,label:'Team',badge:pend,tone:pend?'red':'',badgeTitle:pend?pend+' waiting for your approval':'',owner:true},
+    {view:'documents',icon:I.chart,label:'Documents',badge:'',owner:true},
     {view:'settings',icon:I.gear,label:'Settings',badge:'',owner:true},
   ].filter(it=>!it.owner||!authUser||authUser.role==='admin');
 }
@@ -682,7 +683,7 @@ function showLogin(){
   try{if(typeof mtStopTimer==='function')mtStopTimer();}catch(e){}
   try{if(typeof channelsStopTimer==='function')channelsStopTimer();}catch(e){}
 }
-async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{if(typeof mtForget==='function')mtForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}try{if(typeof draftsForget==='function')draftsForget();}catch(e){}try{if(typeof peopleForgetClient==='function')peopleForgetClient();}catch(e){}errEl('loginErr','');showLogin();}
+async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{if(typeof mtForget==='function')mtForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}try{if(typeof draftsForget==='function')draftsForget();if(typeof documentsForget==='function')documentsForget();}catch(e){}try{if(typeof peopleForgetClient==='function')peopleForgetClient();}catch(e){}errEl('loginErr','');showLogin();}
 /* ---- Password recovery ---- */
 async function forgotPassword(){
   const email=val('loginEmail').toLowerCase();
@@ -788,7 +789,7 @@ function runNotif(i){const x=(window._notifs||[])[i];document.getElementById('no
 document.addEventListener('click',e=>{const p=document.getElementById('notifPop');if(p&&p.classList.contains('open')&&!e.target.closest('#notifPop')&&!e.target.closest('#notifBtn'))p.classList.remove('open');});
 
 /* ---- Theme + shortcuts ---- */
-function themeColorMeta(){const d=document.body.classList.contains('dark');const m=document.getElementById('themeColor');if(m&&typeof m.setAttribute==='function')m.setAttribute('content',d?'#0E0F11':'#FAFAF9');try{document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}}
+function themeColorMeta(){const d=document.body.classList.contains('dark');const m=document.getElementById('themeColor');if(m&&typeof m.setAttribute==='function')m.setAttribute('content',d?'#0B111B':'#F6F7F9');try{document.documentElement.setAttribute('data-theme',d?'dark':'light');}catch(e){}}
 function toggleTheme(){setTheme(document.body.classList.contains('dark')?'light':'dark');}
 /* Settings › Light or dark (and ⌘K). Remembered on this device. */
 function setTheme(mode){const d=mode==='dark';document.body.classList.toggle('dark',d);try{localStorage.setItem('avianceTheme',d?'dark':'light');}catch(e){}themeColorMeta();if(currentView==='settings'&&typeof trialsRepaint==='function')trialsRepaint('settings');}
@@ -813,6 +814,7 @@ boot();
 <script src="portal.js"></script>
 <script src="journey.js"></script>
 <script src="drafts.js"></script>
+<script src="documents.js"></script>
 <script src="team.js"></script>
 <script src="onboarding.js"></script>
 <script src="outreach-adapter.js"></script>

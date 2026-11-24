@@ -526,7 +526,7 @@ function obInvoiceRow(inv){
   if (st !== 'paid' && st !== 'void' && st !== 'cancelled') btns.push(`<button type="button" class="btn ghost" onclick="obMarkPaidGo(${obArg(inv.id)})">Mark paid</button>`);
   return `<li class="ob-inv"><span class="ob-inv-no">${obEsc(obText(inv.number) || '—')}</span>
     <span class="ob-inv-who">${obEsc(obText(inv.client_name || inv.company) || '')}</span>
-    <span class="ob-inv-sum"><b>${obEsc(obMoney(inv.amount))}</b> ${obPilotLine(inv)}</span>
+    <span class="ob-inv-sum"><b>${obEsc(obMoney(inv.amount))}</b> ${obPilotLine(inv)}${inv.due_on ? ` <span class="muted">· due ${obEsc(obText(inv.due_on))}${Number(inv.days_overdue) > 0 ? ` · ${obEsc(String(inv.days_overdue))} days late` : ''}</span>` : ''}</span>
     <span class="pill ${st === 'paid' ? 'green' : st === 'sent' ? 'amber' : 'grey'}">${obEsc(obText(inv.status) || 'draft')}</span>
     <span class="ob-inv-btns">${btns.join('')}</span></li>`;
 }
@@ -535,8 +535,11 @@ function obRenderBilling(){
   if (!ob.billing) return `<div class="card ob-card"><b>Reading the invoices…</b><p class="muted">One moment.</p></div>`;
   const work = ob.billing.work || [];
   const invoices = ob.billing.invoices || [];
-  const toRaise = work.filter(w => !w.invoice_id);
-  const open = invoices.filter(i => obText(i.status).toLowerCase() !== 'paid');
+  // v_invoice_work lists open invoices (with the company and due date); only a month row with no invoice yet is "to raise"
+  const toRaise = work.filter(w => w.month_id && !w.invoice_id);
+  const byId = {}; work.forEach(w => { if (w.id) byId[w.id] = w; });
+  const open = invoices.filter(i => !['paid', 'void', 'cancelled'].includes(obText(i.status).toLowerCase()))
+    .map(i => Object.assign({}, i, byId[i.id] ? {company: byId[i.id].company, days_overdue: byId[i.id].days_overdue, action_needed: byId[i.id].action_needed} : {}));
 
   const raiseBlock = toRaise.length
     ? `<ul class="ob-inv-list">${toRaise.map(w => `<li class="ob-inv"><span class="ob-inv-who">${obEsc(obText(w.company || w.client_name) || 'A client')}</span>
