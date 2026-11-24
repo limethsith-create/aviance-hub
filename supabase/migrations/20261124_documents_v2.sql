@@ -110,7 +110,7 @@ begin
   -- 5. Our guarantee
   if v_pilot then
     s5 := jsonb_build_array(
-      'If we book fewer than ' || v_calls || ' qualified calls within 30 days of your campaign going live, we [refund the ' || v_fee || ' in full].',
+      'If we book fewer than ' || v_calls || ' qualified calls within 30 days of your campaign going live, we refund twice what you paid: $' || to_char(c.monthly_fee * 2, 'FM999,999,990') || ' back.',
       'A refund is money back in your account, not a credit. We pay it within [10 business days] of the 30 days ending.');
   else
     s5 := jsonb_build_array(
@@ -172,7 +172,6 @@ begin
   ]::text[];
   if v_pilot then
     ph := ph || array[
-      'What do you refund if the Pilot falls short? Draft says the ' || v_fee || ' in full.',
       'How long after the Pilot can a client still get the ' || v_fee || ' taken off their first invoice? Draft says 30 days.'
     ]::text[];
   else
