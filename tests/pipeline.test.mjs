@@ -95,11 +95,33 @@ function builder(table) {
   };
   return api;
 }
+/* The database's close_won rule, small and in memory: one client per booking, the plan's
+   own numbers, the booking marked won. Its refusal is the real one's words. */
+const rpcs = [];
+let rpcFail = null;
+function closeWon(a) {
+  const b = (dbRows('discovery_bookings')).find((r) => String(r.id) === String(a.p_booking));
+  if (!b) return { data: null, error: { message: 'That call is not here any more.' } };
+  if (dbRows('clients').some((c) => String(c.booking_id) === String(b.id))) return { data: null, error: { message: 'That call is already a client.' } };
+  const p = dbRows('plan_prices').find((x) => x.plan === a.p_plan);
+  if (!p) return { data: null, error: { message: 'That plan is not in the price list.' } };
+  const term = a.p_term === '3month' ? '3month' : 'monthly';
+  const c = { id: 'cl-' + (dbRows('clients').length + 1), booking_id: b.id, company: b.company, contact_name: b.name, contact_email: b.email, plan: p.plan, term, calls_promised: p.calls_promised, monthly_fee: term === '3month' && p.three_month_fee ? p.three_month_fee : p.monthly_fee, stage: 'won' };
+  dbRows('clients').push(c); b.status = 'won';
+  return { data: { client_id: c.id, invoice_id: 'inv-1', agreement_id: 'agr-1', invoice_number: 'AV-2026-0001' }, error: null };
+}
+async function fakeRpc(name, args) {
+  rpcs.push({ name, args });
+  if (rpcFail) return { data: null, error: rpcFail };
+  if (name === 'close_won') return closeWon(args || {});
+  return { data: null, error: null };
+}
+const dbRows = (t) => (db[t] ||= []);
 const supa = { session: null, user: null, profile: null };
 const fakeSb = {
   auth: { getSession: async () => ({ data: { session: supa.session } }), getUser: async () => ({ data: { user: supa.user } }), signInWithPassword: async () => ({ error: null }), signOut: async () => { supa.session = null; }, resetPasswordForEmail: async () => ({ error: null }), updateUser: async () => ({ error: null }) },
   from: (table) => builder(table),
-  rpc: async () => ({ data: null, error: null }),
+  rpc: fakeRpc,
 };
 globalThis.supabase = { createClient: () => fakeSb };
 
@@ -124,7 +146,7 @@ const PRICES = [
 const booking = (o) => Object.assign({ id: 'b-' + nextId++, name: 'Dana Smith', email: 'dana@acme.test', company: 'Acme Roofing', website: 'acme.test', role: 'Founder', city: 'Austin', country: 'US', industry: 'Roofing', budget: '$5k', decision_maker: true, goal: 'More booked calls', timeline: 'This month', current_lead_gen: 'Referrals', call_at: '2026-11-25T10:00:00Z', minutes: 30, timezone: 'America/Chicago', source: 'website', status: 'new', score: 72, created_at: '2026-11-20T09:00:00Z' }, o);
 function fresh(seedPrices = true) {
   Object.keys(db).forEach((k) => { db[k] = []; });
-  queries.length = 0; failTable = null; plForget();
+  queries.length = 0; failTable = null; plForget(); rpcs.length = 0; rpcFail = null;
   if (seedPrices) db.plan_prices = PRICES.map((p) => Object.assign({}, p));
   authUser = { uid: 'u1', name: 'Owner', role: 'admin', email: 'owner@example.com' };
 }
@@ -481,6 +503,7 @@ test('one booking: their answers, the brief and the outcome buttons; a won one o
     assert.ok(t.includes(w), 'missing: ' + w);
   }
   assert.ok(h.includes('plMarkWon(') && h.includes('plMarkLost(') && h.includes('plMarkNoShow(') && h.includes('plMarkHeld('));
+  assert.ok(h.includes('onclick="plOpenWon()"'), 'Won opens the plan picker');
   // the caller can bring its own top (the Calendar's panel does), and the rest still draws
   const own = renderPlEnquiry(d, { head: '<p>MY HEAD</p>' });
   assert.ok(own.includes('MY HEAD') && !own.includes('pl-head') && own.includes('plMarkWon('));
@@ -494,7 +517,7 @@ test('one booking: their answers, the brief and the outcome buttons; a won one o
   assert.ok(!BROKEN.test(t), t);
 
   // once they are a client the screen says so instead of offering Won again
-  await plWon('b1', { plan: 'growth' });
+  assert.equal((await plCloseWon('b1', 'growth', 'monthly')).ok, true);
   const after = renderPlEnquiry((await plBooking('b1')).data, {});
   assert.ok(text(after).includes('they are a client') && !after.includes('plMarkWon('));
   assert.ok(text(after).includes('growth') && text(after).includes('10 calls a month'));
@@ -517,7 +540,108 @@ test('the buttons read the plan and the reason off the screen, and say plainly w
     r = await plMarkWon('b1');
     assert.equal(r.ok, true);
     assert.equal(db.clients[0].monthly_fee, 4500); assert.equal(db.clients[0].calls_promised, 15);
-    assert.ok(said.some((m) => /client now/.test(m)));
+    assert.deepEqual(rpcs.at(-1), { name: 'close_won', args: { p_booking: 'b1', p_plan: 'scale', p_term: 'monthly' } }, 'Won goes through the database rule');
+    assert.ok(!queries.some((q) => q.table === 'clients' && q.op === 'insert'), 'and never writes the client row from the browser');
+    assert.ok(said.some((m) => /^Won\. The agreement and invoice are on their way to /.test(m)));
     assert.ok(said.every((m) => typeof m === 'string' && m.length && !BROKEN.test(m)), 'plain words');
   } finally { globalThis.toast = realToast; }
+});
+
+/* ───────────── won: the plan picker and the close_won rule ───────────── */
+test('plCloseWon calls close_won with the booking, plan and term, and hands back what the database made', async () => {
+  fresh();
+  db.discovery_bookings = [booking({ id: 'b1' }), booking({ id: 'b2' }), booking({ id: 'b3' })];
+  const r = await plCloseWon('b1', 'growth', '3month');
+  assert.deepEqual(Object.keys(r).sort(), ['data', 'error', 'ok']);
+  assert.deepEqual(r, { ok: true, data: { client_id: 'cl-1', invoice_id: 'inv-1', agreement_id: 'agr-1', invoice_number: 'AV-2026-0001' }, error: '' });
+  assert.deepEqual(rpcs, [{ name: 'close_won', args: { p_booking: 'b1', p_plan: 'growth', p_term: '3month' } }]);
+  assert.equal(queries.length, 0, 'plCloseWon reads and writes no table itself');
+
+  // a Pilot has no term; anything but 3month is monthly
+  await plCloseWon('b2', 'pilot', '3month');
+  assert.deepEqual(rpcs.at(-1).args, { p_booking: 'b2', p_plan: 'pilot', p_term: 'monthly' });
+  await plCloseWon('b3', 'starter');
+  assert.equal(rpcs.at(-1).args.p_term, 'monthly');
+
+  // refused before the database is asked
+  const n = rpcs.length;
+  assert.match((await plCloseWon('', 'growth')).error, /No booking/);
+  assert.match((await plCloseWon('b1', '')).error, /Pick the plan/);
+  assert.match((await plCloseWon('b1', 'platinum')).error, /price list/);
+  assert.equal(rpcs.length, n);
+
+  // the database's own words come back untouched; a thrown error does not escape
+  const twice = await plCloseWon('b1', 'scale', 'monthly');
+  assert.deepEqual(twice, { ok: false, data: null, error: 'That call is already a client.' });
+  const real = fakeSb.rpc; fakeSb.rpc = async () => { throw new TypeError('Failed to fetch'); };
+  try { const down = await plCloseWon('b3', 'growth'); assert.equal(down.ok, false); assert.equal(down.data, null); }
+  finally { fakeSb.rpc = real; }
+});
+
+test('the won picker: four plans, the booking\'s plan already chosen, the term hidden for a Pilot', () => {
+  fresh();
+  const h = renderPlWonPicker(booking({ id: 'b1', plan: 'growth', email: 'dana@acme.test' }), { open: true });
+  const t = text(h);
+  for (const w of ['Pilot', 'Starter', 'Growth', 'Scale', 'Monthly', '3 months', 'Mark won and send the pack', 'dana@acme.test']) assert.ok(t.includes(w), 'missing: ' + w);
+  assert.match(h, /<option value="growth" selected>Growth<\/option>/);
+  assert.equal((h.match(/ selected/g) || []).length, 1);
+  assert.match(h, /<option value="monthly">Monthly<\/option><option value="3month">3 months<\/option>/);
+  assert.ok(h.includes('onclick="plMarkWon(&quot;b1&quot;)"'), 'the confirm button is the one that writes');
+  assert.ok(!/id="plWonPick"[^>]*display:none/.test(h), 'open when asked');
+  assert.ok(!/id="plTermField"[^>]*display:none/.test(h), 'a recurring plan shows the term');
+
+  // closed until Won is clicked, which is how the panel draws it
+  assert.match(renderPlWonPicker(booking({ id: 'b1' }), {}), /id="plWonPick"[^>]*display:none/);
+  // a Pilot has no term to choose
+  const pilot = renderPlWonPicker(booking({ id: 'b1', plan: 'pilot' }), { open: true });
+  assert.match(pilot, /<option value="pilot" selected>/);
+  assert.match(pilot, /id="plTermField" style="display:none"/);
+  // no plan on the booking, a plan the list does not know, nothing at all
+  for (const b of [booking({ id: 'b1', plan: null }), booking({ id: 'b1', plan: 'platinum' }), {}, null]) {
+    const x = renderPlWonPicker(b, { open: true });
+    assert.ok(!/ selected/.test(x) && !BROKEN.test(text(x)), text(x));
+  }
+  assert.ok(!renderPlWonPicker(booking({ id: 'b1', email: '<img src=x onerror=alert(1)>' }), {}).includes('<img'));
+});
+
+test('Won opens the picker, hides the term for a Pilot, and confirming sends the pack through close_won', async () => {
+  fresh();
+  db.discovery_bookings = [booking({ id: 'b1', plan: 'pilot', email: 'dana@acme.test' })];
+  await plLoadEnquiry('b1');
+  const said = [];
+  const realToast = globalThis.toast;
+  globalThis.toast = (m) => said.push(m);
+  try {
+    el('plWonPick').style.display = 'none'; el('plTermField').style.display = '';
+    el('plPlan').value = 'pilot'; el('plTerm').value = '3month';
+    assert.equal(plOpenWon(), true);
+    assert.equal(el('plWonPick').style.display, '');
+    assert.equal(el('plTermField').style.display, 'none', 'no term for a Pilot');
+    el('plPlan').value = 'growth'; plWonTermShow();
+    assert.equal(el('plTermField').style.display, '');
+    assert.equal(plOpenWon(), false, 'clicking Won again tucks it away');
+    assert.equal(rpcs.length, 0, 'opening the picker writes nothing');
+
+    // a Pilot never carries a term, whatever the hidden select still holds
+    el('plPlan').value = 'pilot';
+    let r = await plMarkWon('b1');
+    assert.equal(r.ok, true);
+    assert.deepEqual(rpcs.at(-1).args, { p_booking: 'b1', p_plan: 'pilot', p_term: 'monthly' });
+    assert.equal(said.at(-1), 'Won. The agreement and invoice are on their way to dana@acme.test.');
+    assert.equal(db.discovery_bookings[0].status, 'won');
+    const after = renderPlEnquiry(pl.one, {});
+    assert.ok(text(after).includes('Won') && !after.includes('plMarkWon(') && !after.includes('plOpenWon('), 'a won booking shows Won, not the button');
+
+    // the database's refusal is shown word for word
+    r = await plMarkWon('b1');
+    assert.equal(r.ok, false);
+    assert.equal(said.at(-1), 'That call is already a client.');
+    rpcFail = { message: 'Only the owner can mark a call won.' };
+    await plMarkWon('b1');
+    assert.equal(said.at(-1), 'Only the owner can mark a call won.');
+  } finally { globalThis.toast = realToast; }
+
+  // marked won with no client row we can read: still the Won state, never the button
+  const bare = renderPlOutcome({ booking: booking({ id: 'b9', status: 'won' }), client: null });
+  assert.ok(text(bare).includes('Won') && !bare.includes('plMarkWon(') && !bare.includes('plOpenWon('));
 });

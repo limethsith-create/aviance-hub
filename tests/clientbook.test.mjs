@@ -44,7 +44,13 @@ function builder(table){
   };
   return b;
 }
-const fakeSb = {from: builder, rpc: async () => ({data:null, error:null})};
+/* rpc: recorded, and answered by tables['rpc.<name>'] when a test sets one. */
+let rpcs = [];
+const fakeSb = {from: builder, rpc: async (name, args) => {
+  rpcs.push({name, args});
+  const h = tables['rpc.' + name];
+  return typeof h === 'function' ? h(args) : (h || {data:null, error:null});
+}};
 globalThis.sb = fakeSb;
 
 /* the few shell globals the screens reach for */
@@ -59,6 +65,8 @@ globalThis.toast = (m) => { toasts.push(m) };
 globalThis.openModal = (h) => { fields.modal = h };
 globalThis.closeModal = () => { fields.modal = null };
 
+/* finance.js first, as in index.html: Paid on a client's page goes through fnMarkInvoicePaid. */
+vm.runInThisContext(fs.readFileSync(path.join(root, 'finance.js'), 'utf8'), {filename:'finance.js'});
 vm.runInThisContext(fs.readFileSync(path.join(root, 'clientbook.js'), 'utf8'), {filename:'clientbook.js'});
 
 /* ───────────── fixtures ───────────── */
@@ -84,7 +92,7 @@ const writes = () => calls.filter(c => c.op !== 'select');
 const text = (h) => String(h).replace(/<[^>]*>/g,' ').replace(/&amp;/g,'&').replace(/&#?[a-z0-9]+;/gi,' ').replace(/\s+/g,' ').trim();
 
 beforeEach(() => {
-  calls = []; tables = {}; toasts.length = 0;
+  calls = []; tables = {}; toasts.length = 0; rpcs = [];
   Object.keys(fields).forEach(k => delete fields[k]);
   globalThis.sb = fakeSb;
   globalThis.authUser = {uid:'u1', name:'Owner', role:'admin'};
@@ -423,10 +431,13 @@ test('viewClient renders with zero rows: no months, no inputs, no history', asyn
   assert.ok(!/cbDoMove\(&quot;c1&quot;,&quot;ended&quot;\)/.test(h), 'Ended is two stages away');
 
   /* the anchors other screens will hang off, and nothing written for them */
-  for (const id of ['cbMeetings','cbOutreach','cbInvoices','cbPeople','cbHandover']) {
+  for (const id of ['cbMeetings','cbOutreach','cbPeople','cbHandover']) {
     assert.ok(h.includes('id="' + id + '"'), id + ' anchor');
     assert.ok(h.includes('<section class="card cb-slot" id="' + id + '" data-cb-client="c1"></section>'), id + ' is left empty');
   }
+  /* the invoices block is drawn for the owner, and says so when there are none */
+  assert.ok(h.includes('id="cbInvoices"'), 'cbInvoices anchor');
+  assert.match(t, /No invoice yet/);
 });
 
 test('viewClient on a client that is not there says so instead of breaking', async () => {
@@ -821,4 +832,69 @@ test('the small words a person reads', () => {
   assert.equal(cbStageLabel('sending'), 'sending', 'an unknown stage still reads as something');
   assert.equal(cbPossessive('Stone Roofing'), "Stone Roofing's");
   assert.equal(cbPossessive('Jones'), "Jones'");
+});
+
+/* ═════════════ invoices on the client's own page, and Paid ═════════════ */
+
+const INVOICES = [
+  {id:'i-1', client_id:'c1', number:'AV-2026-0007', amount:2700, status:'sent',    due_on:'2026-11-30', issued_on:'2026-11-23'},
+  {id:'i-2', client_id:'c1', number:'AV-2026-0003', amount:300,  status:'paid',    due_on:'2026-10-10', issued_on:'2026-10-03', paid_at:'2026-10-05T10:00:00Z'},
+  {id:'i-3', client_id:'c1', number:'AV-2026-0005', amount:3000, status:'overdue', due_on:'2026-11-01', issued_on:'2026-10-25'},
+  {id:'i-4', client_id:'c1', number:'AV-2026-0009', amount:3000, status:'draft',   due_on:'2026-12-30', issued_on:'2026-12-23'},
+];
+
+test('cbRenderInvoices: number, amount, status, and Paid only on the ones we are waiting for', () => {
+  const h = cbRenderInvoices({id:'c1'}, INVOICES, {admin:true});
+  const t = text(h);
+  for (const w of ['Invoices', 'AV-2026-0007', '$2,700', 'Sent', 'AV-2026-0003', '$300', 'Paid', 'Overdue', 'Draft']) assert.ok(t.includes(w), 'missing: ' + w);
+  assert.ok(h.includes('onclick="cbMarkPaid(&quot;c1&quot;,&quot;i-1&quot;)"'), 'a sent invoice has Paid');
+  assert.ok(h.includes('cbMarkPaid(&quot;c1&quot;,&quot;i-3&quot;)'), 'an overdue invoice has Paid');
+  assert.ok(!h.includes('&quot;i-2&quot;') && !h.includes('&quot;i-4&quot;'), 'a paid or draft one has no button');
+  assert.equal(h.split('>Paid</button>').length - 1, 2);
+  assert.ok(!/undefined|NaN|\[object/.test(h));
+
+  /* not the owner: an empty slot, nothing about money */
+  const staff = cbRenderInvoices({id:'c1'}, INVOICES, {admin:false});
+  assert.equal(staff, '<section class="card cb-slot" id="cbInvoices" data-cb-client="c1"></section>');
+  /* zero rows, an error, and a nasty number */
+  assert.match(text(cbRenderInvoices({id:'c1'}, [], {admin:true})), /No invoice yet/);
+  assert.match(text(cbRenderInvoices({id:'c1'}, [], {admin:true, error:'nope'})), /could not be read/);
+  assert.ok(!cbRenderInvoices({id:'c1'}, [{id:'x', number:'<img src=x>', amount:1, status:'sent'}], {admin:true}).includes('<img'));
+});
+
+test('only an admin reads invoices; an employee never asks the database for them', async () => {
+  tables['invoices.select'] = () => ({data:INVOICES, error:null});
+  assert.equal((await cbInvoices('c1')).data.length, 4);
+  assert.deepEqual(calls.find(c => c.table === 'invoices').filters, [['eq','client_id','c1']]);
+  calls.length = 0;
+  globalThis.authUser = {uid:'u2', name:'Staff', role:'employee'};
+  const r = await cbInvoices('c1');
+  assert.deepEqual(r, {ok:true, data:[], error:''});
+  assert.equal(calls.filter(c => c.table === 'invoices').length, 0);
+  assert.equal((await cbInvoices('')).ok, false);
+});
+
+test('Paid on the client page calls the mark_paid rule, never a table update, and says what happened', async () => {
+  tables['clients.select'] = () => ({data:[client({stage:'won'})], error:null});
+  tables['invoices.select'] = () => ({data:[INVOICES[0]], error:null});
+  await cbLoadOne('c1', true);
+  cbOpenId = 'c1';
+  assert.ok(viewClient().includes('cbMarkPaid(&quot;c1&quot;,&quot;i-1&quot;)'), 'a just-won client shows its first invoice with Paid');
+
+  tables['rpc.mark_paid'] = () => ({data:{invoice_id:'i-1', client_id:'c1', welcome_sent:true}, error:null});
+  let r = await cbMarkPaid('c1', 'i-1');
+  assert.equal(r.ok, true);
+  assert.deepEqual(rpcs, [{name:'mark_paid', args:{p_invoice:'i-1', p_via:null}}]);
+  assert.equal(calls.filter(c => c.table === 'invoices' && c.op !== 'select').length, 0, 'no direct write to invoices');
+  assert.equal(toasts.at(-1), 'Paid. The welcome email and their way in are on their way.');
+
+  tables['rpc.mark_paid'] = () => ({data:{invoice_id:'i-1', client_id:'c1', welcome_sent:false}, error:null});
+  await cbMarkPaid('c1', 'i-1');
+  assert.equal(toasts.at(-1), 'Marked paid.');
+
+  /* the database's own words are shown as they are */
+  tables['rpc.mark_paid'] = () => ({data:null, error:{message:'That invoice is already paid.'}});
+  r = await cbMarkPaid('c1', 'i-1');
+  assert.deepEqual(r, {ok:false, data:null, error:'That invoice is already paid.'});
+  assert.equal(toasts.at(-1), 'That invoice is already paid.');
 });

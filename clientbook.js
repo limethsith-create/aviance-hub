@@ -10,6 +10,8 @@
    Tables it owns:   clients  client_profiles  client_stage_history  client_events
    Views it reads:   v_month_standing  v_exposure          (finance.js owns the money)
    Tables it reads:  plan_prices  discovery_bookings  profiles  client_requests
+                     invoices (admin only, to list them on the client's page;
+                     marking one paid goes through finance.js fnMarkInvoicePaid)
 
    Every data function returns {ok, data, error} and never throws — the same
    plumbing as finance.js. `error` is a plain sentence, safe to show a person.
@@ -157,6 +159,17 @@ async function cbStageHistory(clientId){
     if (clientId) q = q.eq('client_id', clientId);
     return q.order('at', {ascending:false});
   }, []);
+}
+/* Their invoices, newest first. Only an admin can read invoices, so anyone else
+   gets an empty list without the database being asked. */
+function cbIsAdmin(){
+  try { return typeof authUser !== 'undefined' && !!authUser && authUser.role === 'admin'; } catch (e) { return false; }
+}
+async function cbInvoices(clientId){
+  if (!clientId) return cbErr('Which client is this about?');
+  if (!cbIsAdmin()) return cbOk([]);
+  return cbRun(() => sb.from('invoices').select('*').eq('client_id', clientId)
+    .order('issued_on', {ascending:false}), []);
 }
 /* The dated history: everything any module has written about this client. */
 async function cbEvents(clientId, opts){
@@ -704,6 +717,32 @@ function cbRenderHistory(events){
   '</section>';
 }
 
+/* Their invoices, compact: number, amount, where it stands, and a Paid button on
+   the ones we are waiting for. Admin only — `meta.admin` decides, and without it
+   the block is an empty slot. Pure. */
+const CB_INVOICE_WORDS = {draft:['grey','Draft'], sent:['amber','Sent'], overdue:['red','Overdue'], paid:['green','Paid'], void:['grey','Void']};
+function cbRenderInvoices(r, invoices, meta){
+  const m = meta || {};
+  const slot = '<section class="card cb-slot" id="cbInvoices" data-cb-client="' + cbE(r.id) + '">';
+  if (!m.admin) return slot + '</section>';
+  const rows = (invoices || []).filter(Boolean);
+  if (m.error && !rows.length) return slot + '<h3>Invoices</h3><p class="cb-dim">' + cbE('Their invoices could not be read just now.') + '</p></section>';
+  if (!rows.length) return slot + '<h3>Invoices</h3><p class="cb-dim">' + cbE('No invoice yet. The first one is made when a call is marked won.') + '</p></section>';
+  return slot + '<h3>Invoices</h3>' +
+    '<ul class="cb-monthlist cb-invoices">' + rows.map(i => {
+      const st = cbTrim(i.status).toLowerCase();
+      const w = CB_INVOICE_WORDS[st] || ['grey', st || 'Draft'];
+      const owed = st === 'sent' || st === 'overdue';
+      return '<li class="' + cbE(w[0]) + '">' + cbPill(w[1], w[0]) +
+        '<span class="cb-month-say"><b>' + cbE(cbTrim(i.number) || 'Invoice') + '</b> · ' + cbE(cbUsd(i.amount)) + '</span>' +
+        '<span class="cb-month-when">' + cbE(st === 'paid' ? 'paid ' + cbDate(i.paid_at) : 'due ' + cbDate(i.due_on)) + '</span>' +
+        (owed ? '<button class="btn" onclick="cbMarkPaid(' + cbAttr(r.id) + ',' + cbAttr(i.id) + ')">Paid</button>' : '') +
+        '</li>';
+    }).join('') + '</ul>' +
+    '<p class="cb-dim">' + cbE('Click Paid when their money has arrived. The first time, that sends their welcome email and their way in.') + '</p>' +
+  '</section>';
+}
+
 /* What needs a person on this one client, said at the top of their page. */
 function cbRenderFlags(r){
   if (!r.flags.length) return cbNote('Nothing here needs you today.', 'green');
@@ -713,8 +752,9 @@ function cbRenderFlags(r){
   '</section>';
 }
 
-/* One client's whole page, from data. Pure. */
-function cbRenderClient(r, months, events){
+/* One client's whole page, from data. Pure. `extra` = {admin, invoices, invoicesErr}. */
+function cbRenderClient(r, months, events, extra){
+  const x = extra || {};
   if (!r) return cbEmpty('That client is not here', 'The link may be old, or they may have been removed.', 'Back to clients', "render('clients')");
   return '<div class="cb-one">' +
     '<header class="cb-one-head">' +
@@ -738,8 +778,9 @@ function cbRenderClient(r, months, events){
     '<section class="card cb-slot" id="cbMeetings" data-cb-client="' + cbE(r.id) + '"></section>' +
     // TODO: outreach — their campaigns, replies and booked calls (v_outreach_summary).
     '<section class="card cb-slot" id="cbOutreach" data-cb-client="' + cbE(r.id) + '"></section>' +
-    // TODO: invoices and refunds — finance.js owns the money; link it in here.
-    '<section class="card cb-slot" id="cbInvoices" data-cb-client="' + cbE(r.id) + '"></section>' +
+    /* invoices: listed here for an admin, with Paid on the ones we are waiting for.
+       Refunds are still finance.js's own screen. */
+    cbRenderInvoices(r, x.invoices, {admin: !!x.admin, error: x.invoicesErr}) +
     // TODO: their people — client_people and portal_invites, and their open requests.
     '<section class="card cb-slot" id="cbPeople" data-cb-client="' + cbE(r.id) + '"></section>' +
     // TODO: handover — what we send them when they leave (handovers).
@@ -812,10 +853,11 @@ async function cbLoadOne(clientId, force){
   if (cb.busy[key]) return cb.busy[key];
   if (!force && cb.one[clientId]) return cbOk(cb.one[clientId]);
   cb.busy[key] = (async () => {
-    const [client, profile, months, events, hist, reqs, owners] = await Promise.all([
+    const [client, profile, months, events, hist, reqs, owners, invs] = await Promise.all([
       cbClient(clientId), cbProfile(clientId), cbStanding({clientId}), cbEvents(clientId),
       cbStageHistory(clientId), cbOpenRequests(clientId),
-      Object.keys(cb.owners || {}).length ? Promise.resolve(cbOk(cb.owners)) : cbOwners()
+      Object.keys(cb.owners || {}).length ? Promise.resolve(cbOk(cb.owners)) : cbOwners(),
+      cbInvoices(clientId)
     ]);
     if (!client.ok) { cb.oneErr[clientId] = client.error; return client; }
     cb.one[clientId] = {
@@ -823,6 +865,7 @@ async function cbLoadOne(clientId, force){
       months: months.ok ? months.data || [] : [], events: events.ok ? events.data || [] : [],
       history: hist.ok ? hist.data || [] : [], requests: reqs.ok ? reqs.data || [] : [],
       owners: owners.ok ? owners.data || {} : {},
+      invoices: invs.ok ? invs.data || [] : [], invoicesErr: invs.ok ? '' : invs.error,
       err: [!months.ok ? 'their months' : '', !events.ok ? 'their history' : ''].filter(Boolean).length
         ? 'Some of this page could not be read just now.' : ''
     };
@@ -889,7 +932,8 @@ function viewClient(clientId){
     profiles: got.profile ? {[id]: got.profile} : {},
     history: got.history && got.history.length ? {[id]: got.history[0]} : {}
   });
-  return (got.err ? cbErrNote(got.err) : '') + cbRenderClient(got.client ? r : null, got.months, got.events);
+  return (got.err ? cbErrNote(got.err) : '') + cbRenderClient(got.client ? r : null, got.months, got.events,
+    {admin: cbIsAdmin(), invoices: got.invoices, invoicesErr: got.invoicesErr});
 }
 
 /* ---- what needs a person today ---- */
@@ -911,6 +955,25 @@ function cbShowErr(id, msg){
   return false;
 }
 function cbField(id){ return typeof val === 'function' ? val(id) : '' }
+
+/* Paid, from the invoice on their page. The database rule does the rest: the
+   first payment sends their welcome email and their way in. One at a time. */
+async function cbMarkPaid(clientId, invoiceId){
+  const key = 'paid:' + invoiceId;
+  if (cb.busy[key]) return cbErr('Still working on it.');
+  cb.busy[key] = true;
+  let r;
+  try {
+    r = typeof fnMarkInvoicePaid === 'function' ? await fnMarkInvoicePaid(invoiceId) : cbErr('The finance side is not loaded.');
+  } finally { delete cb.busy[key]; }
+  if (!r.ok) { cbSay(r.error); return r; }
+  cbSay(typeof fnPaidWords === 'function' ? fnPaidWords(r.data) : 'Marked paid.');
+  delete cb.one[clientId];
+  cb.clients = null; cb.tried = false;
+  await cbLoadOne(clientId, true);
+  cbPaint();
+  return r;
+}
 
 /* Move them, from the mover on their page. */
 async function cbDoMove(clientId, toStage){

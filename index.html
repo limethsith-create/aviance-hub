@@ -183,10 +183,7 @@ h1,h2,h3,h4{font-weight:600}
 .login-app-note{font-size:var(--fs-small);color:var(--text);background:var(--surface-2);border-left:3px solid var(--red-brand);padding:9px 11px;margin:-10px 0 18px;line-height:1.5}
 .login-hint{margin-top:18px;padding-top:15px;border-top:1px solid var(--border-soft);font-size:var(--fs-small);color:var(--muted);line-height:1.7}
 .login-ok{font-size:var(--fs-small);color:var(--green);background:var(--green-bg);border:1px solid var(--green);padding:9px 11px;margin:2px 0 12px;line-height:1.5}
-/* Client mode (a client signed in to their portal): only Channels and Numbers; nothing of the owner's. Join page: #join={token}. */
-#joinBox{display:none}
-#login.joining #joinBox{display:block}
-#login.joining .login-std{display:none}
+/* A client never enters this shell: they are sent to portal.html at sign-in (routeUser) and an invite opens join.html. */
 .client-only{display:none!important}
 body.client-mode .client-only{display:inline-flex!important}
 body.client-mode .search,body.client-mode #notifBtn{display:none!important}
@@ -281,17 +278,6 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
       <div class="la-guarantee">Live in 3 weeks — <b>guaranteed</b></div>
     </div>
     <div class="login-card">
-      <div id="joinBox">
-        <div class="login-eyebrow">Aviance</div>
-        <div id="joinTitle" class="login-title">Set up your Aviance account</div>
-        <div id="joinDesc" class="login-desc">Use the email address this invite was sent to, and choose a password.</div>
-        <div class="field"><label for="joinEmail">Email</label><input id="joinEmail" type="email" placeholder="you@email.com" autocomplete="username" onkeydown="if(event.key==='Enter')doJoin()"></div>
-        <div class="field"><label for="joinPass" id="joinPassLabel">Choose a password</label><input id="joinPass" type="password" placeholder="At least 8 characters" autocomplete="new-password" onkeydown="if(event.key==='Enter')doJoin()"></div>
-        <div id="joinErr" class="login-err" role="alert"></div>
-        <div id="joinOk" class="login-ok" style="display:none"></div>
-        <button id="joinBtn" class="btn" style="width:100%;justify-content:center;padding:11px" onclick="doJoin()">Set up my account</button>
-        <div class="login-hint"><button type="button" id="joinSwitch" class="login-link" onclick="joinSwitch()">I already have an account</button></div>
-      </div>
       <div class="login-eyebrow login-std">Aviance OS</div>
       <div class="login-title login-std">Sign in</div>
       <div class="login-desc login-std">Your email and password.</div>
@@ -642,16 +628,20 @@ async function routeUser(errId){
   let prof=await getProfile(user.id);
   if(!prof){await new Promise(r=>setTimeout(r,800));prof=await getProfile(user.id);}
   // the owner (role admin) or an approved team member (role employee: sees everything, changes nothing)
-  const isClient=!!(prof&&prof.approved&&prof.role==='client'&&prof.client_id);
-  if(!isClient&&(!prof||!prof.approved||(prof.role!=='admin'&&prof.role!=='employee'))){
+  const isTeam=!!(prof&&prof.approved&&(prof.role==='admin'||prof.role==='employee'));
+  if(!isTeam){
+    // Not the team. They may be a client: portal_home() answers only for a portal client. A client never
+    // enters this shell — they are sent to their own page, still signed in.
+    authUser=null;
+    let home=null;
+    try{const r=await sb.rpc('portal_home');home=r&&!r.error?r.data:null;}catch(e){home=null;}
+    if(home){showLogin();try{location.replace('/portal.html');}catch(e){}return;}
     try{await sb.auth.signOut();}catch(e){}
-    authUser=null;showLogin();
+    showLogin();
     return errEl(errId,prof&&!prof.approved?'Your account is waiting for the owner to approve it. Try again once they have.':'Aviance OS is for the Aviance team.');
   }
-  authUser=isClient
-    ?{uid:prof.id,name:prof.name||'You',role:'client',clientId:String(prof.client_id),email:prof.email||user.email||''}
-    :{uid:prof.id,name:prof.name||(prof.role==='admin'?'Owner':'Team member'),role:prof.role==='admin'?'admin':'employee',email:prof.email||user.email||''};
-  try{document.body.classList.toggle('ro',authUser.role!=='admin');document.body.classList.toggle('client-mode',isClient);}catch(e){}
+  authUser={uid:prof.id,name:prof.name||(prof.role==='admin'?'Owner':'Team member'),role:prof.role==='admin'?'admin':'employee',email:prof.email||user.email||''};
+  try{document.body.classList.toggle('ro',authUser.role!=='admin');document.body.classList.remove('client-mode');}catch(e){}
   document.getElementById('loginPass').value='';
   enterApp();
 }
@@ -710,58 +700,13 @@ async function submitNewPassword(){
     closeModal();toast('Password updated — use it next time you sign in');
   }catch(e){errEl('npwErr','Could not update the password — try again.');}
 }
-/* ---- Join: https://aviance.store/#join={token} — a client's invite. Set up the account (or sign in), claim the invite, reload into client mode. ---- */
-const JOIN_KEY='avianceJoin';
+/* ---- An old invite link (https://aviance.store/#join={token}): the join page lives in join.html now, so hand the token straight on. ---- */
 function parseJoinToken(h){const m=/[#&]join=([A-Za-z0-9_-]{16,200})(?:&|$)/.exec(String(h||''));return m?m[1]:'';}
-let joinToken=parseJoinToken(INITIAL_HASH),joinMode='new';
-if(joinToken){try{sessionStorage.setItem(JOIN_KEY,joinToken);}catch(e){}}
-else{try{joinToken=sessionStorage.getItem(JOIN_KEY)||'';}catch(e){joinToken='';}}
-function showJoin(){
-  const l=document.getElementById('login');if(l&&l.classList)l.classList.add('joining');
-  joinSetMode('new');
-}
-function joinSetMode(mode){
-  joinMode=mode;
-  const set=(id,t)=>{const e=document.getElementById(id);if(e)e.textContent=t;};
-  const pw=document.getElementById('joinPass');
-  if(mode==='new'){set('joinTitle','Set up your Aviance account');set('joinDesc','Use the email address this invite was sent to, and choose a password.');set('joinPassLabel','Choose a password');set('joinBtn','Set up my account');set('joinSwitch','I already have an account');if(pw){pw.placeholder='At least 8 characters';pw.autocomplete='new-password';}}
-  else{set('joinTitle','Sign in to join');set('joinDesc','Sign in with the email address this invite was sent to.');set('joinPassLabel','Password');set('joinBtn','Sign in and join');set('joinSwitch','I need to set up an account');if(pw){pw.placeholder='Your password';pw.autocomplete='current-password';}}
-  errEl('joinErr','');
-}
-function joinSwitch(){joinSetMode(joinMode==='new'?'existing':'new');}
-function joinDone(){
-  joinToken='';try{sessionStorage.removeItem(JOIN_KEY);}catch(e){}
-  try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}
-  try{location.reload();}catch(e){}
-}
-async function doJoin(){
-  const email=val('joinEmail').toLowerCase(),pass=(document.getElementById('joinPass')||{}).value||'';
-  errEl('joinErr','');const ok=document.getElementById('joinOk');if(ok)ok.style.display='none';
-  if(!joinToken)return errEl('joinErr','This invite link is not valid any more. Ask Aviance for a new one.');
-  if(!/.+@.+\..+/.test(email))return errEl('joinErr','Enter the email address this invite was sent to.');
-  if(joinMode==='new'&&pass.length<8)return errEl('joinErr','Use a password of at least 8 characters.');
-  if(!pass)return errEl('joinErr','Enter your password.');
-  let r;
-  if(joinMode==='new'){
-    r=await sb.auth.signUp({email,password:pass});
-    if(r.error)return errEl('joinErr',/already|registered/i.test(r.error.message||'')?'There is already an account with this email. Choose “I already have an account”.':(r.error.message||'That did not go through. Try again.'));
-    if(!r.data||!r.data.session){if(ok){ok.textContent='Check your inbox and confirm your email, then open your invite link again.';ok.style.display='block';}return;}
-  }else{
-    r=await sb.auth.signInWithPassword({email,password:pass});
-    if(r.error)return errEl('joinErr','Incorrect email or password.');
-  }
-  const c=await sb.rpc('claim_portal_invite',{p_token:joinToken});
-  if(c.error){
-    const m=String(c.error.message||'');
-    errEl('joinErr',/invite link/i.test(m)||/team account/i.test(m)?m:'That did not go through. Try again, or ask Aviance for a new link.');
-    try{await sb.auth.signOut();}catch(e){}
-    return;
-  }
-  joinDone();
-}
+const oldJoinToken=parseJoinToken(INITIAL_HASH);
+try{sessionStorage.removeItem('avianceJoin');}catch(e){}
 async function boot(){
   if(hubStandalone()){const n=document.getElementById('loginAppNote');if(n)n.style.display='block';}
-  if(joinToken){showLogin();showJoin();return;}   // an invite link: the set-up page first, whoever was signed in before
+  if(oldJoinToken){showLogin();try{location.replace('/join.html#'+oldJoinToken);}catch(e){}return;}   // an old-style invite link: join.html does the rest
   try{const {data:{session}}=await sb.auth.getSession();if(session)await routeUser('loginErr');}catch(e){}
   if(!authUser)showLogin();
   if(authUser&&INITIAL_HASH.indexOf('type=recovery')>-1){

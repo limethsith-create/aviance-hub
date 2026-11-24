@@ -1,7 +1,8 @@
 /* Tests for portal.js — the client's people, their way in, and the conversation.
    A fake `sb` stands in for Supabase: a small in-memory database behind the same query builder
    (select / insert / update / eq / neq / is / in / gt / order / limit / single / maybeSingle),
-   with the table defaults the real schema has (portal_invites.token, .status, .expires_at).
+   with the table defaults the real schema has (portal_invites.status, .expires_at), and the
+   portal_invite_create rule: it hands back the raw token once and keeps only a hash.
    Same stubbing style as tests/channels-api.test.mjs. No network.
    Run with:  node --test tests/portal-people.test.mjs   (or npm test) */
 import test, { beforeEach } from 'node:test';
@@ -29,7 +30,7 @@ const DAY = 86400000;
 let db, calls, fails, seq;
 function reset() {
   db = { clients: [], client_people: [], portal_invites: [], client_requests: [], channels: [], channel_members: [], channel_messages: [], profiles: [] };
-  calls = []; fails = {}; seq = 0; toasts = [];
+  calls = []; fails = {}; seq = 0; toasts = []; rpcs = []; rpcFails = {};
 }
 const rows = (t) => (db[t] ||= []);
 const id = (p) => p + '-' + (++seq);
@@ -37,7 +38,7 @@ const iso = (ms) => new Date(ms).toISOString();
 
 const DEFAULTS = {
   client_people: () => ({ is_primary: false }),
-  portal_invites: () => ({ token: 'tok' + (++seq) + 'abcdefghij', status: 'pending', portal_role: 'viewer', expires_at: iso(Date.now() + 14 * DAY), accepted_at: null, accepted_user: null }),
+  portal_invites: () => ({ status: 'pending', portal_role: 'viewer', expires_at: iso(Date.now() + 14 * DAY), accepted_at: null, accepted_user: null }),
   client_requests: () => ({ status: 'open', closed_at: null }),
   channel_members: () => ({ member_role: 'member', last_read_at: null, added_at: iso(Date.now()) }),
   channel_messages: () => ({ deleted_at: null, edited_at: null }),
@@ -62,7 +63,6 @@ function run(c) {
       return Object.assign({ id: id(c.table), created_at: iso(Date.now()) }, base, p);
     });
     for (const r of list) {
-      if (c.table === 'portal_invites' && all.some((x) => x.token === r.token)) return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
       if (c.table === 'channel_members' && all.some((x) => x.channel_id === r.channel_id && ((r.user_id && x.user_id === r.user_id) || (r.person_id && x.person_id === r.person_id)))) return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
       all.push(r);
     }
@@ -112,7 +112,24 @@ function builder(table) {
   };
   return b;
 }
-const fakeSb = { from: builder };
+/* portal_invite_create, as the database does it: earlier invites still waiting for the same
+   address on the same client are revoked, a new row is made holding only a HASH, and the raw
+   token comes back this once. There is no token column to read afterwards. */
+let rpcs = [], rpcFails = {};
+const fakeSb = {
+  from: builder,
+  async rpc(name, args) {
+    rpcs.push({ name, args });
+    if (rpcFails[name]) return { data: null, error: rpcFails[name] };
+    if (name !== 'portal_invite_create') return { data: null, error: null };
+    const all = rows('portal_invites');
+    all.filter((i) => i.client_id === args.p_client && i.email === args.p_email && i.status === 'pending').forEach((i) => { i.status = 'revoked'; });
+    const raw = 'raw' + (++seq) + 'Zm9vYmFyYmF6cXV4';
+    all.push(Object.assign({ id: id('portal_invites'), created_at: iso(Date.now() + seq) }, DEFAULTS.portal_invites(),
+      { client_id: args.p_client, person_id: args.p_person || null, email: args.p_email, token_hash: 'sha256:' + raw.split('').reverse().join('') }));
+    return { data: raw, error: null };
+  },
+};
 globalThis.sb = fakeSb;
 
 const SRC = fs.readFileSync(path.join(root, 'portal.js'), 'utf8');
@@ -170,32 +187,69 @@ test('exactly one primary survives two ptSetPrimary calls', async () => {
 });
 
 /* ───────────── their way in: invites ───────────── */
-test('ptInvite writes the row, leaves the token to the database, and comes back with its link', async () => {
+test('ptInvite goes through portal_invite_create and comes back with the link, once', async () => {
   const cid = seedClient();
   const person = (await ptAddPerson(cid, { fullName: 'Dana', email: 'dana@stone.test' })).data;
   const r = shape(await ptInvite(cid, { email: ' Dana@Stone.test ', personId: person.id, portalRole: 'manager' }));
   assert.equal(r.ok, true);
+  assert.deepEqual(rpcs, [{ name: 'portal_invite_create', args: { p_client: cid, p_email: 'dana@stone.test', p_person: person.id } }]);
+  assert.equal(calls.filter((c) => c.table === 'portal_invites' && c.op === 'insert').length, 0, 'the row is never inserted from JavaScript');
   assert.equal(r.data.email, 'dana@stone.test');
   assert.equal(r.data.portal_role, 'manager');
   assert.equal(r.data.person_id, person.id);
   assert.equal(r.data.state, 'pending'); assert.equal(r.data.stateWords, 'Waiting for them');
-  assert.equal(r.data.link, 'https://aviance.store/#join=' + r.data.token, 'the link shape');
 
-  const payload = calls.find((c) => c.table === 'portal_invites' && c.op === 'insert').payload;
-  assert.deepEqual(Object.keys(payload).sort(), ['client_id', 'email', 'person_id', 'portal_role'], 'no token and no expiry from JavaScript');
-  assert.ok(payload.token === undefined && payload.expires_at === undefined);
-  assert.ok(r.data.token, 'the database default filled the token in');
+  // the link: join.html, the token after the #, never in the query string
+  const raw = r.data.link.split('#')[1];
+  assert.match(raw, /^raw\d+Zm9vYmFyYmF6cXV4$/, 'exactly what the database handed back');
+  assert.equal(r.data.link, 'https://aviance.store/join.html#' + raw, 'the link shape');
+  assert.equal(ptInviteLink(raw), 'https://aviance.store/join.html#' + raw);
+  assert.equal(ptInviteLink(''), '', 'no token, no link');
+  assert.ok(!r.data.link.includes('?'));
+  // the token is handed over inside the link and nowhere else, and is not kept
+  assert.ok(!('token' in r.data) && !('token_hash' in r.data));
+  assert.ok(!JSON.stringify(rows('portal_invites')).includes(raw), 'the raw token is stored nowhere');
+  assert.ok(!/\.token\b/.test(SRC), 'portal.js reads no .token off anything');
+  assert.ok(!/localStorage|sessionStorage/.test(SRC), 'and keeps nothing in the browser');
   assert.ok(!/randomUUID|getRandomValues|Math\.random/.test(SRC), 'portal.js never makes a token itself');
+  assert.equal(rows('portal_invites')[0].portal_role, 'manager', 'the manager role is set on the row the database made');
 
   assert.match((await ptInvite(cid, { email: 'not-an-email' })).error, /email address/);
+  assert.equal(rpcs.length, 1, 'a bad address never reaches the database');
   assert.equal(rows('portal_invites').length, 1);
-  assert.equal((await ptInvite(cid, { email: 'sam@stone.test' })).data.portal_role, 'viewer', 'viewer unless manager is asked for');
+  const sam = await ptInvite(cid, { email: 'sam@stone.test' });
+  assert.equal(sam.data.portal_role, 'viewer', 'viewer unless manager is asked for');
+  assert.equal(rpcs.at(-1).args.p_person, null);
+
+  // the database's own words, and an answer with no token in it
+  rpcFails.portal_invite_create = { message: 'Only the owner can invite a client.' };
+  assert.deepEqual(await ptInvite(cid, { email: 'x@stone.test' }), { ok: false, data: null, error: 'Only the owner can invite a client.' });
+  rpcFails = {};
+  const real = fakeSb.rpc; fakeSb.rpc = async () => ({ data: null, error: null });
+  try { const none = await ptInvite(cid, { email: 'y@stone.test' }); assert.equal(none.ok, false); assert.match(none.error, /not made/); }
+  finally { fakeSb.rpc = real; }
+});
+
+test('listed invites carry their status only: no token, no hash, no link', async () => {
+  const cid = seedClient();
+  await ptInvite(cid, { email: 'dana@stone.test' });
+  const list = shape(await ptInvites(cid));
+  assert.equal(list.ok, true); assert.equal(list.data.length, 1);
+  const row = list.data[0];
+  assert.deepEqual(Object.keys(row).sort(), ['accepted_at', 'accepted_user', 'client_id', 'created_at', 'email', 'expires_at', 'id', 'person_id', 'portal_role', 'state', 'stateWords', 'status']);
+  const asked = calls.filter((c) => c.table === 'portal_invites' && c.op === 'select').map((c) => c.cols);
+  assert.ok(asked.length && asked.every((c) => typeof c === 'string' && c !== '*' && !/token/.test(c)), 'the hash is never asked for: ' + asked.join(' | '));
+  const html = await viewClientPeople(cid);
+  assert.ok(!/join\.html|raw\d|sha256/.test(html), 'the list shows no link');
+  assert.match(html, /Waiting for them/);
 });
 
 test('an invite past its expires_at reads as expired, not pending', async () => {
   const cid = seedClient();
-  const live = (await ptInvite(cid, { email: 'live@stone.test' })).data;
-  const stale = (await ptInvite(cid, { email: 'stale@stone.test' })).data;
+  await ptInvite(cid, { email: 'live@stone.test' });
+  await ptInvite(cid, { email: 'stale@stone.test' });
+  const live = rows('portal_invites').find((i) => i.email === 'live@stone.test');
+  const stale = rows('portal_invites').find((i) => i.email === 'stale@stone.test');
   // the row still says pending; only the date has gone by
   rows('portal_invites').find((i) => i.id === stale.id).expires_at = iso(Date.now() - 60000);
   assert.equal(rows('portal_invites').find((i) => i.id === stale.id).status, 'pending', 'the status column is untouched');
@@ -216,30 +270,42 @@ test('an invite past its expires_at reads as expired, not pending', async () => 
   assert.equal(ptInviteState(null), 'expired');
 });
 
-test('ptRevokeInvite and ptResendInvite: the same row, a fresh 14 days, waiting again', async () => {
+test('ptRevokeInvite revokes; ptResendInvite makes a NEW invite the same way and the old link dies', async () => {
   const cid = seedClient();
-  const inv = (await ptInvite(cid, { email: 'dana@stone.test' })).data;
+  const first = (await ptInvite(cid, { email: 'dana@stone.test', portalRole: 'manager' })).data;
+  const inv = (await ptInvites(cid)).data[0];
 
   const gone = await ptRevokeInvite(inv.id);
   assert.equal(gone.ok, true); assert.equal(gone.data.state, 'revoked'); assert.equal(gone.data.stateWords, 'Revoked');
+  assert.ok(!('link' in gone.data) && !('token_hash' in gone.data));
 
-  const again = await ptResendInvite(inv.id);
+  const again = shape(await ptResendInvite(inv.id));
   assert.equal(again.ok, true);
-  assert.equal(again.data.id, inv.id, 'the same row, not a new invite');
-  assert.equal(rows('portal_invites').length, 1);
+  assert.deepEqual(rpcs.at(-1), { name: 'portal_invite_create', args: { p_client: cid, p_email: 'dana@stone.test', p_person: null } });
+  assert.equal(rows('portal_invites').length, 2, 'a new invite, not the old row woken up');
+  assert.equal(rows('portal_invites')[0].status, 'revoked', 'the old one stays dead');
   assert.equal(again.data.state, 'pending');
-  assert.equal(again.data.token, inv.token, 'the token does not change');
-  const days = (Date.parse(again.data.expires_at) - Date.now()) / DAY;
-  assert.ok(days > 13.9 && days < 14.1, 'a fresh 14 days: ' + days);
-  assert.equal(again.data.link, 'https://aviance.store/#join=' + inv.token);
+  assert.equal(again.data.portal_role, 'manager', 'they keep what they could do');
+  assert.match(again.data.link, /^https:\/\/aviance\.store\/join\.html#raw\d+/);
+  assert.notEqual(again.data.link, first.link, 'a new link every time');
 
-  // an expired invite can be sent again and reads as pending afterwards
-  rows('portal_invites')[0].expires_at = iso(Date.now() - DAY);
-  assert.equal((await ptInvites(cid)).data[0].state, 'expired');
-  assert.equal((await ptResendInvite(inv.id)).data.state, 'pending');
+  // an expired invite can be sent again: the stale row is revoked by the database, a fresh one waits
+  const live = (await ptInvites(cid)).data.find((i) => i.state === 'pending');
+  rows('portal_invites').find((i) => i.id === live.id).expires_at = iso(Date.now() - DAY);
+  assert.equal((await ptInvites(cid)).data.find((i) => i.id === live.id).state, 'expired');
+  assert.equal((await ptResendInvite(live.id)).data.state, 'pending');
+  assert.equal(rows('portal_invites').filter((i) => i.status === 'pending').length, 1, 'only ever one live invite per address');
+
+  // someone who has joined is not invited again
+  const joined = rows('portal_invites').find((i) => i.status === 'pending');
+  joined.status = 'accepted'; joined.accepted_at = iso(Date.now());
+  const n = rpcs.length;
+  assert.match((await ptResendInvite(joined.id)).error, /already joined/);
+  assert.equal(rpcs.length, n);
 
   assert.match((await ptRevokeInvite('')).error, /Pick an invite/);
   assert.match((await ptResendInvite('')).error, /Pick an invite/);
+  assert.match((await ptResendInvite('ghost')).error, /not here any more/);
   fails['portal_invites.update'] = { message: 'permission denied' };
   const r = shape(await ptRevokeInvite(inv.id)); assert.equal(r.ok, false); assert.equal(r.data, null);
 });
@@ -412,10 +478,12 @@ test('every screen renders with zero rows in the database', async () => {
   const dana = (await ptAddPerson(cid, { fullName: 'Dana <b>Stone</b>', email: 'dana@stone.test', isPrimary: true })).data;
   const inv = (await ptInvite(cid, { email: 'dana@stone.test' })).data;
   rows('portal_invites')[0].expires_at = iso(Date.now() - DAY);
+  assert.match(inv.link, /join\.html#/);
   const full = await viewClientPeople(cid);
   assert.match(full, /Dana &lt;b&gt;Stone&lt;\/b&gt;/, 'every name goes through esc()');
   assert.match(full, /Primary/); assert.match(full, /Expired/); assert.match(full, /Send again/);
-  assert.ok(!full.includes(inv.token), 'an expired invite does not show a live link');
+  assert.ok(!full.includes(inv.link) && !full.includes('join.html'), 'the list never shows a link');
+  assert.match(full, /ptResendFromRow\(/, 'Send again makes a new invite');
 
   await ptRaiseRequest(cid, { kind: 'dispute', subject: 'A call that did not match', owner: 'u-owner' });
   const open = await viewRequests();
@@ -431,6 +499,14 @@ test('every screen renders with zero rows in the database', async () => {
   el('ptInviteEmail').value = 'sam@stone.test'; el('ptInviteRole').value = 'manager';
   const sent = await ptInviteFromForm(cid);
   assert.equal(sent.ok, true); assert.equal(sent.data.portal_role, 'manager'); assert.equal(el('ptInviteEmail').value, '');
+  // the link is put on the screen once, for copying
+  assert.ok(el('ptInviteOnce').innerHTML.includes('value="' + sent.data.link + '"'), el('ptInviteOnce').innerHTML);
+  assert.match(el('ptInviteOnce').innerHTML, /Copy the link/);
+  assert.ok(toasts.some((t) => /only shown this once/.test(t)));
+  assert.equal(ptRenderInviteOnce(null), ''); assert.equal(ptRenderInviteOnce({ email: 'a@b.test' }), '');
+  const resent = await ptResendFromRow(rows('portal_invites')[0].id);
+  assert.equal(resent.ok, true);
+  assert.ok(el('ptInviteOnce').innerHTML.includes(resent.data.link) && !el('ptInviteOnce').innerHTML.includes(sent.data.link), 'only the newest link is on the screen');
   el('ptPostBody').value = 'Writing back';
   const posted = await ptPostFromForm(ch.id);
   assert.equal(posted.ok, true); assert.equal(el('ptPostBody').value, '');

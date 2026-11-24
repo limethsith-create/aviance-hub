@@ -8,6 +8,7 @@
      views:  v_month_standing  v_exposure  v_money  v_invoice_work
      rules:  open_next_month(client)  recount_month(month)
              lock_month(month)  raise_invoice(month, due_days)
+             mark_paid(invoice, via)   paid, and the welcome email with their way in
 
    The rules live in the database on purpose. A verdict that decides a refund
    should not depend on which screen asked the question.
@@ -173,10 +174,20 @@ async function fnMarkInvoiceSent(invoiceId){
     .eq('id', invoiceId).select().single(), null);
 }
 
+/* Paid. This goes through the database rule, not a table update, because being
+   paid does more than change a word: the first time a client pays, the rule
+   makes their invite and queues the welcome email with their way in.
+   -> {invoice_id, client_id, welcome_sent} */
 async function fnMarkInvoicePaid(invoiceId, via){
-  return fnRun(() => sb.from('invoices')
-    .update({status:'paid', paid_at:new Date().toISOString(), paid_via:(via||'').slice(0,60)})
-    .eq('id', invoiceId).select().single(), null);
+  if (!invoiceId) return fnErr('Pick the invoice first.');
+  const how = String(via || '').trim().slice(0,60);
+  return fnRun(() => sb.rpc('mark_paid', {p_invoice: invoiceId, p_via: how || null}), null);
+}
+/* What to tell the person who clicked Paid. */
+function fnPaidWords(data){
+  return data && data.welcome_sent === true
+    ? 'Paid. The welcome email and their way in are on their way.'
+    : 'Marked paid.';
 }
 
 /* ---- refunds ------------------------------------------------------ */

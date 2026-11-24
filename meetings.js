@@ -15,7 +15,9 @@
      meetings            every call booked here: kind, starts_at, minutes, status
      discovery_bookings  every call booked on the website. Read here to draw it
                          and to keep its time taken. Its outcome is written by
-                         pipeline.js (plHeld, plNoShow, plWon, plLost), never here.
+                         pipeline.js (plHeld, plNoShow, plCloseWon, plLost), never here.
+                         Won opens pipeline.js's plan picker and goes through the
+                         `close_won` database rule, which also sends the pack.
      clients             only to name a meeting's client and take its plan colour
      qualified_calls     the money side (finance.js). A `qualified` meeting is a
                          booked sales call we delivered, so marking it held or a

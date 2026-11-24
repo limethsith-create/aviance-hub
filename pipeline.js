@@ -16,6 +16,12 @@
      plan_prices          the only place a price ever comes from
      clients              where a won booking lands
 
+   Won goes through the database: plCloseWon calls the `close_won` rule, which makes the
+   client, their channel, the agreement and the first invoice, and queues the email that
+   carries both. The panel's Won button opens a small plan picker first. plWon (the older
+   path that wrote the client row from here) is kept for anything that still calls it,
+   but no button does.
+
    The research engine stays. Nothing here writes to research_briefs or research_log; we
    read what it produced and lay it out. A brief is someone else's jsonb, so every
    renderer here copes with a shape it did not expect.
@@ -55,7 +61,7 @@ const PL_BRIEF_DEPTH = 3;
 const PL_PLANS = ['pilot', 'starter', 'growth', 'scale'];
 const PL_PLAN_WORDS = { pilot: 'Pilot', starter: 'Starter', growth: 'Growth', scale: 'Scale' };
 
-const pl = { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30 };
+const pl = { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30, winning: false };
 
 /* ---- plumbing (finance.js) ---------------------------------------- */
 
@@ -347,6 +353,20 @@ async function plWon(bookingId, opts) {
   return plOk({ client: made.data, booking: moved.data });
 }
 
+/* Won, the whole way: one database rule makes the client, their channel, the agreement
+   and the first invoice, and queues the email with both links in it. Its refusals are
+   already plain words ('That call is already a client.'), so they are passed on as they are.
+   -> {client_id, invoice_id, agreement_id, invoice_number} */
+async function plCloseWon(bookingId, plan, term) {
+  if (!bookingId) return plErr('No booking was asked for.');
+  const p = String(plan || '');
+  if (!p) return plErr('Pick the plan they bought first.');
+  if (!PL_PLANS.includes(p)) return plErr('That plan is not in the price list.');
+  /* a Pilot is a one-off: it has no term to choose */
+  const t = p !== 'pilot' && term === '3month' ? '3month' : 'monthly';
+  return plRun(() => sb.rpc('close_won', { p_booking: bookingId, p_plan: p, p_term: t }), null);
+}
+
 /* ---- the outcome: lost, held, and nobody came -------------------- */
 
 function plIsLossReason(r) { return PL_LOSS_REASONS.includes(String(r || '')); }
@@ -478,6 +498,9 @@ function renderPlOutcome(d) {
   if (d.client) {
     return `<div class="card pl-pad pl-outcome"><b>Won — they are a client</b><p class="muted">${esc(d.client.company || '')} is on ${esc(String(d.client.plan || ''))}, ${esc(String(d.client.calls_promised || 0))} calls a month. This booking cannot make a second client.</p></div>`;
   }
+  if (s === 'won') {
+    return `<div class="card pl-pad pl-outcome"><b>Won</b><p class="muted">This call is already marked won, so there is nothing more to record here.</p></div>`;
+  }
   if (s === 'lost') {
     return `<div class="card pl-pad pl-outcome"><b>Lost</b><p class="muted">${esc(b.lost_reason ? plLossWord(b.lost_reason) : 'No reason was recorded.')}</p></div>`;
   }
@@ -491,12 +514,26 @@ function renderPlOutcome(d) {
     ${said ? `<p class="muted">${esc(said)}</p>` : ''}
     <div class="pl-acts">${s === 'held' ? '' : `<button class="btn ghost" onclick="plMarkHeld(${plAttr(id)})">Call done</button>`}
       ${s === 'no_show' ? '' : `<button class="btn ghost" onclick="plMarkNoShow(${plAttr(id)})">Nobody came</button>`}</div>
-    <div class="field"><label for="plPlan">If they bought, which plan</label><select id="plPlan" data-tk-form><option value="">Pick the plan</option>${PL_PLANS.map((p) => `<option value="${esc(p)}"${p === picked ? ' selected' : ''}>${esc(plPlanWord(p))}</option>`).join('')}</select></div>
-    <div class="field"><label for="plTerm">Term</label><select id="plTerm" data-tk-form><option value="monthly">Month by month</option><option value="3month">Three months up front</option></select></div>
-    <div class="pl-acts"><button class="btn" onclick="plMarkWon(${plAttr(id)})">Won</button></div>
+    <div class="pl-acts"><button class="btn" onclick="plOpenWon()" aria-controls="plWonPick">Won</button></div>
+    ${renderPlWonPicker(b, { open: false })}
     <div class="field"><label for="plLossReason">If we lost them, why</label><select id="plLossReason" data-tk-form><option value="">Pick a reason</option>${PL_LOSS_REASONS.map((r) => `<option value="${esc(r)}">${esc(plLossWord(r))}</option>`).join('')}</select></div>
     <div class="pl-acts"><button class="btn ghost" onclick="plMarkLost(${plAttr(id)})">Lost</button></div>
-    <p class="muted pl-small">The plan sets the number of calls and the fee — both come from the price list, never typed in here.</p></div>`;
+    </div>`;
+}
+
+/* The small plan picker the Won button opens: which plan, and (for everything but a
+   Pilot, which is a one-off) which term. The plan they chose on the website is already
+   picked. Pure: data in, HTML out. `meta.open` draws it already open. */
+function renderPlWonPicker(b, meta) {
+  b = b || {}; meta = meta || {};
+  const id = b.id;
+  const picked = PL_PLANS.includes(String(b.plan)) ? String(b.plan) : '';
+  const to = String(b.email || '').trim();
+  return `<div id="plWonPick" class="pl-won-pick pl-outcome"${meta.open ? '' : ' style="display:none"'}>
+    <div class="field"><label for="plPlan">Which plan did they buy</label><select id="plPlan" data-tk-form onchange="plWonTermShow()"><option value="">Pick the plan</option>${PL_PLANS.map((p) => `<option value="${esc(p)}"${p === picked ? ' selected' : ''}>${esc(plPlanWord(p))}</option>`).join('')}</select></div>
+    <div class="field" id="plTermField"${picked === 'pilot' ? ' style="display:none"' : ''}><label for="plTerm">Term</label><select id="plTerm" data-tk-form><option value="monthly">Monthly</option><option value="3month">3 months</option></select></div>
+    <div class="pl-acts"><button class="btn" id="plWonGo" onclick="plMarkWon(${plAttr(id)})">Mark won and send the pack</button></div>
+    <p class="muted pl-small">This makes them a client and emails the agreement and the first invoice${to ? ' to ' + esc(to) : ''}. The plan sets the number of calls and the fee — both come from the price list, never typed in here.</p></div>`;
 }
 
 /* One booking: where it stands, the brief, and their answers. `meta.head` is the top of
@@ -604,11 +641,34 @@ function plSay(r, good) {
   if (typeof toast === 'function') toast(r && r.ok ? good : (r && r.error) || 'Nothing was changed.');
   return r;
 }
+/* The Won button: show the plan picker (or tuck it away again). */
+function plOpenWon() {
+  const box = typeof document !== 'undefined' ? document.getElementById('plWonPick') : null;
+  if (!box) return false;
+  const show = box.style.display === 'none';
+  box.style.display = show ? '' : 'none';
+  plWonTermShow();
+  return show;
+}
+/* A Pilot has no term, so the term choice is hidden while Pilot is picked. */
+function plWonTermShow() {
+  const f = typeof document !== 'undefined' ? document.getElementById('plTermField') : null;
+  if (!f) return;
+  f.style.display = plPick('plPlan') === 'pilot' ? 'none' : '';
+}
+/* "Mark won and send the pack". One at a time: a second click while the first is still
+   on its way does nothing, so the pack is never asked for twice. */
 async function plMarkWon(id) {
   const plan = plPick('plPlan');
   if (!plan) return plSay(plErr('Pick the plan they bought first.'), '');
-  const r = await plWon(id, { plan, term: plPick('plTerm') || 'monthly', owner: (typeof authUser !== 'undefined' && authUser && authUser.uid) || null });
-  plSay(r, 'Won — they are a client now.');
+  if (pl.winning) return plErr('Still working on it.');
+  pl.winning = true;
+  let r;
+  try { r = await plCloseWon(id, plan, plan === 'pilot' ? 'monthly' : (plPick('plTerm') || 'monthly')); }
+  finally { pl.winning = false; }
+  const b = pl.one && pl.one.booking && String(pl.one.booking.id) === String(id) ? pl.one.booking : null;
+  const to = String((b && b.email) || '').trim() || 'them';
+  plSay(r, 'Won. The agreement and invoice are on their way to ' + to + '.');
   if (r.ok) await plChanged(id);
   return r;
 }
@@ -631,4 +691,4 @@ async function plMarkHeld(id) {
   if (r.ok) await plChanged(id);
   return r;
 }
-function plForget() { Object.assign(pl, { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30 }); }
+function plForget() { Object.assign(pl, { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30, winning: false }); }
