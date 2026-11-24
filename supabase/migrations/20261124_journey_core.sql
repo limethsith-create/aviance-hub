@@ -396,10 +396,14 @@ begin
     'bot', null, 'they just joined the portal');
   return null;
 end $$;
-create or replace constraint trigger client_people_welcome after update of user_id on public.client_people
+do $$ begin
+  if not exists (select 1 from pg_trigger where tgname = 'client_people_welcome' and tgrelid = 'public.client_people'::regclass) then
+    create constraint trigger client_people_welcome after update of user_id on public.client_people
   deferrable initially deferred for each row
   when (old.user_id is null and new.user_id is not null)
   execute function public.trg_person_welcome();
+  end if;
+end $$;
 
 -- ───────────────────────── hourly ─────────────────────────
 create or replace function public.journey_hourly() returns void
