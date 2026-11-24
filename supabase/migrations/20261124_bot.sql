@@ -53,8 +53,7 @@ end $function$;
 
 revoke all on function public.trg_channel_bot() from public, anon, authenticated;
 
-drop trigger if exists channel_messages_bot on public.channel_messages;
-create trigger channel_messages_bot
+create or replace trigger channel_messages_bot
   after insert on public.channel_messages
   for each row
   when (new.author_person is not null and new.msg_kind = 'chat')

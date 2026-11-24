@@ -34,8 +34,7 @@ do $$ begin
   end if;
 end $$;
 
-drop policy if exists "client writes own messages" on public.channel_messages;
-create policy "client writes own messages" on public.channel_messages for insert to authenticated
+alter policy "client writes own messages" on public.channel_messages
   with check (author_user is null and author_person is not null and author_person = public.my_person_in(channel_id)
               and char_length(body) between 1 and 4000 and attachment_url is null and edited_at is null
               and deleted_at is null and msg_kind = 'chat' and meta is null);
@@ -127,17 +126,22 @@ create index if not exists schedule_offers_channel_idx on public.schedule_offers
 do $$ declare t text; begin
   foreach t in array array['journey_steps','bot_drafts','approvals','precall_forms','testing_days','schedule_offers'] loop
     execute format('alter table public.%I enable row level security', t);
-    execute format('drop policy if exists %I on public.%I', t || '_team_read', t);
-    execute format('create policy %I on public.%I for select to authenticated using (public.is_approved())', t || '_team_read', t);
-    execute format('drop policy if exists %I on public.%I', t || '_admin_write', t);
-    execute format('create policy %I on public.%I for all to authenticated using (public.is_admin()) with check (public.is_admin())',
-                   t || '_admin_write', t);
+    if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = t and policyname = t || '_team_read') then
+      execute format('create policy %I on public.%I for select to authenticated using (public.is_approved())', t || '_team_read', t);
+    end if;
+    if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = t and policyname = t || '_admin_write') then
+      execute format('create policy %I on public.%I for all to authenticated using (public.is_admin()) with check (public.is_admin())',
+                     t || '_admin_write', t);
+    end if;
   end loop;
 end $$;
 -- draft_write is for the whole team, so the team may add (only add) drafts.
-drop policy if exists bot_drafts_team_insert on public.bot_drafts;
-create policy bot_drafts_team_insert on public.bot_drafts for insert to authenticated
-  with check (public.is_approved() and status = 'pending');
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'bot_drafts' and policyname = 'bot_drafts_team_insert') then
+    create policy bot_drafts_team_insert on public.bot_drafts for insert to authenticated
+      with check (public.is_approved() and status = 'pending');
+  end if;
+end $$;
 
 -- ───────────────────────── helpers (inside only) ─────────────────────────
 -- The owner: the first approved admin. Bot and system messages are posted as this person ("Aviance" to the client).
@@ -375,8 +379,7 @@ begin
   perform public.journey_seed(new.client_id);
   return new;
 end $$;
-drop trigger if exists invoices_journey_start on public.invoices;
-create trigger invoices_journey_start after update of status on public.invoices
+create or replace trigger invoices_journey_start after update of status on public.invoices
   for each row when (new.status = 'paid' and old.status is distinct from 'paid' and new.is_first)
   execute function public.trg_invoice_journey();
 
@@ -393,8 +396,7 @@ begin
     'bot', null, 'they just joined the portal');
   return null;
 end $$;
-drop trigger if exists client_people_welcome on public.client_people;
-create constraint trigger client_people_welcome after update of user_id on public.client_people
+create or replace constraint trigger client_people_welcome after update of user_id on public.client_people
   deferrable initially deferred for each row
   when (old.user_id is null and new.user_id is not null)
   execute function public.trg_person_welcome();

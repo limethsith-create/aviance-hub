@@ -27,8 +27,7 @@ begin
   return new;
 end $$;
 revoke execute on function public.queue_meeting_confirmation() from public, anon, authenticated;
-drop trigger if exists meetings_confirm on public.meetings;
-create trigger meetings_confirm after insert on public.meetings for each row execute function public.queue_meeting_confirmation();
+create or replace trigger meetings_confirm after insert on public.meetings for each row execute function public.queue_meeting_confirmation();
 
 -- ---- 2. small helpers (internal; nobody outside SQL calls them) ----
 
@@ -318,6 +317,5 @@ begin
   return new;
 end $$;
 revoke execute on function public.post_offer_meet_link() from public, anon, authenticated;
-drop trigger if exists meetings_offer_link on public.meetings;
-create trigger meetings_offer_link after update of meet_link on public.meetings
+create or replace trigger meetings_offer_link after update of meet_link on public.meetings
   for each row execute function public.post_offer_meet_link();
