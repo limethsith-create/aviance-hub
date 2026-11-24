@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Channels (channels.js) =====================
+/* ===================== AVIANCE OS — Channels (channels.js) =====================
    Three columns on a computer: channel list | messages | the client's numbers. On a phone one pane at a time
    (list -> channel), the composer sits at the bottom above the tab bar, and the numbers open as a sheet.
    Colours and sizes come from theme.css tokens (DESIGN.md); the fallbacks only matter if a token is missing. */

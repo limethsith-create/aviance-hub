@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Finance =====================
+/* ===================== AVIANCE OS — Finance =====================
    The money, and the only part of the hub that does NOT go through the machine
    the old backend. Everything here talks straight to Supabase through the
    shell's `sb` client, so it keeps working when the machine is gone.

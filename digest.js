@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — the dashboards and the Friday update =====================
+/* ===================== AVIANCE OS — the dashboards and the Friday update =====================
    The screens that answer "how are we doing" without anyone doing arithmetic by hand.
 
      dgHome()               today, in numbers, and the things that need a person
@@ -55,7 +55,7 @@ function dgHas(name){
    worth breaking a screen over: it comes back as {ok:false} and becomes a dash. */
 async function dgAsk(name){
   const args = Array.prototype.slice.call(arguments, 1);
-  if (!dgHas(name)) return dgErr('That part of the hub is not loaded yet.');
+  if (!dgHas(name)) return dgErr('That part of Aviance OS is not loaded yet.');
   try {
     const r = await globalThis[name].apply(null, args);
     if (!r || typeof r !== 'object') return dgOk(r === undefined ? null : r);
@@ -651,7 +651,7 @@ function dgLink(label, onclick, main){
 function dgMissingLine(missing){
   if (!missing || !missing.length) return '';
   return '<p class="dg-missing">Some of this is not in yet: ' + dgEsc(missing.join(', ')) +
-    '. Those numbers show a dash until that part of the hub answers.</p>';
+    '. Those numbers show a dash until that part of Aviance OS answers.</p>';
 }
 
 /* --- the front screen --- */
@@ -815,14 +815,14 @@ function dgRender(view){
 function dgOpenClient(id){
   if (!id) return;
   if (dgHas('openClient')) { try { openClient(id); return; } catch (e) { /* fall through */ } }
-  if (!dgRender('clients') && dgHas('toast')) toast('That screen is not in the hub yet.');
+  if (!dgRender('clients') && dgHas('toast')) toast('That screen is not in Aviance OS yet.');
 }
 function dgGo(what){
   const where = {requests: 'requests', tasks: 'work', money: 'billing', friday: 'friday', monthEnd: 'monthEnd', home: 'home'}[what];
   if (where && dgRender(where)) return true;
   /* no router (or that screen is not registered): draw it here instead */
   if (what === 'friday' || what === 'monthEnd' || what === 'home') { dgPaint(dgSkeleton()); dgMount(what); return true; }
-  if (dgHas('toast')) toast('That screen is not in the hub yet.');
+  if (dgHas('toast')) toast('That screen is not in Aviance OS yet.');
   return false;
 }
 async function dgLockMonth(monthId){

@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Channels =====================
+/* ===================== AVIANCE OS — Channels =====================
    Team chat: one channel per client (the team + the client), and team channels. A business chat in the style of
    Slack / Linear — no bots, no bubbles. Left: the channel list (clients, team, archived folded away, search).
    Middle: the messages (grouped by person and day, links clickable, images previewed, files as chips, edited /

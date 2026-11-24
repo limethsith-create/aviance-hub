@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Onboarding (a won deal becomes a running client) =====================
+/* ===================== AVIANCE OS — Onboarding (a won deal becomes a running client) =====================
    Four things stand between a signed deal and day one: the agreement, their
    inputs, the strategy call, and the first invoice. This file is the gate.
 

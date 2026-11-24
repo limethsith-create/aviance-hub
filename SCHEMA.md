@@ -1,7 +1,7 @@
-# Aviance Hub — the one shared schema
+# Aviance OS — the one shared schema
 
-Supabase project `zjbxnkpktbghhudjbxhk`. Every module in the hub reads and writes
-these tables through the global `sb` client. Nothing in the hub calls another
+Supabase project `zjbxnkpktbghhudjbxhk`. Every module in Aviance OS reads and writes
+these tables through the global `sb` client. Nothing in Aviance OS calls another
 server. There is no `machineFetch`, no `MACHINE_URL`, no email-distributor.
 
 ## How every module is written
@@ -109,3 +109,83 @@ View **v_outreach_summary** — client_id, client_name, campaigns, running, sent
 - **agreements** — booking_id, client_name*, client_email*, client_company*, plan*, term*, monthly_fee*, status*, gmail_message_id, sent_by, error
 - **agreement_pdfs** — key* (pk), filename*, b64*, updated_at*
 - **workspace_shared / workspace_admin** — id int4, data* jsonb, updated_at
+
+## The words the database will accept
+
+A module holding a word the database refuses does not crash — the write just
+fails, or the count silently reads zero. Three of those were found after the
+rebuild. These lists mirror the live CHECK constraints. **If a migration changes
+one, change it here and in `tests/vocabulary.test.mjs` in the same commit.**
+
+- **clients.stage** / **client_stage_history** — `enquiry, booked, won, onboarding, live, at_risk, paused, ended, lost`
+  (`warming`, `sending`, `setting_up`, `finished` are retired)
+- **meetings.kind** — `discovery, strategy, onboarding, qualified, review, check_in, other`
+  (`qualified` is a booked sales call we delivered: the one that counts toward the guarantee)
+- **meetings.status** — `requested, booked, held, no_show, cancelled` (`confirmed` is retired, now `booked`)
+- **channels.kind** — `team, internal, client`
+- **tasks.department** — the eight: `marketing, sales, onboarding, operations, deliverability, finance, client_success, admin`
+- **discovery_bookings.plan** — `pilot, starter, growth, scale`
+- **discovery_bookings.lost_reason** — `price, timing, no_budget, went_elsewhere, not_a_fit, no_show, ghosted, other`
+
+## What the website may do
+
+The booking page on aviance.online is not signed in, so it acts as `anon`. It is
+allowed exactly two things and nothing else:
+
+- `select * from public.free_slots(days)` — free start times and slot length,
+  **nothing else**: no names, no client ids, no booking ids. It reads the same
+  `calendar_settings` row Aviance OS's Settings screen writes, so changing the
+  working day in Aviance OS changes what the website offers. It subtracts anything
+  in `meetings`, `calendar_blocks` and `discovery_bookings`.
+- `select * from public.v_call_hours` — the working day in words, for the
+  "7am to 9pm Eastern, weekdays" line on the page.
+- `insert into public.discovery_bookings` — guarded by the `website can book`
+  policy: status must be `booked`, no score, no calendar id, and the call must
+  be in the future.
+
+Proven by planting a client, a meeting and a do-not-call row, then reading as
+`anon`: every one came back 0, while `free_slots` correctly dropped the taken
+slot. A unique index (`discovery_bookings_one_per_slot`) means the database
+itself refuses a double booking, which is what lets the page say "someone just
+took that time".
+
+## The mail room
+
+Nothing in the browser sends email. Anything that needs one writes a row to
+**mail_outbox** — to_email, to_name, subject, body_text, body_html, ics, kind*
+[booking_confirmation|reminder_24h|reminder_1h|reminder_5min|agreement|portal_invite|friday_update|handover|other],
+booking_id, meeting_id, client_id, status* [pending|sending|sent|failed|cancelled],
+attempts, last_error, send_after, sent_at, gmail_message_id, needs_meet_link.
+Staff-only under RLS; one row per booking or meeting per kind.
+
+- A new row in `discovery_bookings` queues its own confirmation (trigger), and
+  gets a stand-in video link at once so no email can ever go out without one.
+- `queue_due_reminders()` queues the day-before, hour-before and five-minute
+  nudges, each exactly once, and **only if the person booked before that
+  nudge's window opened** — someone who books three hours ahead never gets
+  "see you tomorrow".
+- The edge function `mail-tick` (supabase/functions/mail-tick) runs every
+  minute. It hands each row to the Apps Script inside aviancelk@gmail.com,
+  which makes the calendar event and a real Google Meet link for a new booking,
+  sends the email, and returns the link, which replaces the stand-in on the
+  booking. Reminders carry that same link.
+- Templates hold `{{MEET_LINK}}`; a trigger refuses to mark a row sent while
+  the placeholder is still in it.
+- Secrets live in Supabase (APPS_SCRIPT_URL, APPS_SCRIPT_SECRET) and in the
+  script's own properties (SHARED_SECRET). With them missing the job runs as a
+  rehearsal and sends nothing.
+
+### The four designed emails
+
+`mail_html(kind, name, at, zone)`, `mail_text(...)` and `mail_subject(...)` build
+the booking confirmation and the day-before, one-hour and five-minute reminders:
+email-safe HTML (tables, inline styles, the logo loaded from
+https://www.aviance.online/logo-180.png) plus a plain-text fallback. Every
+caller goes through `queue_call_mail(kind, email, name, at, zone, booking, meeting, client)`
+so all four always match. Dates and times are written in the person's own time
+zone; `{{MEET_LINK}}` is swapped for that booking's Google Meet link at send time.
+The designs these were built from: "Aviance — booking & reminder emails"
+(https://claude.ai/artifact/KM6PfhSTE2ZqtvvqbX6KUx).
+
+A new booking also starts the research engine (existing trigger), so a test
+booking leaves a research brief behind as well as mail.

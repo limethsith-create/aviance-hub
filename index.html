@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Aviance Hub</title>
+<title>Aviance OS</title>
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="clientbook.css">
 <link rel="stylesheet" href="pipeline.css">
@@ -30,7 +30,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
 <script src="channels-api.js"></script>
 <style>
-/* ===================== AVIANCE HUB — shell styles =====================
+/* ===================== AVIANCE OS — shell styles =====================
    Layout and behaviour of the shell; the look (tokens, radii, type) is in theme.css.
    Sentence case. One brand colour for the primary action and "needs you"; pills: green = good, amber = waiting, red = needs you, grey = done.
    A few places only: Clients, Calendar, Team, Activity, Settings — a sidebar on a
@@ -268,7 +268,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
   <div class="login-wrap">
     <div class="login-aside">
       <div class="la-top"><div class="logo" style="width:40px;height:40px">A</div>
-        <div><div class="la-name">Aviance Hub</div><div class="la-sub">For the Aviance team</div></div></div>
+        <div><div class="la-name">Aviance OS</div><div class="la-sub">For the Aviance team</div></div></div>
       <div class="la-hero">
         <h2>We don't sell emails. We sell <span class="accent">booked calls</span>.</h2>
         <p>Every client runs by itself. This is where you see who is where, and do the few things only people can do.</p>
@@ -292,7 +292,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
         <button id="joinBtn" class="btn" style="width:100%;justify-content:center;padding:11px" onclick="doJoin()">Set up my account</button>
         <div class="login-hint"><button type="button" id="joinSwitch" class="login-link" onclick="joinSwitch()">I already have an account</button></div>
       </div>
-      <div class="login-eyebrow login-std">Aviance Hub</div>
+      <div class="login-eyebrow login-std">Aviance OS</div>
       <div class="login-title login-std">Sign in</div>
       <div class="login-desc login-std">Your email and password.</div>
       <div id="loginAppNote" class="login-app-note" style="display:none">First time in the app? Sign in once here.</div>
@@ -302,7 +302,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
       <div id="loginErr" class="login-err login-std"></div>
       <div id="resetOk" class="login-ok login-std" style="display:none">Recovery link sent — check your inbox.</div>
       <button class="btn login-std" style="width:100%;justify-content:center;padding:11px" onclick="doLogin()">Sign in</button>
-      <div class="login-hint login-std">This hub is for the Aviance team. New here? <button type="button" class="login-link" onclick="openSignUp()">Create an account</button> — the owner approves it.</div>
+      <div class="login-hint login-std">Aviance OS is for the Aviance team. New here? <button type="button" class="login-link" onclick="openSignUp()">Create an account</button> — the owner approves it.</div>
       <div id="signUpBox" class="login-std" style="display:none;margin-top:16px">
         <div class="field"><label>Your name</label><input id="suName" placeholder="Your full name" autocomplete="name"></div>
         <div class="field"><label>Email</label><input id="suEmail" type="email" placeholder="you@email.com" autocomplete="email"></div>
@@ -362,7 +362,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
 </div>
 
 <script>
-/* ===================== AVIANCE HUB — shell =====================
+/* ===================== AVIANCE OS — shell =====================
    Sign-in, the router, the navigation (sidebar on a computer, tab bar on a
    phone), ⌘K, notifications, theme. The shell draws no screen of its own.
 
@@ -470,7 +470,7 @@ let currentClientId=null, currentEnquiryId=null, currentMeetingId=null, currentT
    instead of throwing. Each area is one file; see SCHEMA.md. */
 function V(name,arg){
   const f=typeof window!=='undefined'?window[name]:null;
-  if(typeof f!=='function')return '<div class="card"><div class="empty"><h3>Not loaded</h3><p>This screen\u2019s file did not load. Reload the page, and if it keeps happening tell whoever looks after the hub.</p></div></div>';
+  if(typeof f!=='function')return '<div class="card"><div class="empty"><h3>Not loaded</h3><p>This screen\u2019s file did not load. Reload the page, and if it keeps happening tell whoever looks after Aviance OS.</p></div></div>';
   try{return f(arg)}catch(e){return '<div class="card"><div class="empty"><h3>Something went wrong</h3><p>'+esc((e&&e.message)||'This screen could not be drawn.')+'</p></div></div>'}
 }
 function openClient(id){currentClientId=id;render('client')}
@@ -648,7 +648,7 @@ async function routeUser(errId){
   if(!isClient&&(!prof||!prof.approved||(prof.role!=='admin'&&prof.role!=='employee'))){
     try{await sb.auth.signOut();}catch(e){}
     authUser=null;showLogin();
-    return errEl(errId,prof&&!prof.approved?'Your account is waiting for the owner to approve it. Try again once they have.':'This hub is for the Aviance team.');
+    return errEl(errId,prof&&!prof.approved?'Your account is waiting for the owner to approve it. Try again once they have.':'Aviance OS is for the Aviance team.');
   }
   authUser=isClient
     ?{uid:prof.id,name:prof.name||'You',role:'client',clientId:String(prof.client_id),email:prof.email||user.email||''}
@@ -777,7 +777,7 @@ let cmdkState={items:[],sel:0};
 function cmdkActions(){const a=[];
   if(typeof trialsCmdkActions==='function')a.push(...trialsCmdkActions());
   if(typeof calendarCmdkActions==='function')a.push(...calendarCmdkActions());
-  a.push({type:'Command',label:'Switch light / dark',icon:I.moon,sub:'How the hub looks',kw:'theme dark light mode toggle',run:()=>{closeCmdk();toggleTheme();}});
+  a.push({type:'Command',label:'Switch light / dark',icon:I.moon,sub:'How Aviance OS looks',kw:'theme dark light mode toggle',run:()=>{closeCmdk();toggleTheme();}});
   a.push({type:'Command',label:'Log out',icon:I.logout,sub:'End your session',kw:'log out sign out logout',run:()=>{closeCmdk();logout();}});
   return a;}
 function cmdkEntities(){return typeof trialsCmdkEntities==='function'?trialsCmdkEntities():[]}

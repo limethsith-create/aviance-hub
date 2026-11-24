@@ -1,5 +1,5 @@
 /* ============================================================================
-   clientbook.js — Aviance Hub · the clients and the journey
+   clientbook.js — Aviance OS · the clients and the journey
    ----------------------------------------------------------------------------
    Who every client is, what stage they are at, and what needs a person today.
    This replaces the old Clients screen. It talks to Supabase only,
@@ -210,7 +210,7 @@ async function cbOpenRequests(clientId){
 async function cbEvent(clientId, area, event, detail){
   if (!clientId) return cbErr('Which client is this about?');
   const a = cbTrim(area), e = cbTrim(event);
-  if (!a) return cbErr('An event needs to say which part of the hub it came from.');
+  if (!a) return cbErr('An event needs to say which part of Aviance OS it came from.');
   if (!e) return cbErr('An event needs a name.');
   const d = detail && typeof detail === 'object' && !Array.isArray(detail) ? detail
           : detail == null || detail === '' ? {}
@@ -471,7 +471,7 @@ function cbGroups(rows){
   });
   /* A stage we do not recognise still has to show up somewhere. */
   const odd = (rows || []).filter(r => cbStageIndex(r.stage) < 0);
-  if (odd.length) out.push({key:'', label:'Stage not set', meaning:'These rows carry a stage the hub does not know.', rows: cbSortRows(odd)});
+  if (odd.length) out.push({key:'', label:'Stage not set', meaning:'These rows carry a stage Aviance OS does not know.', rows: cbSortRows(odd)});
   return out;
 }
 function cbSortRows(rows){
@@ -589,7 +589,7 @@ function cbRenderMover(r){
     '<input id="cbMoveNote" class="cb-in" type="text" maxlength="600" placeholder="Inputs signed off on the call">' +
     '<div class="cb-mover-btns">' + btn(fwd, 'fwd') + btn(back, 'back') + '</div>' +
     (!fwd && !back ? '<p class="cb-dim">' + cbE('There is nowhere to move them from here.') + '</p>' : '') +
-    '<p class="cb-mover-rule">' + cbE('One stage at a time, forwards or back. The hub will not let a stage be skipped.') + '</p>' +
+    '<p class="cb-mover-rule">' + cbE('One stage at a time, forwards or back. Aviance OS will not let a stage be skipped.') + '</p>' +
     '<div class="cb-err" id="cbMoveErr" role="alert"></div>' +
   '</section>';
 }

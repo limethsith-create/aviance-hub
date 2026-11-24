@@ -122,3 +122,58 @@ test('no file mentions a module that was deleted, even in a comment', () => {
     }
   }
 });
+
+/* Meeting words. The database refused 'qualified' and 'booked' for a while,
+   which would have failed every booked sales call — the one thing the whole
+   business promises. Both lists are mirrored from the check constraints on
+   public.meetings. */
+const MEETING_KINDS = ['discovery', 'strategy', 'onboarding', 'qualified', 'review', 'check_in', 'other'];
+const MEETING_STATUS = ['requested', 'booked', 'held', 'no_show', 'cancelled'];
+
+/* A module's own vocabulary list, checked against the database's constraint.
+   This compares list to list rather than grepping for stray strings: 'kind' is
+   a column on meetings, channels and client_requests, and no regex can tell
+   which table a given `kind:` belongs to.
+
+   These lists mirror the CHECK constraints on the live tables. If a migration
+   changes a constraint, change it here in the same commit. */
+const DB = {
+  'meetings.kind':   ['discovery', 'strategy', 'onboarding', 'qualified', 'review', 'check_in', 'other'],
+  'meetings.status': ['requested', 'booked', 'held', 'no_show', 'cancelled'],
+  'channels.kind':   ['team', 'internal', 'client'],
+};
+
+/* Pull the keys out of an object literal declared as `const NAME = { ... }`. */
+function declaredKeys(file, name) {
+  const src = fs.readFileSync(path.join(root, file), 'utf8');
+  const at = src.indexOf('const ' + name + ' = {');
+  assert.ok(at >= 0, `${file} no longer declares ${name}`);
+  const body = src.slice(at, src.indexOf('\n};', at));
+  return [...body.matchAll(/^\s{2}([a-z_]+)\s*:/gm)].map((m) => m[1]);
+}
+
+test('the meeting kinds meetings.js offers are all ones the database accepts', () => {
+  const offered = declaredKeys('meetings.js', 'MT_KINDS');
+  assert.ok(offered.length >= 5, 'expected the real list of call kinds');
+  for (const k of offered) {
+    assert.ok(DB['meetings.kind'].includes(k), `meetings.js offers kind '${k}', which the database will refuse`);
+  }
+  /* The one the business is built on. */
+  assert.ok(offered.includes('qualified'), 'the booked sales call must be bookable');
+});
+
+test('the meeting statuses meetings.js uses are all ones the database accepts', () => {
+  const used = declaredKeys('meetings.js', 'MT_STATUS');
+  assert.ok(used.length >= 4, 'expected the real list of statuses');
+  for (const k of used) {
+    assert.ok(DB['meetings.status'].includes(k), `meetings.js uses status '${k}', which the database will refuse`);
+  }
+  assert.ok(used.includes('booked'), "'booked' is what every screen writes");
+});
+
+test('no retired meeting or channel word is left in the code', () => {
+  /* 'confirmed' was the old word for 'booked'; 'internal' for a team channel. */
+  const code = strip(fs.readFileSync(path.join(root, 'meetings.js'), 'utf8'));
+  assert.ok(!code.includes("'confirmed'"), "meetings.js uses 'confirmed'; the status is 'booked' now");
+});
+

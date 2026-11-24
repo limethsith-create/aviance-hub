@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Pipeline (our own sales pipeline) =====================
+/* ===================== AVIANCE OS — Pipeline (our own sales pipeline) =====================
    The enquiries that come in from the website, the research we do on each one before the
    call, and whether we won or lost. Supabase only: no other server, nothing to call out to.
 
@@ -273,7 +273,7 @@ function plResearchNow(bookingId) {
   // research_log itself; the hub only reads them. Until there is a way to ask it from
   // here (a Supabase function it listens on, or a row it picks up), this button only
   // says so — it must never write a brief itself.
-  if (typeof toast === 'function') toast('Noted. The research engine is still started outside the hub, so ask it there.');
+  if (typeof toast === 'function') toast('Noted. The research engine is still started outside Aviance OS, so ask it there.');
   return plOk({ bookingId: bookingId == null ? '' : String(bookingId), triggered: false });
 }
 

@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Meetings =====================
+/* ===================== AVIANCE OS — Meetings =====================
    The calendar, booking, reminders, no-shows, and whether a booked call counts.
    Supabase only: everything here goes straight through the shell's `sb` client.
    There is no other server — no machine, no booking service, nothing to call.

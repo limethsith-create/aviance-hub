@@ -374,7 +374,7 @@ test('cbEvent never leaves detail null, whatever it is given', async () => {
 test('cbEvent says what is missing and writes nothing', async () => {
   tables['client_events.insert'] = (c) => ({data:[c.payload], error:null});
   assert.match((await cbEvent('', 'a', 'b')).error, /Which client/);
-  assert.equal((await cbEvent('c1','','b')).error, 'An event needs to say which part of the hub it came from.');
+  assert.equal((await cbEvent('c1','','b')).error, 'An event needs to say which part of Aviance OS it came from.');
   assert.equal((await cbEvent('c1','a','')).error, 'An event needs a name.');
   assert.deepEqual(writes(), []);
   /* a database error comes back whole, and never throws */

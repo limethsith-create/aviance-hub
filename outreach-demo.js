@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Outreach: demo tool =====================
+/* ===================== AVIANCE OS — Outreach: demo tool =====================
    A complete fake outreach tool, so every outreach screen works today with no
    key, no account and no network. Nothing here reaches outside the browser.
 
