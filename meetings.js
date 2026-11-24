@@ -1112,13 +1112,15 @@ function mtRenderMonth(cal, shown){
          + '<div class="mt-chips">'
          + (blocks.length?'<span class="mt-chip mt-chip-blk mt-hatch" title="'+esc(blocks.map(b=>b.from+' to '+b.to+(b.block.reason?' · '+b.block.reason:'')).join('; '))+'">Blocked</span>':'')
          + list.slice(0, MT_CHIP_MAX).map(mtRenderChip).join('')
-         + (more>0?'<button type="button" class="mt-more" onclick="event.stopPropagation();mtGoWeek('+mtJsArg(key)+')">+'+more+' more</button>':'')
          + '</div>'
+         /* outside the chips, so a short row clips a chip and never this line */
+         + (more>0?'<button type="button" class="mt-more" onclick="event.stopPropagation();mtGoWeek('+mtJsArg(key)+')">+'+more+' more</button>':'')
          + '<span class="mt-dots'+(need?' need':'')+'" aria-hidden="true">'
          + list.slice(0, MT_CHIP_MAX).map(e=>'<i class="mt-dot '+e.planClass+'"></i>').join('')
          + (list.length?'<b>'+list.length+'</b>':'')+'</span></div>';
   }).join('');
-  return '<div class="mt-month"><div class="mt-dow">'+MT_GRID_DAYS.map(d=>'<span>'+d+'</span>').join('')+'</div>'
+  const weeks = Math.max(1, Math.ceil(cal.keys.length / 7));
+  return '<div class="mt-month" id="mtMo" style="--mt-weeks:'+weeks+'"><div class="mt-dow">'+MT_GRID_DAYS.map(d=>'<span>'+d+'</span>').join('')+'</div>'
        + '<div class="mt-cells">'+cells+'</div></div>'
        + '<div class="mt-under">'+mtRenderDayList(cal, cal.day, shown, {openDay:true})+'</div>';
 }
@@ -1526,14 +1528,15 @@ function viewCalendar(){
   else mtLoadCal();
   return mtHost('mtCalHost', mt.cal ? mtRenderCal(mt.cal) : mtLoading('Loading your calendar…'));
 }
-/* Give the week grid exactly the height the window has left, so the whole
-   working day shows with no scrolling. The stylesheet does the sum
-   (100dvh − --mt-top); this only measures what sits above and below the grid.
-   When even the smallest rows will not fit, the grid keeps its minimum height
-   and the page itself scrolls — never a box inside it. */
+/* Give whichever grid is drawn — the week or the month — exactly the height the
+   window has left, so the whole working day, or the whole month, shows with no
+   scrolling. The stylesheet does the sum (100dvh − --mt-top); this only
+   measures what sits above and below the grid. When even the smallest rows will
+   not fit, the grid keeps its minimum height and the page itself scrolls —
+   never a box inside it. */
 function mtFit(){
   try{
-    const g = document.getElementById('mtWk'), c = document.getElementById('content');
+    const g = document.getElementById('mtWk') || document.getElementById('mtMo'), c = document.getElementById('content');
     if(!g || !c || typeof g.getBoundingClientRect !== 'function' || typeof window === 'undefined') return false;
     const r = g.getBoundingClientRect(), cr = c.getBoundingClientRect();
     if(!(r.width > 0)) return false;                       // the phone: the grid is not drawn

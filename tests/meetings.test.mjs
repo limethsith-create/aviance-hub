@@ -580,6 +580,9 @@ test('the month grid: November 2026 starts on Monday 26 October and is whole wee
   mt.day = '2026-11-24'; await mtLoadCal();
   const h = host('mtCalHost');
   assert.equal((h.match(/<div class="mt-cell[ "]/g) || []).length, 42);
+  // the month fits the window the same way the week does: six equal rows, no inner box that scrolls
+  assert.match(h, /class="mt-month" id="mtMo" style="--mt-weeks:6"/);
+  assert.ok(!/overflow-y/.test(h), 'no box inside the page that scrolls');
   assert.match(cellOf(h, '2026-10-26'), /^ out"/, 'October is dimmed');
   assert.match(cellOf(h, '2026-12-06'), /^ out"/, 'December is dimmed');
   assert.match(cellOf(h, '2026-11-24'), /^ today sel"/, 'today is marked');
@@ -1125,6 +1128,11 @@ test('on a phone: dots and a count per day with the picked day listed underneath
   assert.match(css, /\.mt-slot\{[^}]*min-height:44px/);
   assert.match(css, /\.mt-bar \.btn\{min-height:44px/);
   assert.match(phone, /\.mt-cell\{min-height:5\dpx/);
+  assert.match(phone, /\.mt-month\{height:auto/, 'phone: the month is as tall as it needs to be');
+  // both grids are sized from the window, so neither needs scrolling
+  for (const sel of ['.mt-wk{', '.mt-month{'])
+    assert.ok(css.slice(css.indexOf(sel)).slice(0, 400).includes('100dvh - var(--mt-top'), sel + ' takes the height the window has left');
+  assert.match(css, /\.mt-cells\{[^}]*grid-template-rows:repeat\(var\(--mt-weeks,6\),minmax\(0,1fr\)\)/);
   assert.ok(/grid-template-columns:repeat\(7,minmax\(0,1fr\)\)/.test(css), 'seven columns that shrink instead of pushing the page sideways');
 });
 
