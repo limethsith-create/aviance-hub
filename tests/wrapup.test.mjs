@@ -215,7 +215,7 @@ test('wuEndClient asks for a reason, and says so plainly', async () => {
   assert.match(r.error, /Say why/);
   const missing = await t.ctx.wuEndClient('nope', { reason: 'x' });
   assert.equal(missing.ok, false);
-  assert.match(missing.error, /not in the hub/);
+  assert.match(missing.error, /not in Aviance OS/);
 });
 
 /* ═════════════ 2. the final statement ═════════════ */
@@ -531,7 +531,7 @@ test('the final statement renders with zero months', async () => {
   assert.match(text(h), /Harbor Co/);
   // a client who is not there reads as a sentence, not a crash
   await t.ctx.wuLoadStatement('nope');
-  assert.match(text(t.ctx.viewFinalStatement('nope')), /not in the hub/);
+  assert.match(text(t.ctx.viewFinalStatement('nope')), /not in Aviance OS/);
 });
 
 test('Data deletion renders with zero rows, and lists due before coming', async () => {

@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — The client portal =====================
+/* ===================== AVIANCE OS — The client portal =====================
    The client's own people, their way in, and the conversation with them.
 
    Tables (SCHEMA.md): client_people  portal_invites  client_requests

@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Outreach =====================
+/* ===================== AVIANCE OS — Outreach =====================
    Our own front end over whatever is actually sending the email. Three screens:
 
      viewOutreach()                 every client in one list (v_outreach_summary), a Sync button

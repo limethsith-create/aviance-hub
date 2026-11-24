@@ -78,7 +78,7 @@ function viewSettings(){
   <p class="st-note">Every screen that offers someone a time reads this. Change it here and it changes everywhere.</p>
   <div id="stCal" class="st-wrap">Loading…</div></div>
 <div class="card"><h3>The tool doing the sending</h3>
-  <p class="st-note">The hub never sends email itself. It reads from whichever tool is behind it. There are no keys stored in the hub.</p>
+  <p class="st-note">Aviance OS never sends email itself. It reads from whichever tool is behind it. There are no keys stored in Aviance OS.</p>
   <div id="stOut" class="st-wrap">Loading…</div></div>`;
 }
 

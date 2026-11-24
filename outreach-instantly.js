@@ -1,4 +1,4 @@
-/* ================= AVIANCE HUB — Outreach: Instantly (not connected) =================
+/* ================= AVIANCE OS — Outreach: Instantly (not connected) =================
    An empty adapter. Every method is here, every method says the same plain
    thing: Instantly is not connected yet. Nothing in this file touches the
    network, and there is no key in it — there never will be. A key lives

@@ -1,9 +1,9 @@
-# The hub's own database
+# Aviance OS's own database
 
 These are applied to the `aviance-hub` Supabase project (`zjbxnkpktbghhudjbxhk`).
 Pull the SQL with `supabase db pull` — Supabase holds the applied versions.
 
-## Finance (2026-11-22) — the first part of the hub that stood on its own
+## Finance (2026-11-22) — the first part of Aviance OS that stood on its own
 
 | Migration | What it adds |
 | --- | --- |

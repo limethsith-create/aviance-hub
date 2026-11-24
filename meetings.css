@@ -1,4 +1,4 @@
-/* meetings.css — Aviance Hub · Meetings (meetings.js).
+/* meetings.css — Aviance OS · Meetings (meetings.js).
    Same rules as calendar.css: every colour and size is a token from theme.css,
    no new colours, nothing under --fs-min. Each time is printed twice (US
    Eastern big, Sri Lanka under it), so the rows are built around two lines.

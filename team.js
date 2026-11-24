@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Team & Work =====================
+/* ===================== AVIANCE OS — Team & Work =====================
    The people who work here, and the work queue. Supabase only: `profiles`
    and `tasks` through the shell's `sb` client. Nothing here calls another
    server.

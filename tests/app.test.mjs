@@ -23,7 +23,7 @@ function png(file) {
 
 test('manifest: valid JSON with everything an installable app needs', () => {
   const m = JSON.parse(read('manifest.webmanifest').toString());
-  assert.equal(m.name, 'Aviance Hub');
+  assert.equal(m.name, 'Aviance OS');
   assert.equal(m.short_name, 'Aviance');
   assert.equal(m.start_url, '/');
   assert.equal(m.scope, '/');

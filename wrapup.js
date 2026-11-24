@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Wrap-up (wrapup.js) =====================
+/* ===================== AVIANCE OS — Wrap-up (wrapup.js) =====================
    How a client leaves: the final count, the money owed both ways, what they
    take with them, and deleting their data when the time comes.
 
@@ -77,7 +77,7 @@ async function wuClient(clientId){
   if (!clientId) return wuErr('No client was given.');
   const r = await wuRun(() => sb.from('clients').select('*').eq('id', clientId).maybeSingle(), null);
   if (!r.ok) return r;
-  if (!r.data) return wuErr('That client is not in the hub.');
+  if (!r.data) return wuErr('That client is not in Aviance OS.');
   return r;
 }
 async function wuMonths(clientId){

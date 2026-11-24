@@ -1,10 +1,10 @@
-# Aviance Hub
+# Aviance OS
 
 The Aviance owner's window onto the **machine** — live at
 https://aviance.store. One static page, plain browser JavaScript, no build
 step. The machine (`limethsith-create/email-distributor`, deployed at
 https://email-distributor.vercel.app) runs every paying client (Starter,
-Growth or Scale) by itself; the hub shows what it is doing and lets the owner
+Growth or Scale) by itself; Aviance OS shows what it is doing and lets the owner
 steer it, through the contract in `email-distributor/docs/HUB-API.md`.
 
 > **No free trial, one way in (November 2026).** A client starts as a booking
@@ -14,12 +14,12 @@ steer it, through the contract in `email-distributor/docs/HUB-API.md`.
 > Day 30 and the decision page, the Test run, the Dialer and My stats (the
 > owner's own cold email) are gone.
 
-The hub is for one person. Sign-in is Supabase email + password, and only a
+Aviance OS is for one person. Sign-in is Supabase email + password, and only a
 `profiles` row that is `approved` with `role = 'admin'` gets in; anyone else
-sees "This hub is for the Aviance owner." and is signed out.
+sees "Aviance OS is for the Aviance owner." and is signed out.
 
 > The older workspace features (projects, team, clients, calendars, CRM,
-> proposals, invoices) were removed from the hub. Their data is still stored in
+> proposals, invoices) were removed from Aviance OS. Their data is still stored in
 > the Supabase tables `workspace_shared` / `workspace_admin` — it is simply not
 > shown any more.
 
@@ -36,10 +36,10 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `keys.js` | The owner's own set-up, so he never opens Vercel: Settings › Keys (one card per service key — status in words, the steps and an "Open …" link, a password box, Test and save / Test / Forget; a value is never shown back) over `GET/POST /api/mc/keys`, and Settings › Your details (name, address, email, the onboarding inbox, call link, PayPal.me, Wise, Clutch — each with its own Save, "Still to fill in: N", the two the first client needs marked in amber) over `GET/POST /api/mc/config` (see `email-distributor/docs/KEYS.md`). Styles in `trials.css`. |
 | `trials.css` | Styles for the Clients screens, on top of the shell's CSS variables (light + dark). |
 | `inquiries.js` | Bookings: the sales calls booked from the website — list, detail, status/notes, Won / Lost, the board strip. |
-| `manifest.webmanifest` | Makes the hub installable (Add to Home Screen) — the hub can sit on a phone's home screen. |
+| `manifest.webmanifest` | Makes Aviance OS installable (Add to Home Screen) — Aviance OS can sit on a phone's home screen. |
 | `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | The brand cube from the website, flattened onto white (see *Home Screen app*). |
 | `tests/trials.test.mjs` | Node tests for the shell (router, admin gate, ⌘K, deep links), the Clients screens, bookings waiting for their sales call (Won / Lost), and the readability floor. |
-| `tests/simple.test.mjs` | Node tests for the simple hub: the four places and their badges, the one journey, "Needs you", the three questions and the one big button, Settings, deep links, plain words (a banned-word list), and no function name declared twice. |
+| `tests/simple.test.mjs` | Node tests for the simple Aviance OS: the four places and their badges, the one journey, "Needs you", the three questions and the one big button, Settings, deep links, plain words (a banned-word list), and no function name declared twice. |
 | `tests/calendar.test.mjs` | Node tests for the Calendar. |
 | `tests/messages.test.mjs` | Node tests for Messages (each kind of email, escaped; auto-reply labels; reply and bot posts), "Answer Sam's message", the Join Google Meet button and its fallback, Settings › Google Meet (states, the four actions, the return from Google) and Settings › Reply bot (incl. "who are you" / "not now" and the check-back weeks); delivery monitoring: the status line under our emails (each status, amber "not opened yet", red bounce with why, missing fields, escaping), the "hasn't opened" to-do (big button, list line, confirm → `unopenedDone`, reload), the four new alerts, plain words. |
 | `tests/autobuy.test.mjs` | Node tests for CheapInboxes: the big button and the "what to buy" panel (Copy, "Buy this one instead", "I've bought it — check now", one post per click), the card in every status (steps, current step, inboxes, the problem + "Check now", "Wrong domain? Undo"), the Buy & paste fallback with its pointer to Settings, Settings › Inboxes & domains (states, card on file, steps, Save / Test it / Forget, "This is for…" + Link it), plain words, and that nothing can place an order. |
@@ -47,7 +47,7 @@ sees "This hub is for the Aviance owner." and is signed out.
 | `tests/keys.test.mjs` | Node tests for Settings › Keys (cards per status, order, env-set keys without a box, save / test / forget bodies incl. Verifalia's two fields, a refused key keeps what was typed, a saved one is cleared and never drawn, no encryption key) and Settings › Your details (the eight boxes, required marks, "Still to fill in", save / clear bodies for both row shapes, checks), `#settings/keys`, `#settings/details`, ⌘K, the "Is everything running?" pointers, plain words, touch targets. |
 | `tests/app.test.mjs` | Node tests for the manifest, the icons, the `<head>` tags and the manifest. |
 | `tests/fixtures.mjs` | Sample machine answers, shaped exactly like the contract — including a realistic growth history generator and a tiny growth payload full of nulls. |
-| `tests/journey.test.mjs` | The dress rehearsal: the machine's 31 real snapshots of one client's whole journey (the booking → Won → onboarding call → warm-up → the launch call → sending → month two), each drawn with the real hub code on a device set to US Pacific — the Clients list, the three questions and the big button, Messages (with how each email we sent went), the call / inboxes / warm-up / launch-call cards, "What we found" (the brief and the company file), every Behind-the-scenes tab, the Calendar and Settings; plus the moment of the launch call itself and the delivery watch (an unopened "we start on" email, a bounce, a failed send — between two snapshots). Checks: nothing broken or empty on screen, the journey step is the machine's, the big button is what the owner must do, red only when he is needed, plain words, Sri Lanka time with US Eastern beside a call. `HUB_JOURNEY_REPORT=path npm test` writes what the owner sees at every step as plain text. |
+| `tests/journey.test.mjs` | The dress rehearsal: the machine's 31 real snapshots of one client's whole journey (the booking → Won → onboarding call → warm-up → the launch call → sending → month two), each drawn with the real Aviance OS code on a device set to US Pacific — the Clients list, the three questions and the big button, Messages (with how each email we sent went), the call / inboxes / warm-up / launch-call cards, "What we found" (the brief and the company file), every Behind-the-scenes tab, the Calendar and Settings; plus the moment of the launch call itself and the delivery watch (an unopened "we start on" email, a bounce, a failed send — between two snapshots). Checks: nothing broken or empty on screen, the journey step is the machine's, the big button is what the owner must do, red only when he is needed, plain words, Sri Lanka time with US Eastern beside a call. `HUB_JOURNEY_REPORT=path npm test` writes what the owner sees at every step as plain text. |
 | `tests/journey-fixtures.mjs`, `tests/fixtures/journey/` | A trimmed copy of the machine's snapshots (`email-distributor/tests/fixtures/journey/`) without repeats; `node tests/fixtures/journey/trim.mjs` copies them again. |
 
 ## Screens
@@ -56,7 +56,7 @@ A few places only, the same on a phone (a tab bar along the bottom) and a
 computer (a sidebar): **Clients**, **Calendar**, **Team**, **Activity** (the
 owner) and **Settings** (the owner). Badges: Clients = how many clients need
 you + new bookings (red), Calendar = call times waiting for your yes (amber).
-The hub opens on Clients (`#trials`, the old place, opens it too). Pages
+Aviance OS opens on Clients (`#trials`, the old place, opens it too). Pages
 inside a place (a client, Buy & paste, the bookings, Behind the scenes) have a
 Back arrow in the top bar.
 
@@ -297,7 +297,7 @@ already says the day).
 - **Book a call (cold call)** — the Calendar's **Book a call** button opens a
   form for someone on the phone: their name, email, and the date and time in
   your own time zone (required); company, website, time zone or US state,
-  phone, what they sell, plan and notes (optional). As you type, the hub asks
+  phone, what they sell, plan and notes (optional). As you type, Aviance OS asks
   the machine (`POST /api/mc/inquiries`, `action:'bookCheck'`, nothing saved)
   and shows "Your time … · Their time …", where the website and time zone came
   from ("from their email", "guessed from the phone number", "US Eastern, as
@@ -409,14 +409,14 @@ Top bar: Back (on pages inside a place), the page title, ⌘K on a computer
 (find a client, or type what you want to do), and the bell (what needs you:
 urgent to-dos, urgent alerts, call times waiting for your yes).
 
-## Alerts: inside the hub only
+## Alerts: inside Aviance OS only
 
 Machine alerts are not sent to the owner's email, phone or Telegram. They show
 in the bell and in Settings › Alerts, and nowhere else. (Phone notifications,
 the service worker and `push.js` were removed on 2026-11-20; a phone that had
 turned them on forgets its old helper the next time it signs in.)
 
-The hub can still be added to a phone's Home Screen (Share → Add to Home
+Aviance OS can still be added to a phone's Home Screen (Share → Add to Home
 Screen); it then opens like an app. Links such as `#trial/{id}` open straight to the page.
 
 - Deep links (`#trial/{id}`, `#alerts`, `#trials`, `#settings/google?connected=1|error=…`) work on load and on
@@ -424,7 +424,7 @@ Screen); it then opens like an app. Links such as `#trial/{id}` open straight to
   again.
 - The brand PNGs on the website have a transparent background (and a
   transparent stripe under the red top). iOS paints transparency black on the
-  home screen, so the hub's icons are the same cube flattened onto white.
+  home screen, so Aviance OS's icons are the same cube flattened onto white.
 
 ## The look (keep this in any change)
 
@@ -463,10 +463,10 @@ sets `data-theme="dark"` on `<html>`; every token has a dark value.
 appears, a weight outside 400-700 is used, capitals/letter-spacing appear outside
 `theme.css`, a text pair drops below 4.5:1 or a chart mark below 3:1.
 
-## How much the hub asks of the machine
+## How much Aviance OS asks of the machine
 
 The growth history is the expensive call (about days × (2 + inboxes) Redis
-reads), so the hub only fetches it when you open something that shows it:
+reads), so Aviance OS only fetches it when you open something that shows it:
 
 - **Growth tab** — the chosen range, reused for 5 minutes.
 - **Parts** (a client's email system › Behind the scenes) — 14 days, reused for 15 minutes.
@@ -481,21 +481,21 @@ The 60-second auto-refresh never fetches growth history.
 ## `MACHINE_URL`
 
 `index.html` defines `MACHINE_URL` (default `https://email-distributor.vercel.app`).
-To point the hub at another machine while testing, set
+To point Aviance OS at another machine while testing, set
 `localStorage.avianceMachineUrl` in the browser console and reload:
 
 ```js
 localStorage.setItem('avianceMachineUrl', 'http://localhost:3000')
 ```
 
-## How the hub signs in to the machine
+## How Aviance OS signs in to the machine
 
 Every `/api/mc/*` call carries the signed-in owner's Supabase access token as
 `Authorization: Bearer <token>` (`machineFetch()` in `trials.js`). The machine
 verifies the token against the Supabase project's public keys and checks the
-email is on its admin list. No machine secret lives in the hub.
+email is on its admin list. No machine secret lives in Aviance OS.
 
-To open a Mission Control page inside the machine, the hub POSTs a hidden
+To open a Mission Control page inside the machine, Aviance OS POSTs a hidden
 form with `hubToken` and `next` to `POST /api/mc/login` in a new tab
 (`openMachine()`); the machine sets its own session cookie and redirects.
 

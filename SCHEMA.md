@@ -1,7 +1,7 @@
-# Aviance Hub — the one shared schema
+# Aviance OS — the one shared schema
 
-Supabase project `zjbxnkpktbghhudjbxhk`. Every module in the hub reads and writes
-these tables through the global `sb` client. Nothing in the hub calls another
+Supabase project `zjbxnkpktbghhudjbxhk`. Every module in Aviance OS reads and writes
+these tables through the global `sb` client. Nothing in Aviance OS calls another
 server. There is no `machineFetch`, no `MACHINE_URL`, no email-distributor.
 
 ## How every module is written
@@ -134,8 +134,8 @@ allowed exactly two things and nothing else:
 
 - `select * from public.free_slots(days)` — free start times and slot length,
   **nothing else**: no names, no client ids, no booking ids. It reads the same
-  `calendar_settings` row the hub's Settings screen writes, so changing the
-  working day in the hub changes what the website offers. It subtracts anything
+  `calendar_settings` row Aviance OS's Settings screen writes, so changing the
+  working day in Aviance OS changes what the website offers. It subtracts anything
   in `meetings`, `calendar_blocks` and `discovery_bookings`.
 - `select * from public.v_call_hours` — the working day in words, for the
   "7am to 9pm Eastern, weekdays" line on the page.
@@ -148,3 +148,29 @@ Proven by planting a client, a meeting and a do-not-call row, then reading as
 slot. A unique index (`discovery_bookings_one_per_slot`) means the database
 itself refuses a double booking, which is what lets the page say "someone just
 took that time".
+
+## The mail room
+
+Nothing in the browser sends email. Anything that needs one writes a row to
+**mail_outbox** — to_email, to_name, subject, body_text, body_html, ics, kind*
+[booking_confirmation|reminder_24h|reminder_1h|reminder_5min|agreement|portal_invite|friday_update|handover|other],
+booking_id, meeting_id, client_id, status* [pending|sending|sent|failed|cancelled],
+attempts, last_error, send_after, sent_at, gmail_message_id, needs_meet_link.
+Staff-only under RLS; one row per booking or meeting per kind.
+
+- A new row in `discovery_bookings` queues its own confirmation (trigger), and
+  gets a stand-in video link at once so no email can ever go out without one.
+- `queue_due_reminders()` queues the day-before, hour-before and five-minute
+  nudges, each exactly once, and **only if the person booked before that
+  nudge's window opened** — someone who books three hours ahead never gets
+  "see you tomorrow".
+- The edge function `mail-tick` (supabase/functions/mail-tick) runs every
+  minute. It hands each row to the Apps Script inside aviancelk@gmail.com,
+  which makes the calendar event and a real Google Meet link for a new booking,
+  sends the email, and returns the link, which replaces the stand-in on the
+  booking. Reminders carry that same link.
+- Templates hold `{{MEET_LINK}}`; a trigger refuses to mark a row sent while
+  the placeholder is still in it.
+- Secrets live in Supabase (APPS_SCRIPT_URL, APPS_SCRIPT_SECRET) and in the
+  script's own properties (SHARED_SECRET). With them missing the job runs as a
+  rehearsal and sends nothing.

@@ -1,4 +1,4 @@
-/* ===================== AVIANCE HUB — Outreach adapter =====================
+/* ===================== AVIANCE OS — Outreach adapter =====================
    The single seam between the hub and whatever tool actually sends the email.
 
    WHAT AN ADAPTER IS (read this before you plug in a real key)
@@ -155,7 +155,7 @@ async function oaFor(clientId){
   const provider = (account && account.provider) || OA_DEFAULT_PROVIDER;
 
   const impl = oaGet(provider);
-  if (!impl) return oaErr('This client is set up on a tool the hub does not know about yet.');
+  if (!impl) return oaErr('This client is set up on a tool Aviance OS does not know about yet.');
   return oaOk({provider, account, impl});
 }
 
