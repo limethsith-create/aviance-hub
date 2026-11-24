@@ -11,6 +11,8 @@
 <link rel="stylesheet" href="calling.css">
 <link rel="stylesheet" href="channels.css">
 <link rel="stylesheet" href="portal.css">
+<link rel="stylesheet" href="journey.css">
+<link rel="stylesheet" href="drafts.css">
 <link rel="stylesheet" href="team.css">
 <link rel="stylesheet" href="onboarding.css">
 <link rel="stylesheet" href="outreach.css">
@@ -450,6 +452,8 @@ const views={
   ending:{fn:()=>V('viewEnding'),title:'Ending',sub:'Clients on their way out, and the final figure'},
   finalStatement:{fn:()=>V('viewFinalStatement',currentClientId),title:'Final statement',sub:'',back:()=>render('ending')},
   dataDeletion:{fn:()=>V('viewDataDeletion'),title:'Data deletion',sub:'What goes, and what we keep',back:()=>render('ending')},
+  journey:{fn:()=>V('viewJourneyBoard'),title:'Onboarding',sub:'Every new client, from payment to launch',wide:true},
+  drafts:{fn:()=>V('viewDrafts'),title:'Replies to approve',sub:'What the bot wrote. Nothing goes out until you send it'},
   settings:{fn:()=>V('viewSettings'),title:'Settings',sub:'You, the calendar, and the tool behind the outreach'},
 };
 
@@ -528,6 +532,8 @@ function parseDeepLink(h){
   const s=h.match(/^settings\/(warmup|keys|details)$/);if(s)return {view:'settings',section:s[1]};
   if(h==='inquiries')return {view:'inquiries'};
   if(h==='calendar')return {view:'calendar'};
+  if(h==='drafts')return {view:'drafts'};
+  if(h==='onboarding'||h==='journey')return {view:'journey'};
   if(h==='numbers')return {view:'numbers'};
   if(h==='channels')return {view:'channels'};
   const g=h.match(/^settings\/google\/?(?:\?([^#]*))?$/);
@@ -579,6 +585,8 @@ function navItems(){
     {view:'outreach',icon:I.chart,label:'Outreach',badge:'',also:['outreachThread']},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:cal,tone:'amber',badgeTitle:cal?cal+(cal===1?' call needs':' calls need')+' an outcome':'',also:['meeting','noShows','funnel']},
     {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':'',also:['requests']},
+    {view:'drafts',icon:I.chat,label:'Replies',badge:(typeof drCount==='function'?drCount():0)||'',tone:'red',badgeTitle:'Replies the bot drafted, waiting for you'},
+    {view:'journey',icon:I.activity,label:'Onboarding',badge:(typeof jyLateCount==='function'?jyLateCount():0)||'',tone:'amber',badgeTitle:'Steps running late'},
     {view:'billing',icon:I.money,label:'Invoices',badge:req,tone:'amber',also:['monthEnd','friday','ending','finalStatement','dataDeletion']},
     {view:'work',icon:I.people,label:'Work',badge:'',also:['myWork']},
     {view:'team',icon:I.people,label:'Team',badge:pend,tone:pend?'red':'',badgeTitle:pend?pend+' waiting for your approval':'',owner:true},
@@ -674,7 +682,7 @@ function showLogin(){
   try{if(typeof mtStopTimer==='function')mtStopTimer();}catch(e){}
   try{if(typeof channelsStopTimer==='function')channelsStopTimer();}catch(e){}
 }
-async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{if(typeof mtForget==='function')mtForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}try{if(typeof peopleForgetClient==='function')peopleForgetClient();}catch(e){}errEl('loginErr','');showLogin();}
+async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{if(typeof mtForget==='function')mtForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}try{if(typeof draftsForget==='function')draftsForget();}catch(e){}try{if(typeof peopleForgetClient==='function')peopleForgetClient();}catch(e){}errEl('loginErr','');showLogin();}
 /* ---- Password recovery ---- */
 async function forgotPassword(){
   const email=val('loginEmail').toLowerCase();
@@ -803,6 +811,8 @@ boot();
 <script src="calling.js"></script>
 <script src="channels.js"></script>
 <script src="portal.js"></script>
+<script src="journey.js"></script>
+<script src="drafts.js"></script>
 <script src="team.js"></script>
 <script src="onboarding.js"></script>
 <script src="outreach-adapter.js"></script>

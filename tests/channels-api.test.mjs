@@ -362,3 +362,32 @@ test('files: channels-api.js is loaded first and syntax-checked by npm run check
   const src = fs.readFileSync(path.join(root, 'channels-api.js'), 'utf8');
   assert.ok(!/innerHTML|document\./.test(src));
 });
+
+/* ───────────── the bot's drafts for one channel ───────────── */
+test('chBotDrafts / chBotSend / chBotDiscard: filter to the channel, send the edited text, plain errors', async () => {
+  reset();
+  rpcs.drafts_pending = () => ({ data: [
+    { id: 'd2', channel_id: 'ch1', kind: 'reply', body: 'second', reason: 'r', msg_kind: 'bot', created_at: '2026-11-24T10:05:00Z' },
+    { id: 'd1', channel_id: 'ch1', kind: 'welcome', body: 'first', reason: null, msg_kind: 'bot', created_at: '2026-11-24T10:00:00Z' },
+    { id: 'd3', channel_id: 'ch2', kind: 'reply', body: 'elsewhere', created_at: '2026-11-24T10:01:00Z' },
+  ], error: null });
+  const r = await chBotDrafts('ch1');
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.data.map((d) => d.id), ['d1', 'd2']);
+  assert.equal(r.data[0].kind, 'welcome'); assert.equal(r.data[1].reason, 'r');
+  assert.deepEqual((await chBotDrafts('')).data, []);
+  rpcs.draft_send = () => ({ data: { message_id: 'm77' }, error: null });
+  const s = await chBotSend('d1', '  hey Sam  ');
+  assert.deepEqual(s, { ok: true, data: { messageId: 'm77' }, error: null });
+  assert.deepEqual(calls.find((c) => c.rpc === 'draft_send').args, { p_draft: 'd1', p_body: 'hey Sam' });
+  const empty = await chBotSend('d1', '   ');
+  assert.equal(empty.ok, false); assert.match(empty.error, /empty/);
+  rpcs.draft_send = () => ({ data: null, error: { code: 'P0001', message: 'That draft was already sent.' } });
+  assert.equal((await chBotSend('d1', 'x')).error, 'That draft was already sent.');
+  rpcs.draft_discard = () => ({ data: null, error: null });
+  assert.deepEqual(await chBotDiscard('d2'), { ok: true, data: { id: 'd2' }, error: null });
+  assert.deepEqual(calls.filter((c) => c.rpc === 'draft_discard').map((c) => c.args), [{ p_draft: 'd2' }]);
+  rpcs.drafts_pending = () => ({ data: null, error: { code: '42501', message: 'permission denied' } });
+  const denied = await chBotDrafts('ch1');
+  assert.equal(denied.ok, false); assert.equal(denied.error, "You don't have access to do that.");
+});

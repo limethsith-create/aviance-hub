@@ -12,6 +12,9 @@
 <link rel="stylesheet" href="portal-client.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
 <script src="portal-client.js"></script>
+<script src="portal-tracker.js"></script>
+<script src="portal-schedule.js"></script>
+<script src="portal-steps.js"></script>
 </head>
 <body>
 <!-- The client's whole world: sign in, then one channel with the Aviance team.
@@ -79,6 +82,7 @@
         <div class="pc-bar-t"><h1>${pcEsc(home.company || 'Your channel')}</h1><p class="pc-tag">Direct line to Aviance</p></div>
         <button type="button" class="pc-btn pc-btn-quiet" id="pcOut">Sign out</button>
       </div></header>
+      <div id="pcTracker" class="pc-tracker-box"></div>
       <div id="pcKick" class="pc-kick-box"></div>
       <div class="pc-scroll" id="pcScroll" tabindex="0" aria-label="Messages">
         <div class="pc-thread" id="pcThread" role="log" aria-live="polite" aria-relevant="additions"><p class="pc-tag" style="margin:auto">Loading</p></div>
@@ -94,7 +98,8 @@
       </div></form>
     </div>`;
     drawn = ''; rows = [];
-    loadKick();
+    /* the kickoff is now offered in the chat (portal-schedule.js); the old self-booking card stays off */
+    runMounts();
     refresh(true);
     stopLive = pcSubscribe(home.channel.id, function(){ refresh(false); });
     timer = setInterval(function(){ if (!document.hidden) refresh(false); }, PC_POLL_MS);
@@ -156,12 +161,16 @@
     const r = await pcMessages(id);
     loading = false;
     if (!home || home.channel.id !== id) return;
-    if (r.ok) { rows = r.data; draw(toBottom); }
+    if (r.ok) { rows = r.data; draw(toBottom); runMounts(); }
     else if (!drawn) {
       const thread = document.getElementById('pcThread');
       if (thread) thread.innerHTML = `<p class="pc-small" style="margin:auto;text-align:center">${pcEsc(r.error)}</p>`;
     }
   }
+
+  /* the journey files hook in here (see PC in portal-client.js) */
+  function ctx(){ return { home: home, sb: pcClient('portal'), refresh: function(){ refresh(true); }, rpc: function(n, a){ return pcRpc('portal', n, a); } }; }
+  function runMounts(){ if (!home) return; (PC.mounts || []).forEach(function(fn){ try { fn(ctx()); } catch (e) {} }); }
 
   function grow(el){ el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight + 4, 180) + 'px'; }
   function count(el){
@@ -198,6 +207,8 @@
       else book(k.getAttribute('data-pc-book'));
       return;
     }
+    const act = e.target && e.target.closest ? e.target.closest('[data-pc-act]') : null;
+    if (act && home) { const f = PC.actions && PC.actions[act.getAttribute('data-pc-act')]; if (typeof f === 'function') { e.preventDefault(); try { await f(act, ctx()); } catch (x) {} } return; }
     const t = e.target && e.target.closest ? e.target.closest('#pcOut,[data-pc-retry]') : null;
     if (!t) return;
     if (t.id === 'pcOut') { stopChat(); await pcSignOut(); showSignIn(''); const h = root.querySelector('h1'); if (h) h.focus(); }

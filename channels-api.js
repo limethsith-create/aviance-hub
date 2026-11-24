@@ -338,6 +338,31 @@
     return id;
   });
 
+  /* ---------- the bot's drafts for one channel (team only; 20261124_journey_core.sql) ----------
+     chBotDrafts(channelId) -> [{id, kind, body, reason, createdAt}] (pending, oldest first)
+     chBotSend(draftId, body) -> {messageId}     chBotDiscard(draftId) -> {id}
+     Nothing reaches the client until chBotSend. */
+  window.chBotDrafts = wrap("The bot's drafts didn't load.", async function (channelId) {
+    if (!channelId) return [];
+    var list = check(await need(client()).rpc('drafts_pending'), "The bot's drafts didn't load.") || [];
+    return (Array.isArray(list) ? list : []).filter(function (d) { return d && d.id && d.channel_id === channelId; })
+      .map(function (d) { return { id: d.id, kind: d.kind || 'reply', body: d.body || '', reason: d.reason || '', msgKind: d.msg_kind || 'bot', createdAt: d.created_at || null }; })
+      .sort(function (a, b) { return String(a.createdAt || '').localeCompare(String(b.createdAt || '')); });
+  });
+  window.chBotSend = wrap("That didn't send. Try again.", async function (draftId, body) {
+    var b = String(body == null ? '' : body).trim();
+    if (!draftId) throw Fail('Pick a draft first.');
+    if (!b) throw Fail('The message is empty. Write something or discard it.');
+    if (b.length > MAX_BODY) throw Fail('That message is too long. Keep it under ' + MAX_BODY + ' characters.');
+    var out = check(await need(client()).rpc('draft_send', { p_draft: draftId, p_body: b }), "That didn't send. Try again.");
+    return { messageId: (out && (out.message_id || out.messageId)) || null };
+  });
+  window.chBotDiscard = wrap("That draft wasn't discarded. Try again.", async function (draftId) {
+    if (!draftId) throw Fail('Pick a draft first.');
+    check(await need(client()).rpc('draft_discard', { p_draft: draftId }), "That draft wasn't discarded. Try again.");
+    return { id: draftId };
+  });
+
   /* Names are cached for the page's life; sign-out reloads the page. Exposed for tests only. */
   window.chTestReset = function () { names.clear(); typingSent.clear(); typingChans.clear(); };
 })();

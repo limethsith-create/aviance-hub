@@ -878,6 +878,9 @@ function cbRenderClient(r, months, events, extra){
       '<button class="btn ghost" onclick="render(\'clients\')">All clients</button>' +
     '</header>' +
     cbRenderFlags(r) +
+    /* journey.js fills this with the payment-to-launch tracker (window.jyMountClient). */
+    (['won', 'onboarding', 'live'].indexOf(r.stage) >= 0
+      ? '<section class="card cb-slot cb-journey" id="cbJourney" data-cb-client="' + cbE(r.id) + '" data-cb-stage="' + cbE(r.stage) + '"></section>' : '') +
     cbRenderFacts(r, {person: x.person, agreement: x.agreement, channel: x.channel}) +
     cbRenderMover(r) +
     cbRenderProfile(r) +
@@ -1057,9 +1060,19 @@ function viewClient(clientId){
     agreements: got.agreement ? {[id]: got.agreement} : {},
     firstInvoices: cbFirstOf(got.invoices) ? {[id]: cbFirstOf(got.invoices)} : {}
   });
+  cbMountJourney(id);
   return (got.err ? cbErrNote(got.err) : '') + cbRenderClient(got.client ? r : null, got.months, got.events,
     {admin: cbIsAdmin(), invoices: got.invoices, invoicesErr: got.invoicesErr,
      agreement: got.agreement, person: got.person, channel: got.channel});
+}
+
+/* Once the page is on screen, journey.js draws its tracker into #cbJourney. */
+function cbMountJourney(clientId){
+  if (typeof window === 'undefined' || typeof window.jyMountClient !== 'function' || typeof setTimeout !== 'function') return;
+  setTimeout(() => {
+    const el = typeof document !== 'undefined' && document.getElementById ? document.getElementById('cbJourney') : null;
+    if (el && el.getAttribute('data-cb-client') === String(clientId)) window.jyMountClient(clientId, el);
+  }, 0);
 }
 
 /* Their first invoice, out of all of them: the one marked first, else the oldest. */

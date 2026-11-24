@@ -21,7 +21,7 @@ function slice(html, id) {
   while ((x = re.exec(html))) { depth += x[1] ? -1 : (x[0].endsWith('/>') ? 0 : 1); if (!depth) return html.slice(m.index + m[0].length, x.index); }
   return html.slice(m.index + m[0].length);
 }
-const CHILD_IDS = ['chvListPane', 'chvListBody', 'chvMain', 'chvHead', 'chvThread', 'chvTyping', 'chvComposer', 'chvSide', 'chvNumbers'];
+const CHILD_IDS = ['chvListPane', 'chvListBody', 'chvMain', 'chvHead', 'chvThread', 'chvTyping', 'chvBot', 'chvComposer', 'chvSide', 'chvNumbers'];
 function fakeEl(id) {
   let html = '';
   const el = { id, tagName: 'DIV', value: '', checked: false, textContent: '', style: {}, hidden: false, disabled: false, scrollTop: 0, scrollHeight: 1000, clientHeight: 400, _classes: new Set(), className: '',
@@ -404,4 +404,55 @@ test('deep links: #channels and #channels/{id}', () => {
   assert.deepEqual(parseDeepLink('#channels'), { view: 'channels' });
   assert.deepEqual(parseDeepLink('#channels/abc-123'), { view: 'channels', id: 'abc-123' });
   assert.equal(parseDeepLink('#channels/a b'), null);
+});
+
+/* ───────────── the bot's drafts, inline at the bottom of a client channel ───────────── */
+function botStubs(list) {
+  const st = { list: list.slice(), sent: [], discarded: [], fail: {} };
+  globalThis.chBotDrafts = async (id) => (be.calls.push(['chBotDrafts', id]), st.fail.load ? { ok: false, data: null, error: 'nope' } : { ok: true, data: st.list.filter((d) => d.channelId === id), error: null });
+  globalThis.chBotSend = async (id, body) => { st.sent.push([id, body]); if (st.fail.send) return { ok: false, data: null, error: st.fail.send }; st.list = st.list.filter((d) => d.id !== id); return { ok: true, data: { messageId: 'mm' }, error: null }; };
+  globalThis.chBotDiscard = async (id) => { st.discarded.push(id); st.list = st.list.filter((d) => d.id !== id); return { ok: true, data: { id }, error: null }; };
+  return st;
+}
+function noBot() { delete globalThis.chBotDrafts; delete globalThis.chBotSend; delete globalThis.chBotDiscard; }
+test('bot drafts: a client channel shows its pending drafts above the composer, escaped, for staff only', async () => {
+  reset(); asOwner();
+  const st = botStubs([{ id: 'd1', channelId: 'c1', kind: 'reply', body: 'hey Sam, ur kickoff is <b>tmrw</b>', reason: 'asked about the call' }, { id: 'd9', channelId: 't1', kind: 'reply', body: 'other channel' }]);
+  await show({ c1: C1() }); await tick();
+  const bot = el('chvBot').innerHTML;
+  assert.match(bot, /Bot draft · only you can see this · asked about the call/);
+  assert.match(bot, /hey Sam, ur kickoff is &lt;b&gt;tmrw&lt;\/b&gt;/);
+  assert.doesNotMatch(bot, /other channel/);
+  assert.match(bot, />Send</); assert.match(bot, />Discard</);
+  // edit then send: the edited text goes out, the draft disappears
+  chvBotEdit('d1', 'hey Sam, ur kickoff is tmrw at 10am ET');
+  await chvBotSend('d1');
+  assert.deepEqual(st.sent, [['d1', 'hey Sam, ur kickoff is tmrw at 10am ET']]);
+  assert.equal(chv.bot.length, 0);
+  assert.equal(el('chvBot').innerHTML, '');
+  // a client never sees them
+  reset(); asClient(); botStubs([{ id: 'd1', channelId: 'c1', kind: 'reply', body: 'secret draft' }]);
+  await show({ c1: C1() }); await tick();
+  assert.doesNotMatch(el('chvRoot').innerHTML + (el('chvBot').innerHTML || ''), /secret draft/);
+  noBot();
+});
+test('bot drafts: discard, a failed send keeps the draft and says why, team channels show none', async () => {
+  reset(); asOwner();
+  const st = botStubs([{ id: 'd1', channelId: 'c1', kind: 'reply', body: 'one' }, { id: 'd2', channelId: 'c1', kind: 'welcome', body: 'two' }]);
+  await show({ c1: C1() }); await tick();
+  await chvBotDiscard('d2');
+  assert.deepEqual(st.discarded, ['d2']);
+  st.fail.send = 'That draft was already sent.';
+  await chvBotSend('d1');
+  assert.equal(chv.bot.length, 1);
+  assert.match(el('chvBot').innerHTML, /That draft was already sent\./);
+  // Ctrl+Enter sends
+  st.fail.send = null; let prevented = 0;
+  chvBotKey({ key: 'Enter', ctrlKey: true, preventDefault() { prevented++; } }, 'd1'); await tick();
+  assert.equal(prevented, 1); assert.equal(st.sent.length, 2);
+  // a team channel: no lookup
+  be.calls.length = 0;
+  await chvOpen('t1'); await tick();
+  assert.equal(calls('chBotDrafts').length, 0);
+  noBot();
 });

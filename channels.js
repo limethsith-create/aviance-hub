@@ -11,6 +11,8 @@
      chSubscribe(id,{onMessage,onUpdate,onTyping}) → unsubscribe  chTyping(id)  chCreateChannel(name,memberIds)
      chRename chArchive chAddMember chRemoveMember chMembers chEnsureClientChannel(clientId,name) chFileUrl(path)
      chUnreadTotal() chSearch(text)
+     chBotDrafts(channelId) chBotSend(draftId,body) chBotDiscard(draftId) — the bot's pending drafts, shown (staff only)
+     above the composer of a client channel; nothing reaches the client until Send.
    `before` is passed the createdAt of the oldest message shown.
 
    Real tables (channels-api.js): a message's userId is its author_user (team) or author_person (client); a client's
@@ -43,6 +45,7 @@ const chv={
   urls:{}, urlWait:{},
   staff:null, loadStaff:null,
   unreadTotal:0, peekAt:0, timer:null, seq:0,
+  bot:[], botEdits:{}, botBusy:{}, botErr:'', botSeq:0, botTimers:[],
 };
 
 /* ===================== 1. HELPERS ===================== */
@@ -275,6 +278,7 @@ function chvMainHTML(){
     <div class="chv-thread" id="chvThread" onscroll="chvScroll(this)" role="log" aria-live="polite" aria-label="Messages">${chvThreadHTML()}</div>
     <button type="button" class="chv-newpill" id="chvNewPill" onclick="chvJumpNew()" hidden>New messages</button>
     <div class="chv-typing" id="chvTyping" aria-live="polite">${chvTypingText()}</div>
+    <div class="chv-bot" id="chvBot" aria-label="Replies the bot drafted">${chvBotHTML()}</div>
     <div class="chv-composer" id="chvComposer">${chvComposerHTML(c)}</div>`;
 }
 function chvHeadHTML(c){
@@ -420,6 +424,7 @@ function chvLeave(){
   if(chv.unsub){try{chv.unsub();}catch(e){}chv.unsub=null;}
   chv.urls={};chv.urlWait={};
   chv.cur=null;chv.msgs=[];chv.hasMore=false;chv.divId=null;chv.newBelow=0;chv.editing=null;chv.typing={};chv.pending=[];chv.cerr='';
+  chvBotClear();
 }
 async function chvOpen(id,force){
   if(!id)return;
@@ -448,6 +453,7 @@ async function chvOpen(id,force){
     chv.unsub=typeof u==='function'?u:null;
   }catch(e){chv.unsub=null;}
   chvMarkReadNow();
+  chvBotLoad();
   const input=chvEl('chvInput');if(input&&input.focus&&!chvIsPhone())input.focus();
 }
 /* The first of the last N messages that came from other people. */
@@ -474,6 +480,7 @@ function chvOnMessage(m){
   const own=m.userId===chvMe();
   const atBottom=chvAtBottom();
   chv.msgs.push(m);
+  if(m.isClient)chvBotSoon();
   if(chv.typing[m.userId]){delete chv.typing[m.userId];chvPaintTyping();}
   const c=chvFindCh(chv.cur);if(c)c.lastMessageAt=m.createdAt||c.lastMessageAt;
   if(own||atBottom){
@@ -712,6 +719,71 @@ async function chvRemoveMember(uid){
   chvPaintMembers();
 }
 
+/* ===================== 8b. THE BOT'S DRAFTS (staff, client channels) =====================
+   Pending drafts for the open channel sit just above the composer: edit, Send or Discard. Nothing reaches the client
+   until Send (chBotSend -> draft_send). After a client writes, the drafts are looked up again a little later, since the
+   bot needs a few seconds to write. */
+function chvBotOn(){const c=chvFindCh(chv.cur);return !!(c&&c.kind==='client'&&chvIsStaff()&&chvFn('chBotDrafts'));}
+function chvBotClear(){
+  (chv.botTimers||[]).forEach(t=>clearTimeout(t));
+  chv.bot=[];chv.botEdits={};chv.botBusy={};chv.botErr='';chv.botTimers=[];chv.botSeq++;
+}
+function chvBotHTML(){
+  if(!chvBotOn()||!chv.bot.length)return chv.botErr&&chvBotOn()?`<div class="chv-bot-err" role="alert">${esc(chv.botErr)}</div>`:'';
+  return chv.bot.map(d=>{
+    const busy=chv.botBusy[d.id]||'';
+    const val=Object.prototype.hasOwnProperty.call(chv.botEdits,d.id)?chv.botEdits[d.id]:d.body;
+    return `<div class="chv-bot-item" id="chvBot-${esc(d.id)}"><span class="chv-bot-k">Bot draft · only you can see this${d.reason?' · '+esc(d.reason):''}</span>
+      <textarea id="chvBotBox-${esc(d.id)}" rows="2" aria-label="Bot draft — edit before sending" oninput="chvBotEdit(${chvA(d.id)},this.value)" onkeydown="chvBotKey(event,${chvA(d.id)})"${busy?' disabled':''}>${esc(val)}</textarea>
+      <span class="chv-bot-acts"><button type="button" class="chv-btn primary" onclick="chvBotSend(${chvA(d.id)})"${busy?' disabled':''}>${busy==='send'?'Sending':'Send'}</button><button type="button" class="chv-btn" onclick="chvBotDiscard(${chvA(d.id)})"${busy?' disabled':''}>${busy==='discard'?'Discarding':'Discard'}</button></span></div>`;
+  }).join('')+(chv.botErr?`<div class="chv-bot-err" role="alert">${esc(chv.botErr)}</div>`:'');
+}
+function chvPaintBot(){
+  const e=chvEl('chvBot');if(!e)return;
+  const a=typeof document!=='undefined'?document.activeElement:null;
+  if(a&&a.id&&String(a.id).startsWith('chvBotBox-'))return;   // don't wipe what is being typed
+  e.innerHTML=chvBotHTML();
+}
+async function chvBotLoad(){
+  if(!chvBotOn())return;
+  const id=chv.cur,seq=++chv.botSeq;
+  const r=await chvCall('chBotDrafts',id);
+  if(seq!==chv.botSeq||id!==chv.cur)return;
+  if(!r.ok||!Array.isArray(r.data))return;   // quiet: the thread still works without them
+  chv.bot=r.data;
+  const have={};chv.bot.forEach(d=>{have[d.id]=1;});
+  Object.keys(chv.botEdits).forEach(k=>{if(!have[k])delete chv.botEdits[k];});
+  chvPaintBot();
+}
+function chvBotSoon(){
+  if(!chvBotOn()||typeof setTimeout!=='function')return;
+  [6000,15000].forEach(ms=>{const t=setTimeout(chvBotLoad,ms);if(t&&t.unref)t.unref();chv.botTimers.push(t);});
+}
+function chvBotEdit(id,v){chv.botEdits[id]=String(v==null?'':v);}
+function chvBotKey(e,id){if(e&&e.key==='Enter'&&(e.ctrlKey||e.metaKey)){if(e.preventDefault)e.preventDefault();chvBotSend(id);}}
+async function chvBotSend(id){
+  const d=chv.bot.find(x=>x.id===id);if(!d||chv.botBusy[id])return;
+  const body=Object.prototype.hasOwnProperty.call(chv.botEdits,id)?chv.botEdits[id]:d.body;
+  chv.botBusy[id]='send';chv.botErr='';chvPaintBot();
+  const r=await chvCall('chBotSend',id,body);
+  delete chv.botBusy[id];
+  if(!r.ok){chv.botErr=r.error||"That didn't send. Try again.";chvPaintBot();return;}
+  chvBotGone(id);
+}
+async function chvBotDiscard(id){
+  const d=chv.bot.find(x=>x.id===id);if(!d||chv.botBusy[id])return;
+  chv.botBusy[id]='discard';chv.botErr='';chvPaintBot();
+  const r=await chvCall('chBotDiscard',id);
+  delete chv.botBusy[id];
+  if(!r.ok){chv.botErr=r.error||"That draft wasn't discarded. Try again.";chvPaintBot();return;}
+  chvBotGone(id);
+}
+function chvBotGone(id){
+  chv.bot=chv.bot.filter(x=>x.id!==id);delete chv.botEdits[id];
+  const e=chvEl('chvBot');if(e)e.innerHTML=chvBotHTML();
+  try{if(typeof dr!=='undefined'&&typeof drSetCount==='function')drSetCount(Math.max(0,(Number(dr.count)||0)-1));}catch(e2){}
+}
+
 /* ===================== 9. SIDE PANEL: the client's numbers ===================== */
 function chvPanelClientId(){
   const c=chvFindCh(chv.cur);if(!c||c.kind!=='client')return '';
@@ -752,7 +824,7 @@ function channelsStopTimer(){if(chv.timer){clearInterval(chv.timer);chv.timer=nu
 async function chvTick(){
   if(typeof authUser==='undefined'||!authUser){channelsStopTimer();return;}
   if(typeof document!=='undefined'&&document.hidden)return;
-  if(typeof currentView!=='undefined'&&currentView==='channels'){await chvReload();}
+  if(typeof currentView!=='undefined'&&currentView==='channels'){await chvReload();chvBotLoad();}
   else await chvPeek(true);
 }
 /* The unread total for the nav badge when Channels is not open. */
@@ -770,4 +842,5 @@ function channelsForget(){
   if(chv.unsub){try{chv.unsub();}catch(e){}chv.unsub=null;}
   clearTimeout(chv.searchTimer);clearTimeout(chv.typingTimer);
   Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',typing:{},q:'',hits:[],panelSet:false,panelOpen:false,pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,unreadTotal:0,peekAt:0,seq:chv.seq+1});
+  chvBotClear();
 }
