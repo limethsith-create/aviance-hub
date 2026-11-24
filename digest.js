@@ -264,6 +264,29 @@ function dgMultWords(mult){
   return (Number.isInteger(n) ? String(n) : String(n)) + 'x';
 }
 
+/* A website booking that is a real call: not a preview from the site's own tests,
+   not one that was cancelled. */
+function dgRealBooking(b){
+  if (!b) return false;
+  return String(dgPick(b, ['source']) || '') !== 'preview' && String(dgPick(b, ['status']) || '') !== 'cancelled';
+}
+/* What is owed, split by its due date: {overdue, waiting, nextDue}. A sent invoice
+   is only overdue once its due date has passed. null when the invoices were not read. */
+function dgOwedSplit(invRows, now){
+  if (!Array.isArray(invRows)) return null;
+  const today = dgDateOnly(now);
+  let overdue = 0, waiting = 0, nextDue = null;
+  invRows.forEach(r => {
+    const st = String(dgPick(r, ['status']) || '');
+    if (['sent', 'overdue', 'unpaid'].indexOf(st) < 0) return;
+    const amt = dgNum(dgPick(r, ['amount', 'gross_amount']));
+    const due = String(dgPick(r, ['due_on']) || '').slice(0, 10);
+    if (st === 'overdue' || (due && due < today)) overdue += amt;
+    else { waiting += amt; if (due && (!nextDue || due < nextDue)) nextDue = due; }
+  });
+  return {overdue, waiting, nextDue};
+}
+
 /* =================================================================== */
 /* ---- dgHome: the one screen a person opens first ------------------ */
 /* =================================================================== */
@@ -291,6 +314,10 @@ async function dgHome(now){
     q => q.select('*').in('status', DG_TASK_OPEN).lt('due_on', today), []);
   const dialsRes = await dgQuery('call_log',
     q => q.select('*').gte('called_at', dayStartIso), []);
+  /* discovery calls booked from the website for this week — not the preview ones, not the cancelled */
+  const siteRes = await dgQuery('discovery_bookings',
+    q => q.select('*').gte('call_at', week.fromIso).lt('call_at', week.toIso), []);
+  const profilesRes = await dgQuery('client_profiles', q => q.select('client_id,signed_off_at'), []);
 
   /* clients live now: a client with sending under way and no end date */
   let clientsLive = null;
@@ -354,13 +381,27 @@ async function dgHome(now){
   let refundsExposed = dgPickNum(exp, ['at_risk', 'exposure', 'refund_at_risk', 'would_owe', 'amount', 'total']);
   if (refundsExposed === null && exposure.ok) refundsExposed = 0;
 
-  const booked = dgGot(callsRes) ? dgRows(callsRes).length : null;
+  const salesBooked = dgGot(callsRes) ? dgRows(callsRes).length : null;
+  const siteBooked = dgGot(siteRes) ? dgRows(siteRes).filter(dgRealBooking).length : null;
+  const booked = salesBooked === null && siteBooked === null ? null : dgInt(salesBooked) + dgInt(siteBooked);
+
+  /* money owed, split: past its due date (chase it) and not yet due (we are only waiting) */
+  const owedSplit = dgOwedSplit(invRows, at);
+
+  /* clients in onboarding who have not given us their inputs */
+  const signed = {};
+  dgRows(profilesRes).forEach(p => { if (p && p.client_id && dgPick(p, ['signed_off_at'])) signed[p.client_id] = true; });
+  const onboardingWaiting = dgGot(clientsQ) ? dgRows(clientsQ)
+    .filter(c => c && String(dgPick(c, ['stage']) || '') === 'onboarding' && !signed[c.id])
+    .map(c => ({clientId: c.id, company: dgName(c)})) : [];
   const delivered = dgGot(deliveredRes) ? dgRows(deliveredRes).filter(dgCounts).length : null;
 
   return dgOk({
     now: at.toISOString(),
     week: {from: week.fromIso, to: week.toIso, label: dgNiceDate(week.from) + ' – ' + dgNiceDate(new Date(week.to.getTime() - 86400000))},
-    calls: {bookedThisWeek: booked, deliveredThisWeek: delivered},
+    calls: {bookedThisWeek: booked, deliveredThisWeek: delivered, websiteThisWeek: siteBooked, salesThisWeek: salesBooked},
+    owedSplit,
+    onboardingWaiting,
     clientsLive,
     shortMonths,
     money: moneyOut,
@@ -659,7 +700,7 @@ function dgRenderHome(data){
   const d = data || {};
   const c = d.calls || {}, m = d.money || {};
   const tiles = [
-    dgTile('Calls booked this week', dgShow(c.bookedThisWeek)),
+    dgTile('Calls booked this week', dgShow(c.bookedThisWeek), c.websiteThisWeek ? dgFmt(c.websiteThisWeek) + ' from the website' : ''),
     dgTile('Calls delivered this week', dgShow(c.deliveredThisWeek)),
     dgTile('Clients live', dgShow(d.clientsLive)),
     dgTile('Invoiced', dgUsd(m.invoiced)),
@@ -684,7 +725,13 @@ function dgRenderHome(data){
   const needs = [];
   if (dgNum(d.openRequests) > 0) needs.push(['Answer ' + dgShow(d.openRequests) + ' open client ' + dgPlural(d.openRequests, 'request'), "dgGo('requests')"]);
   if (dgNum(d.overdueTasks) > 0) needs.push(['Clear ' + dgShow(d.overdueTasks) + ' overdue ' + dgPlural(d.overdueTasks, 'task'), "dgGo('tasks')"]);
-  if (dgNum(m.owed) > 0) needs.push(['Chase ' + dgUsd(m.owed) + ' owed to us', "dgGo('money')"]);
+  const split = d.owedSplit;
+  if (split && (split.overdue > 0 || split.waiting > 0)) {
+    if (split.overdue > 0) needs.push(['Chase ' + dgUsd(split.overdue) + ' overdue', "dgGo('money')"]);
+    if (split.waiting > 0) needs.push(['Awaiting ' + dgUsd(split.waiting) + (split.nextDue ? ' (due ' + dgNiceDate(dgParse(split.nextDue)) + ')' : ''), "dgGo('money')"]);
+  } else if (dgNum(m.owed) > 0) needs.push([dgUsd(m.owed) + ' owed to us', "dgGo('money')"]);
+  const waitingOn = Array.isArray(d.onboardingWaiting) ? d.onboardingWaiting : [];
+  waitingOn.forEach(w => needs.push(['Onboarding: ' + w.company + ' — waiting on their inputs', "dgOpenClient('" + String(w.clientId || '').replace(/[^A-Za-z0-9_.:-]/g, '') + "')"]));
   needs.push(['Review this week\'s client updates', "dgGo('friday')"]);
   needs.push(['Close the months that have ended', "dgGo('monthEnd')"]);
 

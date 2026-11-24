@@ -144,6 +144,7 @@ vm.runInThisContext(SRC, { filename: 'meetings.js' });
 /* ───────────── helpers ───────────── */
 const toasts = [];
 globalThis.toast = (m) => { toasts.push(m); };
+const openModalShell = globalThis.openModal;   /* the shell's own, kept for the shell test */
 globalThis.openModal = (h) => { el('modal').innerHTML = h; };
 globalThis.closeModal = () => {};
 const tick = () => new Promise((r) => setTimeout(r, 5));
@@ -1418,7 +1419,7 @@ test('a booking\'s panel lays the research brief out to be read — one-liner, s
   const briefAt = h.indexOf('class="card pl-pad pl-brief mt-brief"');
   assert.ok(briefAt > 0);
   const b = visible(h.slice(briefAt, h.indexOf('What they told us')).replace(/^[^>]*>/, ''));
-  assert.match(b, /^Commercial roofer, 20 staff, referrals only\. Score Booking score 81 · Research score 78 — Good fit Need More commercial leads Budget \$3k a month is fine Timing This quarter Authority Owner Pains Referrals have dried up — Said so on the form No outbound at all Slow winters Call plan Label Lead with referrals Clarify How many jobs a month\? Who follows up\? Past pain Tried an agency in 2024 Reinforce They want predictable calls Objections Price Sell the vacation Ten calls a month without lifting a finger Red flags Owner is the only closer Research agents that ran Website reader ran in 4\.2 s Read 6 pages Reviews did not finish in 0\.9 s No b review \/b pages news ran/, b);
+  assert.match(b, /^Acme Roofing Commercial roofer, 20 staff, referrals only\. Score Booking score 81 · Research score 78 — Good fit based on: need, budget, authority, timing Need More commercial leads Budget \$3k a month is fine Timing This quarter Authority Owner The business What they sell Commercial roofs Room for new calls 5 more a week · from their booking form Pains Referrals have dried up — Said so on the form No outbound at all Slow winters Call plan Say it back to them Lead with referrals Questions to ask How many jobs a month\? Who follows up\? What they have tried Tried an agency in 2024 Reinforce They want predictable calls Paint the picture Ten calls a month without lifting a finger If they push back Price Red flags Owner is the only closer Research Website reader ran in 4\.2 s Read 6 pages Reviews did not finish in 0\.9 s No b review \/b pages news ran/, b);
   assert.match(b, /What they sell Commercial roofs/); assert.match(b, /Recommended plan growth/); assert.match(b, /short site/, 'whatever else the brief holds is still listed');
   assert.ok(!h.includes('<b>review</b>') && h.includes('&lt;b&gt;review'), 'escaped');
   assert.match(t, /Brief ready/); assert.ok(!t.includes('Research not ready yet'));
@@ -1426,7 +1427,7 @@ test('a booking\'s panel lays the research brief out to be read — one-liner, s
   // no red flags is said, not left out; and an empty brief is "not ready"
   db.research_briefs = [{ booking_id: 'b1', brief: { one_liner: 'Short one.', red_flags: [] } }];
   await mtOpenBooking('b1');
-  assert.match(visible(host('modal')), /Short one\. Score Booking score 81 Red flags None found\. Research agents that ran The brief does not say which agents ran\./);
+  assert.match(visible(host('modal')), /Acme Roofing Score Booking score 81 The business What they sell Commercial roofs · from their booking form Room for new calls 5 more a week · from their booking form Red flags None found\. Research The brief does not say which agents ran\./, 'a two-word one-liner is a page title, so the card is titled with the company');
   for (const empty of [{}, [], '', null]) {
     db.research_briefs = [{ booking_id: 'b1', brief: empty }];
     await mtOpenBooking('b1');
@@ -1479,4 +1480,155 @@ test('nothing throws: a database that says no comes back as a plain sentence', a
   assert.equal(r.ok, false); assert.equal(r.error, 'no answer');
   assert.equal((await mtDue()).ok, false);
   delete fail['meetings.select'];
+});
+
+/* ───────────── dress rehearsal: the brief as the research engine really writes it ───────────── */
+const REHEARSAL_BRIEF = {
+  bant: { need: 'Can cold email actually land commercial contracts for a plumbing company? We tried it once ourselves and got nothing.', score: 88, budget: '$5,000 – $25,000', timing: 'not given', verdict: 'hot — decision maker with budget and urgency', authority: 'not given' },
+  facts: { city: null, maps: null, news: [], tech: [], phone: null, company: 'Brightline Plumbing', socials: [], website: 'https://example.com', competitors: [], google_rating: null, google_reviews: null },
+  signals: [], one_liner: 'Example Domain', red_flags: [], reputation: { praise: [], complaints: [] },
+  closer_plan: {
+    label: 'So the goal is Can cold email actually land commercial contracts for a plumbing company? We tried it once ourselves, and today new business depends on Mostly referrals.',
+    clarify: ['What made you book a call with us now, Riley?', 'You wrote "Can cold email actually land commercial contracts for a plumbing company? We tri" — what does hitting that look like in 90 days?'],
+    objections: [{ objection: "We tried cold email and it didn't work", acknowledge_associate_ask: 'Totally fair. What did your setup look like?' }],
+  },
+  _writer_note: 'Groq unavailable (no GROQ_API_KEY); brief built from rules.',
+  size_estimate: 'unknown', what_they_sell: 'unknown', who_they_sell_to: 'unknown — ask on the call',
+  recommended_plan: 'Growth — budget fits and they want consistent volume',
+};
+const REHEARSAL_AGENTS = [{ ms: 67, ok: true, agent: 'website', label: 'Website reader', summary: '1 pages read' }, { ms: 2, ok: false, agent: 'google', label: 'Google search', summary: 'no SERPER_API_KEY' }, { ms: 0, ok: false, agent: 'competitors', label: 'Local competitors', summary: 'needs industry + city' }];
+const REHEARSAL_BOOKING = { id: 'b1', company: 'Brightline Plumbing', country: 'us', capacity: 'Around 10', score: 88,
+  goal: 'Can cold email actually land commercial contracts for a plumbing company? We tried it once ourselves and got nothing.', current_lead_gen: 'Mostly referrals',
+  sells: "Commercial plumbing services for property managers and general contractors in the Austin, TX area. We're 12 people and want more commercial contracts." };
+
+test('the rehearsal brief: titled with the company, form answers fill the unknowns, no empty rows, one grey line for web research, a truthful score', () => {
+  const h = mtRenderBrief({ booking: REHEARSAL_BOOKING, score: 88, brief: { brief: REHEARSAL_BRIEF, agents: REHEARSAL_AGENTS, writer: 'rules' }, research: { state: 'done' } });
+  const t = visible(h);
+  assert.match(h, /<h3 class="mt-brief-co">Brightline Plumbing<\/h3>/, 'the card is titled with the company');
+  assert.ok(!t.includes('Example Domain'), 'never the scraped page title');
+  assert.match(t, /What they sell Commercial plumbing services for property managers .* · from their booking form/);
+  assert.match(t, /Who they sell to property managers and general contractors in the Austin, TX area · from their booking form/);
+  assert.match(t, /How big they are 12 people · from their booking form/);
+  assert.match(t, /Room for new calls Around 10 · from their booking form/);
+  assert.ok(!/\bunknown\b|not given: .*Timing not given|Authority not given/i.test(t.replace(/not given: authority, timing/, '')), 'no row that says it does not know: ' + t);
+  for (const empty of ['News', 'Tech', 'Socials', 'Competitors', 'Praise', 'Complaints', 'Signals', 'Google rating']) assert.ok(!t.includes(empty), 'no empty row: ' + empty);
+  assert.match(t, /Score Score 88 out of 100 — hot based on: need, budget · not given: authority, timing/);
+  assert.ok(!t.includes('decision maker with budget and urgency'), 'no claim the signals do not support');
+  assert.match(t, /So the goal is can cold email actually land/, 'their words carry on mid-sentence in lower case');
+  assert.match(t, /depends on mostly referrals/);
+  assert.match(t, /You wrote Can cold email actually land commercial contracts for a plumbing company\? We… — what/, 'a quote is cut at a word, with …');
+  assert.ok(!h.includes('We tri&quot;') && !t.includes('We tri '));
+  assert.match(t, /If they push back “We tried cold email and it didn't work” Say: Totally fair/);
+  assert.ok(!/Acknowledge associate ask/i.test(t));
+  assert.match(t, /Research Web research is off — this brief uses only what they told us on the booking form\. details Website reader ran/);
+  assert.match(h, /<details class="mt-brief-det"><summary>details<\/summary>/, 'the agent list sits behind a toggle');
+  assert.ok(!h.includes('mt-needword'), 'no red per-agent failure list');
+  assert.ok(!t.includes('None found'), 'no red flags is not claimed when nothing could look');
+  assert.ok(!BROKEN.test(t), t);
+  // a real failure (not a missing key) is still shown in red
+  const broke = mtRenderBrief({ booking: REHEARSAL_BOOKING, brief: { brief: { one_liner: 'A roofer with twenty staff.' }, agents: [{ label: 'News', ok: false, summary: 'timed out' }] } });
+  assert.ok(broke.includes('mt-needword') && !visible(broke).includes('Web research is off'));
+});
+
+test('mtTidy and mtCut: quotes cut at a word, a capital only where a sentence starts', () => {
+  assert.equal(mtCut('one two three four', 9), 'one two…');
+  assert.equal(mtCut('short', 80), 'short');
+  const b = { goal: 'More booked calls every month', current_lead_gen: 'Referrals' };
+  assert.equal(mtTidy('The goal is More booked calls every month.', b), 'The goal is more booked calls every month.');
+  assert.equal(mtTidy('More booked calls every month is the goal.', b), 'More booked calls every month is the goal.', 'a sentence still starts with a capital');
+  assert.equal(mtTidy('They said: "More booked c" and left.', b), 'They said: "More booked…" and left.');
+  assert.equal(mtTidy('Nothing of theirs here.', b), 'Nothing of theirs here.');
+  assert.equal(mtTidy('', b), '');
+  assert.equal(mtTidy('Fine', null), 'Fine');
+});
+
+test('the booking panel: the company is plain text, the website its own row; once won the company opens the client and Join the call is gone', async () => {
+  settingsRow(); at('2026-11-24T06:00:00.000Z');
+  db.discovery_bookings.push(bk({ id: 'b1' }));
+  await mtOpenEvent('booking:b1');
+  let h = host('modal');
+  assert.match(visible(h), /Company Acme Roofing Website acme\.test/);
+  assert.ok(!/<a [^>]*>Acme Roofing<\/a>/.test(h), 'the company name is not a link to their website');
+  assert.match(h, /Join the call/);
+  db.clients.push({ id: 'cl-9', booking_id: 'b1', company: 'Acme Roofing', plan: 'growth', calls_promised: 10, term: 'monthly' });
+  db.discovery_bookings[0].status = 'won';
+  await mtOpenBooking('b1');
+  h = host('modal');
+  assert.match(h, /mtOpenClientRecord\('cl-9'\)/);
+  assert.ok(!h.includes('Join the call'), 'no Join for a won booking');
+  assert.match(visible(h), /Open client →/);
+  assert.match(visible(h), /Growth, 10 calls a month/, 'the plan is capitalised');
+});
+
+test('the bell: new website bookings from the last 24 hours and calls needing an outcome, each opening its call', async () => {
+  settingsRow(); at('2026-11-24T06:00:00.000Z');
+  const now = new Date('2026-11-24T06:00:00.000Z');
+  const rows = [
+    bk({ id: 'n1', company: 'Brightline', created_at: '2026-11-24T01:00:00Z', call_at: '2026-11-27T15:00:00Z' }),
+    bk({ id: 'n2', company: 'Preview Co', created_at: '2026-11-24T01:00:00Z', source: 'preview' }),
+    bk({ id: 'n3', company: 'Gone Co', created_at: '2026-11-24T01:00:00Z', status: 'cancelled' }),
+    bk({ id: 'n4', company: 'Old Co', created_at: '2026-11-20T01:00:00Z', call_at: '2026-11-23T15:00:00Z' }),
+  ];
+  const items = mtBellItems(rows, [{ id: 'm1', kind: 'strategy', starts_at: '2026-11-23T14:00:00Z', status: 'booked', guest_name: 'Pat' }], now, mtSettingsNow());
+  assert.deepEqual(items.map((x) => x.key), ['booking:n1', 'booking:n4', 'meeting:m1']);
+  assert.match(items[0].t, /^New booking: Brightline, Fri 27 Nov · 8:30 pm Sri Lanka$/);
+  assert.equal(items[1].t, 'How did the call with Old Co go?');
+  assert.equal(items[2].t, 'How did the call with Pat go?');
+  // the shell asks synchronously; the first ask reads, the next answers from it
+  db.discovery_bookings = rows;
+  authUser = { uid: 'u1', name: 'Owner', role: 'admin', email: 'owner@example.com' };
+  assert.deepEqual(mtNotifs(), []);
+  await tick(); await tick();
+  const n = mtNotifs();
+  assert.ok(n.length >= 2 && n[0].t.startsWith('New booking: Brightline'), JSON.stringify(n));
+  n[0].go();
+  assert.equal(currentView, 'calendar');
+  for (let i = 0; i < 10; i++) await tick();   // let the calendar it opened finish reading
+  assert.equal(typeof computeNotifs, 'function');
+});
+
+test('the calendar refreshes once a minute while it is open and seen, without redrawing what has not changed, and stops on another screen', async () => {
+  settingsRow(); at('2026-11-24T06:00:00.000Z');
+  db.discovery_bookings.push(bk({ id: 'b1' }));
+  await mtLoadCal();
+  assert.equal(mtOnRender('calendar'), true);
+  assert.ok(mt.timer, 'a timer runs while the Calendar is open');
+  el('mtCalHost').innerHTML = 'UNTOUCHED';
+  currentView = 'calendar';
+  await mtTick();
+  assert.equal(host('mtCalHost'), 'UNTOUCHED', 'nothing changed, so nothing was drawn again');
+  db.discovery_bookings.push(bk({ id: 'b2', company: 'New Co', call_at: '2026-11-26T16:00:00.000Z' }));
+  await mtTick();
+  assert.match(host('mtCalHost'), /New Co/, 'a new booking appears');
+  document.hidden = true; el('mtCalHost').innerHTML = 'HIDDEN';
+  db.discovery_bookings.push(bk({ id: 'b3', company: 'Third Co', call_at: '2026-11-26T18:00:00.000Z' }));
+  await mtTick();
+  assert.equal(host('mtCalHost'), 'HIDDEN', 'not while the tab is not seen');
+  document.hidden = false;
+  mtOnRender('home');
+  assert.equal(mt.timer, null, 'leaving the Calendar stops it');
+  // realtime: subscribes when sb can, never throws when it cannot
+  const subs = [];
+  fakeSb.channel = (name) => { const ch = { on(ev, f, cb) { subs.push([name, ev, f]); return ch; }, subscribe() { return ch; } }; return ch; };
+  fakeSb.removeChannel = () => {};
+  mtStopTimer(); assert.equal(mtListen(), true);
+  assert.deepEqual(subs[0].slice(0, 3), ['mt-bookings', 'postgres_changes', { event: 'INSERT', schema: 'public', table: 'discovery_bookings' }]);
+  mtStopTimer(); delete fakeSb.channel; delete fakeSb.removeChannel;
+  assert.equal(mtListen(), false);
+});
+
+test('the shell: #clients opens Clients, the bell popover closes on Escape and when a modal opens, ⌘K finds clients and screens', () => {
+  assert.deepEqual(parseDeepLink('#clients'), { view: 'clients' });
+  assert.deepEqual(parseDeepLink('#paying'), { view: 'clients' });
+  el('notifPop').classList.add('open');
+  openModalShell('<p>x</p>');
+  assert.equal(el('notifPop').classList.contains('open'), false, 'opening a modal closes the popover');
+  el('notifPop').classList.add('open');
+  assert.equal(closeNotif(), true);
+  assert.equal(closeNotif(), false);
+  hubClients = [{ id: 'c1', company: 'Brightline Plumbing', contact_name: 'Riley', stage: 'won' }];
+  const all = cmdkEntities();
+  assert.ok(all.some((x) => x.type === 'Clients' && x.label === 'Brightline Plumbing' && /brightline/i.test(x.kw)));
+  assert.ok(all.some((x) => x.type === 'Screens' && x.label === 'Channels'));
+  hubClients = [];
 });

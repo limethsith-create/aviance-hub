@@ -520,7 +520,8 @@ test('one booking: their answers, the brief and the outcome buttons; a won one o
   assert.equal((await plCloseWon('b1', 'growth', 'monthly')).ok, true);
   const after = renderPlEnquiry((await plBooking('b1')).data, {});
   assert.ok(text(after).includes('they are a client') && !after.includes('plMarkWon('));
-  assert.ok(text(after).includes('growth') && text(after).includes('10 calls a month'));
+  assert.ok(text(after).includes('Growth') && text(after).includes('10 calls a month'), 'the plan name is capitalised for the owner');
+  assert.ok(after.includes('plOpenClient(') && text(after).includes('Open client →'), 'won: a way to their client record');
 });
 
 test('the buttons read the plan and the reason off the screen, and say plainly when they will not act', async () => {
@@ -644,4 +645,62 @@ test('Won opens the picker, hides the term for a Pilot, and confirming sends the
   // marked won with no client row we can read: still the Won state, never the button
   const bare = renderPlOutcome({ booking: booking({ id: 'b9', status: 'won' }), client: null });
   assert.ok(text(bare).includes('Won') && !bare.includes('plMarkWon(') && !bare.includes('plOpenWon('));
+});
+
+/* ───────────── dress rehearsal: the Won flow says what it will do ───────────── */
+test('the won picker shows the price beside the button, preselects the recommended plan, warns of a call still to come, and asks once', () => {
+  fresh();
+  assert.equal(plPriceWords('growth', 'monthly', PRICES), 'Growth · monthly — 10 calls, $3,000 a month');
+  assert.equal(plPriceWords('pilot', '3month', PRICES), 'Pilot — $300 once, 2 calls');
+  assert.equal(plPriceWords('growth', '3month', PRICES), 'Growth · 3 months — 10 calls a month, $2,400 a month ($7,200 for the quarter)');
+  assert.equal(plPriceWords('growth', 'monthly', []), '', 'no price list, no made-up price');
+  assert.equal(plWonConfirmWords({ email: 'riley@brightline.test' }, 'growth', 'monthly', PRICES), 'Send the agreement and the $3,000 invoice to riley@brightline.test?');
+  assert.equal(plWonConfirmWords({ email: 'r@b.test' }, 'growth', '3month', PRICES), 'Send the agreement and the $7,200 invoice to r@b.test?');
+  assert.equal(plWonConfirmWords({ email: 'r@b.test' }, 'pilot', '3month', PRICES), 'Send the agreement and the $300 invoice to r@b.test?');
+  assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'Growth — budget fits and they want consistent volume' } }), 'growth');
+  assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'The $300 Pilot' } }), 'pilot');
+  assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'whatever' } }), '');
+  assert.equal(plRecommendedPlan(null), '');
+
+  const future = { id: 'b1', email: 'r@b.test', call_at: '2099-01-01T10:00:00Z', plan: null };
+  const h = renderPlWonPicker(future, { open: true, prices: PRICES, recommended: 'growth' });
+  const t = text(h);
+  assert.match(h, /<option value="growth" selected>Growth<\/option>/, 'the recommended plan is picked when they chose none');
+  assert.ok(t.includes('The brief recommends Growth.'));
+  assert.ok(t.includes('Growth · monthly — 10 calls, $3,000 a month'));
+  assert.ok(t.includes('This call hasn’t happened yet.'));
+  assert.ok(h.includes('onclick="plWonAsk(&quot;b1&quot;)"'), 'the first button only asks');
+  assert.match(h, /id="plWonConfirm"[^>]*display:none/);
+  assert.ok(t.includes('Send the agreement and the $3,000 invoice to r@b.test?') && t.includes('Yes, send it') && t.includes('Back'));
+  const past = renderPlWonPicker(Object.assign({}, future, { call_at: '2020-01-01T10:00:00Z', plan: 'scale' }), { open: true, prices: PRICES, recommended: 'growth' });
+  assert.ok(!text(past).includes('hasn’t happened') && /value="scale" selected/.test(past), 'the plan they chose beats the recommendation');
+
+  // asking shows the confirm line and hides the first button; Back undoes it
+  el('plPlan').value = ''; assert.equal(plWonAsk('b1').ok, false);
+  pl.one = { booking: future, prices: PRICES };
+  el('plPlan').value = 'growth'; el('plTerm').value = '3month';
+  el('plWonConfirm').style.display = 'none'; el('plWonAskRow').style.display = '';
+  assert.equal(plWonAsk('b1').data.asked, 'Send the agreement and the $7,200 invoice to r@b.test?');
+  assert.equal(el('plWonConfirm').style.display, ''); assert.equal(el('plWonAskRow').style.display, 'none');
+  plWonTermShow();
+  assert.equal(el('plWonPrice').textContent, 'Growth · 3 months — 10 calls a month, $2,400 a month ($7,200 for the quarter)');
+  assert.equal(el('plWonConfirm').style.display, 'none', 'changing the plan or term goes back a step');
+  assert.equal(rpcs.length, 0, 'nothing was sent by asking');
+});
+
+test('after Won: the invoice line and Open client; capitalised plan; the country in capitals; empty brief rows left out', () => {
+  fresh();
+  const d = { booking: booking({ id: 'b1', status: 'won' }), client: { id: 'cl-1', company: 'Acme Roofing', plan: 'growth', calls_promised: 10, term: 'monthly' }, invoice: { number: 'AV-2026-1001', amount: 3000, status: 'sent' } };
+  const h = renderPlOutcome(d); const t = text(h);
+  assert.ok(t.includes('Acme Roofing is on Growth, 10 calls a month'));
+  assert.ok(t.includes('Invoice AV-2026-1001 · $3,000 sent'));
+  assert.ok(h.includes('plOpenClient(&quot;cl-1&quot;)') && t.includes('Open client →'));
+  assert.ok(!renderPlEnquiry(Object.assign({}, d, { booking: Object.assign({}, d.booking, { meet_link: 'https://meet.google.com/x' }) }), {}).includes('Join the call'), 'no Join for a won call');
+  assert.equal(plCountry('us'), 'US'); assert.equal(plCountry('Sri Lanka'), 'Sri Lanka'); assert.equal(plCountry(null), '');
+  assert.ok(plAnswers({ city: 'Austin', country: 'us' }).some((a) => a.value === 'Austin, US'));
+  const secs = plBriefSections({ brief: { facts: { city: null, news: [], tech: [], company: 'Acme' }, reputation: { praise: [], complaints: [] }, signals: [], _writer_note: 'x', summary: 'Kept' } });
+  assert.ok(!secs.some((s) => ['Reputation', 'Signals'].includes(s.title)), 'a heading with nothing under it is not drawn');
+  assert.ok(secs.every((s) => s.text || s.lines.length));
+  assert.ok(!JSON.stringify(secs).includes('News') && !JSON.stringify(secs).includes('Reputation') && !JSON.stringify(secs).includes('Writer note'), JSON.stringify(secs));
+  assert.ok(JSON.stringify(secs).includes('Acme') && JSON.stringify(secs).includes('Kept'));
 });

@@ -108,14 +108,14 @@ test('invoice lines: the database total wins, and a mismatch is flagged', () => 
 /* ───────────── dates ───────────── */
 test('a date-only value is a calendar day in every time zone', () => {
   const d = P('pcDate');
-  assert.equal(d('2026-11-24'), '24 November 2026');
-  assert.equal(d('2026-01-01'), '1 January 2026');
-  assert.equal(d('2026-12-31'), '31 December 2026');
+  assert.equal(d('2026-11-24'), 'November 24, 2026');
+  assert.equal(d('2026-01-01'), 'January 1, 2026');
+  assert.equal(d('2026-12-31'), 'December 31, 2026');
   assert.equal(d(''), ''); assert.equal(d(null), ''); assert.equal(d('not a date'), '');
 });
 test('a timestamp is shown in the viewer\'s own zone', () => {
   const local = new Date(2026, 10, 25, 23, 30);
-  assert.equal(P('pcDate')(local.toISOString()), '25 November 2026');
+  assert.equal(P('pcDate')(local.toISOString()), 'November 25, 2026');
   assert.equal(P('pcDayKey')(local.toISOString()), '2026-11-25');
   assert.match(P('pcTime')(local.toISOString()), /11[:.]30|23[:.]30/);
 });
@@ -124,8 +124,8 @@ test('day labels: Today, Yesterday, then the day by name', () => {
   const now = new Date(2026, 10, 24, 12, 0);
   assert.equal(l(new Date(2026, 10, 24, 0, 5), now), 'Today');
   assert.equal(l(new Date(2026, 10, 23, 23, 55), now), 'Yesterday');
-  assert.equal(l(new Date(2026, 10, 20, 9, 0), now), 'Friday 20 November');
-  assert.equal(l(new Date(2025, 11, 31, 9, 0), now), 'Wednesday 31 December 2025');
+  assert.equal(l(new Date(2026, 10, 20, 9, 0), now), 'Friday, November 20');
+  assert.equal(l(new Date(2025, 11, 31, 9, 0), now), 'Wednesday, December 31, 2025');
   assert.equal(l(new Date(2026, 10, 30), new Date(2026, 11, 1)), 'Yesterday');
 });
 
@@ -220,7 +220,7 @@ test('agreement: everything from the database is escaped, brackets stay, the own
 });
 test('agreement: once signed, the form is replaced by who signed and when', () => {
   const h = P('pcAgreementHtml')({ ...AGREEMENT, status: 'signed', signed_name: 'Dana <W>', signed_at: new Date(2026, 10, 25, 10, 0).toISOString() });
-  assert.ok(h.includes('Signed by Dana &lt;W&gt; on 25 November 2026'));
+  assert.ok(h.includes('Signed by Dana &lt;W&gt; on November 25, 2026'));
   assert.ok(!h.includes('pcSignForm') && !h.includes('Sign agreement'));
   assert.ok(h.includes('Print or save as PDF'));
   const v = P('pcAgreementHtml')({ ...AGREEMENT, status: 'void' });
@@ -237,7 +237,7 @@ const INVOICE = { kind: 'invoice', number: 'AV-1042', status: 'sent', issued_on:
 test('invoice: lines, credit, total and how to pay', () => {
   const h = P('pcInvoiceHtml')(INVOICE);
   assert.ok(h.includes('>Invoice</h1>') && h.includes('AV-1042'));
-  assert.ok(h.includes('24 November 2026') && h.includes('1 December 2026'));
+  assert.ok(h.includes('November 24, 2026') && h.includes('December 1, 2026'));
   assert.ok(h.includes('Growth &lt;plan&gt;') && h.includes('Acme &amp; Co'));
   assert.ok(h.includes('class="pc-credit"') && h.includes('−$300.00'));
   assert.ok(h.includes('Total due') && h.includes('$3,697.00'));
@@ -251,7 +251,7 @@ test('invoice: no card button without a safe link', () => {
 });
 test('invoice: once paid it reads as a receipt', () => {
   const h = P('pcInvoiceHtml')({ ...INVOICE, status: 'paid', paid_at: new Date(2026, 10, 26, 9, 0).toISOString() });
-  assert.ok(h.includes('>Receipt</h1>') && h.includes('pc-stamp-paid') && h.includes('26 November 2026'));
+  assert.ok(h.includes('>Receipt</h1>') && h.includes('pc-stamp-paid') && h.includes('November 26, 2026'));
   assert.ok(h.includes('Total paid') && !h.includes('How to pay') && !h.includes('Pay by card'));
   assert.doesNotThrow(() => P('pcInvoiceHtml')(null));
 });
@@ -393,4 +393,153 @@ test('the stylesheet loads no outside font and ships print rules', () => {
 test('portal-client.js keeps no token or password in storage', () => {
   const js = fs.readFileSync(path.join(root, 'portal-client.js'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(!/localStorage|sessionStorage|document\.cookie/.test(js));
+});
+
+/* ───────────── documents v2: brackets, signatures, the calm invoice ───────────── */
+test('brackets stay visible but marked, and everything is still escaped', () => {
+  const f = P('pcFillHtml');
+  assert.equal(f('Governed by [the laws of Sri Lanka].'), 'Governed by <mark class="pc-fill">[the laws of Sri Lanka]</mark>.');
+  assert.equal(f('<b>[x]</b>'), '&lt;b&gt;<mark class="pc-fill">[x]</mark>&lt;/b&gt;');
+  assert.equal(f('no brackets'), 'no brackets');
+  assert.equal(f('[a] and [b]').match(/pc-fill/g).length, 2);
+  assert.equal(f(null), '');
+});
+test('agreement: Aviance signs opposite the client, by name, as Founder', () => {
+  const sig = { ...AGREEMENT, terms: { ...AGREEMENT.terms, signatures: [{ label: 'For Aviance', name: 'Ravi <P>', role: 'Founder', org: 'Aviance' }] } };
+  const h = P('pcAgreementHtml')(sig);
+  assert.ok(h.includes('class="pc-sigs"') && h.includes('Ravi &lt;P&gt;, Founder') && h.includes('For Aviance'));
+  assert.ok(h.includes('For Acme &lt;b&gt;Ltd&lt;/b&gt;') && h.includes('Signs below'));
+  const s = P('pcAgreementHtml')({ ...sig, status: 'signed', signed_name: 'Dana W', signed_at: new Date(2026, 10, 25, 10, 0).toISOString() });
+  assert.ok(s.includes('class="pc-sigs"') && s.includes('Ravi &lt;P&gt;, Founder') && s.includes('Signed by Dana W on November 25, 2026'));
+  /* an older snapshot without signatures still shows a line to fill in */
+  const old = P('pcAgreementHtml')(AGREEMENT);
+  assert.ok(old.includes('<mark class="pc-fill">[YOUR NAME]</mark>, Founder'));
+  assert.ok(!P('pcAgreementHtml')({ ...AGREEMENT, status: 'void' }).includes('pc-sigs'));
+});
+test('agreement: section numbers from the database are not doubled', () => {
+  const h = P('pcAgreementHtml')({ ...AGREEMENT, terms: { sections: [{ h: '7. How we send', body: ['x'] }] } });
+  assert.ok(h.includes('<span class="pc-num">1</span>How we send</h2>'));
+});
+test('pay details: an admin reminder in brackets never reaches a client', () => {
+  const d = P('pcPayDetails');
+  assert.deepEqual(d({ wise_details: '[WISE BANK DETAILS — add in Settings]', payoneer_link: '' }), { ready: false, wise: '', link: '' });
+  assert.deepEqual(d({ ready: false, wise_details: 'IBAN 1', payoneer_link: 'https://p.example' }), { ready: false, wise: '', link: '' });
+  assert.deepEqual(d({ ready: true, wise_details: null, payoneer_link: 'https://p.example' }), { ready: true, wise: '', link: 'https://p.example' });
+  assert.deepEqual(d({ wise_details: 'IBAN 1' }), { ready: true, wise: 'IBAN 1', link: '' });
+  assert.equal(d(null).ready, false);
+});
+test('invoice: payment details not ready shows the calm block, never the placeholder', () => {
+  const h = P('pcInvoiceHtml')({ ...INVOICE, pay: { ready: false, wise_details: null, payoneer_link: '' } });
+  assert.ok(h.includes('Payment details') && h.includes('We’ll send these to you directly. Reply to our email if you need them now.'));
+  assert.ok(!h.includes('How to pay') && !h.includes('pc-pre') && !h.includes('Pay by card'));
+  const old = P('pcInvoiceHtml')({ ...INVOICE, pay: { wise_details: '[WISE BANK DETAILS — add in Settings]', payoneer_link: '' } });
+  assert.ok(!old.includes('WISE BANK DETAILS') && old.includes('We’ll send these to you directly'));
+});
+test('invoice: status word, service period and terms', () => {
+  const h = P('pcInvoiceHtml')({ ...INVOICE, status_word: 'Unpaid', terms: 'Net 7 — due Dec 1, 2026',
+    service: 'Growth · 10 qualified calls · month 1 — starts the day your first emails go out' });
+  assert.ok(h.includes('>Status</dt><dd>Unpaid</dd>') && h.includes('>Terms</dt><dd>Net 7 — due Dec 1, 2026</dd>'));
+  assert.ok(h.includes('class="pc-service"') && h.includes('month 1 — starts the day your first emails go out'));
+  const late = P('pcInvoiceHtml')({ ...INVOICE, status_word: 'Overdue' });
+  assert.ok(late.includes('<p class="pc-stamp"><strong>Overdue</strong></p>'));
+  assert.equal(P('pcStatusWord')({ status: 'sent' }), 'Unpaid');
+  assert.equal(P('pcStatusWord')({ status: 'paid' }), 'Paid');
+});
+test('invoice: "From" is plain Aviance until the owner fills in the company details', () => {
+  const h = P('pcInvoiceHtml')({ ...INVOICE, from: { ready: false, legal_name: 'Aviance', email: 'hi@aviance.example' } });
+  assert.ok(h.includes('<p class="pc-strong">Aviance</p>') && h.includes('hi@aviance.example') && !h.includes('[YOUR COMPANY'));
+  const full = P('pcInvoiceHtml')({ ...INVOICE, from: { ready: true, legal_name: 'Aviance Pvt Ltd', address: '1 Road', email: 'a@b.example', phone: '+94 77 000' } });
+  assert.ok(full.includes('Aviance Pvt Ltd') && full.includes('1 Road') && full.includes('+94 77 000'));
+});
+test('print: deferred so the click never freezes, with a Save-as-PDF note', () => {
+  const realWin = globalThis.window;
+  let printed = 0;
+  globalThis.window = { print() { printed++; } };
+  try {
+    assert.equal(P('pcPrint')(), true);
+    assert.equal(printed, 0, 'not inside the click');
+  } finally { globalThis.window = realWin; }
+  assert.ok(P('pcInvoiceHtml')(INVOICE).includes('Save as PDF'));
+  const doc = fs.readFileSync(path.join(root, 'doc.html'), 'utf8');
+  assert.ok(doc.includes('pcPrint()') && !/window\.print\(\)/.test(doc));
+});
+
+/* ───────────── times: the same words as the emails ───────────── */
+test('zones read as ET / CT / MT / PT, anywhere else as the city', () => {
+  const z = P('pcZoneAbbr');
+  assert.equal(z('America/New_York'), 'ET'); assert.equal(z('America/Indiana/Indianapolis'), 'ET');
+  assert.equal(z('America/Chicago'), 'CT'); assert.equal(z('America/Indiana/Knox'), 'CT');
+  assert.equal(z('America/Denver'), 'MT'); assert.equal(z('America/Phoenix'), 'MT');
+  assert.equal(z('America/Los_Angeles'), 'PT');
+  assert.equal(z('Asia/Colombo'), 'Colombo time'); assert.equal(z('America/Argentina/Buenos_Aires'), 'Buenos Aires time');
+  assert.equal(z(''), 'UTC');
+});
+test('pcWhen: "Fri, Nov 27 · 10:00 AM ET" in any zone', () => {
+  const w = P('pcWhen');
+  assert.equal(w('2026-11-27T15:00:00Z', 'America/New_York'), 'Fri, Nov 27 · 10:00 AM ET');
+  assert.equal(w('2026-11-27T15:00:00Z', 'America/Los_Angeles'), 'Fri, Nov 27 · 7:00 AM PT');
+  assert.equal(w('2026-11-27T15:00:00Z', 'Asia/Colombo'), 'Fri, Nov 27 · 8:30 PM Colombo time');
+  assert.equal(w('nonsense', 'America/New_York'), '');
+});
+test('kickoff slots are grouped by the client\'s own day, with ET beside them', () => {
+  const slots = [{ starts_at: '2026-11-27T15:30:00Z' }, { starts_at: '2026-11-27T15:00:00Z' }, { starts_at: '2026-11-27T20:00:00Z' }, { starts_at: '2026-11-27T15:00:00Z' }, null];
+  const col = P('pcKickoffDays')(slots, 'Asia/Colombo', 'America/New_York');
+  assert.deepEqual(col.map((d) => d.label), ['Fri, Nov 27', 'Sat, Nov 28']);
+  assert.deepEqual(col[0].slots.map((s) => s.time + ' / ' + s.other), ['8:30 PM / 10:00 AM ET', '9:00 PM / 10:30 AM ET']);
+  assert.equal(col[1].slots[0].time, '1:30 AM');
+  const ny = P('pcKickoffDays')(slots, 'America/New_York', 'America/New_York');
+  assert.equal(ny.length, 1);
+  assert.equal(ny[0].slots[0].other, '', 'no second time when the client is on ET');
+  assert.deepEqual(P('pcKickoffDays')(null), []);
+});
+test('kickoff card: pick a day, pick a time, confirm; once booked it shows the time and the link', () => {
+  const k = { zone: 'America/New_York', booked: null, slots: [{ starts_at: '2026-11-27T15:00:00Z' }, { starts_at: '2026-11-30T15:00:00Z' }] };
+  const h = P('pcKickoffHtml')(k, { viewerZone: 'Asia/Colombo' });
+  assert.ok(h.includes('Book your kickoff') && h.includes('data-pc-day="2026-11-27"') && h.includes('aria-pressed="true">Fri, Nov 27'));
+  assert.ok(h.includes('data-pc-slot="2026-11-27T15:00:00.000Z"') && h.includes('10:00 AM ET') && !h.includes('data-pc-book'));
+  const pick = P('pcKickoffHtml')(k, { viewerZone: 'Asia/Colombo', day: '2026-11-30', pick: '2026-11-30T15:00:00.000Z' });
+  assert.ok(pick.includes('Book Mon, Nov 30 · 10:00 AM ET?') && pick.includes('data-pc-book="2026-11-30T15:00:00.000Z"') && pick.includes('Mon, Nov 30 · 8:30 PM your time'));
+  const busy = P('pcKickoffHtml')(k, { viewerZone: 'Asia/Colombo', pick: '2026-11-27T15:00:00.000Z', busy: true, error: 'That time has just <gone>.' });
+  assert.ok(busy.includes(' disabled>Booking…') && busy.includes('That time has just &lt;gone&gt;.'));
+  const done = P('pcKickoffHtml')({ zone: 'America/New_York', booked: { starts_at: '2026-11-27T15:00:00Z', minutes: 45, status: 'booked', meet_link: 'https://meet.jit.si/aviance-x' } },
+    { viewerZone: 'America/New_York', now: '2026-11-25T00:00:00Z' });
+  assert.ok(done.includes('Kickoff: Fri, Nov 27 · 10:00 AM ET') && done.includes('href="https://meet.jit.si/aviance-x"') && !done.includes('your time'));
+  assert.equal(P('pcKickoffHtml')({ booked: { starts_at: '2026-11-27T15:00:00Z', minutes: 45, status: 'booked' } }, { now: '2026-12-01T00:00:00Z' }), '', 'gone once it has happened');
+  const bad = P('pcKickoffHtml')({ booked: { starts_at: '2099-11-27T15:00:00Z', meet_link: 'javascript:alert(1)' } }, {});
+  assert.ok(!bad.includes('javascript:'));
+  assert.ok(P('pcKickoffHtml')({ zone: 'America/New_York', slots: [] }, {}).includes('Message us below'));
+  assert.doesNotThrow(() => P('pcKickoffHtml')(null, null));
+});
+test('pcKickoff / pcBookKickoff ask the portal functions and never throw', async () => {
+  reset();
+  answer = { data: { zone: 'America/New_York', booked: null, slots: [] }, error: null };
+  assert.equal((await P('pcKickoff')(10)).ok, true);
+  assert.deepEqual(rpcs[0], { name: 'portal_kickoff_slots', args: { p_days: 10 } });
+  answer = { data: 'nonsense', error: null };
+  assert.equal((await P('pcKickoff')(99)).ok, false);
+  assert.equal(rpcs[1].args.p_days, 21);
+  answer = { data: { starts_at: '2026-11-27T15:00:00Z', meet_link: 'https://m' }, error: null };
+  const b = await P('pcBookKickoff')('2026-11-27T15:00:00Z');
+  assert.equal(b.ok, true);
+  assert.deepEqual(rpcs[2], { name: 'portal_book_kickoff', args: { p_start: '2026-11-27T15:00:00.000Z' } });
+  const n = rpcs.length;
+  assert.equal((await P('pcBookKickoff')('')).ok, false);
+  assert.equal(rpcs.length, n, 'no time, no question');
+  answer = { data: null, error: { message: 'That time has just gone. Please pick another.' } };
+  assert.equal((await P('pcBookKickoff')('2026-11-27T15:00:00Z')).error, 'That time has just gone. Please pick another.');
+  answer = new Error('Failed to fetch');
+  assert.equal((await P('pcKickoff')(10)).offline, true);
+});
+test('join.html explains the channel, the link and where to get help', () => {
+  const html = fs.readFileSync(path.join(root, 'join.html'), 'utf8');
+  assert.ok(html.includes('Your private line to the Aviance team — updates, approvals and questions, all in one place.'));
+  assert.ok(html.includes("Opening this page doesn't use your link — only setting your password does."));
+  assert.ok(html.includes('Stuck? Reply to any of our emails.'));
+  assert.ok(html.includes("Reply to our email and we\\'ll send a fresh link."));
+  assert.match(P('pcInviteMessage')('expired'), /fresh link/);
+});
+test('portal.html shows the kickoff card above the chat', () => {
+  const html = fs.readFileSync(path.join(root, 'portal.html'), 'utf8');
+  assert.ok(html.indexOf('id="pcKick"') > 0 && html.indexOf('id="pcKick"') < html.indexOf('id="pcScroll"'));
+  assert.ok(html.includes('pcKickoffHtml(') && html.includes('pcBookKickoff(') && html.includes('pcKickoff(10)'));
 });

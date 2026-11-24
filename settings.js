@@ -82,7 +82,9 @@ const ST_BIZ_FIELDS=[
   ['email','Billing email','email','Where a client writes about an invoice'],
   ['wise_details','Wise bank details','area','Shown on the invoice so they can pay by bank transfer'],
   ['payoneer_link','Payoneer link','url','Optional. Shown on the invoice as a second way to pay'],
-  ['kickoff_link','Kickoff booking link','url','Sent in the welcome email so they can book their first call']
+  ['kickoff_link','Kickoff booking link','url','Only used if a client cannot book inside their portal'],
+  ['signer_name','Who signs for Aviance','text','Your full name. Shown as the Aviance signature on every agreement and the welcome email'],
+  ['phone','Business phone','text','Optional. Printed on invoices']
 ];
 function stIsAdmin(){ try{ return typeof authUser!=='undefined'&&!!authUser&&authUser.role==='admin' }catch(e){ return false } }
 /* A stand-in the database ships with, e.g. "[YOUR COMPANY LEGAL NAME]". */

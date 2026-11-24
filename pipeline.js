@@ -159,6 +159,16 @@ async function plBooking(id) {
   const brief = await plBrief(id);
   const state = await plResearchState(id);
   const client = await plRun(() => sb.from('clients').select('*').eq('booking_id', id).limit(1), []);
+  const theClient = client.ok && Array.isArray(client.data) && client.data.length ? client.data[0] : null;
+  /* the price list, so the Won picker can say what they are buying; the team can read it */
+  const prices = await plRun(() => sb.from('plan_prices').select('*'), []);
+  /* their first invoice once they are a client. Only an admin can read invoices, so
+     anyone else simply sees no invoice line. */
+  let invoice = null;
+  if (theClient && theClient.id != null) {
+    const inv = await plRun(() => sb.from('invoices').select('*').eq('client_id', theClient.id).order('created_at', { ascending: true }).limit(1), []);
+    if (inv.ok && Array.isArray(inv.data) && inv.data.length) invoice = inv.data[0];
+  }
 
   return plOk({
     booking: b,
@@ -168,7 +178,9 @@ async function plBooking(id) {
     briefError: brief.ok ? '' : brief.error,
     sections: plBriefSections(brief.ok ? brief.data : null),
     research: state.ok ? state.data : { state: 'unknown', since: null, note: state.error },
-    client: client.ok && Array.isArray(client.data) && client.data.length ? client.data[0] : null,
+    client: theClient,
+    prices: prices.ok && Array.isArray(prices.data) ? prices.data.filter(Boolean) : [],
+    invoice,
   });
 }
 
@@ -178,13 +190,19 @@ function plAnswers(b) {
   const yesNo = (v) => (v === true ? 'Yes' : v === false ? 'No' : v);
   return [
     ['Name', b.name], ['Email', b.email], ['Phone', b.phone], ['Their role', b.role], ['Company', b.company],
-    ['Website', b.website], ['Where they are', [b.city, b.country].filter(Boolean).join(', ')],
+    ['Website', b.website], ['Where they are', [b.city, plCountry(b.country)].filter(Boolean).join(', ')],
     ['Industry', b.industry], ['What they sell', b.sells], ['Deal size', b.budget],
     ['How they win customers today', b.current_lead_gen], ['Capacity for new calls', b.capacity],
     ['Tried outbound before', yesNo(b.tried_outbound)],
     ['Can they decide', yesNo(b.decision_maker)],
     ['What they want', b.goal], ['When they want it', b.timeline], ['Came from', b.source],
   ].filter(([, v]) => v != null && String(v).trim() !== '').map(([k, v]) => ({ label: k, value: String(v) }));
+}
+
+/* "us" → "US": a country code is written in capitals; a country's name is left as it is. */
+function plCountry(c) {
+  const s = String(c == null ? '' : c).trim();
+  return /^[a-z]{2,3}$/i.test(s) ? s.toUpperCase() : s;
 }
 
 /* ---- the research engine's work (read only) ----------------------- */
@@ -256,17 +274,19 @@ function plBriefSections(briefRow, depth) {
   const entries = Array.isArray(raw) ? raw.map((v, i) => ['Point ' + (i + 1), v]) : Object.keys(raw).map((k) => [k, raw[k]]);
   entries.forEach(([key, value]) => {
     const title = plTitle(key);
-    if (value == null || value === '') return;
+    if (plEmpty(value) || String(key).charAt(0) === '_') return;
     if (typeof value !== 'object') { out.push({ title: '', lines: [{ label: title, value: plFlat(value, max) }], text: '' }); return; }
     if (Array.isArray(value)) {
       const simple = value.every((v) => v == null || typeof v !== 'object');
-      if (simple) { out.push({ title, lines: value.filter((v) => v != null && v !== '').map((v) => ({ label: '', value: String(v) })), text: '' }); return; }
-      out.push({ title, lines: value.map((v, i) => ({ label: typeof v === 'object' && v && (v.title || v.label || v.name) ? String(v.title || v.label || v.name) : String(i + 1), value: plFlat(v, max - 1) })), text: '' });
+      if (simple) { out.push({ title, lines: value.filter((v) => !plEmpty(v)).map((v) => ({ label: '', value: String(v) })), text: '' }); return; }
+      out.push({ title, lines: value.filter((v) => !plEmpty(v)).map((v, i) => ({ label: typeof v === 'object' && v && (v.title || v.label || v.name) ? String(v.title || v.label || v.name) : String(i + 1), value: plFlat(v, max - 1) })).filter((l) => l.value !== ''), text: '' });
       return;
     }
     const keys = Object.keys(value);
-    out.push({ title, lines: keys.filter((k) => value[k] != null && value[k] !== '').map((k) => ({ label: plTitle(k), value: plFlat(value[k], max - 1) })), text: '' });
+    out.push({ title, lines: keys.filter((k) => !plEmpty(value[k])).map((k) => ({ label: plTitle(k), value: plFlat(value[k], max - 1) })).filter((l) => l.value !== ''), text: '' });
   });
+  /* a heading with nothing under it is not drawn */
+  for (let i = out.length - 1; i >= 0; i--) if (!out[i].text && !out[i].lines.length) out.splice(i, 1);
   /* loose one-liners are nicer as one block */
   const loose = out.filter((s) => !s.title && s.lines.length === 1 && !s.text);
   if (loose.length > 1) {
@@ -274,6 +294,14 @@ function plBriefSections(briefRow, depth) {
     return [{ title: 'In short', lines: loose.map((s) => s.lines[0]), text: '' }].concat(rest);
   }
   return out;
+}
+/* Says nothing: missing, blank, an empty list or an empty object. */
+function plEmpty(v) {
+  if (v == null) return true;
+  if (typeof v === 'string') return v.trim() === '';
+  if (Array.isArray(v)) return v.every(plEmpty);
+  if (typeof v === 'object') return Object.keys(v).every((k) => plEmpty(v[k]));
+  return false;
 }
 /* "icp_notes" / "icpNotes" -> "Icp notes" */
 function plTitle(k) {
@@ -496,7 +524,11 @@ function renderPlBrief(sections, state, bookingId) {
 function renderPlOutcome(d) {
   const b = d.booking, id = b.id, s = String(b.status);
   if (d.client) {
-    return `<div class="card pl-pad pl-outcome"><b>Won — they are a client</b><p class="muted">${esc(d.client.company || '')} is on ${esc(String(d.client.plan || ''))}, ${esc(String(d.client.calls_promised || 0))} calls a month. This booking cannot make a second client.</p></div>`;
+    const c = d.client, inv = d.invoice;
+    const calls = String(c.calls_promised || 0) + (String(c.plan) === 'pilot' ? ' calls' : ' calls a month');
+    return `<div class="card pl-pad pl-outcome"><b>Won — they are a client</b><p class="muted">${esc(c.company || '')} is on ${esc(plPlanWord(c.plan) || 'a plan')}${String(c.term) === '3month' ? ' · 3 months' : ''}, ${esc(calls)}. This booking cannot make a second client.</p>
+      ${inv ? `<p class="pl-small">${esc('Invoice ' + (inv.number || '') + ' · ' + plUsd(inv.amount) + ' ' + plInvoiceWord(inv))}</p>` : ''}
+      <div class="pl-acts"><button type="button" class="btn" onclick="plOpenClient(${plAttr(c.id)})">Open client →</button></div></div>`;
   }
   if (s === 'won') {
     return `<div class="card pl-pad pl-outcome"><b>Won</b><p class="muted">This call is already marked won, so there is nothing more to record here.</p></div>`;
@@ -515,24 +547,85 @@ function renderPlOutcome(d) {
     <div class="pl-acts">${s === 'held' ? '' : `<button class="btn ghost" onclick="plMarkHeld(${plAttr(id)})">Call done</button>`}
       ${s === 'no_show' ? '' : `<button class="btn ghost" onclick="plMarkNoShow(${plAttr(id)})">Nobody came</button>`}</div>
     <div class="pl-acts"><button class="btn" onclick="plOpenWon()" aria-controls="plWonPick">Won</button></div>
-    ${renderPlWonPicker(b, { open: false })}
+    ${renderPlWonPicker(b, { open: false, prices: d.prices, recommended: plRecommendedPlan(d.brief) })}
     <div class="field"><label for="plLossReason">If we lost them, why</label><select id="plLossReason" data-tk-form><option value="">Pick a reason</option>${PL_LOSS_REASONS.map((r) => `<option value="${esc(r)}">${esc(plLossWord(r))}</option>`).join('')}</select></div>
     <div class="pl-acts"><button class="btn ghost" onclick="plMarkLost(${plAttr(id)})">Lost</button></div>
     </div>`;
 }
 
+/* ---- what a plan costs, said once, from plan_prices -------------- */
+
+function plUsd(n) { const v = Math.round(Number(n) || 0); return '$' + v.toLocaleString('en-US'); }
+/* "sent", "paid", "overdue": where an invoice stands, in a word. */
+function plInvoiceWord(inv) {
+  const s = String((inv && inv.status) || 'sent');
+  return s === 'paid' ? 'paid' : s === 'void' ? 'cancelled' : s === 'draft' ? 'not sent yet' : s === 'overdue' ? 'sent, overdue' : 'sent';
+}
+function plPrice(plan, prices) {
+  const k = String(plan || '');
+  return (Array.isArray(prices) ? prices : []).find((p) => p && String(p.plan) === k) || null;
+}
+/* A Pilot is a one-off; a plan without a 3-month price is monthly whatever was picked. */
+function plTermOf(plan, term, prices) {
+  const p = plPrice(plan, prices);
+  if (String(plan) === 'pilot' || (p && (!p.is_recurring || !Number(p.three_month_fee)))) return 'monthly';
+  return term === '3month' ? '3month' : 'monthly';
+}
+/* What the first invoice comes to: a month, the quarter, or the Pilot once. */
+function plFirstInvoice(plan, term, prices) {
+  const p = plPrice(plan, prices); if (!p) return null;
+  const t = plTermOf(plan, term, prices);
+  return t === '3month' ? Number(p.three_month_fee) * 3 : Number(p.monthly_fee);
+}
+/* "Growth · monthly — 10 calls, $3,000 a month". '' when the price list is not loaded. */
+function plPriceWords(plan, term, prices) {
+  const p = plPrice(plan, prices); if (!p) return '';
+  const name = plPlanWord(plan) || String(plan);
+  const calls = Number(p.calls_promised) || 0;
+  if (String(plan) === 'pilot' || !p.is_recurring) return name + ' — ' + plUsd(p.monthly_fee) + ' once, ' + calls + ' calls';
+  if (plTermOf(plan, term, prices) === '3month') {
+    return name + ' · 3 months — ' + calls + ' calls a month, ' + plUsd(p.three_month_fee) + ' a month (' + plUsd(Number(p.three_month_fee) * 3) + ' for the quarter)';
+  }
+  return name + ' · monthly — ' + calls + ' calls, ' + plUsd(p.monthly_fee) + ' a month';
+}
+/* The one line asked before anything is sent. */
+function plWonConfirmWords(b, plan, term, prices) {
+  const to = String((b && b.email) || '').trim() || 'them';
+  const amt = plFirstInvoice(plan, term, prices);
+  return 'Send the agreement and the ' + (amt == null ? '' : plUsd(amt) + ' ') + 'invoice to ' + to + '?';
+}
+/* The plan the research engine recommends: "Growth — budget fits" → 'growth'. */
+function plRecommendedPlan(briefRow) {
+  const raw = briefRow && typeof briefRow === 'object' && 'brief' in briefRow ? briefRow.brief : null;
+  const r = raw && typeof raw === 'object' ? raw.recommended_plan : null;
+  const m = /^\s*(?:the\s+\$?\d*\s*)?([a-z]+)/i.exec(String(r == null ? '' : (typeof r === 'object' ? (r.plan || r.name || '') : r)));
+  const k = m ? m[1].toLowerCase() : '';
+  return PL_PLANS.includes(k) ? k : '';
+}
+/* A call still in the future: Won is allowed, but it is said. */
+function plNotHappened(b, now) { const t = plMs(b && b.call_at); return Boolean(t) && t > (now || new Date()).getTime(); }
+
 /* The small plan picker the Won button opens: which plan, and (for everything but a
-   Pilot, which is a one-off) which term. The plan they chose on the website is already
-   picked. Pure: data in, HTML out. `meta.open` draws it already open. */
+   Pilot, which is a one-off) which term, with what that costs beside the button.
+   The plan they chose on the website is already picked; failing that, the one the
+   brief recommends. The button asks once ("Send the agreement and the $3,000
+   invoice to …?") before anything is sent. Pure: data in, HTML out.
+   meta = {open, prices, recommended, now} */
 function renderPlWonPicker(b, meta) {
   b = b || {}; meta = meta || {};
   const id = b.id;
-  const picked = PL_PLANS.includes(String(b.plan)) ? String(b.plan) : '';
+  const rec = PL_PLANS.includes(String(meta.recommended)) ? String(meta.recommended) : '';
+  const picked = PL_PLANS.includes(String(b.plan)) ? String(b.plan) : rec;
   const to = String(b.email || '').trim();
+  const price = picked ? plPriceWords(picked, 'monthly', meta.prices) : '';
   return `<div id="plWonPick" class="pl-won-pick pl-outcome"${meta.open ? '' : ' style="display:none"'}>
-    <div class="field"><label for="plPlan">Which plan did they buy</label><select id="plPlan" data-tk-form onchange="plWonTermShow()"><option value="">Pick the plan</option>${PL_PLANS.map((p) => `<option value="${esc(p)}"${p === picked ? ' selected' : ''}>${esc(plPlanWord(p))}</option>`).join('')}</select></div>
-    <div class="field" id="plTermField"${picked === 'pilot' ? ' style="display:none"' : ''}><label for="plTerm">Term</label><select id="plTerm" data-tk-form><option value="monthly">Monthly</option><option value="3month">3 months</option></select></div>
-    <div class="pl-acts"><button class="btn" id="plWonGo" onclick="plMarkWon(${plAttr(id)})">Mark won and send the pack</button></div>
+    ${plNotHappened(b, meta.now) ? '<p class="pl-small pl-warn">This call hasn’t happened yet.</p>' : ''}
+    <div class="field"><label for="plPlan">Which plan did they buy</label><select id="plPlan" data-tk-form onchange="plWonTermShow()"><option value="">Pick the plan</option>${PL_PLANS.map((p) => `<option value="${esc(p)}"${p === picked ? ' selected' : ''}>${esc(plPlanWord(p))}</option>`).join('')}</select>${!b.plan && rec ? '<p class="muted pl-small">The brief recommends ' + esc(plPlanWord(rec)) + '.</p>' : ''}</div>
+    <div class="field" id="plTermField"${picked === 'pilot' ? ' style="display:none"' : ''}><label for="plTerm">Term</label><select id="plTerm" data-tk-form onchange="plWonTermShow()"><option value="monthly">Monthly</option><option value="3month">3 months</option></select></div>
+    <p class="pl-small" id="plWonPrice">${esc(price)}</p>
+    <div class="pl-acts" id="plWonAskRow"><button class="btn" id="plWonGo" onclick="plWonAsk(${plAttr(id)})">Mark won and send the pack</button></div>
+    <div id="plWonConfirm" class="pl-won-confirm" style="display:none"><p id="plWonConfirmText">${esc(plWonConfirmWords(b, picked, 'monthly', meta.prices))}</p>
+      <div class="pl-acts"><button class="btn" onclick="plMarkWon(${plAttr(id)})">Yes, send it</button><button class="btn ghost" onclick="plWonBack()">Back</button></div></div>
     <p class="muted pl-small">This makes them a client and emails the agreement and the first invoice${to ? ' to ' + esc(to) : ''}. The plan sets the number of calls and the fee — both come from the price list, never typed in here.</p></div>`;
 }
 
@@ -551,7 +644,7 @@ function renderPlEnquiry(d, meta) {
   const head = typeof meta.head === 'string' ? meta.head : `<div class="card pl-pad pl-head">
     <div class="pl-card-head"><b class="pl-who">${esc(plWho(b))}</b>${plStatusPill(b.status)}${score === '' ? '' : `<span class="pill blue">Score ${esc(String(score))}</span>`}</div>
     <div class="pl-when">${b.call_at ? `<b>${esc(plWhen(b.call_at))}</b> <span class="muted">· ${esc(plRel(b.call_at, now))}${b.timezone ? ' · ' + esc(b.timezone) : ''}</span>` : '<span class="muted">No call booked</span>'}</div>
-    ${b.meet_link && plSafeUrl(b.meet_link) ? `<div class="pl-acts"><a class="btn" href="${esc(plSafeUrl(b.meet_link))}" target="_blank" rel="noopener noreferrer">Join the call</a></div>` : ''}
+    ${b.meet_link && plSafeUrl(b.meet_link) && !d.client && String(b.status) !== 'won' ? `<div class="pl-acts"><a class="btn" href="${esc(plSafeUrl(b.meet_link))}" target="_blank" rel="noopener noreferrer">Join the call</a></div>` : ''}
   </div>`;
 
   const answers = (d.answers || []).length
@@ -650,11 +743,47 @@ function plOpenWon() {
   plWonTermShow();
   return show;
 }
-/* A Pilot has no term, so the term choice is hidden while Pilot is picked. */
+/* A Pilot has no term, so the term choice is hidden while Pilot is picked. The price
+   beside the button follows the plan and term picked. */
 function plWonTermShow() {
-  const f = typeof document !== 'undefined' ? document.getElementById('plTermField') : null;
+  const doc = typeof document !== 'undefined' ? document : null;
+  const f = doc ? doc.getElementById('plTermField') : null;
   if (!f) return;
-  f.style.display = plPick('plPlan') === 'pilot' ? 'none' : '';
+  const plan = plPick('plPlan');
+  f.style.display = plan === 'pilot' ? 'none' : '';
+  const prices = pl.one && pl.one.prices;
+  const w = doc.getElementById('plWonPrice');
+  if (w) w.textContent = plan ? plPriceWords(plan, plPick('plTerm'), prices) : '';
+  plWonBack();
+}
+/* "Mark won and send the pack" asks once, in one line, before anything is sent. */
+function plWonAsk(id) {
+  const plan = plPick('plPlan');
+  if (!plan) return plSay(plErr('Pick the plan they bought first.'), '');
+  const doc = typeof document !== 'undefined' ? document : null;
+  const b = pl.one && pl.one.booking && String(pl.one.booking.id) === String(id) ? pl.one.booking : { id };
+  const words = plWonConfirmWords(b, plan, plPick('plTerm'), pl.one && pl.one.prices);
+  const box = doc ? doc.getElementById('plWonConfirm') : null, ask = doc ? doc.getElementById('plWonAskRow') : null;
+  const t = doc ? doc.getElementById('plWonConfirmText') : null;
+  if (t) t.textContent = words;
+  if (box) box.style.display = '';
+  if (ask) ask.style.display = 'none';
+  return plOk({ asked: words });
+}
+function plWonBack() {
+  const doc = typeof document !== 'undefined' ? document : null;
+  const box = doc ? doc.getElementById('plWonConfirm') : null, ask = doc ? doc.getElementById('plWonAskRow') : null;
+  if (box) box.style.display = 'none';
+  if (ask) ask.style.display = '';
+  return true;
+}
+/* "Open client →" once they are won. */
+function plOpenClient(clientId) {
+  if (!clientId) return false;
+  try { if (typeof closeModal === 'function') closeModal(); } catch (e) { /* nothing open */ }
+  if (typeof mt !== 'undefined' && mt) mt.open = null;
+  if (typeof openClient === 'function') { openClient(clientId); return true; }
+  return false;
 }
 /* "Mark won and send the pack". One at a time: a second click while the first is still
    on its way does nothing, so the pack is never asked for twice. */

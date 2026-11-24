@@ -54,3 +54,8 @@
   .pl-bar-row { grid-template-columns: 1fr auto; }
   .pl-bar-track { grid-column: 1 / -1; }
 }
+
+/* The Won picker: a soft warning for a call still to come, and the one-line confirm. */
+.pl-warn{color:var(--amber);font-weight:600}
+.pl-won-confirm{border-left:3px solid var(--border-strong);padding:8px 0 4px 12px;margin:6px 0}
+.pl-won-confirm p{margin:0 0 6px}

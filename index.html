@@ -161,6 +161,9 @@ h1,h2,h3,h4{font-weight:600}
 
 /* LOGIN */
 .login-screen{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:20px}
+/* What shows while the saved session is checked, so the sign-in form never flashes up for someone already signed in. */
+.boot-screen{position:fixed;inset:0;z-index:210;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;background:var(--bg);color:var(--muted);font-size:var(--fs-small)}
+.boot-screen .logo{width:44px;height:44px}
 .login-wrap{display:grid;grid-template-columns:1fr 1fr;width:860px;max-width:100%;background:var(--surface);border:1px solid var(--border);overflow:hidden}
 .login-aside{background:#000;color:#fff;padding:36px 34px;display:flex;flex-direction:column}
 .la-top{display:flex;align-items:center;gap:11px;margin-bottom:auto}
@@ -260,8 +263,11 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
 </head>
 <body>
 
+<!-- LOADING: shown until the saved session has been checked (boot) -->
+<div id="bootScreen" class="boot-screen" role="status" aria-live="polite"><div class="logo">A</div><div>Opening Aviance OS…</div></div>
+
 <!-- LOGIN -->
-<div id="login" class="login-screen">
+<div id="login" class="login-screen" style="display:none">
   <div class="login-wrap">
     <div class="login-aside">
       <div class="la-top"><div class="logo" style="width:40px;height:40px">A</div>
@@ -406,7 +412,8 @@ function val(id){const e=document.getElementById(id);return e?e.value.trim():''}
 function errEl(id,msg){const e=document.getElementById(id);if(e)e.textContent=msg;return false}
 function emptyState(icon,title,sub,btn,action){return `<div class="card"><div class="empty"><div class="empty-ic">${icon}</div><h3>${title}</h3><p>${sub}</p>${btn?`<button class="btn" onclick="${action}">${btn}</button>`:''}</div></div>`}
 function toast(msg){const t=document.getElementById('toast');t.innerHTML=`<span class="tdot"></span><span>${esc(msg)}</span>`;t.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),4000);}
-function openModal(html){document.getElementById('modal').innerHTML=html;document.getElementById('modalWrap').classList.add('open');}
+function closeNotif(){const p=document.getElementById('notifPop');if(p&&p.classList.contains('open')){p.classList.remove('open');return true;}return false;}
+function openModal(html){closeNotif();document.getElementById('modal').innerHTML=html;document.getElementById('modalWrap').classList.add('open');}
 function closeModal(){document.getElementById('modalWrap').classList.remove('open');}
 document.getElementById('modalWrap').addEventListener('click',e=>{if(e.target.id==='modalWrap')closeModal();});
 
@@ -430,7 +437,6 @@ const views={
   outreachClient:{fn:()=>V('viewOutreachClient',currentClientId),title:'Outreach',sub:'',wide:true,back:()=>render('outreach')},
   outreachThread:{fn:()=>V('viewOutreachThread',currentThreadId),title:'Reply',sub:'',back:()=>render('outreach')},
   channels:{fn:()=>V('viewChannels'),title:'Channels',sub:()=>hubIsClient()?'Message the Aviance team':'Talk with your team and your clients',wide:true},
-  clientChannel:{fn:()=>V('viewClientChannel',currentClientId),title:'Client channel',sub:'',wide:true,back:()=>render('channels')},
   requests:{fn:()=>V('viewRequests'),title:'Requests',sub:'What clients have asked for'},
   clientPeople:{fn:()=>V('viewClientPeople',currentClientId),title:'Their people',sub:'Who from their business can sign in',back:()=>render('clients')},
   onboarding:{fn:()=>V('viewOnboarding'),title:'Onboarding',sub:'What is blocking each new client'},
@@ -499,7 +505,7 @@ function render(v){
   try{if(view.after)view.after();}catch(e){}
   try{updateNotifBadge();}catch(e){}
   try{trialsOnRender(v);}catch(e){}
-  try{calendarOnRender(v);}catch(e){}
+  try{if(typeof mtOnRender==='function')mtOnRender(v);}catch(e){}
   try{if(typeof channelsOnRender==='function')channelsOnRender(v);}catch(e){}
   try{if(typeof peopleOnRender==='function')peopleOnRender(v);}catch(e){}
   try{if(typeof numbersOnRender==='function')numbersOnRender(v);}catch(e){}
@@ -516,12 +522,11 @@ function parseDeepLink(h){
   h=String(h||'');const at=h.indexOf('#');if(at<0)return null;h=h.slice(at+1).replace(/^\/+/,'').replace(/\/+$/,'');
   if(h==='numbers')return {view:'numbers'};
   if(h==='channels')return {view:'channels'};
-  if(h==='trials'||h==='clients')return {view:'paying'};
+  if(h==='trials'||h==='clients'||h==='paying')return {view:'clients'};
   if(h==='alerts')return {view:'settings',section:'alerts'};
   if(h==='settings')return {view:'settings'};
   const s=h.match(/^settings\/(warmup|keys|details)$/);if(s)return {view:'settings',section:s[1]};
   if(h==='inquiries')return {view:'inquiries'};
-  if(h==='paying')return {view:'paying'};
   if(h==='calendar')return {view:'calendar'};
   if(h==='numbers')return {view:'numbers'};
   if(h==='channels')return {view:'channels'};
@@ -573,7 +578,7 @@ function navItems(){
     {view:'calling',icon:I.sun,label:'Calling',badge:'',also:['callTargets','dnc']},
     {view:'outreach',icon:I.chart,label:'Outreach',badge:'',also:['outreachThread']},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:cal,tone:'amber',badgeTitle:cal?cal+(cal===1?' call needs':' calls need')+' an outcome':'',also:['meeting','noShows','funnel']},
-    {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':'',also:['clientChannel','requests']},
+    {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':'',also:['requests']},
     {view:'billing',icon:I.money,label:'Invoices',badge:req,tone:'amber',also:['monthEnd','friday','ending','finalStatement','dataDeletion']},
     {view:'work',icon:I.people,label:'Work',badge:'',also:['myWork']},
     {view:'team',icon:I.people,label:'Team',badge:pend,tone:pend?'red':'',badgeTitle:pend?pend+' waiting for your approval':'',owner:true},
@@ -645,7 +650,9 @@ async function routeUser(errId){
   document.getElementById('loginPass').value='';
   enterApp();
 }
+function hideBoot(){const b=document.getElementById('bootScreen');if(b)b.style.display='none';}
 function enterApp(){
+  hideBoot();
   document.getElementById('login').style.display='none';document.getElementById('app').style.display='grid';
   document.getElementById('whoAvatar').textContent=(authUser.name||'A').trim().charAt(0).toUpperCase()||'A';
   document.getElementById('whoName').textContent=authUser.name;
@@ -659,14 +666,15 @@ function enterApp(){
   try{tkDropOldPhoneAlerts();}catch(e){}
 }
 function showLogin(){
+  hideBoot();
   document.getElementById('app').style.display='none';
   document.getElementById('login').style.display='flex';
   closeModal();closeCmdk();
   try{trialsStopTimer();}catch(e){}
-  try{calendarStopTimer();}catch(e){}
+  try{if(typeof mtStopTimer==='function')mtStopTimer();}catch(e){}
   try{if(typeof channelsStopTimer==='function')channelsStopTimer();}catch(e){}
 }
-async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{calendarForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}try{if(typeof peopleForgetClient==='function')peopleForgetClient();}catch(e){}errEl('loginErr','');showLogin();}
+async function logout(){try{if(typeof peopleSignOut==='function'&&!hubIsClient())await peopleSignOut();}catch(e){}try{await sb.auth.signOut();}catch(e){}authUser=null;try{document.body.classList.remove('client-mode');}catch(e){}try{trialsForget();}catch(e){}try{if(typeof mtForget==='function')mtForget();}catch(e){}try{if(typeof channelsForget==='function')channelsForget();}catch(e){}try{if(typeof peopleForgetClient==='function')peopleForgetClient();}catch(e){}errEl('loginErr','');showLogin();}
 /* ---- Password recovery ---- */
 async function forgotPassword(){
   const email=val('loginEmail').toLowerCase();
@@ -723,8 +731,23 @@ function cmdkActions(){const a=[];
   a.push({type:'Command',label:'Switch light / dark',icon:I.moon,sub:'How Aviance OS looks',kw:'theme dark light mode toggle',run:()=>{closeCmdk();toggleTheme();}});
   a.push({type:'Command',label:'Log out',icon:I.logout,sub:'End your session',kw:'log out sign out logout',run:()=>{closeCmdk();logout();}});
   return a;}
-function cmdkEntities(){return typeof trialsCmdkEntities==='function'?trialsCmdkEntities():[]}
-function openCmdk(){if(!authUser||hubIsClient())return;const w=document.getElementById('cmdkWrap');w.classList.add('open');const inp=document.getElementById('cmdkInput');inp.value='';renderCmdk('');setTimeout(()=>inp.focus(),30);}
+/* What ⌘K can find: every client by name, person or email, and the main screens by name. */
+const CMDK_SCREENS=[['home','Today','dashboard home'],['clients','Clients','book list'],['needsYou','Needs you','behind attention'],['calendar','Calendar','calls bookings meetings'],['funnel','Funnel','enquiries wins'],['channels','Channels','messages chat'],['onboarding','Onboarding','checklist new clients'],['billing','Invoices','billing money paid'],['outreach','Outreach','email campaigns'],['calling','Calling','dial phone'],['team','Team','people staff'],['work','Work','tasks jobs'],['friday','Friday update','weekly note'],['monthEnd','Month end','close months'],['ending','Ending','wrap up'],['settings','Settings','preferences']];
+function cmdkEntities(){
+  const out=[],seen={};
+  const list=(typeof cb!=='undefined'&&cb&&Array.isArray(cb.clients)&&cb.clients.length)?cb.clients:hubClients;
+  (list||[]).forEach(c=>{if(!c||!c.id||seen[c.id])return;seen[c.id]=1;
+    out.push({type:'Clients',label:String(c.company||c.contact_name||'Client'),sub:[c.contact_name,c.stage].filter(Boolean).join(' · '),icon:I.people,
+      kw:[c.company,c.contact_name,c.contact_email,'client'].filter(Boolean).join(' '),run:()=>{closeCmdk();openClient(c.id);}});});
+  CMDK_SCREENS.forEach(([v,label,kw])=>{if(!views[v])return;const sub=typeof views[v].sub==='function'?'':views[v].sub;
+    out.push({type:'Screens',label,sub:sub||'',icon:I.trials,kw:label+' '+kw+' '+v,run:()=>{closeCmdk();render(v);}});});
+  if(typeof trialsCmdkEntities==='function'){try{out.push(...trialsCmdkEntities());}catch(e){}}
+  return out;
+}
+function openCmdk(){if(!authUser||hubIsClient())return;const w=document.getElementById('cmdkWrap');w.classList.add('open');const inp=document.getElementById('cmdkInput');inp.value='';
+  try{inp.focus();}catch(e){}   // straight away, so the first keys typed are not lost
+  renderCmdk('');setTimeout(()=>{if(document.activeElement!==inp)inp.focus();},30);
+  if(!hubClients.length)hubLoadClients().then(()=>{if(w.classList.contains('open'))renderCmdk(inp.value);}).catch(()=>{});}
 function closeCmdk(){document.getElementById('cmdkWrap').classList.remove('open');}
 function renderCmdk(q){q=(q||'').toLowerCase().trim();
   let items=[...cmdkEntities(),...cmdkActions()];
@@ -748,7 +771,7 @@ document.getElementById('cmdkInput').addEventListener('keydown',e=>{
 });
 
 /* ---- Notifications: client to-dos + open urgent machine alerts + calendar requests waiting for a yes ---- */
-function computeNotifs(){if(!authUser||hubIsClient())return [];let n=[];try{n=typeof trialsNotifs==='function'?trialsNotifs():[];}catch(e){n=[];}try{if(typeof calendarNotifs==='function')n=n.concat(calendarNotifs());}catch(e){}return n;}
+function computeNotifs(){if(!authUser||hubIsClient())return [];let n=[];try{n=typeof trialsNotifs==='function'?trialsNotifs():[];}catch(e){n=[];}try{if(typeof mtNotifs==='function')n=n.concat(mtNotifs());}catch(e){}return n;}
 function updateNotifBadge(){const dot=document.getElementById('notifDot');if(!dot)return;const n=computeNotifs();if(n.length){dot.style.display='grid';dot.textContent=n.length>9?'9+':n.length;}else{dot.style.display='none';}}
 function toggleNotif(e){e.stopPropagation();const pop=document.getElementById('notifPop');if(pop.classList.contains('open')){pop.classList.remove('open');return;}const n=computeNotifs();window._notifs=n;
   pop.innerHTML=`<div class="notif-head">What needs you</div>`+(n.length?`<div class="notif-list">${n.map((x,i)=>`<div class="notif-item" onclick="runNotif(${i})"><span class="nd" style="background:${x.dot}"></span><div style="min-width:0"><b>${esc(x.t)}</b>${x.s?`<small>${esc(x.s)}</small>`:''}</div></div>`).join('')}</div>`:`<div class="notif-empty">Nothing needs you right now.</div>`);
@@ -765,7 +788,7 @@ function initTheme(){try{if(localStorage.getItem('avianceTheme')==='dark')docume
 document.addEventListener('keydown',e=>{
   const typing=/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName||''))||e.target.isContentEditable;
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(!authUser||hubIsClient())return;const w=document.getElementById('cmdkWrap');w.classList.contains('open')?closeCmdk():openCmdk();return;}
-  if(e.key==='Escape'){closeModal();return;}
+  if(e.key==='Escape'){if(closeNotif())return;closeModal();return;}
   if(typing||!authUser||hubIsClient())return;
   if(e.key==='/'){e.preventDefault();openCmdk();}
   else if(e.key.toLowerCase()==='n'){openNewPayingClient();}

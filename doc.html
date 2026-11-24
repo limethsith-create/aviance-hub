@@ -80,7 +80,7 @@
   root.addEventListener('click', function(e){
     const t = e.target && e.target.closest ? e.target.closest('[data-pc-print],[data-pc-retry]') : null;
     if (!t) return;
-    if (t.hasAttribute('data-pc-print')) window.print();
+    if (t.hasAttribute('data-pc-print')) pcPrint();  /* deferred, so the click never freezes the page */
     else load();
   });
   window.addEventListener('hashchange', function(){ token = pcTokenFromHash(location.hash); load(); });

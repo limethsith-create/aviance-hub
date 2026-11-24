@@ -259,6 +259,12 @@ body.dark,:root[data-theme="dark"]{
   background:var(--surface-2);color:var(--text);font-size:var(--fs-base);font-weight:600}
 
 /* ── the research brief in a booking's panel ────────────────────────────── */
+/* The brief: titled with the company; web research off is one grey line, the detail behind a toggle */
+.mt-brief-co{font-size:var(--fs-h3);font-weight:600;margin:0 0 6px}
+.mt-brief-src{font-size:var(--fs-small)}
+.mt-brief-off{margin:0;font-size:var(--fs-small)}
+.mt-brief-det summary{cursor:pointer;color:var(--muted);font-size:var(--fs-small)}
+.mt-brief-det .mt-brief-ul{margin-top:6px}
 .mt-brief-one{font-size:var(--fs-strong);font-weight:600;line-height:1.5;margin:0}
 .mt-brief-score{margin:0;font-size:var(--fs-base);line-height:1.5}
 .mt-brief-ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:var(--fs-base);line-height:1.5}

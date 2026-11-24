@@ -1332,16 +1332,24 @@ function mtRenderBookingHead(d, st){
     + (need?'<span class="pill red">Needs an outcome</span>':'')
     + (score===''?'':'<span class="pill blue" title="What the research engine scored them">Score '+esc(String(score))+'</span>')
     + (state==='done' && mtBriefHas(d)?'<span class="pill green">Brief ready</span>':'<span class="pill grey">Research not ready yet</span>');
+  /* the company is their name, not a link to their website (that has its own row);
+     once they are won it opens their client record */
+  const client = d && d.client && d.client.id != null ? d.client : null;
+  const won = !!client || String(b.status) === 'won';
   const kv = [
     ['Who', esc(b.name||'No name given')+(b.role?' · '+esc(b.role):'')],
-    ['Company', (site?'<a href="'+esc(site)+'" target="_blank" rel="noopener noreferrer">'+esc(b.company||b.website)+'</a>':esc(b.company||'Not given'))],
+    ['Company', client
+      ? '<button type="button" class="mt-textbtn" onclick="mtOpenClientRecord('+mtJsArg(client.id)+')">'+esc(b.company||client.company||'Their client record')+' →</button>'
+      : esc(b.company||'Not given')],
     ['Plan', '<span class="mt-planchip '+mtPlanClass(plan)+'">'+esc(mtPlanTag(plan))+' · '+esc(plan?mtPlanWord(plan):'No plan chosen yet')+'</span>'],
     ['How long', esc(mtMinutesOf(b,s)+' minutes')]
   ];
+  if(site) kv.splice(2, 0, ['Website', '<a href="'+esc(site)+'" target="_blank" rel="noopener noreferrer">'+esc(mtText(b.website))+'</a>']);
   return '<div class="mt-ph"><div class="mt-ph-pills">'+pills+'</div>'
     + mtBigWhen(at, s, theirs, at && typeof plRel==='function' ? '<span>'+esc(plRel(at, mtNow()))+'</span>' : '')
     + '<dl class="mt-kv">'+kv.map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+v+'</dd>').join('')+'</dl>'
-    + (link
+    + (won ? ''
+      : link
         ? '<div class="mt-acts"><a class="btn" href="'+esc(link)+'" target="_blank" rel="noopener noreferrer">Join the call</a>'
           + '<button type="button" class="btn ghost" onclick="mtCopy('+mtJsArg(link)+')">Copy the link</button></div>'
         : '<p class="mt-none">No Google Meet link on this one yet.</p>')
@@ -1376,11 +1384,89 @@ function mtBriefHas(d){
   const row = d && d.brief && typeof d.brief === 'object' ? d.brief : null, raw = row ? row.brief : null;
   return raw != null && raw !== '' && !(typeof raw === 'object' && !Object.keys(raw).length);
 }
+/* A brief value that says nothing: empty, or the research engine's own words
+   for "we do not know" ('unknown', 'not given', 'unknown — ask on the call'). */
+function mtUnknown(v){
+  const t = mtBriefText(v);
+  return !t || /^(unknown|not given|not known|n\/a|none given|tbc)\b/i.test(t);
+}
+/* Cut a long piece of text at a word, with "…" — never mid-word ("We tri"). */
+function mtCut(text, n){
+  const s = mtText(text), max = Number(n) > 0 ? Number(n) : 80;
+  if(s.length <= max) return s;
+  let cut = s.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  if(sp > max*0.5) cut = cut.slice(0, sp);
+  return cut.replace(/[\s,;:.—-]+$/, '')+'…';
+}
+/* The answers they typed on the booking form: the research engine pastes these
+   into its call plan, so they are what mtTidy looks for. */
+function mtFormWords(b){
+  const o = b || {};
+  return [o.goal, o.current_lead_gen, o.sells, o.timeline, o.budget, o.capacity, o.industry]
+    .map(mtText).filter(x => x.length >= 4);
+}
+/* Tidy a line of the call plan that has their own words pasted into it:
+   - a quote cut off mid-word ("…we tri") is cut again at a word, with "…";
+   - their words carried on mid-sentence lose the capital letter they had at the
+     start of their answer ("the goal is Can cold email…" → "…is can cold email…").
+   Pure; anything that is not text comes back as it was. */
+function mtTidy(text, b){
+  let s = mtText(text);
+  if(!s) return s;
+  const words = mtFormWords(b);
+  if(!words.length) return s;
+  s = s.replace(/(["“])([^"”]{3,}?)(["”])/g, (all, open, inner, close) => {
+    const q = inner.replace(/…$/, '');
+    const whole = words.find(w => w.length > q.length && w.indexOf(q) === 0);
+    return whole ? open+mtCut(whole, q.length)+close : all;
+  });
+  words.forEach(w => {
+    const head = w.slice(0, Math.min(14, w.length));
+    if(!/^[A-Z][a-z]/.test(head)) return;            // "US", "I ", a number: leave it
+    let at = s.indexOf(head, 1);
+    while(at > 0){
+      const before = s.slice(0, at).replace(/\s+$/, '');
+      const prev = before.slice(-1);
+      if(before.length && /[A-Za-z0-9,;—-]/.test(prev)) s = s.slice(0, at)+s.charAt(at).toLowerCase()+s.slice(at+1);
+      at = s.indexOf(head, at+1);
+    }
+  });
+  return s;
+}
+/* What the brief's own words are called on screen. */
+const MT_BRIEF_WORDS = {
+  label:'Say it back to them', clarify:'Questions to ask', past_pain:'What they have tried', reinforce:'Reinforce',
+  objections:'If they push back', sell_the_vacation:'Paint the picture', acknowledge_associate_ask:'Say', objection:'If they say'
+};
+/* Who they sell to, when their own description says "… for <who>". */
+function mtSellsTo(sells){
+  const m = /\bfor\s+([^.;!?]{3,160})/i.exec(mtText(sells));
+  return m ? m[1].trim().replace(/[,\s]+$/, '') : '';
+}
+/* "We're 12 people" → "12 people". */
+function mtSizeFrom(text){
+  const m = /\b(\d{1,5})\s*(?:-|–|to)?\s*(?:\d{1,5}\s*)?(people|staff|employees|person team|strong)\b/i.exec(mtText(text));
+  return m ? m[0].trim() : '';
+}
+/* A scraped page title passed off as a one-liner: "Example Domain", "Home". */
+function mtLooksLikeTitle(one, company){
+  const t = mtText(one);
+  if(!t) return true;
+  if(t.split(/\s+/).length < 4) return true;
+  if(/^(home|welcome|index|example domain|untitled)\b/i.test(t)) return true;
+  return !!company && t.toLowerCase() === mtText(company).toLowerCase();
+}
+/* An agent that did not run because a key or an input is missing, not because it broke. */
+function mtAgentOff(a){
+  return !!a && typeof a === 'object' && a.ok === false && /\bno [A-Z0-9_]*KEY\b|\bneeds\b|\bnot set\b|\bmissing\b/i.test(mtBriefText(a.summary));
+}
 /* `d` is what plBooking returns: d.brief is the research_briefs row or null. */
 function mtRenderBrief(d){
   const row = d && d.brief && typeof d.brief === 'object' ? d.brief : null;
   const raw = row ? row.brief : null;
   const id = d && d.booking ? d.booking.id : '';
+  const bk = (d && d.booking) || {};
   if(!mtBriefHas(d)){
     const st = (d && d.research && d.research.state) || 'none';
     const why = st === 'running' ? 'The research engine is working on this one. The brief shows up here when it is written.'
@@ -1394,76 +1480,144 @@ function mtRenderBrief(d){
   if(typeof raw !== 'object' || Array.isArray(raw))
     return '<div class="card pl-pad pl-brief mt-brief">'+(typeof raw === 'string'
       ? '<p class="pl-pre">'+esc(raw)+'</p>'
-      : mtBriefUl(mtBriefList(raw).map(x=>esc(mtBriefText(x)))))+'</div>';
+      : mtBriefUl(mtBriefList(raw).map(x=>esc(mtBriefText(x))).filter(Boolean)))+'</div>';
 
   const used = {};
-  const take = (...names) => { for(const n of names){ if(raw[n] != null && raw[n] !== ''){ used[n] = 1; return raw[n] } } return null };
+  const take = (...names) => { for(const n of names){ if(raw[n] != null && raw[n] !== ''){ used[n] = 1; return raw[n] } } names.forEach(n=>{ if(n in raw) used[n] = 1 }); return null };
+  const tidy = (v) => esc(mtTidy(mtBriefText(v), bk));
+  const word = (k) => MT_BRIEF_WORDS[k] || mtBriefTitle(k);
+  /* label/value rows, with every row that says nothing left out */
   const kvs = (obj, skip) => {
     if(!obj || typeof obj !== 'object' || Array.isArray(obj)) return '';
-    const rows = Object.keys(obj).filter(k => (skip||[]).indexOf(k) < 0 && obj[k] != null && obj[k] !== '').map(k=>{
+    const rows = Object.keys(obj).filter(k => (skip||[]).indexOf(k) < 0 && k.charAt(0) !== '_').map(k=>{
       const v = obj[k];
-      const body = Array.isArray(v) ? mtBriefUl(mtBriefList(v).map(x=>esc(mtBriefText(x)))) : esc(mtBriefText(v));
-      return body ? '<small>'+esc(mtBriefTitle(k))+'</small><span>'+body+'</span>' : '';
+      const body = Array.isArray(v) ? mtBriefUl(mtBriefList(v).filter(x => !mtUnknown(x)).map(tidy).filter(Boolean))
+        : (v && typeof v === 'object') ? tidy(v) : mtUnknown(v) ? '' : tidy(v);
+      return body ? '<small>'+esc(word(k))+'</small><span>'+body+'</span>' : '';
     }).join('');
     return rows ? '<div class="pl-kv">'+rows+'</div>' : '';
   };
 
-  const one = mtBriefText(take('one_liner','oneLiner','summary'));
-  /* the score: the booking's own, and what the brief says about fit */
+  /* the card is titled with the company — never the page title the website reader scraped */
+  const facts = raw.facts && typeof raw.facts === 'object' && !Array.isArray(raw.facts) ? raw.facts : {};
+  const company = mtText(bk.company) || mtText(facts.company) || mtText(raw.company) || mtText(bk.name);
+  const oneRaw = mtBriefText(take('one_liner','oneLiner','summary'));
+  const one = mtLooksLikeTitle(oneRaw, company) ? '' : oneRaw;
+
+  /* the score, and only the signals that are actually there */
   const bant = take('bant','score','fit');
+  const bo = bant && typeof bant === 'object' && !Array.isArray(bant) ? bant : null;
   const sc = d && d.score !== '' && d.score != null ? String(d.score) : '';
-  const bantScore = bant && typeof bant === 'object' && !Array.isArray(bant) && bant.score != null && bant.score !== '' ? String(bant.score) : (bant != null && typeof bant !== 'object' ? String(bant) : '');
-  const verdict = bant && typeof bant === 'object' && !Array.isArray(bant) ? mtBriefText(bant.verdict) : '';
-  const scoreLine = [sc !== '' ? 'Booking score '+sc : '', bantScore !== '' ? 'Research score '+bantScore : ''].filter(Boolean).join(' · ');
-  const score = (scoreLine ? '<p class="mt-brief-score"><b>'+esc(scoreLine)+'</b>'+(verdict?' — '+esc(verdict):'')+'</p>' : (verdict?'<p class="mt-brief-score">'+esc(verdict)+'</p>':''))
-    + kvs(bant, ['score','verdict']);
+  const bantScore = bo && bo.score != null && bo.score !== '' ? String(bo.score) : (bant != null && typeof bant !== 'object' ? String(bant) : '');
+  const signals = ['need','budget','authority','timing'].filter(k => bo && k in bo);
+  const present = signals.filter(k => !mtUnknown(bo[k])), missing = signals.filter(k => mtUnknown(bo[k]));
+  const verdictAll = bo ? mtBriefText(bo.verdict) : '';
+  /* "hot — decision maker with budget and urgency" may only say all that when
+     every signal is there; otherwise just its first word stays */
+  const verdict = !verdictAll ? '' : !missing.length ? verdictAll : verdictAll.split(/\s+[—–-]\s+/)[0];
+  const scores = sc !== '' && bantScore !== '' && sc === bantScore ? ['Score '+sc+' out of 100']
+    : [sc !== '' ? 'Booking score '+sc : '', bantScore !== '' ? 'Research score '+bantScore : ''].filter(Boolean);
+  const scoreLine = scores.join(' · ');
+  const basis = signals.length ? (present.length ? 'based on: '+present.join(', ') : 'based on nothing they told us yet')
+    + (missing.length ? ' · not given: '+missing.join(', ') : '') : '';
+  const score = (scoreLine || verdict ? '<p class="mt-brief-score">'+(scoreLine ? '<b>'+esc(scoreLine)+'</b>' : '')
+      + (verdict ? (scoreLine ? ' — ' : '')+esc(verdict) : '')
+      + (basis ? '<span class="mt-brief-sum">'+esc(basis)+'</span>' : '')+'</p>' : '')
+    + kvs(bo, ['score','verdict']);
+
+  /* what the business is: the brief's words, or their own from the booking form */
+  const formTag = ' <span class="muted mt-brief-src">· from their booking form</span>';
+  const biz = [];
+  const bizRow = (label, briefVal, formVal) => {
+    const fromBrief = mtUnknown(briefVal) ? '' : mtBriefText(briefVal);
+    const scraped = fromBrief && / · /.test(fromBrief) && mtText(formVal);   // headings the reader joined up
+    if(fromBrief && !scraped) biz.push('<small>'+esc(label)+'</small><span>'+tidy(fromBrief)+'</span>');
+    else if(mtText(formVal)) biz.push('<small>'+esc(label)+'</small><span>'+esc(mtText(formVal))+formTag+'</span>');
+  };
+  bizRow('What they sell', take('what_they_sell','sells_what'), bk.sells);
+  bizRow('Who they sell to', take('who_they_sell_to','sells_to'), mtSellsTo(bk.sells));
+  bizRow('How big they are', take('size_estimate','size'), mtSizeFrom(bk.sells) || mtSizeFrom(bk.goal));
+  if(mtText(bk.capacity)) biz.push('<small>Room for new calls</small><span>'+esc(mtText(bk.capacity))+formTag+'</span>');
+  const business = biz.length ? '<div class="pl-kv">'+biz.join('')+'</div>' : '';
 
   const pains = mtBriefUl(mtBriefList(take('pain_hypotheses','pains','pain_points')).map(x=>{
     if(x && typeof x === 'object' && !Array.isArray(x)){
       const p = mtBriefText(x.pain || x.title || x.name || x.hypothesis), ev = mtBriefText(x.evidence || x.why || x.detail);
-      return p || ev ? '<b>'+esc(p || ev)+'</b>'+(p && ev ? '<span class="muted"> — '+esc(ev)+'</span>' : '') : esc(mtBriefText(x));
+      return p || ev ? '<b>'+tidy(p || ev)+'</b>'+(p && ev ? '<span class="muted"> — '+tidy(ev)+'</span>' : '') : tidy(x);
     }
-    return esc(mtBriefText(x));
+    return mtUnknown(x) ? '' : tidy(x);
   }).filter(Boolean));
 
+  /* the call plan: objections are "If they say … / Say …", the rest as rows */
   const planRaw = take('closer_plan','call_plan','plan');
-  const plan = planRaw && typeof planRaw === 'object' && !Array.isArray(planRaw) ? kvs(planRaw)
-    : Array.isArray(planRaw) ? mtBriefUl(mtBriefList(planRaw).map(x=>esc(mtBriefText(x))))
-    : planRaw != null ? '<p class="pl-pre">'+esc(mtBriefText(planRaw))+'</p>' : '';
-
-  const flagsRaw = take('red_flags','redFlags','flags');
-  used.red_flags = 1;
-  const flagItems = mtBriefList(flagsRaw).map(x=>esc(mtBriefText(x))).filter(Boolean);
-  const flags = flagItems.length ? mtBriefUl(flagItems) : '<p class="muted">None found.</p>';
+  let plan = '';
+  if(planRaw && typeof planRaw === 'object' && !Array.isArray(planRaw)){
+    const obj = Array.isArray(planRaw.objections) ? planRaw.objections : null;
+    const objHTML = obj ? mtBriefUl(obj.map(o=>{
+      if(!o || typeof o !== 'object' || Array.isArray(o)) return mtUnknown(o) ? '' : tidy(o);
+      const said = mtBriefText(o.objection || o.if || o.title), say = mtBriefText(o.acknowledge_associate_ask || o.say || o.answer || o.reply);
+      if(!said && !say) return tidy(o);
+      return (said ? '<b>“'+tidy(said)+'”</b>' : '')+(say ? '<span class="mt-brief-sum">Say: '+tidy(say)+'</span>' : '');
+    }).filter(Boolean)) : '';
+    plan = kvs(planRaw, obj ? ['objections'] : [])
+      + (objHTML ? '<div class="pl-kv"><small>'+esc(word('objections'))+'</small><span>'+objHTML+'</span></div>' : '');
+  } else if(Array.isArray(planRaw)) plan = mtBriefUl(mtBriefList(planRaw).map(tidy).filter(Boolean));
+  else if(planRaw != null) plan = '<p class="pl-pre">'+tidy(planRaw)+'</p>';
 
   /* which research agents ran: research_briefs.agents */
-  const agents = mtBriefUl(mtBriefList(row.agents).map(a=>{
+  const agentList = mtBriefList(row.agents);
+  const failed = agentList.filter(a => a && typeof a === 'object' && a.ok === false);
+  const webOff = failed.length > 0 && failed.every(mtAgentOff);
+  const agentItem = (a) => {
     if(!a || typeof a !== 'object') return esc(mtBriefText(a));
     const name = mtBriefText(a.label || a.agent || a.name) || 'An agent';
     const ok = a.ok === false ? 'did not finish' : 'ran';
-    const secs = Number(a.ms) > 0 ? ' in '+(Math.round(Number(a.ms)/100)/10)+' s' : '';
+    const secs = Number(a.ms) >= 50 ? ' in '+(Math.round(Number(a.ms)/100)/10)+' s' : '';
     const sum = mtBriefText(a.summary);
-    return '<b>'+esc(name)+'</b> <span class="'+(a.ok === false ? 'mt-needword' : 'muted')+'">'+esc(ok+secs)+'</span>'+(sum?'<span class="mt-brief-sum">'+esc(sum)+'</span>':'');
-  }).filter(Boolean));
+    return '<b>'+esc(name)+'</b> <span class="'+(a.ok === false && !webOff ? 'mt-needword' : 'muted')+'">'+esc(ok+secs)+'</span>'+(sum?'<span class="mt-brief-sum">'+esc(sum)+'</span>':'');
+  };
+  const agents = mtBriefUl(agentList.map(agentItem).filter(Boolean));
+  const note = mtText(raw._writer_note);
+  used._writer_note = 1;
+  const research = webOff
+    ? '<p class="muted mt-brief-off">Web research is off — this brief uses only what they told us on the booking form.</p>'
+      + '<details class="mt-brief-det"><summary>details</summary>'+agents+(note ? '<p class="muted">'+esc(note)+'</p>' : '')+'</details>'
+    : (agents || (row.writer ? '<p class="muted">Written by '+esc(String(row.writer))+'.</p>' : '<p class="muted">The brief does not say which agents ran.</p>'))
+      + (note ? '<p class="muted mt-brief-sum">'+esc(note)+'</p>' : '');
 
-  /* everything else the brief holds, in pipeline.js's own layout */
+  /* red flags: "None found." only when the research could actually look */
+  const flagsRaw = take('red_flags','redFlags','flags');
+  used.red_flags = 1;
+  const flagItems = mtBriefList(flagsRaw).map(x => mtUnknown(x) ? '' : tidy(x)).filter(Boolean);
+  const flags = flagItems.length ? mtBriefUl(flagItems) : webOff ? '' : '<p class="muted">None found.</p>';
+
+  /* everything else the brief holds, in pipeline.js's own layout (it leaves out what is empty) */
+  ['facts','company'].forEach(k => { used[k] = 1 });
   const rest = {}; Object.keys(raw).forEach(k=>{ if(!used[k]) rest[k] = raw[k] });
+  const factsRest = {}; Object.keys(facts).forEach(k=>{ if(k !== 'company' && k !== 'website') factsRest[k] = facts[k] });
+  if(Object.keys(factsRest).length) rest.facts = factsRest;
   let more = '';
   try{
     const secs = typeof plBriefSections === 'function' ? plBriefSections({brief:rest}) : [];
-    more = secs.map(sx => '<div class="pl-brief-sec mt-brief-sec">'+(sx.title?'<h4>'+esc(sx.title)+'</h4>':'')
-      + (sx.text?'<p class="pl-pre">'+esc(sx.text)+'</p>':'')
-      + (sx.lines && sx.lines.length ? '<div class="pl-kv">'+sx.lines.map(l=>'<small'+(l.label?'':' aria-hidden="true"')+'>'+esc(l.label||'·')+'</small><span>'+esc(l.value)+'</span>').join('')+'</div>' : '')
-      + '</div>').join('');
+    more = secs.map(sx => {
+      const lines = (sx.lines||[]).filter(l => !mtUnknown(l.value));
+      if(!sx.text && !lines.length) return '';
+      return '<div class="pl-brief-sec mt-brief-sec">'+(sx.title?'<h4>'+esc(sx.title)+'</h4>':'')
+        + (sx.text?'<p class="pl-pre">'+tidy(sx.text)+'</p>':'')
+        + (lines.length ? '<div class="pl-kv">'+lines.map(l=>'<small'+(l.label?'':' aria-hidden="true"')+'>'+esc(l.label||'·')+'</small><span>'+tidy(l.value)+'</span>').join('')+'</div>' : '')
+        + '</div>';
+    }).join('');
   }catch(e){ more = '' }
 
   return '<div class="card pl-pad pl-brief mt-brief">'
-    + (one ? '<p class="mt-brief-one">'+esc(one)+'</p>' : '')
+    + (company ? '<h3 class="mt-brief-co">'+esc(company)+'</h3>' : '')
+    + (one ? '<p class="mt-brief-one">'+tidy(one)+'</p>' : '')
     + mtBriefSec('Score', score)
+    + mtBriefSec('The business', business)
     + mtBriefSec('Pains', pains)
     + mtBriefSec('Call plan', plan)
     + mtBriefSec('Red flags', flags)
-    + mtBriefSec('Research agents that ran', agents || (row.writer ? '<p class="muted">Written by '+esc(String(row.writer))+'.</p>' : '<p class="muted">The brief does not say which agents ran.</p>'))
+    + mtBriefSec('Research', research)
     + more + '</div>';
 }
 
@@ -1593,11 +1747,25 @@ async function mtLoadCal(keep){
   const seq = ++mt.seq;
   const r = await mtCal(mt.view, mt.day);
   if(seq !== mt.seq) return r;
+  /* `keep`: a refresh. Nothing that is drawn changed, so nothing is drawn again —
+     the grid never flickers once a minute; and a refresh that failed leaves the
+     calendar on screen rather than swapping it for an error. */
+  if(keep && mt.cal && (!r.ok || mtCalSig(r.data) === mtCalSig(mt.cal))) return r;
   mt.err = r.ok ? '' : r.error;
   mt.cal = r.ok ? r.data : null;
   if(r.ok){ mt.day = r.data.day; mt.view = r.data.view; }
   mtPaintCal();
   return r;
+}
+/* Everything about a calendar that shows on screen, as one string. Two calendars
+   with the same one draw the same. */
+function mtCalSig(cal){
+  if(!cal) return '';
+  try{
+    return JSON.stringify([cal.view, cal.day, cal.title, cal.need,
+      (cal.events||[]).map(e=>[e.key, e.startMs, e.minutes, e.status, e.plan, e.title, e.needsOutcome, e.hasBrief]),
+      (cal.blocks||[]).map(b=>[b.id, b.starts_at, b.ends_at, b.reason])]);
+  }catch(e){ return String(Math.random()) }
 }
 /* Today as the view on screen counts days: a business day in the week, one of
    the owner's days in the month. */
@@ -1660,6 +1828,13 @@ function mtOpenFunnel(){ if(typeof render === 'function') render('funnel'); retu
 /* ---- the panel a call opens in ---- */
 function mtShowPanel(html){ if(typeof openModal === 'function') openModal(html); return html }
 function mtClosePanel(){ mt.open = null; if(typeof closeModal === 'function') closeModal(); return true }
+/* A won booking's company name opens their client record. */
+function mtOpenClientRecord(clientId){
+  if(!clientId) return false;
+  mtClosePanel();
+  if(typeof openClient === 'function'){ try{ openClient(clientId); return true }catch(e){} }
+  return false;
+}
 function mtOpenEvent(key){
   const k = String(key||''), at = k.indexOf(':');
   const id = at < 0 ? '' : k.slice(at+1);
@@ -1942,8 +2117,138 @@ async function mtSubmitBlock(){
   return r;
 }
 
+/* ===================== 13. THE BELL, AND A CALENDAR THAT STAYS FRESH ===================== */
+/* The shell's bell asks mtNotifs() for what the calendar has to say: a website
+   booking made in the last 24 hours, and a call that has been and gone with no
+   outcome. It is asked synchronously, so it answers from what was last read and
+   reads again in the background once that is a minute old. Each one opens its call. */
+const MT_REFRESH_MS = 60000;    /* the Calendar reads itself again this often, while it is open and seen */
+const MT_NEW_MS = 24*36e5;      /* how long a new booking rings the bell */
+const MT_LOOKBACK_DAYS = 30;    /* how far back the bell looks for calls with no outcome */
+
+/* What the bell says, from rows. Pure. Newest booking first, then the calls to mark. */
+function mtBellItems(bookings, meetings, now, st){
+  const s = st || mtSettingsNow(), at = now || mtNow(), t = at.getTime();
+  const fresh = [], due = [];
+  (bookings||[]).forEach(b=>{
+    if(!b || b.id == null) return;
+    if(String(b.source||'') === 'preview' || String(b.status||'') === 'cancelled') return;
+    const who = mtText(b.company) || mtText(b.name) || 'Someone';
+    const made = mtParseDate(b.created_at), when = mtParseDate(b.call_at);
+    if(made && t - made.getTime() >= 0 && t - made.getTime() < MT_NEW_MS)
+      fresh.push({key:'booking:'+b.id, ms:made.getTime(), kind:'new',
+        t:'New booking: '+who+', '+(when ? mtWhenIn(when, s.owner_zone) : 'no time picked'),
+        s:'Booked on the website'+(typeof plRel === 'function' ? ' '+plRel(made, at) : '')+'.'});
+    if(typeof plNeedsOutcome === 'function' && plNeedsOutcome(b, at))
+      due.push({key:'booking:'+b.id, ms:when ? when.getTime() : 0, kind:'outcome',
+        t:'How did the call with '+who+' go?',
+        s:(when ? mtWhenIn(when, s.owner_zone)+' — ' : '')+'mark it done, a no-show, won or lost.'});
+  });
+  (meetings||[]).forEach(m=>{
+    if(!m || m.id == null || !mtMeetingNeedsOutcome(m, at)) return;
+    const when = mtParseDate(m.starts_at);
+    due.push({key:'meeting:'+m.id, ms:when ? when.getTime() : 0, kind:'outcome',
+      t: mtText(m.title) ? 'How did '+mtText(m.title)+' go?' : mtText(m.guest_name) ? 'How did the call with '+mtText(m.guest_name)+' go?' : 'How did the '+mtKindWord(m.kind).toLowerCase()+' go?',
+      s:(when ? mtWhenIn(when, s.owner_zone)+' — ' : '')+'mark it done or a no-show.'});
+  });
+  fresh.sort((a,b)=>b.ms-a.ms); due.sort((a,b)=>b.ms-a.ms);
+  return fresh.concat(due);
+}
+/* Read what the bell needs. One read at a time. */
+async function mtBellLoad(){
+  if(mt.bellBusy) return mt.bellBusy;
+  mt.bellBusy = (async () => {
+    try{
+      const got = await mtSettings();
+      const st = got.ok ? got.data : mtSettingsNow(), now = mtNow();
+      const since = new Date(now.getTime() - MT_LOOKBACK_DAYS*864e5).toISOString();
+      const dayAgo = new Date(now.getTime() - MT_NEW_MS).toISOString();
+      const made = await mtRun(() => sb.from('discovery_bookings').select('*').gte('created_at', dayAgo), []);
+      const past = await mtRun(() => sb.from('discovery_bookings').select('*').gte('call_at', since).lt('call_at', now.toISOString()), []);
+      const ms = await mtRun(() => sb.from('meetings').select('*').gte('starts_at', since).lt('starts_at', now.toISOString()), []);
+      if(!made.ok && !past.ok && !ms.ok) return made;
+      const seen = {}, rows = [];
+      (made.ok ? made.data||[] : []).concat(past.ok ? past.data||[] : []).forEach(b=>{ if(b && b.id != null && !seen[b.id]){ seen[b.id] = 1; rows.push(b) } });
+      mt.bell = mtBellItems(rows, ms.ok ? ms.data||[] : [], now, st);
+      mt.bellAt = Date.now();
+      try{ if(typeof updateNotifBadge === 'function') updateNotifBadge(); }catch(e){}
+      return mtOk(mt.bell);
+    } finally { mt.bellBusy = null }
+  })();
+  return mt.bellBusy;
+}
+/* The shell's bell: [{t, s, dot, go}] from what is loaded, reading again once it is old. */
+function mtNotifs(){
+  if(!mt.bellBusy && Date.now() - (mt.bellAt||0) > MT_REFRESH_MS){ try{ mtBellLoad() }catch(e){} }
+  return (mt.bell||[]).map(x => ({t:x.t, s:x.s, dot: x.kind === 'new' ? 'var(--blue)' : 'var(--red)', key:x.key, go:() => mtBellOpen(x.key)}));
+}
+/* A bell item opens its call: that week of the calendar, with its panel open. */
+function mtBellOpen(key){
+  const k = String(key||'');
+  if(!/^(booking|meeting):./.test(k)) return null;
+  if(typeof render === 'function'){ mt.want = k; render('calendar'); return k }
+  return mtGoTo(k);
+}
+
+/* The shell calls this after every render: the Calendar keeps itself fresh while
+   it is the screen open, and stops the moment another screen is. */
+function mtOnRender(view){
+  if(view === 'calendar') mtStartRefresh(); else mtStopRefresh();
+  mtListen();
+  return view === 'calendar';
+}
+function mtStartRefresh(){
+  if(!mt.timer && typeof setInterval === 'function') mt.timer = setInterval(mtTick, MT_REFRESH_MS);
+  if(!mt.visBound){
+    try{ if(typeof document !== 'undefined' && typeof document.addEventListener === 'function'){ document.addEventListener('visibilitychange', mtOnVisible); mt.visBound = true } }catch(e){}
+  }
+  return !!mt.timer;
+}
+function mtStopRefresh(){
+  if(mt.timer){ try{ clearInterval(mt.timer) }catch(e){} }
+  mt.timer = null;
+  return true;
+}
+/* Signing out: no timer, no listening. */
+function mtStopTimer(){ mtStopRefresh(); mtUnlisten(); return true }
+function mtOnScreen(){ return typeof currentView === 'undefined' || currentView === 'calendar' }
+function mtHidden(){ try{ return typeof document !== 'undefined' && !!document.hidden }catch(e){ return false } }
+/* One refresh: only while the Calendar is open and the tab is seen, and never on
+   top of a button that is still working. */
+async function mtTick(){
+  if(!mtOnScreen()){ mtStopRefresh(); return mtOk(null) }
+  if(mtHidden() || mt.busy || !mt.cal) return mtOk(null);
+  const r = await mtLoadCal(true);
+  return r;
+}
+function mtOnVisible(){ return !mtHidden() && mt.timer ? mtTick() : null }
+/* A new website booking, the moment it lands (Supabase realtime on
+   discovery_bookings; who may see it is still decided by the database). */
+function mtListen(){
+  if(mt.rt) return true;
+  try{
+    if(typeof sb === 'undefined' || !sb || typeof sb.channel !== 'function') return false;
+    mt.rt = sb.channel('mt-bookings')
+      .on('postgres_changes', {event:'INSERT', schema:'public', table:'discovery_bookings'}, mtOnNewBooking)
+      .subscribe();
+    return true;
+  }catch(e){ mt.rt = null; return false }
+}
+function mtUnlisten(){
+  if(!mt.rt) return true;
+  try{ if(typeof sb !== 'undefined' && sb && typeof sb.removeChannel === 'function') sb.removeChannel(mt.rt) }catch(e){}
+  mt.rt = null;
+  return true;
+}
+async function mtOnNewBooking(){
+  mt.bellAt = 0;
+  try{ await mtBellLoad() }catch(e){}
+  return mtTick();
+}
+
 /* Forget everything read so far (used by the tests and by signing out). */
 function mtForget(){
+  mtStopTimer(); mt.bell = []; mt.bellAt = 0; mt.bellBusy = null;
   mt.settings = null; mt.view = mtSavedView(); mt.viewRead = true; mt.day = null; mt.cal = null; mt.needOnly = false; mt.legend = false;
   mt.open = null; mt.want = null; mt.seq++; mt.one = null;
   mt.noshows = null; mt.err = ''; mt.now = null; mt.busy = false;

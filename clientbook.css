@@ -144,3 +144,9 @@
   .cb-needs button .cb-go{grid-row:1;grid-column:2}
   .cb-timeline li{grid-template-columns:1fr;gap:2px}
 }
+
+/* A link-like button in The facts: their booking, their channel. */
+.cb-link{background:none;border:0;padding:0;font:inherit;color:var(--text);text-decoration:underline;cursor:pointer;text-align:left}
+.cb-link:hover{color:var(--red-deep)}
+.cb-inv-acts{display:flex;gap:var(--s2);flex-wrap:wrap;margin-left:auto}
+.cb-facts-acts{margin-top:var(--s3)}
