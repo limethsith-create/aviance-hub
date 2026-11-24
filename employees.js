@@ -1,7 +1,10 @@
 /* ===================== AVIANCE OS — Employees (the owner's staff screen) =====================
    Who works here, how she gets in, and the 1-to-1 chat with each person.
-   Left: the staff list (name, email, status, last seen, unread). Right: the person who is open —
-   her access code, her welcome page, and the chat (newest at the bottom, text + one file at a time).
+   Left: a slim strip of names — her name, a presence dot and an unread count, nothing else.
+   Right: the chat with whoever is open — a header (her name, her email, when she was last here and a "⋯"
+   menu), the thread (newest at the bottom, text + one file at a time) and the send box. Nothing else.
+   The "⋯" menu holds her access code, her welcome page, "Clear this chat", her access, and "Add an employee".
+   Deleting is always soft (deleted_at + an empty body) and always filtered by the open channel.
 
    Data (database functions in 20261125_staff.sql, owner only; see /home/claude/staff/SPEC.md):
      staff_list()                        -> [{id,name,email,status,last_seen_at,channel_id,unread,code_set,created_at}]
@@ -26,6 +29,9 @@ const EMP_MAX_FILE = 10 * 1024 * 1024;     // 10 MB a file, as the bucket allows
 const EMP_OK_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'pdf', 'docx', 'csv'];
 const EMP_BUCKET = 'chat-files';
 const EMP_BODY_MAX = 4000;
+const EMP_ON_MS = 2 * 60 * 1000;           // green: she was here in the last two minutes
+const EMP_RECENT_MS = 60 * 60 * 1000;      // amber: within the hour
+const EMP_DAY_MS = 24 * 60 * 60 * 1000;    // past a day a clock time alone would mislead
 const EMP_NOT_READY = "The Employees area isn't switched on yet. Once the database update is applied, your staff will show here.";
 const EMP_CODE_NOT_READY = "The access-code function isn't deployed yet, so there is no code to show. Try again once it is.";
 const EMP_FILES_NOT_READY = "File uploads aren't switched on yet. Send the message as text for now.";
@@ -38,7 +44,9 @@ const emp = {
   adding: false, addErr: null, addBusy: false, addName: '', addEmail: '',
   code: null,                      // {staffId, code} — lives only while the panel is open
   codeBusy: '', codeErr: null,
-  ask: '',                         // inline "are you sure" for reset / revoke: '<what>:<id>'
+  ask: '',                         // inline "are you sure": 'reset:<id>' 'revoke:<id>' 'clear:<id>' 'del:<msgId>'
+  menu: '',                        // the staff id whose "⋯" menu is open
+  delBusy: '', clearBusy: false,   // the message being deleted / the chat being cleared
   busy: {}, timer: null, chatTimer: null, seq: 0, mseq: 0,
 };
 
@@ -274,6 +282,41 @@ async function empCode(staffId) {
   } catch (e) { return { ok: false, data: null, error: empPlain(e, "The code didn't come back. Try again."), missing: false }; }
 }
 
+/* ---- deleting: always soft, always inside the open channel ----
+   The row stays so her page can hide it (she filters on deleted_at); the words go for good.
+   Both of these filter by channel_id as well as the id, so a slip can never reach another chat. */
+function empStamp() { return new Date().toISOString(); }
+function empDelPatch() { return { deleted_at: empStamp(), body: '' }; }
+function empUpdater() {
+  const s = empSb();
+  if (!s) return null;
+  try {
+    const q = s.from('channel_messages');
+    return q && typeof q.update === 'function' ? q : null;
+  } catch (e) { return null; }
+}
+async function empDeleteMessage(channelId, msgId) {
+  if (!channelId || !msgId) return { ok: false, data: null, error: 'There is nothing to delete.', missing: false };
+  const q = empUpdater();
+  if (!q) return { ok: false, data: null, error: EMP_NOT_READY, missing: true };
+  try {
+    const r = await q.update(empDelPatch()).eq('channel_id', channelId).eq('id', msgId);
+    if (r && r.error) return { ok: false, data: null, error: empPlain(r.error, "That message wasn't deleted. Try again."), missing: empMissing(r.error) };
+    return { ok: true, data: null, error: null, missing: false };
+  } catch (e) { return { ok: false, data: null, error: empPlain(e, "That message wasn't deleted. Try again."), missing: empMissing(e) }; }
+}
+async function empClearChannel(channelId) {
+  if (!channelId) return { ok: false, data: null, error: 'There is no chat to clear yet.', missing: false };
+  const q = empUpdater();
+  if (!q) return { ok: false, data: null, error: EMP_NOT_READY, missing: true };
+  try {
+    /* Only this channel, and only what is still there: already-deleted rows keep their first stamp. */
+    const r = await q.update(empDelPatch()).eq('channel_id', channelId).is('deleted_at', null);
+    if (r && r.error) return { ok: false, data: null, error: empPlain(r.error, "The chat wasn't cleared. Try again."), missing: empMissing(r.error) };
+    return { ok: true, data: null, error: null, missing: false };
+  } catch (e) { return { ok: false, data: null, error: empPlain(e, "The chat wasn't cleared. Try again."), missing: empMissing(e) }; }
+}
+
 /* ===================== 2. NAV BADGE ===================== */
 function empIsOwner() { try { return !!(typeof authUser !== 'undefined' && authUser && authUser.role === 'admin'); } catch (e) { return false; } }
 function empUnreadTotal(list) {
@@ -309,11 +352,11 @@ function employeesForget() {
     open: null, msgs: [], msgsLoaded: false, msgsErr: null, herReadAt: null,
     draft: '', sending: false, file: null, fileErr: null,
     adding: false, addErr: null, addBusy: false, code: null, codeBusy: '', codeErr: null,
-    ask: '', busy: {}, seq: emp.seq + 1, mseq: emp.mseq + 1,
+    ask: '', menu: '', delBusy: '', clearBusy: false, busy: {}, seq: emp.seq + 1, mseq: emp.mseq + 1,
   });
 }
 
-/* ===================== 3. RENDER (pure: data in, HTML out) ===================== */
+/* ===================== 3. RENDER (pure: data in, HTML string out) ===================== */
 function empA(v) { return esc(JSON.stringify(v == null ? '' : String(v))); }
 function empEl(id) { return typeof document !== 'undefined' ? document.getElementById(id) : null; }
 
@@ -344,6 +387,22 @@ function empLastSeenText(iso) {
   const s = empAgo(iso);
   return s === 'never' ? 'Not signed in yet' : 'Last seen ' + s;
 }
+/* The presence dot. Her page writes last_seen_at every few seconds while she has it open,
+   so a fresh stamp really does mean "she is there now". */
+function empPresence(iso) {
+  const t = Date.parse(iso || '');
+  if (!t) return { tone: 'never', text: 'Not signed in yet' };
+  const age = Date.now() - t;
+  if (age <= EMP_ON_MS) return { tone: 'on', text: 'Online now' };
+  if (age <= EMP_RECENT_MS) return { tone: 'recent', text: 'Last seen ' + empTime(iso) };
+  /* Older than an hour: a clock time alone would mislead once a day has passed. */
+  return { tone: 'off', text: age <= EMP_DAY_MS ? 'Last seen ' + empTime(iso) : 'Last seen ' + empAgo(iso) };
+}
+/* The dot carries its own words, because a colour on its own says nothing to a screen reader. */
+function empDotHTML(iso) {
+  const p = empPresence(iso);
+  return `<span class="emp-dot ${p.tone}" role="img" title="${esc(p.text)}" aria-label="${esc(p.text)}"></span>`;
+}
 function empAttachName(url) {
   let s = String(url == null ? '' : url).split('?')[0].split('#')[0];
   s = s.slice(s.lastIndexOf('/') + 1);
@@ -366,8 +425,9 @@ function empEmptyHTML(list) {
   const any = (Array.isArray(list) ? list : []).length;
   return `<div class="card emp-blank">
     <h3>${any ? 'Pick someone' : 'No one works here yet'}</h3>
-    <p>${any ? 'Choose a person on the left to see her access code, her welcome page and your chat with her.'
-      : 'Press “Add employee”, type her name and her Gmail address, and she gets her own private channel with you — and nothing else in Aviance.'}</p>
+    <p>${any ? 'Click a name on the left to open your chat with her.'
+      : 'Add someone and she gets her own private channel with you — and nothing else in Aviance.'}</p>
+    <button type="button" class="btn" onclick="empAddOpen()">Add an employee</button>
   </div>`;
 }
 function empAddFormHTML(ctx) {
@@ -386,16 +446,16 @@ function empAddFormHTML(ctx) {
     </div>
   </form>`;
 }
+/* One row in the strip: her name, her dot, and an unread count if there is one. Nothing else —
+   the email and the "last seen" live in the chat header on the right. */
 function empRowHTML(s, ctx) {
   const c = ctx || {}, on = c.openId && s && s.id === c.openId;
   const unread = Math.max(0, Number(s && s.unread) || 0);
-  return `<button type="button" class="emp-row${on ? ' on' : ''}" onclick="empOpen(${empA(s.id)})"${on ? ' aria-current="true"' : ''}
-      aria-label="${esc((s.name || 'Employee') + ' — ' + empStatusLabel(s.status) + (unread ? ', ' + unread + ' unread' : ''))}">
-    <span class="emp-rtop"><span class="emp-rname">${esc(s.name || 'No name')}</span>
-      ${unread ? `<span class="badge red" aria-hidden="true">${esc(unread > 99 ? '99+' : unread)}</span>` : ''}</span>
-    <span class="emp-remail">${esc(s.email || '')}</span>
-    <span class="emp-rmeta"><span class="emp-tag ${empStatusTone(s.status)}">${esc(empStatusLabel(s.status))}</span>
-      <span class="emp-rseen">${esc(empLastSeenText(s.lastSeenAt))}</span></span>
+  const p = empPresence(s && s.lastSeenAt);
+  return `<button type="button" role="listitem" class="emp-row${on ? ' on' : ''}" onclick="empOpen(${empA(s.id)})"${on ? ' aria-current="true"' : ''}
+      aria-label="${esc((s.name || 'Employee') + ' — ' + p.text + (unread ? ', ' + unread + ' unread' : ''))}">
+    ${empDotHTML(s && s.lastSeenAt)}<span class="emp-rname">${esc(s.name || 'No name')}</span>
+    ${unread ? `<span class="badge red" aria-hidden="true">${esc(unread > 99 ? '99+' : unread)}</span>` : ''}
   </button>`;
 }
 function empListHTML(list, ctx) {
@@ -419,27 +479,75 @@ function empCodeHTML(code, staff) {
       she signs in at aviance.store/team with her email address and this code. If it gets lost, press “Reset code” and send her the new one.</p>
   </div>`;
 }
+/* Every destructive step asks here first, inline. confirm() is never used. */
 function empAskHTML(what, s) {
-  const reset = what === 'reset';
+  const w = String(what || '');
+  if (w === 'clear') {
+    return `<div class="emp-ask" role="alert">
+      <p>Clear your whole chat with ${esc((s && s.name) || 'her')}? Every message goes from both sides. This cannot be undone.</p>
+      <div class="emp-acts">
+        <button type="button" class="btn" onclick="empClearGo(${empA(s && s.id)})">Yes, clear it</button>
+        <button type="button" class="btn ghost" onclick="empAskNo()">No, keep it</button>
+      </div>
+    </div>`;
+  }
+  const reset = w === 'reset';
   return `<div class="emp-ask" role="alert">
-    <p>${reset ? `Make a new code for ${esc(s.name || 'her')}? Her old code stops working straight away.`
-      : `Take away ${esc(s.name || 'her')}’s access? She won’t be able to sign in. Nothing is deleted — you can let her back in later.`}</p>
+    <p>${reset ? `Make a new code for ${esc((s && s.name) || 'her')}? Her old code stops working straight away.`
+      : `Take away ${esc((s && s.name) || 'her')}’s access? She won’t be able to sign in. Nothing is deleted — you can let her back in later.`}</p>
     <div class="emp-acts">
-      <button type="button" class="btn" onclick="${reset ? `empCodeGo(${empA(s.id)})` : `empRevokeGo(${empA(s.id)})`}">${reset ? 'Yes, new code' : 'Yes, take it away'}</button>
+      <button type="button" class="btn" onclick="${reset ? `empCodeGo(${empA(s && s.id)})` : `empRevokeGo(${empA(s && s.id)})`}">${reset ? 'Yes, new code' : 'Yes, take it away'}</button>
       <button type="button" class="btn ghost" onclick="empAskNo()">No, leave it</button>
     </div>
   </div>`;
+}
+/* The one menu on the screen: what to do about the person who is open, plus adding someone new. */
+function empMenuHTML(s, ctx) {
+  const c = ctx || {}, busy = (c.busy && c.busy[s.id]) || '';
+  const revoked = s.status === 'revoked';
+  return `<div class="emp-menu" role="menu" aria-label="${esc('More for ' + (s.name || 'her'))}">
+    <button type="button" role="menuitem" class="emp-mi" onclick="${s.codeSet ? `empAskYes('reset',${empA(s.id)})` : `empCodeGo(${empA(s.id)})`}"${busy ? ' disabled' : ''}>
+      ${busy === 'code' ? 'Making a code…' : (s.codeSet ? 'Reset code' : 'Generate access code')}</button>
+    <button type="button" role="menuitem" class="emp-mi" onclick="empWelcome(${empA(s.id)})"${busy ? ' disabled' : ''}>${busy === 'doc' ? 'Opening…' : 'Welcome page'}</button>
+    <button type="button" role="menuitem" class="emp-mi" onclick="empAskYes('clear',${empA(s.id)})"${c.clearBusy ? ' disabled' : ''}>${c.clearBusy ? 'Clearing…' : 'Clear this chat'}</button>
+    <button type="button" role="menuitem" class="emp-mi" onclick="${revoked ? `empRevokeGo(${empA(s.id)},'active')` : `empAskYes('revoke',${empA(s.id)})`}"${busy ? ' disabled' : ''}>
+      ${busy === 'status' ? 'Changing…' : (revoked ? 'Let her back in' : 'Revoke access')}</button>
+    <button type="button" role="menuitem" class="emp-mi" onclick="empAddOpen()">Add an employee</button>
+  </div>`;
+}
+/* The chat header: who she is, how to reach her, when she was last here, and the ⋯ menu. */
+function empHeadHTML(s, ctx) {
+  const c = ctx || {}, on = !!(c.menuOpen && c.menuOpen === s.id);
+  const p = empPresence(s.lastSeenAt);
+  return `<header class="emp-head">
+    <div class="emp-hwho">
+      <h2 class="emp-hname">${empDotHTML(s.lastSeenAt)}<span>${esc(s.name || 'No name')}</span></h2>
+      <p class="emp-hsub"><span class="emp-hmail">${esc(s.email || '')}</span><span class="emp-hseen">${esc(p.text)}</span></p>
+    </div>
+    <div class="emp-hmore">
+      <button type="button" class="emp-more" id="empMoreBtn" aria-haspopup="menu" aria-expanded="${on ? 'true' : 'false'}"
+        aria-label="${esc('More for ' + (s.name || 'her'))}" onclick="empMenuToggle(${empA(s.id)})">⋯</button>
+      ${on ? empMenuHTML(s, c) : ''}
+    </div>
+  </header>`;
 }
 function empMsgHTML(m, ctx) {
   const c = ctx || {};
   const mine = !!(c.ownerId && m && m.authorUser === c.ownerId);
   const sys = m && m.kind && m.kind !== 'chat';
+  const asking = c.ask === 'del:' + (m && m.id);
+  const busy = c.delBusy === (m && m.id);
   return `<div class="emp-msg${mine ? ' mine' : ''}${sys ? ' sys' : ''}">
     <div class="emp-bub">
       ${m.body ? `<p class="emp-btext">${esc(m.body)}</p>` : ''}
       ${m.attachment ? `<button type="button" class="emp-file" onclick="empOpenFile(${empA(m.attachment)})">${esc(empAttachName(m.attachment))}</button>` : ''}
       ${!m.body && !m.attachment ? `<p class="emp-btext emp-muted">(empty message)</p>` : ''}
     </div>
+    ${asking ? `<span class="emp-dask" role="alert">Delete it?
+      <button type="button" class="emp-link" onclick="empDelGo(${empA(m.id)})"${busy ? ' disabled' : ''}>${busy ? 'Deleting…' : 'Yes'}</button>
+      <button type="button" class="emp-link" onclick="empAskNo()">No</button></span>`
+      : `<button type="button" class="emp-del" onclick="empAskYes('del',${empA(m.id)})"
+        aria-label="Delete this message">Delete</button>`}
     <time class="emp-mtime">${esc(empTime(m.createdAt))}</time>
   </div>`;
 }
@@ -471,28 +579,15 @@ function empComposerHTML(ctx) {
 }
 function empPanelHTML(s, ctx) {
   const c = ctx || {};
-  const busy = c.busy && c.busy[s.id] || '';
   const codeOn = !!(c.code && c.code.staffId === s.id && c.code.code);
-  const revoked = s.status === 'revoked';
   return `<div class="emp-panel">
-    <header class="card emp-phead">
-      <div class="emp-pwho"><h2 class="emp-pname">${esc(s.name || 'No name')}</h2>
-        <p class="emp-pmail">${esc(s.email || '')}</p>
-        <p class="emp-pmeta"><span class="emp-tag ${empStatusTone(s.status)}">${esc(empStatusLabel(s.status))}</span>
-          <span class="emp-rseen">${esc(empLastSeenText(s.lastSeenAt))}</span></p></div>
-      <div class="emp-pacts">
-        <button type="button" class="btn" onclick="${s.codeSet ? `empAskYes('reset',${empA(s.id)})` : `empCodeGo(${empA(s.id)})`}"${busy ? ' disabled' : ''}>
-          ${busy === 'code' ? 'Making a code…' : (s.codeSet ? 'Reset code' : 'Generate access code')}</button>
-        <button type="button" class="btn ghost" onclick="${revoked ? `empRevokeGo(${empA(s.id)},'active')` : `empAskYes('revoke',${empA(s.id)})`}"${busy ? ' disabled' : ''}>
-          ${busy === 'status' ? 'Changing…' : (revoked ? 'Let her back in' : 'Revoke access')}</button>
-        <button type="button" class="btn ghost" onclick="empWelcome(${empA(s.id)})"${busy ? ' disabled' : ''}>${busy === 'doc' ? 'Opening…' : 'Welcome page'}</button>
-      </div>
-    </header>
-    ${c.ask === 'reset:' + s.id ? empAskHTML('reset', s) : ''}
-    ${c.ask === 'revoke:' + s.id ? empAskHTML('revoke', s) : ''}
-    ${c.codeErr ? `<p class="card emp-bad" role="alert">${esc(c.codeErr)}</p>` : ''}
-    ${codeOn ? empCodeHTML(c.code.code, s) : ''}
     <section class="card emp-chat" aria-label="${esc('Chat with ' + (s.name || 'her'))}">
+      ${empHeadHTML(s, c)}
+      ${c.ask === 'reset:' + s.id ? empAskHTML('reset', s) : ''}
+      ${c.ask === 'revoke:' + s.id ? empAskHTML('revoke', s) : ''}
+      ${c.ask === 'clear:' + s.id ? empAskHTML('clear', s) : ''}
+      ${c.codeErr ? `<p class="emp-bad" role="alert">${esc(c.codeErr)}</p>` : ''}
+      ${codeOn ? empCodeHTML(c.code.code, s) : ''}
       ${empChatHTML(c.msgs, c)}
       ${empComposerHTML(c)}
     </section>
@@ -501,16 +596,13 @@ function empPanelHTML(s, ctx) {
 function empScreenHTML(list, ctx) {
   const c = ctx || {}, rows = Array.isArray(list) ? list : [];
   const open = rows.find(s => s && s.id === c.openId) || null;
-  const n = rows.length;
   return `${c.err ? `<div class="emp-bad emp-top" role="alert">${esc(c.err)}</div>` : ''}
     <div class="emp-grid">
-      <section class="emp-side" aria-label="Your staff">
-        <div class="emp-bar"><p class="emp-hint">${esc(n ? n + (n === 1 ? ' person' : ' people') : 'Nobody yet')}</p>
-          <button type="button" class="btn" onclick="empAddOpen()"${c.adding ? ' disabled' : ''}>Add employee</button></div>
+      <nav class="emp-strip" aria-label="Your staff">${empListHTML(rows, c)}</nav>
+      <section class="emp-main">
         ${c.adding ? empAddFormHTML(c) : ''}
-        ${empListHTML(rows, c)}
+        ${open ? empPanelHTML(open, c) : (c.adding ? '' : empEmptyHTML(rows))}
       </section>
-      <section class="emp-main">${open ? empPanelHTML(open, c) : empEmptyHTML(rows)}</section>
     </div>`;
 }
 
@@ -521,6 +613,7 @@ function empCtx() {
     adding: emp.adding, addErr: emp.addErr, addBusy: emp.addBusy,
     addName: emp.addName, addEmail: emp.addEmail,
     busy: emp.busy, code: emp.code, codeErr: emp.codeErr, ask: emp.ask,
+    menuOpen: emp.menu, delBusy: emp.delBusy, clearBusy: emp.clearBusy,
     msgs: emp.msgs, msgsLoaded: emp.msgsLoaded, msgsErr: emp.msgsErr, herReadAt: emp.herReadAt,
     draft: emp.draft, sending: emp.sending, fileName: emp.file ? emp.file.name : '', fileErr: emp.fileErr,
   };
@@ -569,7 +662,7 @@ async function empLoad(force) {
 }
 
 /* ---- the Add form ---- */
-function empAddOpen() { emp.adding = true; emp.addErr = null; emp.addName = ''; emp.addEmail = ''; empPaint(); setTimeout(() => { const e = empEl('empAddName'); if (e && e.focus) e.focus(); }, 0); }
+function empAddOpen() { emp.adding = true; emp.menu = ''; emp.ask = ''; emp.addErr = null; emp.addName = ''; emp.addEmail = ''; empPaint(); setTimeout(() => { const e = empEl('empAddName'); if (e && e.focus) e.focus(); }, 0); }
 function empAddCancel() { emp.adding = false; emp.addErr = null; emp.addName = ''; emp.addEmail = ''; empPaint(); }
 async function empAddSave(ev) {
   if (ev && ev.preventDefault) ev.preventDefault();
@@ -595,7 +688,7 @@ function empForcePaint() { const r = empEl('empRoot'); if (r) { r.innerHTML = em
 function empOpen(id) {
   if (!id) return;
   if (emp.open !== id) empForgetCode();
-  emp.open = id; emp.ask = ''; emp.codeErr = null;
+  emp.open = id; emp.ask = ''; emp.menu = ''; emp.delBusy = ''; emp.clearBusy = false; emp.codeErr = null;
   emp.msgs = []; emp.msgsLoaded = false; emp.msgsErr = null; emp.herReadAt = null;
   emp.draft = ''; emp.file = null; emp.fileErr = null;
   empForcePaint();
@@ -609,8 +702,38 @@ function empCodeHide() { empForgetCode(); empForcePaint(); }
 function empFind(id) { return emp.list.find(s => s.id === id) || null; }
 function empOpenRow() { return empFind(emp.open); }
 
-function empAskYes(what, id) { emp.ask = what + ':' + id; empForcePaint(); }
+function empAskYes(what, id) { emp.ask = what + ':' + id; emp.menu = ''; empForcePaint(); }
 function empAskNo() { emp.ask = ''; empForcePaint(); }
+/* The "⋯" menu: open for one person at a time, and never left open behind a question. */
+function empMenuToggle(id) { emp.menu = emp.menu === id ? '' : String(id || ''); emp.ask = ''; empForcePaint(); }
+function empMenuClose() { if (emp.menu) { emp.menu = ''; empForcePaint(); } }
+
+/* Delete one message: soft, in this channel only, then repaint from the database. */
+async function empDelGo(msgId) {
+  const s = empOpenRow();
+  if (!s || !msgId || emp.delBusy) return;
+  emp.delBusy = String(msgId); empForcePaint();
+  const r = await empDeleteMessage(s.channelId, msgId);
+  emp.delBusy = '';
+  if (!r.ok) { emp.msgsErr = r.error; empForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
+  emp.ask = ''; emp.msgsErr = null;
+  empForcePaint();
+  await empLoadMessages(true);        // what the database says, not what we guessed
+}
+/* Clear the whole chat with the person who is open — again, this channel only. */
+async function empClearGo(id) {
+  const s = empFind(id);
+  if (!s || emp.clearBusy) return;
+  emp.clearBusy = true; empForcePaint();
+  const r = await empClearChannel(s.channelId);
+  emp.clearBusy = false;
+  if (!r.ok) { emp.ask = ''; emp.msgsErr = r.error; empForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
+  emp.ask = ''; emp.msgsErr = null; emp.menu = '';
+  if (typeof toast === 'function') toast('Your chat with ' + (s.name || 'her') + ' is cleared.');
+  empForcePaint();
+  await empLoadMessages(true);
+  empLoad(true);                      // the unread count may have changed with it
+}
 
 async function empCodeGo(id) {
   const s = empFind(id); if (!s || emp.busy[id]) return;
@@ -741,5 +864,5 @@ async function empOpenFile(path) {
 /* render() calls this after every screen change: leave the chat alone unless we are on it. */
 function empOnRender(view) {
   if (view === 'employees') { if (emp.open) empChatStart(); empScrollChat(); return; }
-  empChatStop(); empForgetCode();
+  empChatStop(); empForgetCode(); emp.menu = ''; emp.ask = '';
 }
