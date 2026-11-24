@@ -1,20 +1,26 @@
 /* Channels data layer: the only code that talks to Supabase for chat (the Channels screen imports nothing else).
    Plain script, global functions on window, built on the global `sb` client. CONTRACT.md "Hub data layer".
    Every function resolves to {ok, data, error}: error is plain words for a non-technical person, and nothing here throws.
-   chSubscribe is the one synchronous call: it returns the unsubscribe function itself (which also carries ok/data/error). */
+   chSubscribe is the one synchronous call: it returns the unsubscribe function itself (which also carries ok/data/error).
+
+   The live tables (SCHEMA.md "Conversations"):
+     channel_messages(id, channel_id, author_user, author_person, body, attachment_url, created_at, edited_at, deleted_at)
+       a team message has author_user = the login; a client's message has author_person = their client_people id.
+     channel_members(channel_id, user_id | person_id, member_role, last_read_at)
+   Database functions (supabase/migrations/20261124_channels_rpcs.sql): my_channels(), mark_channel_read(c),
+   channel_people(p_ids) (names for BOTH kinds of author), ensure_client_channel(p_client_id, p_name).
+   A message's userId is author_user or author_person (both uuids, never the same); a client's message carries
+   isClient: true and a name that says the company, so nobody mistakes who is talking.
+   Files: there is no storage bucket yet, so sending files is refused in plain words. A message that already has an
+   http(s) attachment_url shows it as one attachment {path: url, url, name}; chFileUrl hands such a link straight back. */
 (function () {
   'use strict';
 
-  var BUCKET = 'chat-files';
-  var MAX_FILE = 10 * 1024 * 1024;   // 10 MB each
-  var MAX_FILES = 5;                 // per message
   var MAX_BODY = 8000;
+  var NO_FILES = "Sending files isn't switched on yet. Send the message as text, or paste a link to the file.";
   var TYPING_GAP = 3000;             // ms between typing signals per channel
-  var URL_SECONDS = 3600;            // signed links last 1 hour
-  var URL_KEEP = 50 * 60 * 1000;     // reuse a signed link for 50 minutes
 
-  var names = new Map();             // userId -> {name, role}
-  var urlCache = new Map();          // path -> {url, at}
+  var names = new Map();             // user id or client person id -> {name, role, kind, company}
   var typingSent = new Map();        // channelId -> last time we signalled
   var typingChans = new Map();       // channelId -> {chan, refs, idle}
 
@@ -31,7 +37,6 @@
     if (/failed to fetch|networkerror|network request|load failed|fetch failed/i.test(msg)) return "Can't reach Aviance right now. Check your connection and try again.";
     if (code === 'PGRST301' || /jwt|not authenticated|session/i.test(msg)) return 'Your sign-in has run out. Please sign in again.';
     if (code === '42501' || /row-level security|permission denied|not authorized|unauthorized/i.test(msg)) return "You don't have access to do that.";
-    if (/maximum allowed size|payload too large|too large/i.test(msg)) return 'That file is too big. The limit is 10 MB per file.';
     if (code === 'P0001' && msg) return msg;   // our own database messages are already plain
     return fallback;
   }
@@ -48,15 +53,9 @@
     if (res && res.error) throw Fail(plain(res.error, fallback));
     return res ? res.data : null;
   }
-  function uuid() {
-    var c = globalThis.crypto;
-    if (c && c.randomUUID) return c.randomUUID();
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (ch) { var r = Math.random() * 16 | 0; return (ch === 'x' ? r : (r & 3 | 8)).toString(16); });
-  }
-  function safeName(name) {
-    var n = String(name || 'file').split(/[\\/]/).pop().replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_{2,}/g, '_').replace(/^[._]+/, '');
-    if (n.length > 80) { var dot = n.lastIndexOf('.'); var ext = dot > 0 && n.length - dot <= 10 ? n.slice(dot) : ''; n = n.slice(0, 80 - ext.length) + ext; }
-    return n || 'file';
+  function isWebLink(u) { return /^https?:\/\/[^\s]+$/i.test(String(u || '')); }
+  function linkName(u) {
+    try { var last = decodeURIComponent(new URL(u).pathname.split('/').pop() || ''); return last || 'Attached link'; } catch (e) { return 'Attached link'; }
   }
   function iso(v) { if (v instanceof Date) return v.toISOString(); return String(v); }
   function noop() {}
@@ -70,41 +69,59 @@
     return u.id;
   }
 
-  /* ---------- names (cached) ---------- */
+  /* ---------- names (cached): team logins and client people, one lookup ---------- */
   async function loadNames(ids) {
     var want = [];
     (ids || []).forEach(function (id) { if (id && !names.has(id) && want.indexOf(id) < 0) want.push(id); });
     if (want.length) {
       try {
         var res = await need(client()).rpc('channel_people', { p_ids: want });
-        (res && res.data || []).forEach(function (p) { names.set(p.id, { name: p.name || 'Someone', role: p.role || null }); });
+        (res && res.data || []).forEach(function (p) {
+          if (!p || !p.id) return;
+          var isClient = p.kind === 'client' || p.role === 'client';
+          names.set(p.id, { name: p.name || (isClient ? 'Client' : 'Someone'), role: p.role || null, kind: isClient ? 'client' : 'team', company: p.company || null });
+        });
       } catch (e) { /* names are nice to have: fall through to the fallback below */ }
-      want.forEach(function (id) { if (!names.has(id)) names.set(id, { name: 'Someone', role: null, guess: true }); });
+      want.forEach(function (id) { if (!names.has(id)) names.set(id, { name: 'Someone', role: null, kind: null, company: null, guess: true }); });
     }
     return names;
   }
   function nameOf(id) { var n = names.get(id); return n ? n.name : 'Someone'; }
+  // What the thread shows as the author: a client always reads "Pat Lee (Stone Roofing)".
+  function labelOf(id, isClient) {
+    var n = names.get(id) || {};
+    var base = n.name || (isClient ? 'Client' : 'Someone');
+    if (!isClient) return base;
+    return n.company ? base + ' (' + n.company + ')' : base + ' (client)';
+  }
+  function authorOf(r) { return r.author_user || r.author_person || null; }
 
   function mapMessage(r) {
     var deleted = !!r.deleted_at;
+    var isClient = !r.author_user && !!r.author_person;
+    var id = authorOf(r), n = names.get(id) || {};
+    var url = !deleted && isWebLink(r.attachment_url) ? String(r.attachment_url) : null;
     return {
-      id: r.id, channelId: r.channel_id, userId: r.user_id, name: nameOf(r.user_id),
+      id: r.id, channelId: r.channel_id, userId: id, name: labelOf(id, isClient),
+      authorKind: isClient ? 'client' : 'team', isClient: isClient, company: isClient ? (n.company || null) : null,
       body: deleted ? '' : (r.body || ''),
-      attachments: deleted ? [] : (Array.isArray(r.attachments) ? r.attachments : []),
+      attachments: url ? [{ path: url, url: url, name: linkName(url), size: 0, type: '' }] : [],
       createdAt: r.created_at, editedAt: r.edited_at || null, deleted: deleted
     };
   }
   async function mapMessages(rows) {
-    await loadNames(rows.map(function (r) { return r.user_id; }));
+    await loadNames(rows.map(authorOf));
     return rows.map(mapMessage);
   }
-  var MSG_COLS = 'id,channel_id,user_id,body,attachments,created_at,edited_at,deleted_at';
+  var MSG_TABLE = 'channel_messages';
+  var MSG_COLS = 'id,channel_id,author_user,author_person,body,attachment_url,created_at,edited_at,deleted_at';
 
   /* ---------- reading ---------- */
   async function listRaw() {
     var data = check(await need(client()).rpc('my_channels'), "Couldn't load your channels.") || [];
     return data.map(function (c) {
-      return { id: c.id, name: c.name, kind: c.kind, clientId: c.client_id || null, archived: !!c.archived_at, lastMessageAt: c.last_message_at || null, unread: Number(c.unread) || 0 };
+      return { id: c.id, name: c.name, kind: c.kind, clientId: c.client_id || null, archived: !!c.archived_at, lastMessageAt: c.last_message_at || null, unread: Number(c.unread) || 0,
+        company: c.company || null, purpose: c.purpose || null, lastBody: c.last_body || null };
     });
   }
   window.chListChannels = wrap("Couldn't load your channels.", listRaw);
@@ -118,7 +135,7 @@
     if (!channelId) throw Fail('Pick a channel first.');
     opts = opts || {};
     var limit = Math.max(1, Math.min(200, parseInt(opts.limit, 10) || 50));
-    var q = need(client()).from('messages').select(MSG_COLS).eq('channel_id', channelId);
+    var q = need(client()).from(MSG_TABLE).select(MSG_COLS).eq('channel_id', channelId);
     if (opts.before) q = q.lt('created_at', iso(opts.before));
     var rows = check(await q.order('created_at', { ascending: false }).limit(limit), "Couldn't load the messages.") || [];
     return await mapMessages(rows.slice().reverse());
@@ -128,7 +145,7 @@
     var t = String(text == null ? '' : text).trim();
     if (!t) return [];
     var pattern = '%' + t.replace(/[\\%_]/g, function (c) { return '\\' + c; }) + '%';
-    var rows = check(await need(client()).from('messages').select(MSG_COLS).ilike('body', pattern).is('deleted_at', null).order('created_at', { ascending: false }).limit(50), "Couldn't search the messages.") || [];
+    var rows = check(await need(client()).from(MSG_TABLE).select(MSG_COLS).ilike('body', pattern).is('deleted_at', null).order('created_at', { ascending: false }).limit(50), "Couldn't search the messages.") || [];
     var chans = {};
     try { (await listRaw()).forEach(function (c) { chans[c.id] = c.name; }); } catch (e) { /* names of channels are optional */ }
     var mapped = await mapMessages(rows);
@@ -140,30 +157,14 @@
     if (!channelId) throw Fail('Pick a channel first.');
     var text = String(body == null ? '' : body).trim();
     var list = Array.prototype.slice.call(files || []);
-    if (!text && !list.length) throw Fail('Write a message or add a file first.');
+    if (!text && !list.length) throw Fail('Write a message first.');
     if (text.length > MAX_BODY) throw Fail('That message is too long. Keep it under ' + MAX_BODY + ' characters.');
-    if (list.length > MAX_FILES) throw Fail('You can add up to ' + MAX_FILES + ' files to one message.');
-    list.forEach(function (f) {
-      var nm = (f && f.name) || 'That file';
-      if (!f || !(f.size > 0)) throw Fail(nm + ' is empty, so it was not sent.');
-      if (f.size > MAX_FILE) throw Fail(nm + ' is too big. The limit is 10 MB per file.');
-    });
+    if (list.length) throw Fail(NO_FILES);
     var s = need(client());
     var uid = await myId();
-    var uploaded = [], attachments = [];
-    async function cleanup() { if (uploaded.length) { try { await s.storage.from(BUCKET).remove(uploaded); } catch (e) { /* best effort */ } } }
-    try {
-      for (var i = 0; i < list.length; i++) {
-        var f = list[i], path = channelId + '/' + uuid() + '-' + safeName(f.name);
-        var up = await s.storage.from(BUCKET).upload(path, f, { contentType: f.type || 'application/octet-stream', upsert: false });
-        if (up && up.error) { var pe = plain(up.error, ''); throw Fail(pe || "Couldn't upload " + (f.name || 'a file') + '. Please try again.'); }
-        uploaded.push(path);
-        attachments.push({ path: path, name: String(f.name || 'file'), size: f.size, type: f.type || 'application/octet-stream' });
-      }
-      var res = await s.from('messages').insert({ channel_id: channelId, user_id: uid, body: text, attachments: attachments }).select(MSG_COLS).single();
-      var row = check(res, "Your message didn't send. Please try again.");
-      return (await mapMessages([row]))[0];
-    } catch (e) { await cleanup(); throw e; }
+    var res = await s.from(MSG_TABLE).insert({ channel_id: channelId, author_user: uid, author_person: null, body: text }).select(MSG_COLS).single();
+    var row = check(res, "Your message didn't send. Please try again.");
+    return (await mapMessages([row]))[0];
   });
 
   window.chEdit = wrap("Couldn't save your change.", async function (messageId, body) {
@@ -171,14 +172,16 @@
     var text = String(body == null ? '' : body).trim();
     if (!text) throw Fail('A message can\'t be empty. Delete it instead.');
     if (text.length > MAX_BODY) throw Fail('That message is too long. Keep it under ' + MAX_BODY + ' characters.');
-    var rows = check(await need(client()).from('messages').update({ body: text, edited_at: new Date().toISOString() }).eq('id', messageId).is('deleted_at', null).select(MSG_COLS), "Couldn't save your change.");
+    var s = need(client()), uid = await myId();
+    var rows = check(await s.from(MSG_TABLE).update({ body: text, edited_at: new Date().toISOString() }).eq('id', messageId).eq('author_user', uid).is('deleted_at', null).select(MSG_COLS), "Couldn't save your change.");
     if (!rows || !rows.length) throw Fail('You can only edit your own messages, in channels that are still open.');
     return (await mapMessages([rows[0]]))[0];
   });
 
   window.chDelete = wrap("Couldn't delete that message.", async function (messageId) {
     if (!messageId) throw Fail('Pick a message first.');
-    var rows = check(await need(client()).from('messages').update({ deleted_at: new Date().toISOString() }).eq('id', messageId).select(MSG_COLS), "Couldn't delete that message.");
+    var s = need(client()), uid = await myId();
+    var rows = check(await s.from(MSG_TABLE).update({ deleted_at: new Date().toISOString() }).eq('id', messageId).eq('author_user', uid).is('deleted_at', null).select(MSG_COLS), "Couldn't delete that message.");
     if (!rows || !rows.length) throw Fail('You can only delete your own messages, in channels that are still open.');
     return (await mapMessages([rows[0]]))[0];
   });
@@ -189,17 +192,11 @@
     return { channelId: channelId };
   });
 
+  // Only an http(s) attachment_url can be opened; there is no storage bucket to sign links from.
   window.chFileUrl = wrap("Couldn't open that file.", async function (path) {
-    var p = String(path && path.path ? path.path : (path || ''));
-    if (!p || p.indexOf('..') >= 0 || p.charAt(0) === '/') throw Fail("That file link isn't valid.");
-    var hit = urlCache.get(p);
-    if (hit && Date.now() - hit.at < URL_KEEP) return hit.url;
-    var res = await need(client()).storage.from(BUCKET).createSignedUrl(p, URL_SECONDS);
-    var d = check(res, "Couldn't open that file.");
-    var url = d && d.signedUrl;
-    if (!url) throw Fail("Couldn't open that file.");
-    urlCache.set(p, { url: url, at: Date.now() });
-    return url;
+    var p = String(path && (path.url || path.path) ? (path.url || path.path) : (path || ''));
+    if (!isWebLink(p)) throw Fail("That file link isn't valid.");
+    return p;
   });
 
   /* ---------- live updates and typing ---------- */
@@ -234,11 +231,11 @@
       var closed = false;
       function deliver(cb, row) {
         if (typeof cb !== 'function') return;
-        loadNames([row.user_id]).then(function () { if (!closed) { try { cb(mapMessage(row)); } catch (x) { /* a screen error must not stop updates */ } } });
+        loadNames([authorOf(row)]).then(function () { if (!closed) { try { cb(mapMessage(row)); } catch (x) { /* a screen error must not stop updates */ } } });
       }
       var filter = 'channel_id=eq.' + channelId;
-      live.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: filter }, function (p) { if (p && p.new) deliver(handlers.onMessage, p.new); });
-      live.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: filter }, function (p) { if (p && p.new) deliver(handlers.onUpdate, p.new); });
+      live.on('postgres_changes', { event: 'INSERT', schema: 'public', table: MSG_TABLE, filter: filter }, function (p) { if (p && p.new) deliver(handlers.onMessage, p.new); });
+      live.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: MSG_TABLE, filter: filter }, function (p) { if (p && p.new) deliver(handlers.onUpdate, p.new); });
       live.subscribe();
       var te = typingEntry(channelId);
       te.refs += 1;
@@ -285,7 +282,7 @@
     var ids = [uid];
     (memberIds || []).forEach(function (m) { if (m && ids.indexOf(m) < 0) ids.push(m); });
     var made = { id: row.id, name: row.name, kind: row.kind, clientId: row.client_id || null, archived: false, lastMessageAt: null, unread: 0 };
-    var mres = await s.from('channel_members').insert(ids.map(function (m) { return { channel_id: row.id, user_id: m }; }));
+    var mres = await s.from('channel_members').insert(ids.map(function (m) { return m === uid ? { channel_id: row.id, user_id: m, member_role: 'owner' } : { channel_id: row.id, user_id: m }; }));
     if (mres && mres.error) { var e = Fail("The channel was created, but some people couldn't be added. Add them from the channel's people list."); e.partial = made; return Promise.reject(e); }
     return made;
   });
@@ -322,14 +319,15 @@
     return { channelId: id, userId: userId };
   });
 
+  // Team logins and client people. userId is the login id or the client person id; kind says which.
   window.chMembers = wrap("Couldn't load the people in this channel.", async function (id) {
     if (!id) throw Fail('Pick a channel first.');
-    var rows = check(await need(client()).from('channel_members').select('user_id,role,added_at,last_read_at').eq('channel_id', id), "Couldn't load the people in this channel.") || [];
-    await loadNames(rows.map(function (r) { return r.user_id; }));
+    var rows = check(await need(client()).from('channel_members').select('user_id,person_id,member_role,added_at,last_read_at').eq('channel_id', id), "Couldn't load the people in this channel.") || [];
+    await loadNames(rows.map(function (r) { return r.user_id || r.person_id; }));
     return rows.map(function (r) {
-      var p = names.get(r.user_id) || {};
-      return { userId: r.user_id, name: nameOf(r.user_id), role: r.role || 'member', profileRole: p.role || null, addedAt: r.added_at, lastReadAt: r.last_read_at };
-    }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+      var mid = r.user_id || r.person_id, isClient = !r.user_id && !!r.person_id, p = names.get(mid) || {};
+      return { userId: mid, kind: isClient ? 'client' : 'team', isClient: isClient, name: labelOf(mid, isClient), role: r.member_role || 'member', profileRole: isClient ? 'client' : (p.role || null), addedAt: r.added_at, lastReadAt: r.last_read_at };
+    }).sort(function (a, b) { return (a.isClient === b.isClient ? 0 : a.isClient ? 1 : -1) || a.name.localeCompare(b.name); });
   });
 
   window.chEnsureClientChannel = wrap("Couldn't set up that client's channel.", async function (clientId, name) {
@@ -341,5 +339,5 @@
   });
 
   /* Names are cached for the page's life; sign-out reloads the page. Exposed for tests only. */
-  window.chTestReset = function () { names.clear(); urlCache.clear(); typingSent.clear(); typingChans.clear(); };
+  window.chTestReset = function () { names.clear(); typingSent.clear(); typingChans.clear(); };
 })();

@@ -13,6 +13,11 @@
      chUnreadTotal() chSearch(text)
    `before` is passed the createdAt of the oldest message shown.
 
+   Real tables (channels-api.js): a message's userId is its author_user (team) or author_person (client); a client's
+   message has isClient:true and a name like "Pat Lee (Stone Roofing)", and the thread marks it with a Client tag.
+   Files: there is no storage bucket yet, so the composer has no Attach button (CHV_FILES_ON). A message that already
+   carries a web link as its attachment still shows it.
+
    Client mode (authUser.role==='client'): only their own channel, opened straight away, no channel admin.
    House rules: every string through esc(); links only http/https; ids reach handlers through chvA();
    view functions only return HTML; nothing runs at load time. Everything here is prefixed chv / channels. */
@@ -21,6 +26,8 @@
 const CHV_PAGE=50;                    // messages per page
 const CHV_MAX_FILE=10*1024*1024;      // per file (the storage rule)
 const CHV_MAX_FILES=5;                // per message
+const CHV_FILES_ON=false;             // no 'chat-files' bucket yet: sending files is switched off
+const CHV_NO_FILES="Sending files isn't switched on yet. Send the message as text, or paste a link to the file.";
 const CHV_GROUP_MS=5*60*1000;         // same person within 5 minutes = one group
 const CHV_POLL_MS=60000;
 const CHV_TYPING_MS=4500;
@@ -169,8 +176,9 @@ function chvListHTML(){
 }
 function chvRow(c){
   const u=Number(c.unread)||0,on=c.id===chv.cur;
-  return `<button type="button" class="chv-row${on?' on':''}${u?' unread':''}" onclick="chvOpen(${chvA(c.id)})"${on?' aria-current="true"':''} aria-label="${esc((c.name||'Channel')+(u?', '+u+' unread':''))}">
-    <span class="chv-hash" aria-hidden="true">${c.kind==='client'?'C':'#'}</span><span class="chv-rname">${esc(c.name||'Channel')}</span>${u?`<span class="chv-badge" aria-hidden="true">${esc(chvBadgeText(u))}</span>`:''}</button>`;
+  const cl=c.kind==='client';
+  return `<button type="button" class="chv-row${on?' on':''}${u?' unread':''}${cl?' client':''}" onclick="chvOpen(${chvA(c.id)})"${on?' aria-current="true"':''} aria-label="${esc((c.name||'Channel')+(cl?', client channel':'')+(u?', '+u+' unread':''))}"${cl?' title="Client channel: the client reads and writes here"':''}>
+    <span class="chv-hash" aria-hidden="true">${cl?'C':'#'}</span><span class="chv-rname">${esc(c.name||'Channel')}</span>${u?`<span class="chv-badge" aria-hidden="true">${esc(chvBadgeText(u))}</span>`:''}</button>`;
 }
 function chvListBodyHTML(){
   if(chv.err&&!chv.chs.length)return `<div class="chv-err" role="alert">${esc(chv.err)} <button type="button" class="chv-link" onclick="chvReload()">Try again</button></div>`;
@@ -273,7 +281,7 @@ function chvHeadHTML(c){
   const staff=chvIsStaff();
   const showNums=c.kind==='client'&&chvFn('renderClientNumbers');
   return `${chvIsClient()?'':`<button type="button" class="chv-back" onclick="chvBack()" aria-label="Back to channels">Channels</button>`}
-    <div class="chv-title"><h2>${esc(c.name||'Channel')}</h2><span class="chv-kind">${c.kind==='client'?'Client':'Team'}${c.archived?' · Archived':''}</span></div>
+    <div class="chv-title"><h2>${esc(c.name||'Channel')}</h2><span class="chv-kind${c.kind==='client'?' client':''}">${c.kind==='client'?`Client channel · ${esc(c.company||c.name||'the client')} reads and writes here`:'Team'}${c.archived?' · Archived':''}</span></div>
     <div class="chv-actions">
       ${staff&&!c.archived?`<button type="button" class="chv-btn" onclick="chvMembers()">Members</button><button type="button" class="chv-btn" onclick="chvRename()">Rename</button><button type="button" class="chv-btn" onclick="chvArchive()">Archive</button>`:''}
       ${showNums?`<button type="button" class="chv-btn${chv.panelOpen?' on':''}" onclick="chvTogglePanel()" aria-pressed="${chv.panelOpen?'true':'false'}">Numbers</button>`:''}
@@ -302,8 +310,9 @@ function chvThreadHTML(){
 }
 function chvMsgHTML(m,first,own,d){
   const idAttr='chvM-'+esc(m.id);
-  const gut=`<div class="chv-gut">${first?`<span class="chv-av" aria-hidden="true">${esc(chvInitial(m.name))}</span>`:''}</div>`;
-  const head=first?`<div class="chv-mhead"><span class="chv-who">${esc(m.name||'Someone')}</span><time>${esc(d?chvTime(d):'')}</time></div>`:'';
+  const cl=!!m.isClient;
+  const gut=`<div class="chv-gut">${first?`<span class="chv-av${cl?' client':''}" aria-hidden="true">${esc(chvInitial(m.name))}</span>`:''}</div>`;
+  const head=first?`<div class="chv-mhead"><span class="chv-who">${esc(m.name||'Someone')}</span>${cl?'<span class="chv-client-tag">Client</span>':''}<time>${esc(d?chvTime(d):'')}</time></div>`:'';
   if(m.deleted)return `<div class="chv-msg${first?' first':''} deleted" id="${idAttr}">${gut}<div class="chv-col">${head}<div class="chv-body"><span class="chv-gone">This message was deleted</span></div></div></div>`;
   let body;
   if(chv.editing===m.id){
@@ -313,14 +322,15 @@ function chvMsgHTML(m,first,own,d){
     body=(m.body?`<div class="chv-text">${chvLinkify(m.body)}${m.editedAt?` <span class="chv-edited">(edited)</span>`:''}</div>`:'')+chvAttsHTML(m);
   }
   const actions=own&&chv.editing!==m.id&&!(chvFindCh(chv.cur)||{}).archived?`<span class="chv-macts"><button type="button" class="chv-link" onclick="chvEditStart(${chvA(m.id)})">Edit</button><button type="button" class="chv-link" onclick="chvDelete(${chvA(m.id)})">Delete</button></span>`:'';
-  return `<div class="chv-msg${first?' first':''}${own?' own':''}" id="${idAttr}">${gut}<div class="chv-col">${head}<div class="chv-body">${body}${actions}</div></div></div>`;
+  return `<div class="chv-msg${first?' first':''}${own?' own':''}${cl?' from-client':''}" id="${idAttr}">${gut}<div class="chv-col">${head}<div class="chv-body">${body}${actions}</div></div></div>`;
 }
 function chvAttsHTML(m){
   const atts=chvAttOf(m);if(!atts.length)return '';
   return `<div class="chv-atts">`+atts.map((a,i)=>{
-    const url=chv.urls[a.path];
+    const direct=a.url&&/^https?:\/\//i.test(a.url)?a.url:'';   // a web link needs no signing
+    const url=chv.urls[a.path]||direct;
     const name=esc(a.name||'file'),size=a.size?chvBytes(a.size):'';
-    chvWantUrl(a.path);
+    if(!direct)chvWantUrl(a.path);
     if(chvIsImage(a)){
       return url?`<a class="chv-img" href="${esc(url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(url)}" alt="${name}" loading="lazy"></a>`
         :`<span class="chv-img pending" aria-label="${name}"><span>${name}</span></span>`;
@@ -496,10 +506,10 @@ function chvComposerHTML(c){
   return `${chips?`<div class="chv-chips" id="chvChips">${chips}</div>`:'<div class="chv-chips" id="chvChips"></div>'}
     <div class="chv-cerr" id="chvCErr" role="alert">${esc(chv.cerr)}</div>
     <div class="chv-cbox">
-      <button type="button" class="chv-attach" onclick="chvPick()" aria-label="Attach files">Attach</button>
+      ${CHV_FILES_ON?`<button type="button" class="chv-attach" onclick="chvPick()" aria-label="Attach files">Attach</button>`:''}
       <textarea id="chvInput" rows="1" placeholder="Write a message" aria-label="Write a message" onkeydown="chvKey(event)" oninput="chvInput(this)" onpaste="chvPaste(event)">${esc(chv.drafts[chv.cur]||'')}</textarea>
       <button type="button" class="chv-send" id="chvSend" onclick="chvSend()"${chv.sending?' disabled':''}>Send</button>
-      <input type="file" id="chvFile" multiple hidden onchange="chvFiles(this)">
+      ${CHV_FILES_ON?`<input type="file" id="chvFile" multiple hidden onchange="chvFiles(this)">`:''}
     </div>`;
 }
 function chvPaintComposer(){const c=chvFindCh(chv.cur),e=chvEl('chvComposer');if(c&&e)e.innerHTML=chvComposerHTML(c);}
@@ -514,6 +524,7 @@ function chvKey(e){
 }
 /* Add files, checking the limits; says what was left out in plain words. */
 function chvAddFiles(list){
+  if(!CHV_FILES_ON){chv.cerr=CHV_NO_FILES;const e=chvEl('chvCErr');if(e)e.textContent=chv.cerr;return;}
   const msgs=[];
   Array.from(list||[]).forEach(f=>{
     if(!f)return;
@@ -530,6 +541,7 @@ function chvFiles(input){chvAddFiles(input&&input.files);if(input)try{input.valu
 function chvUnattach(i){chv.pending.splice(i,1);chv.cerr='';chvSaveDraft();chvPaintComposer();}
 /* Pasting a screenshot attaches it; pasting text works as usual. */
 function chvPaste(e){
+  if(!CHV_FILES_ON)return;                     // text pastes as usual; images are not sent while files are off
   const cd=e&&e.clipboardData;if(!cd)return;
   const files=[];
   if(cd.files&&cd.files.length)Array.from(cd.files).forEach(f=>{if(/^image\//i.test(f.type||''))files.push(f);});
@@ -682,7 +694,8 @@ async function chvPaintMembers(){
   const mem=Array.isArray(mr.data)?mr.data:[];
   const ids={};mem.forEach(m=>{ids[m.userId||m.id]=1;});
   const addable=staff.filter(p=>!ids[p.id]);
-  b2.innerHTML=`<ul class="chv-members">${mem.map(m=>{const uid=m.userId||m.id;return `<li><span class="chv-av" aria-hidden="true">${esc(chvInitial(m.name))}</span><span class="chv-mname">${esc(m.name||'Member')}</span>${uid===chvMe()?'<span class="muted">You</span>':`<button type="button" class="chv-link" onclick="chvRemoveMember(${chvA(uid)})">Remove</button>`}</li>`;}).join('')||'<li class="muted">No members.</li>'}</ul>
+  // A client's own people are shown, marked Client, and are not removable here (that would cut the client off).
+  b2.innerHTML=`<ul class="chv-members">${mem.map(m=>{const uid=m.userId||m.id,cl=!!m.isClient||m.kind==='client';return `<li${cl?' class="client"':''}><span class="chv-av${cl?' client':''}" aria-hidden="true">${esc(chvInitial(m.name))}</span><span class="chv-mname">${esc(m.name||'Member')}</span>${cl?'<span class="chv-client-tag">Client</span>':uid===chvMe()?'<span class="muted">You</span>':`<button type="button" class="chv-link" onclick="chvRemoveMember(${chvA(uid)})">Remove</button>`}</li>`;}).join('')||'<li class="muted">No members.</li>'}</ul>
     ${addable.length?`<div class="field"><label for="chvAddSel">Add a team member</label><div class="chv-addrow"><select id="chvAddSel">${addable.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><button type="button" class="btn" onclick="chvAddMember()">Add</button></div></div>`:''}
     <div id="chvModalErr" class="chv-err" role="alert" hidden></div>`;
 }

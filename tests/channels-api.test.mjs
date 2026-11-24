@@ -17,7 +17,10 @@ function reset() {
   calls = []; uploads = []; removed = []; chans = []; removedChans = []; signed = [];
   state = { user: 'u-me', uploadError: null, signError: null, sendResult: 'ok' };
   rpcs = {
-    channel_people: ({ p_ids }) => ({ data: p_ids.filter((i) => i !== 'u-ghost').map((id) => ({ id, name: id === 'u-me' ? 'Me Myself' : 'Person ' + id, role: id.startsWith('c-') ? 'client' : 'admin' })), error: null }),
+    // team logins are u-*, client people are c-* (a client_people id), as the real channel_people answers
+    channel_people: ({ p_ids }) => ({ data: p_ids.filter((i) => i !== 'u-ghost').map((id) => id.startsWith('c-')
+      ? { id, name: 'Person ' + id, role: 'client', kind: 'client', company: id === 'c-nocompany' ? null : 'Stone Roofing' }
+      : { id, name: id === 'u-me' ? 'Me Myself' : 'Person ' + id, role: 'admin', kind: 'team', company: null }), error: null }),
   };
   tables = {};
 }
@@ -70,16 +73,25 @@ beforeEach(() => { reset(); chTestReset(); globalThis.sb = fakeSb; });
 reset();
 
 const file = (name, size, type = 'text/plain') => ({ name, size, type });
-const row = (o = {}) => ({ id: 'm1', channel_id: 'ch1', user_id: 'u-me', body: 'hi', attachments: [], created_at: '2026-11-20T10:00:00Z', edited_at: null, deleted_at: null, ...o });
+// a channel_messages row; a client's message is crow() (author_person set, author_user null)
+const row = (o = {}) => ({ id: 'm1', channel_id: 'ch1', author_user: 'u-me', author_person: null, body: 'hi', attachment_url: null, created_at: '2026-11-20T10:00:00Z', edited_at: null, deleted_at: null, ...o });
+const crow = (person, o = {}) => row({ author_user: null, author_person: person, ...o });
+const T = 'channel_messages';
 const shape = (r) => { assert.deepEqual(Object.keys(r).sort(), ['data', 'error', 'ok']); return r; };
 
 /* ───────────── reading ───────────── */
 test('chListChannels maps the rpc rows to the contract shape', async () => {
-  rpcs.my_channels = () => ({ data: [{ id: 'a', name: 'Stone Roofing', kind: 'client', client_id: 'stone-roofing', archived_at: null, last_message_at: '2026-11-20T09:00:00Z', unread: 3 }, { id: 'b', name: 'Team', kind: 'team', client_id: null, archived_at: '2026-01-01T00:00:00Z', last_message_at: null, unread: 0 }], error: null });
+  rpcs.my_channels = () => ({ data: [{ id: 'a', name: 'Stone Roofing', purpose: 'Your direct line to the Aviance team', kind: 'client', client_id: 'stone-roofing', company: 'Stone Roofing', archived_at: null, created_at: '2026-11-19T09:00:00Z', last_message_at: '2026-11-20T09:00:00Z', last_body: 'hello', unread: 3 }, { id: 'b', name: 'Team', kind: 'team', client_id: null, archived_at: '2026-01-01T00:00:00Z', last_message_at: null, unread: 0 }], error: null });
   const r = shape(await chListChannels());
   assert.equal(r.ok, true); assert.equal(r.error, null);
-  assert.deepEqual(r.data[0], { id: 'a', name: 'Stone Roofing', kind: 'client', clientId: 'stone-roofing', archived: false, lastMessageAt: '2026-11-20T09:00:00Z', unread: 3 });
-  assert.equal(r.data[1].archived, true); assert.equal(r.data[1].clientId, null); assert.equal(r.data[1].lastMessageAt, null);
+  assert.deepEqual(r.data[0], { id: 'a', name: 'Stone Roofing', kind: 'client', clientId: 'stone-roofing', archived: false, lastMessageAt: '2026-11-20T09:00:00Z', unread: 3, company: 'Stone Roofing', purpose: 'Your direct line to the Aviance team', lastBody: 'hello' });
+  assert.equal(r.data[1].archived, true); assert.equal(r.data[1].clientId, null); assert.equal(r.data[1].lastMessageAt, null); assert.equal(r.data[1].company, null);
+  assert.deepEqual(calls.find((x) => x.rpc).rpc, 'my_channels');
+});
+test('chListChannels: a client channel made by close_won (no messages yet) is listed as a client channel', async () => {
+  rpcs.my_channels = () => ({ data: [{ id: 'won', name: 'Blue Sky', kind: 'client', client_id: 'cl-1', company: 'Blue Sky', archived_at: null, last_message_at: null, last_body: null, unread: 0 }], error: null });
+  const r = await chListChannels();
+  assert.equal(r.data.length, 1); assert.equal(r.data[0].kind, 'client'); assert.equal(r.data[0].clientId, 'cl-1'); assert.equal(r.data[0].company, 'Blue Sky');
 });
 test('chListChannels: a database error comes back as plain words', async () => {
   rpcs.my_channels = () => ({ data: null, error: { code: '42P01', message: 'relation "channels" does not exist' } });
@@ -91,91 +103,83 @@ test('chUnreadTotal adds up unread but skips archived channels', async () => {
   rpcs.my_channels = () => ({ data: [{ id: 'a', name: 'A', kind: 'client', unread: 2 }, { id: 'b', name: 'B', kind: 'team', unread: 5 }, { id: 'c', name: 'C', kind: 'team', unread: 9, archived_at: 'x' }], error: null });
   const r = await chUnreadTotal(); assert.equal(r.ok, true); assert.equal(r.data, 7);
 });
-test('chMessages returns oldest to newest, with names, edits and deleted messages blanked', async () => {
-  tables['messages.select'] = () => ({ data: [row({ id: 'm3', created_at: '2026-11-20T12:00:00Z', user_id: 'c-1', body: 'new' }), row({ id: 'm2', created_at: '2026-11-20T11:00:00Z', body: 'secret', attachments: [{ path: 'p', name: 'n', size: 1, type: 't' }], deleted_at: '2026-11-20T11:05:00Z' }), row({ id: 'm1', edited_at: '2026-11-20T10:30:00Z' })], error: null });
+test('chMessages reads channel_messages oldest to newest; team and client authors are named, the client marked', async () => {
+  tables[T + '.select'] = () => ({ data: [crow('c-1', { id: 'm3', created_at: '2026-11-20T12:00:00Z', body: 'new' }), row({ id: 'm2', created_at: '2026-11-20T11:00:00Z', body: 'secret', attachment_url: 'https://x.test/a.pdf', deleted_at: '2026-11-20T11:05:00Z' }), row({ id: 'm1', edited_at: '2026-11-20T10:30:00Z' })], error: null });
   const r = await chMessages('ch1');
   assert.equal(r.ok, true);
   assert.deepEqual(r.data.map((m) => m.id), ['m1', 'm2', 'm3']);
-  assert.equal(r.data[0].name, 'Me Myself'); assert.equal(r.data[2].name, 'Person c-1');
+  assert.equal(r.data[0].name, 'Me Myself'); assert.equal(r.data[0].userId, 'u-me'); assert.equal(r.data[0].isClient, false); assert.equal(r.data[0].authorKind, 'team');
+  assert.equal(r.data[2].name, 'Person c-1 (Stone Roofing)'); assert.equal(r.data[2].userId, 'c-1');
+  assert.equal(r.data[2].isClient, true); assert.equal(r.data[2].authorKind, 'client'); assert.equal(r.data[2].company, 'Stone Roofing');
   assert.equal(r.data[0].editedAt, '2026-11-20T10:30:00Z');
   assert.equal(r.data[1].deleted, true); assert.equal(r.data[1].body, ''); assert.deepEqual(r.data[1].attachments, []);
-  const c = calls.find((x) => x.table === 'messages');
+  const c = calls.find((x) => x.table === T);
+  assert.equal(c.cols, 'id,channel_id,author_user,author_person,body,attachment_url,created_at,edited_at,deleted_at');
   assert.deepEqual(c.filters, [['eq', 'channel_id', 'ch1']]); assert.deepEqual(c.order, ['created_at', { ascending: false }]); assert.equal(c.limit, 50);
+  assert.deepEqual(calls.find((x) => x.rpc === 'channel_people').args.p_ids.sort(), ['c-1', 'u-me']);
+  assert.equal(calls.filter((x) => x.table === 'messages').length, 0, 'the old messages table is never touched');
+});
+test('chMessages: a client without a company still reads as a client; attachment_url web links become one attachment', async () => {
+  tables[T + '.select'] = () => ({ data: [crow('c-nocompany', { id: 'a' }), row({ id: 'b', attachment_url: 'https://files.test/folder/Quote%20v2.pdf' }), row({ id: 'c', attachment_url: 'chat-files/x.pdf' })], error: null });
+  const r = await chMessages('ch1');
+  assert.deepEqual(r.data.map((m) => m.id), ['c', 'b', 'a']);
+  assert.equal(r.data[2].name, 'Person c-nocompany (client)');
+  assert.deepEqual(r.data[1].attachments, [{ path: 'https://files.test/folder/Quote%20v2.pdf', url: 'https://files.test/folder/Quote%20v2.pdf', name: 'Quote v2.pdf', size: 0, type: '' }]);
+  assert.deepEqual(r.data[0].attachments, [], 'a storage path with no bucket is dropped');
 });
 test('chMessages: before + limit are applied (limit capped), names are fetched once and cached', async () => {
-  tables['messages.select'] = () => ({ data: [row()], error: null });
+  tables[T + '.select'] = () => ({ data: [row()], error: null });
   await chMessages('ch1', { before: '2026-11-20T10:00:00Z', limit: 10 });
   await chMessages('ch1', { limit: 9999 });
-  const m = calls.filter((x) => x.table === 'messages');
+  const m = calls.filter((x) => x.table === T);
   assert.deepEqual(m[0].filters.at(-1), ['lt', 'created_at', '2026-11-20T10:00:00Z']); assert.equal(m[0].limit, 10); assert.equal(m[1].limit, 200);
   assert.equal(calls.filter((x) => x.rpc === 'channel_people').length, 1);
 });
 test('chMessages: an unknown author shows as "Someone"; a failing names lookup does not fail the load', async () => {
-  tables['messages.select'] = () => ({ data: [row({ user_id: 'u-ghost' })], error: null });
+  tables[T + '.select'] = () => ({ data: [row({ author_user: 'u-ghost' })], error: null });
   assert.equal((await chMessages('ch1')).data[0].name, 'Someone');
   chTestReset(); rpcs.channel_people = () => { throw new Error('boom'); };
   const r = await chMessages('ch1'); assert.equal(r.ok, true); assert.equal(r.data[0].name, 'Someone');
 });
 test('chMessages without a channel or on a database error', async () => {
   assert.match((await chMessages('')).error, /Pick a channel/);
-  tables['messages.select'] = () => ({ data: null, error: { code: '42501', message: 'new row violates row-level security policy' } });
+  tables[T + '.select'] = () => ({ data: null, error: { code: '42501', message: 'new row violates row-level security policy' } });
   const r = await chMessages('ch1'); assert.equal(r.ok, false); assert.equal(r.error, "You don't have access to do that.");
 });
 test('chSearch escapes % and _, skips deleted, adds channel names; empty text gives nothing', async () => {
   rpcs.my_channels = () => ({ data: [{ id: 'ch1', name: 'Stone Roofing', kind: 'client', unread: 0 }], error: null });
-  tables['messages.select'] = () => ({ data: [row({ body: '100% sure' })], error: null });
+  tables[T + '.select'] = () => ({ data: [row({ body: '100% sure' })], error: null });
   const r = await chSearch('  100%_x '); assert.equal(r.ok, true);
-  const c = calls.find((x) => x.table === 'messages');
+  const c = calls.find((x) => x.table === T);
   assert.deepEqual(c.filters, [['ilike', 'body', '%100\\%\\_x%'], ['is', 'deleted_at', null]]);
   assert.equal(r.data[0].channelName, 'Stone Roofing');
   const e = await chSearch('   '); assert.deepEqual(e.data, []); assert.equal(e.ok, true);
-  tables['messages.select'] = () => ({ data: null, error: { message: 'Failed to fetch' } });
+  tables[T + '.select'] = () => ({ data: null, error: { message: 'Failed to fetch' } });
   assert.match((await chSearch('x')).error, /Can't reach Aviance/);
 });
 
 /* ───────────── sending ───────────── */
-test('chSend: text only', async () => {
-  tables['messages.insert'] = (c) => ({ data: [row({ body: c.payload.body, id: 'new1' })], error: null });
+test('chSend: writes channel_messages with author_user = you and author_person null', async () => {
+  tables[T + '.insert'] = (c) => ({ data: [row({ body: c.payload.body, id: 'new1' })], error: null });
   const r = await chSend('ch1', '  hello there  ', []);
-  assert.equal(r.ok, true); assert.equal(r.data.body, 'hello there'); assert.equal(r.data.id, 'new1'); assert.equal(r.data.name, 'Me Myself');
+  assert.equal(r.ok, true); assert.equal(r.data.body, 'hello there'); assert.equal(r.data.id, 'new1'); assert.equal(r.data.name, 'Me Myself'); assert.equal(r.data.userId, 'u-me'); assert.equal(r.data.isClient, false);
   const c = calls.find((x) => x.op === 'insert');
-  assert.deepEqual(c.payload, { channel_id: 'ch1', user_id: 'u-me', body: 'hello there', attachments: [] });
+  assert.equal(c.table, T);
+  assert.deepEqual(c.payload, { channel_id: 'ch1', author_user: 'u-me', author_person: null, body: 'hello there' });
   assert.equal(uploads.length, 0);
 });
-test('chSend: files go to chat-files/{channel}/{uuid}-{safe-name} and are listed on the message', async () => {
-  tables['messages.insert'] = (c) => ({ data: [row({ attachments: c.payload.attachments })], error: null });
-  const r = await chSend('ch1', '', [file('../../My Plan (v2).pdf', 1234, 'application/pdf'), file('', 10, '')]);
-  assert.equal(r.ok, true); assert.equal(uploads.length, 2);
-  assert.equal(uploads[0].bucket, 'chat-files');
-  assert.match(uploads[0].path, /^ch1\/[0-9a-f-]{36}-My_Plan_v2_.pdf$/);
-  assert.match(uploads[1].path, /^ch1\/[0-9a-f-]{36}-file$/);
-  assert.equal(uploads[0].opts.upsert, false); assert.equal(uploads[1].opts.contentType, 'application/octet-stream');
-  assert.deepEqual(r.data.attachments[0], { path: uploads[0].path, name: '../../My Plan (v2).pdf', size: 1234, type: 'application/pdf' });
+test('chSend: files are refused in plain words (no storage bucket yet) and nothing is sent or uploaded', async () => {
+  tables[T + '.insert'] = () => ({ data: [row()], error: null });
+  const r = await chSend('ch1', 'see attached', [file('plan.pdf', 1234, 'application/pdf')]);
+  assert.equal(r.ok, false); assert.match(r.error, /Sending files isn't switched on yet/);
+  assert.equal(uploads.length, 0); assert.equal(calls.filter((c) => c.op === 'insert').length, 0);
 });
-test('chSend: limits, before anything is uploaded', async () => {
-  const many = Array.from({ length: 6 }, (_, i) => file('f' + i, 1));
-  assert.match((await chSend('ch1', 'x', many)).error, /up to 5 files/);
-  assert.match((await chSend('ch1', 'x', [file('big.zip', 10 * 1024 * 1024 + 1)])).error, /big\.zip is too big.*10 MB/);
-  assert.match((await chSend('ch1', 'x', [file('empty.txt', 0)])).error, /empty/);
-  assert.match((await chSend('ch1', '   ', [])).error, /Write a message or add a file/);
+test('chSend: limits', async () => {
+  assert.match((await chSend('ch1', '   ', [])).error, /Write a message first/);
   assert.match((await chSend('ch1', 'a'.repeat(8001), [])).error, /too long/);
   assert.match((await chSend('', 'x', [])).error, /Pick a channel/);
-  const exactly5 = Array.from({ length: 5 }, (_, i) => file('f' + i, 1));
-  tables['messages.insert'] = () => ({ data: [row()], error: null });
-  assert.equal((await chSend('ch1', 'x', exactly5)).ok, true);
-});
-test('chSend: a failed upload removes the files already uploaded and sends nothing', async () => {
-  state.uploadError = { at: 2, err: { message: 'The object exceeded the maximum allowed size' } };
-  const r = await chSend('ch1', 'x', [file('a.txt', 5), file('b.txt', 5)]);
-  assert.equal(r.ok, false); assert.match(r.error, /10 MB/);
-  assert.equal(removed.length, 1); assert.equal(removed[0], uploads[0].path);
-  assert.equal(calls.filter((c) => c.op === 'insert').length, 0);
-});
-test('chSend: if saving the message fails the uploaded files are cleaned up', async () => {
-  tables['messages.insert'] = () => ({ data: null, error: { code: '42501', message: 'row-level security' } });
-  const r = await chSend('ch1', 'x', [file('a.txt', 5)]);
-  assert.equal(r.ok, false); assert.equal(r.error, "You don't have access to do that.");
-  assert.deepEqual(removed, [uploads[0].path]);
+  tables[T + '.insert'] = () => ({ data: null, error: { code: '42501', message: 'row-level security' } });
+  assert.equal((await chSend('ch1', 'x')).error, "You don't have access to do that.");
 });
 test('chSend: signed out gives a plain message; no sb gives a plain message; never throws', async () => {
   state.user = null; assert.match((await chSend('ch1', 'x')).error, /sign in again/);
@@ -186,25 +190,28 @@ test('chSend: signed out gives a plain message; no sb gives a plain message; nev
 
 /* ───────────── edit / delete / read / file links ───────────── */
 test('chEdit updates the body and stamps edited_at; nothing updated means not yours', async () => {
-  tables['messages.update'] = (c) => ({ data: [row({ body: c.payload.body, edited_at: c.payload.edited_at })], error: null });
+  tables[T + '.update'] = (c) => ({ data: [row({ body: c.payload.body, edited_at: c.payload.edited_at })], error: null });
   const r = await chEdit('m1', ' fixed ');
   assert.equal(r.ok, true); assert.equal(r.data.body, 'fixed'); assert.ok(r.data.editedAt);
-  const c = calls.find((x) => x.op === 'update'); assert.deepEqual(c.filters, [['eq', 'id', 'm1'], ['is', 'deleted_at', null]]);
-  tables['messages.update'] = () => ({ data: [], error: null });
+  const c = calls.find((x) => x.op === 'update'); assert.equal(c.table, T);
+  assert.deepEqual(c.filters, [['eq', 'id', 'm1'], ['eq', 'author_user', 'u-me'], ['is', 'deleted_at', null]]);   // only your own
+  tables[T + '.update'] = () => ({ data: [], error: null });
   assert.match((await chEdit('m1', 'x')).error, /only edit your own/);
   assert.match((await chEdit('m1', '  ')).error, /can't be empty/);
   assert.match((await chEdit('m1', 'a'.repeat(8001))).error, /too long/);
   assert.match((await chEdit('', 'x')).error, /Pick a message/);
 });
 test('chDelete is a soft delete and only works on your own messages', async () => {
-  tables['messages.update'] = (c) => ({ data: [row({ deleted_at: c.payload.deleted_at })], error: null });
+  tables[T + '.update'] = (c) => ({ data: [row({ deleted_at: c.payload.deleted_at })], error: null });
   const r = await chDelete('m1');
   assert.equal(r.ok, true); assert.equal(r.data.deleted, true); assert.equal(r.data.body, '');
-  assert.deepEqual(Object.keys(calls.find((x) => x.op === 'update').payload), ['deleted_at']);
+  const u = calls.find((x) => x.op === 'update');
+  assert.deepEqual(Object.keys(u.payload), ['deleted_at']); assert.equal(u.table, T);
+  assert.deepEqual(u.filters, [['eq', 'id', 'm1'], ['eq', 'author_user', 'u-me'], ['is', 'deleted_at', null]]);
   assert.equal(calls.filter((c) => c.op === 'delete').length, 0);
-  tables['messages.update'] = () => ({ data: [], error: null });
+  tables[T + '.update'] = () => ({ data: [], error: null });
   assert.match((await chDelete('m1')).error, /only delete your own/);
-  tables['messages.update'] = () => ({ data: null, error: { message: 'Failed to fetch' } });
+  tables[T + '.update'] = () => ({ data: null, error: { message: 'Failed to fetch' } });
   assert.match((await chDelete('m1')).error, /Can't reach Aviance/);
 });
 test('chMarkRead calls the database function; failures are plain words', async () => {
@@ -215,13 +222,12 @@ test('chMarkRead calls the database function; failures are plain words', async (
   assert.equal((await chMarkRead('ch1')).error, 'You do not have access to that channel.');
   assert.match((await chMarkRead('')).error, /Pick a channel/);
 });
-test('chFileUrl: signed for 1 hour, reused while fresh, refuses odd paths, accepts an attachment object', async () => {
-  const a = await chFileUrl('ch1/abc-doc.pdf'); assert.equal(a.ok, true); assert.match(a.data, /^https:\/\/files\.test\/ch1\/abc-doc\.pdf/);
-  assert.equal(signed[0].secs, 3600);
-  const b = await chFileUrl({ path: 'ch1/abc-doc.pdf' }); assert.equal(b.data, a.data); assert.equal(signed.length, 1);
-  assert.match((await chFileUrl('../secret')).error, /isn't valid/); assert.match((await chFileUrl('')).error, /isn't valid/); assert.match((await chFileUrl('/abs')).error, /isn't valid/);
-  state.signError = { message: 'Object not found' };
-  assert.equal((await chFileUrl('ch1/other.pdf')).error, "Couldn't open that file.");
+test('chFileUrl: hands back a web link as it is (no bucket to sign from); refuses anything else', async () => {
+  const a = await chFileUrl('https://files.test/a.pdf'); assert.equal(a.ok, true); assert.equal(a.data, 'https://files.test/a.pdf');
+  const b = await chFileUrl({ path: 'https://files.test/a.pdf', url: 'https://files.test/a.pdf' }); assert.equal(b.data, 'https://files.test/a.pdf');
+  assert.equal(signed.length, 0);
+  assert.match((await chFileUrl('../secret')).error, /isn't valid/); assert.match((await chFileUrl('')).error, /isn't valid/); assert.match((await chFileUrl('ch1/abc-doc.pdf')).error, /isn't valid/);
+  assert.match((await chFileUrl('javascript:alert(1)')).error, /isn't valid/);
 });
 
 /* ───────────── live updates ───────────── */
@@ -232,11 +238,11 @@ test('chSubscribe: new messages, updates and typing reach the callbacks; unsubsc
   const live = chans.find((c) => c.name === 'chat:ch1'), typing = chans.find((c) => c.name === 'typing:ch1');
   assert.ok(live.subscribed && typing.subscribed);
   const ins = live.ons.find((o) => o.filter.event === 'INSERT'), upd = live.ons.find((o) => o.filter.event === 'UPDATE');
-  assert.equal(ins.filter.table, 'messages'); assert.equal(ins.filter.filter, 'channel_id=eq.ch1');
-  ins.cb({ new: row({ id: 'n1', user_id: 'c-9', body: 'ping' }) });
+  assert.equal(ins.filter.table, 'channel_messages'); assert.equal(upd.filter.table, 'channel_messages'); assert.equal(ins.filter.filter, 'channel_id=eq.ch1');
+  ins.cb({ new: crow('c-9', { id: 'n1', body: 'ping' }) });
   upd.cb({ new: row({ id: 'n1', deleted_at: '2026-11-20T13:00:00Z' }) });
   await new Promise((r) => setTimeout(r, 5));
-  assert.equal(got.msg[0].name, 'Person c-9'); assert.equal(got.msg[0].body, 'ping');
+  assert.equal(got.msg[0].name, 'Person c-9 (Stone Roofing)'); assert.equal(got.msg[0].isClient, true); assert.equal(got.msg[0].body, 'ping');
   assert.equal(got.upd[0].deleted, true);
   typing.ons.find((o) => o.type === 'broadcast').cb({ payload: { user_id: 'c-9', name: 'Pat' } });
   assert.deepEqual(got.typ, [{ userId: 'c-9', name: 'Pat' }]);
@@ -277,7 +283,8 @@ test('chCreateChannel makes a team channel and adds you plus the chosen people o
   const r = await chCreateChannel('  Planning  ', ['u-2', 'u-me', 'u-2', 'u-3']);
   assert.equal(r.ok, true); assert.equal(r.data.id, 'new'); assert.equal(r.data.name, 'Planning'); assert.equal(r.data.kind, 'team');
   assert.deepEqual(calls.find((c) => c.table === 'channels').payload, { name: 'Planning', kind: 'team', created_by: 'u-me' });
-  assert.deepEqual(calls.find((c) => c.table === 'channel_members').payload.map((m) => m.user_id), ['u-me', 'u-2', 'u-3']);
+  const mem = calls.find((c) => c.table === 'channel_members').payload;
+  assert.deepEqual(mem.map((m) => m.user_id), ['u-me', 'u-2', 'u-3']); assert.equal(mem[0].member_role, 'owner'); assert.equal(mem[1].member_role, undefined);
   assert.match((await chCreateChannel('   ', [])).error, /Give the channel a name/);
   assert.match((await chCreateChannel('x'.repeat(81), [])).error, /under 80/);
 });
@@ -312,11 +319,13 @@ test('chAddMember (already a member is fine), chRemoveMember', async () => {
   tables['channel_members.delete'] = () => ({ data: null, error: { message: 'Failed to fetch' } });
   assert.match((await chRemoveMember('ch1', 'u-2')).error, /Can't reach/);
 });
-test('chMembers lists names and roles, sorted by name', async () => {
-  tables['channel_members.select'] = () => ({ data: [{ user_id: 'c-1', role: 'member', added_at: 'a', last_read_at: 'b' }, { user_id: 'u-me', role: 'owner', added_at: 'a', last_read_at: 'b' }], error: null });
+test('chMembers lists team logins and client people (marked), team first, by name', async () => {
+  tables['channel_members.select'] = () => ({ data: [{ user_id: null, person_id: 'c-1', member_role: 'member', added_at: 'a', last_read_at: null }, { user_id: 'u-zed', person_id: null, member_role: 'member', added_at: 'a', last_read_at: 'b' }, { user_id: 'u-me', person_id: null, member_role: 'owner', added_at: 'a', last_read_at: 'b' }], error: null });
   const r = await chMembers('ch1');
-  assert.deepEqual(r.data.map((m) => m.name), ['Me Myself', 'Person c-1']);
-  assert.equal(r.data[1].profileRole, 'client'); assert.equal(r.data[0].role, 'owner');
+  assert.deepEqual(r.data.map((m) => m.name), ['Me Myself', 'Person u-zed', 'Person c-1 (Stone Roofing)']);
+  assert.equal(r.data[0].role, 'owner'); assert.equal(r.data[0].kind, 'team'); assert.equal(r.data[0].profileRole, 'admin');
+  assert.equal(r.data[2].userId, 'c-1'); assert.equal(r.data[2].isClient, true); assert.equal(r.data[2].kind, 'client'); assert.equal(r.data[2].profileRole, 'client');
+  assert.equal(calls.find((c) => c.table === 'channel_members').cols, 'user_id,person_id,member_role,added_at,last_read_at');
   assert.match((await chMembers('')).error, /Pick a channel/);
 });
 test('chEnsureClientChannel returns the channel id; errors from the database are plain', async () => {

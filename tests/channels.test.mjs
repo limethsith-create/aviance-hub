@@ -213,24 +213,54 @@ test('edit and delete your own messages only', async () => {
   assert.deepEqual(calls('chDelete')[0], ['chDelete', 'm2']);
   assert.match(el('chvThread').innerHTML, /chvM-m2[\s\S]*This message was deleted/);
 });
-test('attachments: size and count limits, paste an image, send with files', async () => {
+test('files are switched off (no storage bucket): no Attach button, adding or pasting a file says so, text still sends', async () => {
   reset(); asOwner(); await show({ c1: C1() });
-  chvAddFiles([{ name: 'big.zip', size: 11 * 1048576, type: 'application/zip' }]);
-  assert.equal(chv.pending.length, 0); assert.match(chv.cerr, /big\.zip is bigger than 10 MB/);
+  const comp = el('chvComposer').innerHTML;
+  assert.doesNotMatch(comp, /chv-attach|Attach files|type="file"/);
   chvAddFiles([{ name: 'ok.pdf', size: 1000, type: 'application/pdf' }]);
-  assert.equal(chv.pending.length, 1); assert.match(el('chvComposer').innerHTML, /ok\.pdf/);
-  chvAddFiles(Array.from({ length: 6 }, (_, i) => ({ name: 'f' + i, size: 10, type: 'text/plain' })));
-  assert.equal(chv.pending.length, 5); assert.match(chv.cerr, /up to 5 files/);
-  chvUnattach(0); assert.equal(chv.pending.length, 4);
-  // paste: an image is attached, text paste is left alone
-  let pd = 0; const img = { name: 'image.png', size: 500, type: 'image/png' };
-  chvPaste({ clipboardData: { files: [img] }, preventDefault() { pd++; } });
-  assert.equal(pd, 1); assert.equal(chv.pending.length, 5);
-  let pd2 = 0; chvPaste({ clipboardData: { files: [], items: [] }, preventDefault() { pd2++; } }); assert.equal(pd2, 0);
-  el('chvInput').value = '';
-  await chvSend();                                      // files alone are a message
-  assert.equal(calls('chSend')[0][3].length, 5);
-  assert.equal(chv.pending.length, 0);
+  assert.equal(chv.pending.length, 0); assert.match(chv.cerr, /Sending files isn't switched on yet/);
+  let pd = 0;
+  chvPaste({ clipboardData: { files: [{ name: 'image.png', size: 500, type: 'image/png' }] }, preventDefault() { pd++; } });
+  assert.equal(pd, 0); assert.equal(chv.pending.length, 0);
+  el('chvInput').value = 'text only';
+  await chvSend();
+  assert.deepEqual(calls('chSend')[0].slice(0, 4), ['chSend', 'c1', 'text only', []]);
+});
+test('a web-link attachment (attachment_url) shows as a file chip without signing', async () => {
+  reset(); asOwner();
+  await show({ c1: [M('w1', 'u2', 'Sam', 'the quote', iso(0, 9, 0), { attachments: [{ path: 'https://files.test/q.pdf', url: 'https://files.test/q.pdf', name: 'q.pdf', size: 0, type: '' }] })] });
+  await tick();
+  assert.match(el('chvThread').innerHTML, /class="chv-file" href="https:\/\/files\.test\/q\.pdf" download="q\.pdf"/);
+  assert.equal(calls('chFileUrl').length, 0);
+});
+test('client channel: listed under Clients, labelled a client channel, client messages tagged, the owner replies', async () => {
+  // as close_won leaves it: kind client, owner member, one client person, the client has written first
+  reset({ channels: [{ id: 'cw', name: 'Blue Sky', kind: 'client', clientId: 'cl-1', company: 'Blue Sky', archived: false, lastMessageAt: iso(0, 9, 0), unread: 1 }] });
+  asOwner();
+  await show({ cw: [M('k1', 'p-1', 'Pat Lee (Blue Sky)', 'Hi, when do we start?', iso(0, 9, 0), { isClient: true, authorKind: 'client', company: 'Blue Sky' })] });
+  const list = el('chvListBody').innerHTML;
+  assert.match(list, />Clients<[\s\S]*Blue Sky/); assert.match(list, /aria-label="Blue Sky, client channel/); assert.match(list, /class="chv-row on client"/);
+  assert.equal(chv.cur, 'cw');
+  assert.match(el('chvHead').innerHTML, /Client channel · Blue Sky reads and writes here/);
+  const t = el('chvThread').innerHTML;
+  assert.match(t, /chv-msg first from-client/); assert.match(t, /Pat Lee \(Blue Sky\)<\/span><span class="chv-client-tag">Client<\/span>/);
+  assert.doesNotMatch(t, /chvEditStart\(&quot;k1&quot;\)/);                     // not the owner's to edit
+  assert.ok(be.marked.includes('cw'));
+  el('chvInput').value = 'Monday, 10am';
+  await chvSend();
+  assert.deepEqual(calls('chSend')[0].slice(0, 3), ['chSend', 'cw', 'Monday, 10am']);
+  const t2 = el('chvThread').innerHTML;
+  assert.match(t2, /Monday, 10am/);
+  assert.ok(t2.lastIndexOf('chv-client-tag') < t2.indexOf('Monday, 10am'));
+  assert.doesNotMatch(t2.slice(t2.indexOf('chvM-new')), /from-client/);           // the owner's reply is not marked as the client
+});
+test('members of a client channel: client people are marked and cannot be removed here', async () => {
+  reset({ members: [{ userId: 'u1', name: 'Owner', kind: 'team' }, { userId: 'p-1', name: 'Pat Lee (Stone Roofing)', kind: 'client', isClient: true }] });
+  asOwner(); await show({ c1: C1() });
+  await chvMembers(); await tick();
+  const b = el('chvMemBody').innerHTML;
+  assert.match(b, /Pat Lee \(Stone Roofing\)<\/span><span class="chv-client-tag">Client/);
+  assert.doesNotMatch(b, /chvRemoveMember\(&quot;p-1&quot;\)/);
 });
 test('realtime: a message arrives at the bottom, an edit updates it, typing shows and clears', async () => {
   reset(); asOwner(); await show({ c1: C1() });
