@@ -20,12 +20,16 @@
 /* The booking's stage, in pipeline order — the same words as the booking list. */
 const PL_STATUSES = ['new', 'held', 'no_show', 'contacted', 'agreement_sent', 'won', 'lost'];
 const PL_STATUS_WORDS = {
-  new: ['blue', 'Call booked'], held: ['amber', 'Call done'], no_show: ['red', 'No-show'],
+  new: ['blue', 'Call booked'], booked: ['blue', 'Call booked'], brief_sent: ['blue', 'Call booked'],
+  cancelled: ['grey', 'Cancelled'], held: ['amber', 'Call done'], no_show: ['red', 'No-show'],
   contacted: ['amber', 'Following up'], agreement_sent: ['amber', 'Agreement sent'],
   won: ['green', 'Won'], lost: ['grey', 'Lost'],
 };
-/* Still in play. */
-const PL_OPEN = ['new', 'held', 'no_show', 'contacted', 'agreement_sent'];
+/* Finished, one way or another. Everything else is still in play.
+   The website writes 'booked' and the research engine moves it on to words of
+   its own ('brief_sent', ...), so a booking is open unless it is one of these —
+   a fixed list of open words once hid every real booking from this screen. */
+const PL_CLOSED = ['won', 'lost', 'cancelled'];
 /* A call we can honestly say was held. */
 const PL_HELD = ['held', 'contacted', 'agreement_sent', 'won', 'lost'];
 /* Why we lost — the only answers accepted. */
@@ -78,7 +82,7 @@ function plRel(v, now) {
 function plStatusWord(s) { const m = PL_STATUS_WORDS[s] || ['grey', String(s || '—')]; return m[1]; }
 function plStatusPill(s) { const m = PL_STATUS_WORDS[s] || ['grey', String(s || '—')]; return `<span class="pill ${m[0]}">${esc(m[1])}</span>`; }
 function plLossWord(r) { return PL_LOSS_WORDS[r] || String(r || ''); }
-function plIsOpen(b) { return Boolean(b) && PL_OPEN.includes(String(b.status)); }
+function plIsOpen(b) { return Boolean(b) && !PL_CLOSED.includes(String(b.status)); }
 function plWho(b) { return String((b && (b.company || b.name)) || 'Someone'); }
 /* 0–100 if that is what it is; '' when the research engine has not scored them. */
 function plScore(b) { const n = Number(b && b.score); return Number.isFinite(n) ? n : ''; }
@@ -98,11 +102,11 @@ async function plBookings(opts) {
   const got = await plRun(() => {
     let q = sb.from('discovery_bookings').select('*');
     if (o.status && o.status !== 'all' && o.status !== 'open') q = q.eq('status', o.status);
-    else if (o.status === 'open') q = q.in('status', PL_OPEN);
     return q.order('call_at', { ascending: true });
   }, []);
   if (!got.ok) return got;
-  const rows = Array.isArray(got.data) ? got.data.filter((r) => r && r.id != null) : [];
+  let rows = Array.isArray(got.data) ? got.data.filter((r) => r && r.id != null) : [];
+  if (o.status === 'open') rows = rows.filter(plIsOpen);
   if (!rows.length) return plOk([]);
 
   /* which of them the research engine has already written a brief for */
@@ -413,7 +417,7 @@ function plResearchPill(row) {
 function plNeedsOutcome(b, now) {
   const t = plMs(b && b.call_at); if (!t) return false;
   const s = String(b && b.status);
-  return (s === 'new' || s === 'held' || s === 'contacted') && (now || new Date()).getTime() - t > 20 * 60000;
+  return (s === 'new' || s === 'booked' || s === 'brief_sent' || s === 'held' || s === 'contacted') && (now || new Date()).getTime() - t > 20 * 60000;
 }
 
 function renderPlBookingCard(b, now) {
