@@ -14,8 +14,9 @@
 <script src="portal-client.js"></script>
 </head>
 <body>
-<!-- A client's agreement or invoice, opened by the link in our email.
-     The link's token rides in the #fragment, is read once and kept in memory.
+<!-- A client's agreement or invoice, or a new employee's welcome page, opened by
+     the link in our email. The link's token rides in the #fragment, is read once
+     and kept in memory.
      Loads only portal-client.js: no hub module reaches a client's browser. -->
 <noscript><main class="pc-wrap pc-notice"><h1 class="pc-h1">Please turn on JavaScript.</h1><p class="pc-lede">This page needs it to show your document.</p></main></noscript>
 <div id="pcRoot"></div>
@@ -28,8 +29,56 @@
 
   function show(html){ root.innerHTML = html; }
 
+  /* ---- the staff welcome page (document kind 's') --------------------
+     One page a new employee reads on her phone before her first day. It is
+     only words: her name is the nicest-to-have, never anything private, so
+     the page still reads properly if the database has nothing to add yet. */
+
+  const STAFF_TOKEN = /^s\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[0-9a-f]{32,128}$/i;
+
+  function staffWelcomeHtml(d){
+    const o = d || {};
+    const name = String(o.name || '').trim();
+    const owner = String(o.owner || 'Limethsith').trim() || 'Limethsith';
+    const site = 'aviance.store/team';
+    const secs = [
+      { h: 'What this channel is for',
+        body: ['It is your direct line to ' + owner + '. Nothing else — no company-wide feed, no other channels.',
+               'Ask anything, however small. Say when something is unclear, when you are stuck, or when you have finished. You can send files and photos in the same place, so a screenshot or a document never needs an email.',
+               'He sees it on his side straight away, and you will see when he has read yours.'] },
+      { h: 'How to log in',
+        body: ['Go to ' + site + ' on your phone or laptop.',
+               'Type your Gmail address — the same one this page was sent to.',
+               'Type the access code ' + owner + ' sent you in a separate message. It looks like AVX-4K7M-Q2ZP. Capital letters, with the dashes.',
+               'Press the button, and you are in. You stay signed in on that device, so next time the link opens straight into your channel.'] },
+      { h: 'If the code does not work',
+        body: ['Check the email address first: it has to be the exact Gmail the code was made for.',
+               'Then check the code. It is all capitals, and it never uses the letters O, I, L or S or the numbers 0, 1 and 5 — so if a character looks like one of those, it is something else. Copying and pasting it is the safest way.',
+               'A code can be replaced. Message ' + owner + ' and he will make you a new one in a moment; the old one stops working as soon as he does.'] }
+    ];
+    const sections = secs.map((s, i) =>
+      `<section class="pc-sec"><h2><span class="pc-num">${i + 1}</span>${pcEsc(s.h)}</h2>${pcParasHtml(s.body)}</section>`).join('');
+    return `<main class="pc-wrap pc-doc">
+      <header class="pc-dochead">${pcLogoHtml()}<p class="pc-tag">Welcome</p></header>
+      <h1 class="pc-h1" tabindex="-1">${name ? 'Welcome, ' + pcEsc(name) : 'Welcome to Aviance'}</h1>
+      <p class="pc-lede">Aviance books guaranteed sales calls for business-to-business companies: we find the right people, start the conversation, and put a meeting on their calendar.</p>
+      <p class="pc-lede">You are the first person ${pcEsc(owner)} has hired, so you will see the whole of it from the inside.</p>
+      <div class="pc-terms">${sections}</div>
+      ${pcPrintHtml()}
+    </main>`;
+  }
+
+  async function loadStaff(){
+    /* doc_get may not know this kind yet; the page is the same either way. */
+    const r = await pcRpc('anon', 'doc_get', { p_token: token });
+    const d = r && r.ok && r.data && r.data.kind === 'staff' ? r.data : {};
+    doc = { kind: 'staff', name: d.name || '', owner: d.owner || '' };
+    paint();
+  }
+
   async function load(){
     show(pcLoadingHtml());
+    if (STAFF_TOKEN.test(token)) return loadStaff();
     const r = await pcDocGet(token);
     if (!r.ok) {
       doc = null;
@@ -42,7 +91,10 @@
   }
 
   function paint(){
-    if (doc.kind === 'agreement') {
+    if (doc.kind === 'staff') {
+      document.title = 'Welcome — Aviance';
+      show(staffWelcomeHtml(doc));
+    } else if (doc.kind === 'agreement') {
       document.title = 'Agreement — ' + (doc.company || 'Aviance');
       show(pcAgreementHtml(doc));
     } else {
