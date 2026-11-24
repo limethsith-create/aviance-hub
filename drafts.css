@@ -1,0 +1,31 @@
+/* drafts.css — Replies to approve (prefix dr), and the inline bot drafts at the bottom of a client channel (chv-bot*). */
+.dr{display:flex;flex-direction:column;gap:var(--s4,16px);max-width:820px}
+.dr-empty{padding:var(--s6,32px) var(--s5,24px);text-align:center}
+.dr-empty h3{margin:0 0 var(--s2,8px);font-size:var(--fs-h3)}
+.dr-empty p{margin:0 0 var(--s3,12px);color:var(--muted)}
+.dr-hint{margin:0;color:var(--muted);font-size:var(--fs-small)}
+.dr-err{padding:var(--s3,12px);background:var(--red-bg);color:var(--red);font-size:var(--fs-small)}
+.dr-card{padding:var(--s4,16px);display:flex;flex-direction:column;gap:var(--s3,12px)}
+.dr-head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2,8px)}
+.dr-co{font-size:var(--fs-strong)}
+.dr-tag{font-family:var(--mono);font-size:var(--fs-min);text-transform:uppercase;letter-spacing:.06em;padding:2px 6px;border:1px solid var(--border);color:var(--muted)}
+.dr-time{color:var(--muted);font-size:var(--fs-small)}
+.dr-link{margin-left:auto;background:none;border:0;padding:0 4px;min-height:44px;color:var(--text);text-decoration:underline;cursor:pointer;font:inherit;font-size:var(--fs-small)}
+.dr-link:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.dr-said{margin:0;padding:var(--s2,8px) var(--s3,12px);border-left:3px solid var(--border-strong);background:var(--field);white-space:pre-wrap;word-break:break-word}
+.dr-said-k{display:block;font-family:var(--mono);font-size:var(--fs-min);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:2px}
+.dr-label{font-weight:600;font-size:var(--fs-small)}
+.dr-why{font-weight:400;color:var(--muted)}
+.dr-box{width:100%;box-sizing:border-box;min-height:88px;padding:var(--s3,12px);font:inherit;font-size:var(--fs-base);background:var(--bg);color:var(--text);border:1px solid var(--border);resize:vertical}
+.dr-box:focus{outline:2px solid var(--text);outline-offset:1px}
+.dr-acts{display:flex;gap:var(--s2,8px);flex-wrap:wrap}
+
+/* inline in Channels: the pending drafts for the open client channel, above the composer */
+.chv-bot{display:flex;flex-direction:column;gap:var(--s2,8px);padding:0 var(--s4,16px)}
+.chv-bot:empty{display:none}
+.chv-bot-item{border:1px dashed var(--border-strong);padding:var(--s2,8px) var(--s3,12px);display:flex;flex-direction:column;gap:var(--s2,8px);background:var(--field)}
+.chv-bot-k{font-family:var(--mono);font-size:var(--fs-min);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.chv-bot-item textarea{width:100%;box-sizing:border-box;min-height:56px;padding:8px;font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--border);resize:vertical}
+.chv-bot-acts{display:flex;gap:var(--s2,8px)}
+.chv-bot-err{color:var(--red);font-size:var(--fs-small)}
+@media (max-width:480px){.dr-card{padding:var(--s3,12px)}.dr-acts .btn{flex:1;justify-content:center}}

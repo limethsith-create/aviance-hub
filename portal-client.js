@@ -176,7 +176,7 @@ function pcGroupMessages(rows, home, now){
     let day = days[days.length - 1];
     if (!day || day.key !== key) { day = { key, label: pcDayLabel(at, now), items: [] }; days.push(day); prev = null; }
     const lead = !prev || prev.kind !== kind || prev.who !== who || (at - prev.at) > 5 * 60 * 1000;
-    day.items.push({ id: r.id, kind, mine: kind === 'client' && !!meId && r.author_person === meId, name, time: pcTime(at), iso: at ? at.toISOString() : '', body: String(r.body == null ? '' : r.body), lead });
+    day.items.push({ id: r.id, kind, mine: kind === 'client' && !!meId && r.author_person === meId, name, time: pcTime(at), iso: at ? at.toISOString() : '', body: String(r.body == null ? '' : r.body), lead, msgKind: r.msg_kind || 'chat', meta: r.meta || null });
     prev = { kind, who, at };
   }
   return days;
@@ -478,8 +478,14 @@ function pcThreadHtml(days){
   return list.map((day) => `<div class="pc-day" role="separator"><span class="pc-tag">${pcEsc(day.label)}</span></div>` +
     day.items.map((m) => `<article class="pc-msg pc-msg-${m.kind === 'team' ? 'team' : 'client'}${m.mine ? ' pc-msg-mine' : ''}${m.lead ? ' pc-msg-lead' : ''}">
       ${m.lead ? `<p class="pc-msg-head"><span class="pc-msg-name">${pcEsc(m.name)}</span>${m.kind === 'team' ? '<span class="pc-tag pc-red">Aviance</span>' : ''}<time class="pc-msg-time" datetime="${pcEsc(m.iso)}">${pcEsc(m.time)}</time></p>` : ''}
-      <p class="pc-msg-body">${pcEsc(m.body)}</p>
+      <p class="pc-msg-body">${pcEsc(m.body)}</p>${pcCardHtml(m)}
     </article>`).join('')).join('');
+}
+/* the extra part a journey message carries (time choices, an approval, a form) */
+function pcCardHtml(m){
+  const f = m && m.msgKind && m.msgKind !== 'chat' && PC.cards && PC.cards[m.msgKind];
+  if (typeof f !== 'function') return '';
+  try { return String(f(m) || ''); } catch (e) { return ''; }
 }
 
 /* ---- plumbing ------------------------------------------------------- */
@@ -633,7 +639,17 @@ async function pcHome(){
   if (r.ok && r.data && !(r.data.channel && r.data.channel.id && r.data.person && r.data.person.id)) return pcOk(null);
   return r;
 }
-const PC_MSG_COLS = 'id,channel_id,author_user,author_person,body,created_at';
+const PC_MSG_COLS = 'id,channel_id,author_user,author_person,body,created_at,msg_kind,meta';
+const PC_MSG_COLS_OLD = 'id,channel_id,author_user,author_person,body,created_at';
+
+/* Extension points for the journey files (portal-tracker.js, portal-schedule.js, portal-steps.js).
+   PC.cards[msg_kind](item, home) -> extra HTML drawn under a message of that kind (escape everything).
+   PC.actions[name](el, ctx)      -> a click on any [data-pc-act="name"] inside the page.
+   PC.mounts.push(fn(ctx))        -> called when the chat opens and after every refresh.
+   ctx = { home, sb, refresh(), rpc(name,args) } */
+var PC = (typeof window !== 'undefined' && window.PC) || { cards: {}, actions: {}, mounts: [] };
+if (typeof window !== 'undefined') window.PC = PC;
+let pcMsgCols = PC_MSG_COLS;
 async function pcMessages(channelId){
   const sb = pcClient('portal');
   if (!sb) return pcErr(PC_OFFLINE);
@@ -642,11 +658,12 @@ async function pcMessages(channelId){
     /* Row level security already leaves removed messages out; asking again
        costs nothing. If the removed-marker is not ours to read, ask without it. */
     const ask = (live) => {
-      let q = sb.from('channel_messages').select(PC_MSG_COLS).eq('channel_id', channelId);
+      let q = sb.from('channel_messages').select(pcMsgCols).eq('channel_id', channelId);
       if (live) q = q.is('deleted_at', null);
       return q.order('created_at', { ascending: false }).limit(PC_HISTORY);
     };
     let res = await ask(true);
+    if (res && res.error && /msg_kind|meta/.test(String(res.error.message || ''))) { pcMsgCols = PC_MSG_COLS_OLD; res = await ask(true); }
     if (res && res.error && !pcErr(res.error).offline) res = await ask(false);
     if (!res) return pcErr('No answer from Aviance.');
     if (res.error) return pcErr(res.error);

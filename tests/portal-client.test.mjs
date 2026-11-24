@@ -373,9 +373,11 @@ for (const page of ['doc.html', 'join.html', 'portal.html']) {
   test(`${page} loads only the client files and obeys the site's content policy`, () => {
     const html = fs.readFileSync(path.join(root, page), 'utf8');
     const scripts = [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]);
-    assert.equal(scripts.length, 2);
+    // the portal also loads its three journey files (client files only, never the hub's)
+    const want = page === 'portal.html' ? ['portal-client.js', 'portal-tracker.js', 'portal-schedule.js', 'portal-steps.js'] : ['portal-client.js'];
+    assert.equal(scripts.length, 1 + want.length);
     assert.ok(scripts[0].startsWith('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@'));
-    assert.equal(scripts[1], 'portal-client.js');
+    assert.deepEqual(scripts.slice(1), want);
     assert.deepEqual([...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map((m) => m[1]), ['portal-client.css']);
     for (const f of HUB) assert.ok(!html.includes('"' + f + '"'), `${page} must not load ${f}`);
     assert.ok(!/fonts\.googleapis|fonts\.gstatic/.test(html), 'fonts come from this site only');
