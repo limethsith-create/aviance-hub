@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#ffffff">
+<title>Aviance — open your channel</title>
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="portal-client.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script src="portal-client.js"></script>
+</head>
+<body>
+<!-- The invited client sets a password here. The invite token rides in the
+     #fragment, is read once and kept in memory; it is sent only to the
+     portal-accept function. Loads only portal-client.js. -->
+<noscript><main class="pc-wrap pc-notice"><h1 class="pc-h1">Please turn on JavaScript.</h1><p class="pc-lede">This page needs it to set up your login.</p></main></noscript>
+<div id="pcRoot"></div>
+<script>
+(function(){
+  const root = document.getElementById('pcRoot');
+  const token = pcTokenFromHash(location.hash);
+  let invite = null;
+  let busy = false;
+
+  function show(html){ root.innerHTML = html; const h = root.querySelector('h1'); if (h) h.focus(); }
+
+  function formHtml(v){
+    const company = v.company || 'your company';
+    return `<main class="pc-wrap pc-notice">${pcLogoHtml()}
+      <h1 class="pc-h1" tabindex="-1">Welcome, ${pcEsc(pcFirstName(v.name))}.</h1>
+      <p class="pc-lede">Set a password to open ${pcEsc(company)}'s channel with Aviance.</p>
+      <form class="pc-form" id="pcJoinForm" novalidate>
+        <div class="pc-field">
+          <label class="pc-label" for="pcEmail">Your email</label>
+          <input class="pc-input" id="pcEmail" type="email" value="${pcEsc(v.email)}" readonly autocomplete="username">
+        </div>
+        <div class="pc-field">
+          <label class="pc-label" for="pcPw">Password</label>
+          <div class="pc-pw">
+            <input class="pc-input" id="pcPw" type="password" autocomplete="new-password" minlength="8" maxlength="72" required aria-describedby="pcPwHint pcJoinErr">
+            <button type="button" class="pc-pw-toggle" id="pcPwToggle" aria-pressed="false" aria-label="Show passwords">Show</button>
+          </div>
+          <p class="pc-small" id="pcPwHint" style="margin-top:8px">At least 8 characters.</p>
+        </div>
+        <div class="pc-field">
+          <label class="pc-label" for="pcPw2">Password again</label>
+          <input class="pc-input" id="pcPw2" type="password" autocomplete="new-password" maxlength="72" required aria-describedby="pcJoinErr">
+        </div>
+        <p class="pc-err" id="pcJoinErr" role="alert" aria-live="assertive"></p>
+        <button type="submit" class="pc-btn" id="pcJoinBtn">Open my channel</button>
+      </form>
+    </main>`;
+  }
+
+  async function load(){
+    show(pcLoadingHtml());
+    const r = await pcInvitePeek(token);
+    if (!r.ok) { show(pcOfflineHtml()); return; }
+    if (r.data.ok && r.data.email) { invite = r.data; show(formHtml(invite)); return; }
+    const reason = r.data.reason;
+    if (reason === 'used') {
+      show(pcNoticeHtml('You are already set up.', pcInviteMessage('used'), '<p><a class="pc-btn" href="/portal.html">Sign in</a></p>'));
+    } else if (reason === 'expired') {
+      show(pcNoticeHtml('This link has expired.', 'Reply to our email and we will send a new one.'));
+    } else {
+      show(pcDeadLinkHtml());
+    }
+  }
+
+  async function join(form){
+    if (busy || !invite) return;
+    const pw = form.querySelector('#pcPw'), pw2 = form.querySelector('#pcPw2');
+    const err = form.querySelector('#pcJoinErr'), btn = form.querySelector('#pcJoinBtn');
+    const bad = pcPasswordProblem(pw.value, pw2.value);
+    err.textContent = bad;
+    if (bad) { (pcPasswordProblem(pw.value) ? pw : pw2).focus(); return; }
+    const password = pw.value;
+    busy = true; btn.disabled = true; btn.textContent = 'Opening…';
+    const a = await pcAccept(token, password);
+    if (!a.ok) {
+      busy = false; btn.disabled = false; btn.textContent = 'Open my channel';
+      err.textContent = a.error;
+      return;
+    }
+    const s = await pcSignIn(a.data.email, password);
+    if (!s.ok) {
+      show(pcNoticeHtml('Your password is set.', 'Sign in with your email and new password to open your channel.', '<p><a class="pc-btn" href="/portal.html">Sign in</a></p>'));
+      return;
+    }
+    location.replace('/portal.html');
+  }
+
+  root.addEventListener('submit', function(e){
+    if (e.target && e.target.id === 'pcJoinForm') { e.preventDefault(); join(e.target); }
+  });
+  root.addEventListener('click', function(e){
+    const t = e.target && e.target.closest ? e.target.closest('#pcPwToggle,[data-pc-retry]') : null;
+    if (!t) return;
+    if (t.id !== 'pcPwToggle') { load(); return; }
+    const on = t.getAttribute('aria-pressed') !== 'true';
+    ['pcPw', 'pcPw2'].forEach(function(id){ const el = document.getElementById(id); if (el) el.type = on ? 'text' : 'password'; });
+    t.setAttribute('aria-pressed', on ? 'true' : 'false');
+    t.setAttribute('aria-label', on ? 'Hide passwords' : 'Show passwords');
+    t.textContent = on ? 'Hide' : 'Show';
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

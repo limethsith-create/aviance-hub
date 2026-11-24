@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#ffffff">
+<title>Aviance — your channel</title>
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="portal-client.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script src="portal-client.js"></script>
+</head>
+<body>
+<!-- The client's whole world: sign in, then one channel with the Aviance team.
+     What a client may read or write is decided by the database (row level
+     security), not by this page. Loads only portal-client.js. -->
+<noscript><main class="pc-wrap pc-notice"><h1 class="pc-h1">Please turn on JavaScript.</h1><p class="pc-lede">This page needs it to open your channel.</p></main></noscript>
+<div id="pcRoot"></div>
+<script>
+(function(){
+  const root = document.getElementById('pcRoot');
+  let home = null, rows = [], drawn = '', stopLive = null, timer = null, loading = false, sendBusy = false;
+
+  /* ---- signing in ---- */
+  function showSignIn(message, email){
+    stopChat();
+    document.title = 'Aviance — sign in';
+    root.innerHTML = `<main class="pc-wrap pc-notice">${pcLogoHtml()}
+      <h1 class="pc-h1" tabindex="-1">Sign in.</h1>
+      <p class="pc-lede">Your direct line to the Aviance team.</p>
+      <form class="pc-form" id="pcInForm" novalidate>
+        <div class="pc-field"><label class="pc-label" for="pcInEmail">Email</label>
+          <input class="pc-input" id="pcInEmail" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required value="${pcEsc(email || '')}"></div>
+        <div class="pc-field"><label class="pc-label" for="pcInPw">Password</label>
+          <input class="pc-input" id="pcInPw" type="password" autocomplete="current-password" required aria-describedby="pcInErr"></div>
+        <p class="pc-err" id="pcInErr" role="alert" aria-live="assertive">${pcEsc(message || '')}</p>
+        <button type="submit" class="pc-btn" id="pcInBtn">Sign in</button>
+        <p class="pc-small pc-under">Forgotten your password? Reply to any email from us and we will send you a new link.</p>
+      </form>
+    </main>`;
+  }
+
+  async function signIn(form){
+    const email = form.querySelector('#pcInEmail').value.trim();
+    const pw = form.querySelector('#pcInPw').value;
+    const err = form.querySelector('#pcInErr'), btn = form.querySelector('#pcInBtn');
+    btn.disabled = true; btn.textContent = 'Signing in…'; err.textContent = '';
+    const r = await pcSignIn(email, pw);
+    if (!r.ok) { btn.disabled = false; btn.textContent = 'Sign in'; err.textContent = r.error; return; }
+    enter(email);
+  }
+
+  async function enter(email){
+    const r = await pcHome();
+    if (!r.ok) {
+      if (r.offline) { root.innerHTML = pcOfflineHtml(); return; }
+      await pcSignOut();
+      showSignIn('We could not open your channel. Please sign in again.', email);
+      return;
+    }
+    if (!r.data) {
+      await pcSignOut();
+      showSignIn('This login is not a client account.', email);
+      return;
+    }
+    home = r.data;
+    showChat();
+  }
+
+  /* ---- the channel ---- */
+  function showChat(){
+    document.title = (home.company || 'Your channel') + ' — Aviance';
+    root.innerHTML = `<div class="pc-app">
+      <header class="pc-bar"><div class="pc-bar-in">${pcLogoHtml()}
+        <div class="pc-bar-t"><h1>${pcEsc(home.company || 'Your channel')}</h1><p class="pc-tag">Direct line to Aviance</p></div>
+        <button type="button" class="pc-btn pc-btn-quiet" id="pcOut">Sign out</button>
+      </div></header>
+      <div class="pc-scroll" id="pcScroll" tabindex="0" aria-label="Messages">
+        <div class="pc-thread" id="pcThread" role="log" aria-live="polite" aria-relevant="additions"><p class="pc-tag" style="margin:auto">Loading</p></div>
+      </div>
+      <form class="pc-compose" id="pcCompose"><div class="pc-compose-in">
+        <p class="pc-err" id="pcSendErr" role="alert" aria-live="assertive"></p>
+        <div class="pc-compose-row">
+          <label class="pc-sr" for="pcText">Message the Aviance team</label>
+          <textarea id="pcText" rows="1" maxlength="${PC_MAX_BODY}" placeholder="Write a message" enterkeyhint="send" aria-describedby="pcCount"></textarea>
+          <button type="submit" class="pc-btn" id="pcSendBtn">Send</button>
+        </div>
+        <p class="pc-tag pc-count" id="pcCount" aria-live="polite"></p>
+      </div></form>
+    </div>`;
+    drawn = ''; rows = [];
+    refresh(true);
+    stopLive = pcSubscribe(home.channel.id, function(){ refresh(false); });
+    timer = setInterval(function(){ if (!document.hidden) refresh(false); }, PC_POLL_MS);
+  }
+
+  function stopChat(){
+    if (stopLive) { stopLive(); stopLive = null; }
+    if (timer) { clearInterval(timer); timer = null; }
+    home = null; rows = []; drawn = '';
+  }
+
+  function draw(toBottom){
+    const box = document.getElementById('pcScroll'), thread = document.getElementById('pcThread');
+    if (!box || !thread || !home) return;
+    const days = pcGroupMessages(rows, home, new Date());
+    const html = pcThreadHtml(days);
+    if (html === drawn && !toBottom) return;
+    const near = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+    if (html !== drawn) { thread.innerHTML = html; drawn = html; }
+    if (toBottom || near) box.scrollTop = box.scrollHeight;
+  }
+
+  async function refresh(toBottom){
+    if (!home || loading) return;
+    loading = true;
+    const id = home.channel.id;
+    const r = await pcMessages(id);
+    loading = false;
+    if (!home || home.channel.id !== id) return;
+    if (r.ok) { rows = r.data; draw(toBottom); }
+    else if (!drawn) {
+      const thread = document.getElementById('pcThread');
+      if (thread) thread.innerHTML = `<p class="pc-small" style="margin:auto;text-align:center">${pcEsc(r.error)}</p>`;
+    }
+  }
+
+  function grow(el){ el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight + 4, 180) + 'px'; }
+  function count(el){
+    const c = document.getElementById('pcCount');
+    if (c) c.textContent = el.value.length >= PC_MAX_BODY - 400 ? el.value.length + ' / ' + PC_MAX_BODY : '';
+  }
+
+  async function send(){
+    if (sendBusy || !home) return;
+    const el = document.getElementById('pcText'), err = document.getElementById('pcSendErr'), btn = document.getElementById('pcSendBtn');
+    const text = pcCleanBody(el.value);
+    if (!text) { el.focus(); return; }
+    sendBusy = true; btn.disabled = true; err.textContent = '';
+    const r = await pcSend(home.channel.id, home.person.id, text);
+    sendBusy = false; btn.disabled = false;
+    if (!r.ok) { err.textContent = 'That message did not go. ' + r.error; el.focus(); return; }
+    el.value = ''; grow(el); count(el); el.focus();
+    if (r.data && r.data.id != null && !rows.some(function(m){ return m.id === r.data.id; })) rows = rows.concat([r.data]);
+    draw(true);
+    refresh(true);
+  }
+
+  root.addEventListener('submit', function(e){
+    if (!e.target) return;
+    if (e.target.id === 'pcInForm') { e.preventDefault(); signIn(e.target); }
+    if (e.target.id === 'pcCompose') { e.preventDefault(); send(); }
+  });
+  root.addEventListener('click', async function(e){
+    const t = e.target && e.target.closest ? e.target.closest('#pcOut,[data-pc-retry]') : null;
+    if (!t) return;
+    if (t.id === 'pcOut') { stopChat(); await pcSignOut(); showSignIn(''); const h = root.querySelector('h1'); if (h) h.focus(); }
+    else boot();
+  });
+  root.addEventListener('keydown', function(e){
+    if (e.target && e.target.id === 'pcText' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+  });
+  root.addEventListener('input', function(e){
+    if (e.target && e.target.id === 'pcText') { grow(e.target); count(e.target); }
+  });
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) refresh(false); });
+  window.addEventListener('online', function(){ refresh(false); });
+
+  async function boot(){
+    root.innerHTML = pcLoadingHtml();
+    const s = await pcSession();
+    if (!s.ok) { root.innerHTML = pcOfflineHtml(); return; }
+    if (s.data) enter(s.data.user && s.data.user.email); else showSignIn('');
+  }
+  pcOnSignedOut(function(){ if (home) showSignIn('You have been signed out. Sign in again to carry on.'); });
+  boot();
+})();
+</script>
+</body>
+</html>

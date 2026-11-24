@@ -34,7 +34,7 @@ async function ptRun(fn, whenEmpty){
 
 /* ---- small helpers ----------------------------------------------- */
 
-const PT_INVITE_DAYS = 14;          // portal_invites.expires_at default, repeated for a resend
+const PT_INVITE_DAYS = 14;          // portal_invites.expires_at default, said on the screen
 const PT_BODY_MAX = 4000;
 
 function ptSb(){
@@ -144,11 +144,23 @@ async function ptSetPrimary(clientId, personId){
 
 /* ===================== 2. THEIR WAY IN (invites) ===================== */
 
-/* The link we send them. The token comes from the database. */
+/* The link is made ONCE, by the database: `portal_invite_create` hands back the
+   raw token a single time and keeps only its hash. So a link can be shown at the
+   moment an invite is made and never again — nothing here reads a token off a
+   row, because there is none to read. To get a new link, send the invite again:
+   that makes a new one and the old one stops working. */
+
+/* The columns a screen needs. The hash is never asked for. */
+const PT_INVITE_COLS = 'id,client_id,person_id,email,portal_role,status,expires_at,accepted_at,accepted_user,created_at';
+
+/* The link we give them. The token rides after the #, so it never reaches a
+   server log. */
 function ptInviteLink(token){
+  const t = String(token || '').trim();
+  if (!t) return '';
   let origin = 'https://aviance.store';
   try { if (typeof location !== 'undefined' && location.origin) origin = location.origin; } catch (e) {}
-  return origin + '/#join=' + encodeURIComponent(String(token || ''));
+  return `${origin}/join.html#${t}`;
 }
 
 /* The real state of an invite. An invite past its expires_at reads as expired
@@ -167,63 +179,70 @@ function ptInviteWords(state){
   if (state === 'expired')  return 'Expired — send a new one';
   return 'Waiting for them';
 }
-/* An invite row plus the two things a screen always wants. */
+/* An invite row plus its real state, in words. No link: a listed invite has none. */
 function ptInviteShape(row){
   if (!row) return null;
   const state = ptInviteState(row);
-  return Object.assign({}, row, {state, stateWords: ptInviteWords(state), link: ptInviteLink(row.token)});
+  const out = {};
+  PT_INVITE_COLS.split(',').forEach(k => { if (row[k] !== undefined) out[k] = row[k]; });
+  return Object.assign(out, {state, stateWords: ptInviteWords(state)});
 }
 
 async function ptInvites(clientId){
   if (!ptCanSee(clientId)) return ptDenied();
-  const r = await ptRun(() => ptSb().from('portal_invites').select('*').eq('client_id', clientId)
+  const r = await ptRun(() => ptSb().from('portal_invites').select(PT_INVITE_COLS).eq('client_id', clientId)
     .order('created_at', {ascending:false}), []);
   if (!r.ok) return r;
   return ptOk((r.data || []).map(ptInviteShape));
 }
 
-/* Invite one of their people in. The token and the 14-day expiry are the
-   database's own defaults — nothing random is made in JavaScript here. */
+/* Invite one of their people in. The database makes the link's secret and the
+   14-day expiry, and revokes any earlier invite still waiting for the same
+   address — nothing random is made in JavaScript here.
+   -> {client_id, person_id, email, portal_role, state, stateWords, link}
+   `link` is the only copy there will ever be: show it once, for copying. */
 async function ptInvite(clientId, opts){
   if (!ptCanSee(clientId)) return ptDenied();
   const o = opts || {};
   const email = ptText(o.email, 200).toLowerCase();
   if (!ptIsEmail(email)) return ptErr('Enter the email address to invite.');
-  const role = o.portalRole === 'manager' ? 'manager' : 'viewer';
+  const person = o.personId || o.person_id || null;
 
-  const r = await ptRun(() => ptSb().from('portal_invites').insert({
-    client_id:   clientId,
-    person_id:   o.personId || o.person_id || null,
-    email:       email,
-    portal_role: role
-  }).select().single(), null);
+  const r = await ptRun(() => ptSb().rpc('portal_invite_create',
+    {p_client: clientId, p_email: email, p_person: person}), null);
   if (!r.ok) return r;
+  const link = ptInviteLink(typeof r.data === 'string' ? r.data : '');
+  if (!link) return ptErr('The invite was not made. Please try again.');
 
-  // TODO: send the invite email to `email` with invite.link once the email side
-  // of the hub is built. Until then the link is copied out of the screen by hand.
-  return ptOk(ptInviteShape(r.data));
+  /* The database makes every invite a viewer. A manager is set on the row it
+     just made; if that does not take, they are a viewer and we say so. */
+  let role = 'viewer';
+  if (o.portalRole === 'manager') {
+    const up = await ptRun(() => ptSb().from('portal_invites').update({portal_role:'manager'})
+      .eq('client_id', clientId).eq('email', email).eq('status', 'pending').select('id'), []);
+    if (up.ok && Array.isArray(up.data) && up.data.length) role = 'manager';
+  }
+  return ptOk({client_id: clientId, person_id: person, email: email, portal_role: role,
+    state: 'pending', stateWords: ptInviteWords('pending'), link: link});
 }
 
 async function ptRevokeInvite(id){
   if (!id) return ptErr('Pick an invite first.');
   const r = await ptRun(() => ptSb().from('portal_invites')
-    .update({status:'revoked'}).eq('id', id).select().single(), null);
+    .update({status:'revoked'}).eq('id', id).select(PT_INVITE_COLS).single(), null);
   if (!r.ok) return r;
   return ptOk(ptInviteShape(r.data));
 }
 
-/* Send it again: the same row, a fresh 14 days, waiting again. */
+/* Send it again: a NEW invite for the same person, made the same way. The old
+   link stops working (the database revokes it) and the new one is shown once. */
 async function ptResendInvite(id){
   if (!id) return ptErr('Pick an invite first.');
-  const r = await ptRun(() => ptSb().from('portal_invites').update({
-    status:      'pending',
-    expires_at:  ptIso(ptNow() + PT_INVITE_DAYS * 86400000),
-    accepted_at: null
-  }).eq('id', id).select().single(), null);
-  if (!r.ok) return r;
-
-  // TODO: send the invite email again to the row's address with invite.link.
-  return ptOk(ptInviteShape(r.data));
+  const old = await ptRun(() => ptSb().from('portal_invites').select(PT_INVITE_COLS).eq('id', id).maybeSingle(), null);
+  if (!old.ok) return old;
+  if (!old.data) return ptErr('That invite is not here any more.');
+  if (ptInviteState(old.data) === 'accepted') return ptErr('They have already joined, so there is nothing to send again.');
+  return ptInvite(old.data.client_id, {email: old.data.email, personId: old.data.person_id, portalRole: old.data.portal_role});
 }
 
 /* ===================== 3. WHAT THEY ASK FOR (requests) ===================== */
@@ -469,21 +488,21 @@ async function viewClientPeople(clientId){
 
   let inviteHtml;
   if (!invites.ok) inviteHtml = ptAlert(invites.error);
-  else if (!invites.data.length) inviteHtml = ptEmpty('No invites yet', 'An invite emails them a link to their own portal.');
+  else if (!invites.data.length) inviteHtml = ptEmpty('No invites yet', 'An invite makes a link to their own portal. It is shown once, for you to copy and send.');
   else inviteHtml = `<ul class="pt-list">` + invites.data.map(i => `<li class="pt-row">
       <span class="pt-name">${ptEsc(i.email || '')}${ptTag(PT_INVITE_TONE[i.state] || 'grey', i.stateWords)}</span>
       <span class="pt-sub">${ptEsc((i.portal_role === 'manager' ? 'Manager' : 'Viewer') + ' · ' + (i.state === 'accepted' ? 'joined ' + ptWhen(i.accepted_at) : 'expires ' + ptWhen(i.expires_at)))}</span>
       <span class="pt-acts">
         ${i.state === 'pending' ? `<button type="button" class="pt-link" onclick="ptRevokeInvite(${ptA(i.id)})">Revoke</button>` : ''}
-        ${i.state === 'expired' || i.state === 'revoked' ? `<button type="button" class="pt-link" onclick="ptResendInvite(${ptA(i.id)})">Send again</button>` : ''}
+        ${i.state === 'expired' || i.state === 'revoked' ? `<button type="button" class="pt-link" onclick="ptResendFromRow(${ptA(i.id)})">Send again</button>` : ''}
       </span>
     </li>`).join('') + `</ul>`;
 
   const form = `<div class="pt-form">
     <div class="pt-field"><label for="ptInviteEmail">Email address</label><input id="ptInviteEmail" type="email" autocomplete="off" placeholder="name@theircompany.com"></div>
     <div class="pt-field"><label for="ptInviteRole">They can</label><select id="ptInviteRole"><option value="viewer">Look at their numbers</option><option value="manager">Look and ask for changes</option></select></div>
-    <button type="button" class="pt-btn primary" onclick="ptInviteFromForm(${ptA(clientId)})">Send invite</button>
-  </div>`;
+    <button type="button" class="pt-btn primary" onclick="ptInviteFromForm(${ptA(clientId)})">Make the invite</button>
+  </div><div id="ptInviteOnce" aria-live="polite"></div>`;
 
   return `<div class="pt-wrap">
     ${ptCard('Their people', 'Exactly one of them is the primary contact.', peopleHtml)}
@@ -564,8 +583,41 @@ async function ptInviteFromForm(clientId){
   const out = await ptInvite(clientId, {email: e ? e.value : '', portalRole: r ? r.value : 'viewer'});
   if (!out.ok) { ptSay(out.error); return out; }
   if (e) e.value = '';
-  ptSay('Invite made. Copy the link and send it to them.');
+  ptShowInviteOnce(out.data);
+  ptSay('Invite made. Copy the link now — it is only shown this once.');
   return out;
+}
+async function ptResendFromRow(id){
+  const out = await ptResendInvite(id);
+  if (!out.ok) { ptSay(out.error); return out; }
+  ptShowInviteOnce(out.data);
+  ptSay('A new invite is made and the old link no longer works. Copy the new link now.');
+  return out;
+}
+
+/* The link, once. Pure: the invite in, HTML out. */
+function ptRenderInviteOnce(inv){
+  if (!inv || !inv.link) return '';
+  return `<div class="pt-form" role="status">
+    <div class="pt-field"><label for="ptInviteLinkOut">Their link — shown once, copy it now</label>
+      <input id="ptInviteLinkOut" type="text" readonly value="${ptEsc(inv.link)}" onfocus="this.select()"></div>
+    <button type="button" class="pt-btn primary" onclick="ptCopyInviteLink()">Copy the link</button>
+    <p class="pt-sub">For ${ptEsc(inv.email || 'them')}. It lasts ${PT_INVITE_DAYS} days. We do not keep a copy: if it is lost, send the invite again to make a new one.</p>
+  </div>`;
+}
+function ptShowInviteOnce(inv){
+  const box = ptEl('ptInviteOnce');
+  if (box) box.innerHTML = ptRenderInviteOnce(inv);
+}
+async function ptCopyInviteLink(){
+  const i = ptEl('ptInviteLinkOut');
+  const link = i ? String(i.value || '') : '';
+  if (!link) { ptSay('There is no link to copy. Make the invite again.'); return false; }
+  let ok = false;
+  try { await navigator.clipboard.writeText(link); ok = true; } catch (e) { ok = false; }
+  if (!ok && i && typeof i.select === 'function') { try { i.select(); } catch (e) {} }
+  ptSay(ok ? 'Copied. Send it to them.' : 'Could not copy by itself. The link is selected — copy it by hand.');
+  return ok;
 }
 
 async function ptPostFromForm(channelId){

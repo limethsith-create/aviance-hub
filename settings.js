@@ -1,6 +1,13 @@
-/* Settings — you, the calendar, and which tool is doing the sending.
+/* Settings — you, the calendar, which tool is doing the sending, and (for the
+   owner only) the business details that go on agreements, invoices and emails.
    There are no API keys in the hub. The outreach tool is reached through
-   outreach-adapter.js, and a key, when there is one, lives outside this repo. */
+   outreach-adapter.js, and a key, when there is one, lives outside this repo.
+
+   Payments and documents: read with the `biz_get` database rule and saved with
+   `biz_set`, both admin only. A value that still starts with "[" is the
+   stand-in the database ships with, so the screen says "not set yet" beside it.
+
+   Every data function returns {ok, data, error} and never throws. Prefix: st. */
 
 function stOk(data){ return {ok:true, data, error:''} }
 function stErr(e){ const m=(e&&(e.message||e.error_description||e.msg))||String(e||'Something went wrong.'); return {ok:false,data:null,error:m} }
@@ -67,6 +74,58 @@ function stProviders(){
   return names.length?names:['demo'];
 }
 
+/* ---- Payments and documents (admin only) ---- */
+/* [key the database knows, label, kind of field, a hint] */
+const ST_BIZ_FIELDS=[
+  ['legal_name','Company legal name','text','The name on the agreement and the invoice'],
+  ['address','Company address','text','Printed on every invoice'],
+  ['email','Billing email','email','Where a client writes about an invoice'],
+  ['wise_details','Wise bank details','area','Shown on the invoice so they can pay by bank transfer'],
+  ['payoneer_link','Payoneer link','url','Optional. Shown on the invoice as a second way to pay'],
+  ['kickoff_link','Kickoff booking link','url','Sent in the welcome email so they can book their first call']
+];
+function stIsAdmin(){ try{ return typeof authUser!=='undefined'&&!!authUser&&authUser.role==='admin' }catch(e){ return false } }
+/* A stand-in the database ships with, e.g. "[YOUR COMPANY LEGAL NAME]". */
+function stIsPlaceholder(v){ return String(v==null?'':v).trim().charAt(0)==='[' }
+async function stBiz(){
+  if(!stIsAdmin())return stErr('Only the owner can see the payment details.');
+  return stRun(()=>sb.rpc('biz_get'),{});
+}
+function stValidBiz(f){
+  const email=String(f.email||'').trim();
+  if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email))return 'The billing email does not look like an email address.';
+  for(const k of ['payoneer_link','kickoff_link']){
+    const u=String(f[k]||'').trim();
+    if(u&&!/^https:\/\/\S+$/i.test(u))return (k==='payoneer_link'?'The Payoneer link':'The kickoff booking link')+' has to start with https://';
+  }
+  return '';
+}
+/* Saves only the six fields on this card; anything else the database holds is left alone. */
+async function stSaveBiz(fields){
+  if(!stIsAdmin())return stErr('Only the owner can change the payment details.');
+  const f=fields||{};
+  const bad=stValidBiz(f);
+  if(bad)return stErr(bad);
+  const p={};
+  ST_BIZ_FIELDS.forEach(([k])=>{ if(f[k]!==undefined)p[k]=String(f[k]==null?'':f[k]).trim() });
+  if(!Object.keys(p).length)return stErr('There is nothing to save.');
+  return stRun(()=>sb.rpc('biz_set',{p}),{});
+}
+/* The card's inside. Pure: the saved values in, HTML out. */
+function stRenderBiz(data){
+  const d=data||{};
+  const rows=ST_BIZ_FIELDS.map(([k,label,kind,hint])=>{
+    const v=d[k]==null?'':String(d[k]);
+    const id='stBiz_'+k;
+    const note=stIsPlaceholder(v)?` <small class="st-err" id="${id}_note">not set yet</small>`:'';
+    const input=kind==='area'
+      ?`<textarea id="${id}" rows="5" style="width:100%;max-width:420px;background:var(--surface-2);border:1px solid var(--border);color:var(--text);font:inherit;font-size:var(--fs-base);padding:8px 10px">${esc(v)}</textarea>`
+      :`<input id="${id}" value="${esc(v)}"${kind==='email'?' inputmode="email"':kind==='url'?' inputmode="url" placeholder="https://…"':''} style="min-width:280px">`;
+    return stRow(label,input+note,hint);
+  }).join('');
+  return rows+`<div class="st-act"><button class="btn" onclick="stSubmitBiz()">Save</button><span id="stBizMsg" class="st-msg"></span></div>`;
+}
+
 /* ---- Screens ---- */
 function stRow(label,html,hint){
   return `<div class="st-row"><div class="st-lab">${esc(label)}${hint?`<small>${esc(hint)}</small>`:''}</div><div class="st-fld">${html}</div></div>`;
@@ -79,10 +138,32 @@ function viewSettings(){
   <div id="stCal" class="st-wrap">Loading…</div></div>
 <div class="card"><h3>The tool doing the sending</h3>
   <p class="st-note">Aviance OS never sends email itself. It reads from whichever tool is behind it. There are no keys stored in Aviance OS.</p>
-  <div id="stOut" class="st-wrap">Loading…</div></div>`;
+  <div id="stOut" class="st-wrap">Loading…</div></div>`
+  +(stIsAdmin()?`
+<div class="card"><h3>Payments and documents</h3>
+  <p class="st-note">These go on every agreement, invoice and welcome email. Anything marked “not set yet” still shows a stand-in to the client, so fill it in before the first call is won.</p>
+  <div id="stBiz" class="st-wrap">Loading…</div></div>`:'');
 }
 
-async function stLoad(){ stLoadMe(); stLoadCal(); stLoadOut(); }
+async function stLoad(){ stLoadMe(); stLoadCal(); stLoadOut(); stLoadBiz(); }
+
+async function stLoadBiz(){
+  const el=document.getElementById('stBiz'); if(!el)return;
+  const r=await stBiz();
+  if(!r.ok){ el.innerHTML=`<p class="st-err">${esc(r.error)}</p>`; return }
+  el.innerHTML=stRenderBiz(r.data);
+}
+async function stSubmitBiz(){
+  const msg=document.getElementById('stBizMsg'); if(msg)msg.textContent='Saving…';
+  const f={};
+  ST_BIZ_FIELDS.forEach(([k])=>{ const e=document.getElementById('stBiz_'+k); if(e)f[k]=e.value });
+  const r=await stSaveBiz(f);
+  if(!r.ok){ if(msg)msg.textContent=r.error; return r }
+  const el=document.getElementById('stBiz'); if(el)el.innerHTML=stRenderBiz(r.data);
+  const again=document.getElementById('stBizMsg'); if(again)again.textContent='Saved.';
+  if(typeof toast==='function')toast('The payment details are saved.');
+  return r;
+}
 
 async function stLoadMe(){
   const el=document.getElementById('stMe'); if(!el)return;

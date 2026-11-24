@@ -104,9 +104,31 @@ function run(c) {
   return { data: out, error: null };
 }
 resetDb();
+const dbRows = (t) => (db[t] ||= []);
+/* The database's close_won rule, small and in memory: one client per booking, the plan's
+   own numbers, the booking marked won. Its refusal is the real one's words. */
+const rpcs = [];
+let rpcFail = null;
+function closeWon(a) {
+  const b = (dbRows('discovery_bookings')).find((r) => String(r.id) === String(a.p_booking));
+  if (!b) return { data: null, error: { message: 'That call is not here any more.' } };
+  if (dbRows('clients').some((c) => String(c.booking_id) === String(b.id))) return { data: null, error: { message: 'That call is already a client.' } };
+  const p = dbRows('plan_prices').find((x) => x.plan === a.p_plan);
+  if (!p) return { data: null, error: { message: 'That plan is not in the price list.' } };
+  const term = a.p_term === '3month' ? '3month' : 'monthly';
+  const c = { id: 'cl-' + (dbRows('clients').length + 1), booking_id: b.id, company: b.company, contact_name: b.name, contact_email: b.email, plan: p.plan, term, calls_promised: p.calls_promised, monthly_fee: term === '3month' && p.three_month_fee ? p.three_month_fee : p.monthly_fee, stage: 'won' };
+  dbRows('clients').push(c); b.status = 'won';
+  return { data: { client_id: c.id, invoice_id: 'inv-1', agreement_id: 'agr-1', invoice_number: 'AV-2026-0001' }, error: null };
+}
+async function fakeRpc(name, args) {
+  rpcs.push({ name, args });
+  if (rpcFail) return { data: null, error: rpcFail };
+  if (name === 'close_won') return closeWon(args || {});
+  return { data: null, error: null };
+}
 const fakeSb = {
   from: builder,
-  rpc: async () => ({ data: null, error: null }),
+  rpc: fakeRpc,
   auth: { getSession: async () => ({ data: { session: { access_token: 't' } } }), getUser: async () => ({ data: { user: null } }), signInWithPassword: async () => ({ error: null }), signOut: async () => {}, resetPasswordForEmail: async () => ({ error: null }), updateUser: async () => ({ error: null }) },
 };
 globalThis.supabase = { createClient: () => fakeSb };
@@ -939,8 +961,12 @@ test('the panel\'s buttons go through pipeline.js, and the calendar and the pane
   r = await plMarkWon('b1');
   assert.equal(r.ok, false); assert.match(r.error, /Pick the plan/); assert.equal(db.clients.length, 0);
   el('plPlan').value = 'growth';
+  assert.ok(host('modal').includes('onclick="plOpenWon()"') && /Mark won and send the pack/.test(visible(host('modal'))), 'Won opens the plan picker in the panel');
+  toasts.length = 0;
   r = await plMarkWon('b1');
   assert.equal(r.ok, true);
+  assert.deepEqual(rpcs.at(-1), { name: 'close_won', args: { p_booking: 'b1', p_plan: 'growth', p_term: '3month' } });
+  assert.ok(toasts.some((m) => /^Won\. The agreement and invoice are on their way to \S+@\S+\.$/.test(m)), toasts.join(' | '));
   assert.deepEqual([db.clients[0].plan, db.clients[0].term, db.clients[0].calls_promised, db.clients[0].monthly_fee, db.clients[0].booking_id], ['growth', '3month', 10, 2400, 'b1']);
   assert.equal(db.discovery_bookings[0].status, 'won');
   assert.match(visible(host('modal')), /Won — they are a client/);

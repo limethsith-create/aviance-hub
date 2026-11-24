@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#ffffff">
+<title>Aviance — your document</title>
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="portal-client.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script src="portal-client.js"></script>
+</head>
+<body>
+<!-- A client's agreement or invoice, opened by the link in our email.
+     The link's token rides in the #fragment, is read once and kept in memory.
+     Loads only portal-client.js: no hub module reaches a client's browser. -->
+<noscript><main class="pc-wrap pc-notice"><h1 class="pc-h1">Please turn on JavaScript.</h1><p class="pc-lede">This page needs it to show your document.</p></main></noscript>
+<div id="pcRoot"></div>
+<script>
+(function(){
+  const root = document.getElementById('pcRoot');
+  let token = pcTokenFromHash(location.hash);
+  let doc = null;
+  let busy = false;
+
+  function show(html){ root.innerHTML = html; }
+
+  async function load(){
+    show(pcLoadingHtml());
+    const r = await pcDocGet(token);
+    if (!r.ok) {
+      doc = null;
+      document.title = 'Aviance';
+      show(r.offline ? pcOfflineHtml() : pcDeadLinkHtml());
+      return;
+    }
+    doc = r.data;
+    paint();
+  }
+
+  function paint(){
+    if (doc.kind === 'agreement') {
+      document.title = 'Agreement — ' + (doc.company || 'Aviance');
+      show(pcAgreementHtml(doc));
+    } else {
+      document.title = (doc.status === 'paid' ? 'Receipt ' : 'Invoice ') + (doc.number || '') + ' — Aviance';
+      show(pcInvoiceHtml(doc));
+    }
+  }
+
+  async function sign(form){
+    if (busy) return;
+    const name = form.querySelector('#pcSignName');
+    const agree = form.querySelector('#pcSignAgree');
+    const err = form.querySelector('#pcSignErr');
+    const btn = form.querySelector('#pcSignBtn');
+    const bad = pcSignProblem(name.value, agree.checked);
+    err.textContent = bad;
+    if (bad) { (agree.checked || pcSignProblem(name.value, true) ? name : agree).focus(); return; }
+    busy = true; btn.disabled = true; btn.textContent = 'Signing…';
+    const r = await pcDocSign(token, name.value, navigator.userAgent);
+    busy = false;
+    if (!r.ok) {
+      btn.disabled = false; btn.textContent = 'Sign agreement';
+      err.textContent = r.error;
+      return;
+    }
+    doc = r.data;
+    paint();
+    const done = document.getElementById('pcSigned');
+    if (done) { done.focus(); done.scrollIntoView({ block: 'center' }); }
+  }
+
+  root.addEventListener('submit', function(e){
+    if (e.target && e.target.id === 'pcSignForm') { e.preventDefault(); sign(e.target); }
+  });
+  root.addEventListener('click', function(e){
+    const t = e.target && e.target.closest ? e.target.closest('[data-pc-print],[data-pc-retry]') : null;
+    if (!t) return;
+    if (t.hasAttribute('data-pc-print')) window.print();
+    else load();
+  });
+  window.addEventListener('hashchange', function(){ token = pcTokenFromHash(location.hash); load(); });
+
+  load();
+})();
+</script>
+</body>
+</html>

@@ -13,7 +13,7 @@ import vm from 'node:vm';
 const root = path.join(import.meta.dirname, '..');
 
 /* ───────────── a fake supabase ───────────── */
-let calls, tables, rpcs, failWith;
+let calls, tables, rpcs, failWith, rpcAnswer;
 
 function builder(tableName) {
   const q = { table: tableName, filters: [], payload: null, op: null, cols: null };
@@ -45,12 +45,13 @@ const fakeSb = {
   async rpc(name, args) {
     rpcs.push({ name, args });
     if (failWith) return { data: null, error: failWith };
+    if (rpcAnswer && name in rpcAnswer) return { data: rpcAnswer[name], error: null };
     return { data: { id: 'm-new', month_no: 1 }, error: null };
   },
 };
 
 function reset() {
-  calls = []; rpcs = []; failWith = null;
+  calls = []; rpcs = []; failWith = null; rpcAnswer = null;
   tables = {
     plan_prices: [
       { plan: 'pilot',   label: 'The Pilot', calls_promised: 2,  monthly_fee: 300,  three_month_fee: 0,     is_recurring: false },
@@ -258,6 +259,33 @@ test('money is written the way a person reads it', () => {
   assert.equal(usd(0), '$0');
   assert.equal(usd(null), '$0');
   assert.equal(usd('2497.6'), '$2,498');
+});
+
+/* ───────────── paid goes through the database rule ───────────── */
+
+test('fnMarkInvoicePaid calls mark_paid and never writes the invoices table itself', async () => {
+  reset();
+  rpcAnswer = { mark_paid: { invoice_id: 'i-1', client_id: 'c-1', welcome_sent: true } };
+  const r = await F('fnMarkInvoicePaid')('i-1', '  Wise  ');
+  assert.deepEqual(r, { ok: true, data: { invoice_id: 'i-1', client_id: 'c-1', welcome_sent: true }, error: '' });
+  assert.deepEqual(rpcs.at(-1), { name: 'mark_paid', args: { p_invoice: 'i-1', p_via: 'Wise' } });
+  assert.equal(calls.filter((c) => c.table === 'invoices').length, 0, 'no direct table update');
+  assert.equal(F('fnPaidWords')(r.data), 'Paid. The welcome email and their way in are on their way.');
+
+  await F('fnMarkInvoicePaid')('i-2');
+  assert.deepEqual(rpcs.at(-1).args, { p_invoice: 'i-2', p_via: null }, 'no way of paying given: the rule decides');
+  assert.equal(F('fnPaidWords')({ welcome_sent: false }), 'Marked paid.');
+  assert.equal(F('fnPaidWords')(null), 'Marked paid.');
+  assert.equal(F('fnPaidWords')({ welcome_sent: 'yes' }), 'Marked paid.', 'only a real true counts');
+
+  const n = rpcs.length;
+  assert.equal((await F('fnMarkInvoicePaid')('')).ok, false);
+  assert.equal(rpcs.length, n, 'nothing is asked without an invoice');
+  failWith = { message: 'Only the owner can mark an invoice paid.' };
+  assert.deepEqual(await F('fnMarkInvoicePaid')('i-1'), { ok: false, data: null, error: 'Only the owner can mark an invoice paid.' });
+  const src = fs.readFileSync(path.join(root, 'finance.js'), 'utf8');
+  const body = src.slice(src.indexOf('async function fnMarkInvoicePaid'), src.indexOf('function fnPaidWords'));
+  assert.ok(body.includes("sb.rpc('mark_paid'") && !body.includes('.update('), 'the old invoice update is gone');
 });
 
 /* ───────────── it stands alone ───────────── */

@@ -31,7 +31,12 @@ async function xxRun(fn, whenEmpty){ try{ return xxWrap(await fn(), whenEmpty) }
 
 All tables: approved staff can read and write (`is_approved()`). The `dnc` table
 is add-only for staff; only `is_admin()` can change or remove a row.
-Client sign-in is not built yet, so client-facing tables are team-only for now.
+`invoices` are admin-read. A signed-in portal client sees ONLY their own channel:
+they may select the `channel_messages` of that channel (`deleted_at is null`) and
+insert `{channel_id, author_person, body}` (with `author_user` null). Every other
+table and view returns nothing for a client. A client never enters the hub shell:
+index.html asks `portal_home()` for anyone who is not an approved team member and
+sends a client to `/portal.html`.
 
 ## Money rules already built (finance.js — do not duplicate)
 
@@ -65,7 +70,7 @@ and `created_at timestamptz not null default now()` unless said otherwise.
 ### Meetings and the calendar
 The Calendar (meetings.js) is the one place every call lives. It reads `meetings`
 **and** `discovery_bookings` and draws both; there is no separate Bookings screen.
-A booking's outcome is still written only by pipeline.js. Both tables hold their
+A booking's outcome is still written only by pipeline.js (Won goes through `close_won`, below). Both tables hold their
 time: the hub's slot finder treats any booking that is not `cancelled` as taken.
 `discovery_bookings.status` starts as `booked` (the website), becomes `brief_sent`
 (the research engine), then `held`, `no_show`, `won`, `lost` or `cancelled`. A
@@ -77,7 +82,7 @@ of "open" words.
 
 ### Their people and the portal
 - **client_people** — client_id*, full_name*, email, phone, role, is_primary*, timezone, notes
-- **portal_invites** — client_id*, person_id, email*, token* (unique, random), portal_role* [viewer|manager], status* [pending|accepted|revoked|expired], expires_at* (now + 14 days), accepted_at, accepted_user
+- **portal_invites** — client_id*, person_id, email*, token_hash, portal_role* [viewer|manager], status* [pending|accepted|revoked|expired], expires_at* (now + 14 days), accepted_at, accepted_user. **There is no `token` column.** Only a hash is stored; the raw token is handed back once by `portal_invite_create` and is never readable again, so a listed invite has a status and no link (portal.js).
 - **client_requests** — client_id*, person_id, kind* [question|change|complaint|dispute|pause|cancel|other], subject*, body, status* [open|in_progress|answered|closed], owner, closed_at
 
 ### Conversations
@@ -117,6 +122,48 @@ View **v_outreach_summary** — client_id, client_name, campaigns, running, sent
 - **agreements** — booking_id, client_name*, client_email*, client_company*, plan*, term*, monthly_fee*, status*, gmail_message_id, sent_by, error
 - **agreement_pdfs** — key* (pk), filename*, b64*, updated_at*
 - **workspace_shared / workspace_admin** — id int4, data* jsonb, updated_at
+
+## Close to onboarded
+
+The path from a won call to a client who can sign in. Every step is a database
+rule called with `sb.rpc`; each returns jsonb unless said, and refuses in plain
+English that the screen shows as it is.
+
+1. **Won** on a call's panel (pipeline.js `plCloseWon`, after the plan picker) →
+   `close_won` → client + channel + agreement + invoice, and the "pack" email queued.
+2. The client opens the links, signs the agreement (typed name) and pays by the
+   Wise / Payoneer details on the invoice.
+3. The owner clicks **Paid** (finance.js `fnMarkInvoicePaid`, from the client's
+   page or Billing) → `mark_paid` → invoice paid, invite made, "welcome" email queued.
+4. The client opens the join link and sets a password → edge function
+   `portal-accept` → lands on portal.html and sees only their channel.
+
+Team (admin only):
+- `close_won(p_booking uuid, p_plan text, p_term text default 'monthly')` → `{client_id, invoice_id, agreement_id, invoice_number}`. `p_plan` in pilot|starter|growth|scale; `p_term` in monthly|3month. Raises 'That call is already a client.' if done twice.
+- `mark_paid(p_invoice uuid, p_via text default null)` → `{invoice_id, client_id, welcome_sent boolean}`.
+- `biz_get()` → `{legal_name, address, email, wise_details, payoneer_link, kickoff_link, site}` — the business details on agreements, invoices and emails. Stand-ins until set: a value that starts with `[` is not set yet (Settings → "Payments and documents", settings.js).
+- `biz_set(p jsonb)` → the same shape; merges the keys given.
+- `portal_invite_create(p_client uuid, p_email text, p_person uuid default null)` → `text`, the RAW token, shown once. Only its hash is stored; earlier pending invites for that email + client are revoked.
+
+Public (anon, by link token):
+- `doc_get(p_token text)` → an agreement `{kind:'agreement', company, contact_name, status [sent|signed|void], signed_name, signed_at, terms}` or an invoice `{kind:'invoice', number, status [draft|sent|paid|overdue|void], issued_on, due_on, paid_at, currency, lines:[{label, amount}], gross, pilot_credit, amount, bill_to, from, pay:{wise_details, payoneer_link}}`; raises 'This link is not valid.'
+- `doc_sign(p_token text, p_name text, p_agent text)` → the agreement as `doc_get`, now signed. Once only.
+- `invite_peek(p_token text)` → `{ok:true, email, company, name}` or `{ok:false, reason: used|expired|invalid}`.
+
+Client (signed in as a portal client):
+- `portal_home()` → null when the caller is not a portal client, else `{person:{id,name}, company, channel:{id,name}, members:[{kind: team|client, id, name}]}`.
+
+Edge function (public, no JWT): `POST /functions/v1/portal-accept {token, password}` → `200 {ok:true, email}`, or `4xx {ok:false, error}` in plain words.
+
+Links — the token rides in the URL #fragment, never the query string:
+`{site}/doc.html#<token>`, `{site}/join.html#<token>`, `{site}/portal.html`
+(`site` defaults to https://aviance.store). An old `/#join=<token>` link is
+handed on to join.html by index.html.
+
+SQL the documents and email side provides: `agreement_terms(p_client)`,
+`mail_pack(p_client, p_agreement_url, p_invoice_url)`,
+`mail_welcome(p_client, p_join_url, p_agreement_url, p_receipt_url, p_kickoff_url)`,
+and the helper `biz(p_key text) returns text`.
 
 ## The words the database will accept
 

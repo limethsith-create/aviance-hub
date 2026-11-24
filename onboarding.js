@@ -620,6 +620,6 @@ async function obMarkSentGo(invoiceId){
 }
 async function obMarkPaidGo(invoiceId, via){
   const r = typeof fnMarkInvoicePaid === 'function' ? await fnMarkInvoicePaid(invoiceId, via || 'bank transfer') : obErr('The finance side is not loaded.');
-  obSay(r.ok ? 'Marked as paid.' : r.error);
+  obSay(r.ok ? (typeof fnPaidWords === 'function' ? fnPaidWords(r.data) : 'Marked paid.') : r.error);
   await obLoadBilling(); obPaint(obRenderBilling());
 }

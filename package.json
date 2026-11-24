@@ -4,6 +4,6 @@
   "description": "Aviance OS — the owner's command centre (static site, no build step).",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check calling.js && node --check channels-api.js && node --check channels.js && node --check clientbook.js && node --check digest.js && node --check finance.js && node --check meetings.js && node --check onboarding.js && node --check outreach-adapter.js && node --check outreach-demo.js && node --check outreach-instantly.js && node --check outreach-smartlead.js && node --check outreach.js && node --check pipeline.js && node --check portal.js && node --check settings.js && node --check team.js && node --check wrapup.js"
+    "check": "node --check calling.js && node --check channels-api.js && node --check channels.js && node --check clientbook.js && node --check digest.js && node --check finance.js && node --check meetings.js && node --check onboarding.js && node --check outreach-adapter.js && node --check outreach-demo.js && node --check outreach-instantly.js && node --check outreach-smartlead.js && node --check outreach.js && node --check pipeline.js && node --check portal-client.js && node --check portal.js && node --check settings.js && node --check team.js && node --check wrapup.js"
   }
 }
