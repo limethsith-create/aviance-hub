@@ -74,11 +74,10 @@ const CL_SCRIPT = [
     id: 'guarantee', title: '3. The guarantee (say it every call)', open: true, items: [
       { kind: 'say', text: '"Here\'s the part that matters. Before we start, we agree a number of calls for the month. If we miss that number in your first month, you don\'t get an apology, you get double your money back. Not the calls — double the fee. Every month after that, if we miss it, that month is free, refunded in full. So the only person taking a risk here is me."' },
       { kind: 'note', text: 'The numbers, exactly:' },
-      { kind: 'num', text: 'Pilot $300 one-off → 2 qualified calls within 30 days of going live → $600 back if we miss.' },
       { kind: 'num', text: 'Starter $1,500/month → 5 calls → $3,000 back in month one.' },
       { kind: 'num', text: 'Growth $3,000/month → 10 calls → $6,000 back.' },
       { kind: 'num', text: 'Scale $4,500/month → 15 calls → $9,000 back.' },
-      { kind: 'note', text: 'On a 3-month term the monthly price drops (Starter $1,200, Growth $2,400, Scale $3,600) and double-back means double that month\'s fee.' },
+      { kind: 'note', text: 'On a 3-month term the monthly price drops — Starter $1,200, Growth $2,400, Scale $3,600 a month — and double-back means double that month\'s fee.' },
     ],
   },
   {
@@ -100,7 +99,7 @@ const CL_SCRIPT = [
       { kind: 'ask', term: '"We tried cold email, it didn\'t work."', text: '"Most of it doesn\'t, because people guess the message and blast it. We test angles on our own warmed inboxes first, and we carry the risk. Miss the number, you get double back. Did the last lot offer you that?"' },
       { kind: 'ask', term: '"Just send me an email."', text: '"I will. What\'s the best address? And so it isn\'t another email in the pile — if I put thirty minutes in next week and it\'s useless, you cancel it and you\'ve lost nothing."' },
       { kind: 'ask', term: '"Sounds too good to be true."', text: '"It would be if we took everyone. We don\'t. And it isn\'t a sales promise, it\'s written into the agreement you sign."' },
-      { kind: 'ask', term: '"How much?"', text: '"Depends on the number you want. Most start with the Pilot: $300, two qualified calls in the first 30 days, $600 back if we miss. After that it\'s $1,500 a month for five, and up from there."' },
+      { kind: 'ask', term: '"How much?"', text: '"Depends on the number you want. Most start on Starter: five qualified calls a month, $1,500 a month, or $1,200 a month if you take the three-month term. Miss five in your first month and you get $3,000 back. From there it\'s ten calls at $3,000 and fifteen at $4,500."' },
       { kind: 'ask', term: '"We have someone doing this."', text: '"Good. What\'s it booking a month? We\'re not replacing them — we\'re the version with a number attached and money behind it."' },
       { kind: 'ask', term: '"I don\'t have time."', text: '"That\'s exactly why this exists. Thirty seconds are up, by the way. Shall I take thirty minutes off your hands next week instead?"' },
       { kind: 'ask', term: '"How do you get the calls?"', text: '"Pre-warmed inboxes, a list built for your market, and copy you approve before a single email goes out."' },

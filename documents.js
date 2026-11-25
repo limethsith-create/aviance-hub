@@ -1,7 +1,7 @@
 /* ===================== AVIANCE OS — Documents (everything a client receives) =====================
    One screen with a live preview of every email, document and chat message that goes out to a client:
    the discovery-call emails (confirmation + 3 reminders), the agreement / invoice / receipt for each of
-   the 4 plans, the pack and welcome emails, and every bot / step message in the 14-day journey.
+   the 3 plans on offer, the pack and welcome emails, and every bot / step message in the 14-day journey.
 
    Data: documents_preview() (20261124_documents_screen.sql, owner only). It runs the real flow for a
    sample client on each plan inside a rolled-back transaction, so what you see is exactly what the
@@ -12,8 +12,18 @@
 
 /* ===================== 0. STATE ===================== */
 const dc={items:[],loaded:false,loading:false,err:null,pick:null,seq:0};
-const DC_GROUP_ORDER=['Discovery call','Emails — Pilot','Emails — Starter (3 months)','Emails — Growth','Emails — Scale',
+const DC_GROUP_ORDER=['Discovery call','Emails — Starter (3 months)','Emails — Growth','Emails — Scale',
   'Agreements','Invoices','Receipts','Chat messages','Problems'];
+/* The $300 Pilot is retired. documents_preview() still builds its pack while the
+   database says so, so it is dropped here: the owner is never shown a Pilot document
+   to choose from. (Nothing a real Pilot client already holds is touched.) */
+const DC_RETIRED=[/^Emails — Pilot$/i];
+function dcRetired(x){
+  const g=String((x&&x.group)||'');
+  if(DC_RETIRED.some(re=>re.test(g)))return true;
+  const plan=String((x&&x.meta&&x.meta.plan)||'').toLowerCase();
+  return plan==='pilot';
+}
 /* the order a client meets the chat messages in */
 const DC_CHAT_ORDER=['welcome','offer:kickoff','form','step:kickoff','approval:icp','step:testing:doing','update','step:testing:done','approval:copy','offer:onboarding','step:onboarding','step:launch'];
 
@@ -33,7 +43,8 @@ async function dcFetch(){
 /* Sort + tidy what the database sent: the per-plan booking confirmation repeats the "Discovery call" one, so it goes. */
 function dcPrepare(list){
   const items=(Array.isArray(list)?list:[]).filter(x=>x&&x.key&&x.title)
-    .filter(x=>!(String(x.group||'').indexOf('Emails — ')===0&&/booking confirmation/i.test(x.title)));
+    .filter(x=>!(String(x.group||'').indexOf('Emails — ')===0&&/booking confirmation/i.test(x.title)))
+    .filter(x=>!dcRetired(x));
   const chatKey=x=>{
     const m=x.meta||{};const k=String(x.key||'').replace(/^chat_/,'').replace(/_\d+$/,'');
     if(k==='offer')return 'offer:'+(/onboarding/i.test(x.title)?'onboarding':'kickoff');

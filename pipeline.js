@@ -58,8 +58,14 @@ const PL_NEVER_HELD = ['no_show', 'ghosted'];
 const PL_RUNNING_MS = 30 * 60000;
 const PL_BRIEF_DEPTH = 3;
 
-const PL_PLANS = ['pilot', 'starter', 'growth', 'scale'];
+/* The plans a new sale may be put on. The $300 Pilot is retired: it is no longer
+   offered anywhere, so it is not in this list. */
+const PL_PLANS = ['starter', 'growth', 'scale'];
+/* Every plan that has ever been sold, so a client already on a retired plan still
+   reads correctly (their label, their price, their guarantee wording). */
 const PL_PLAN_WORDS = { pilot: 'Pilot', starter: 'Starter', growth: 'Growth', scale: 'Scale' };
+/* Retired: still rendered from history, never offered and never coloured as its own. */
+const PL_RETIRED_PLANS = ['pilot'];
 
 const pl = { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30, winning: false };
 
@@ -338,6 +344,8 @@ async function plWon(bookingId, opts) {
   const o = opts || {};
   if (!bookingId) return plErr('No booking was asked for.');
   if (!o.plan) return plErr('Pick the plan they bought first.');
+  /* the Pilot is retired: no new client may be put on it */
+  if (PL_RETIRED_PLANS.includes(String(o.plan))) return plErr('That plan is retired. Pick ' + PL_PLANS.map(plPlanWord).join(', ') + '.');
 
   const got = await plRun(() => sb.from('discovery_bookings').select('*').eq('id', bookingId).maybeSingle(), null);
   if (!got.ok) return got;
@@ -389,9 +397,10 @@ async function plCloseWon(bookingId, plan, term) {
   if (!bookingId) return plErr('No booking was asked for.');
   const p = String(plan || '');
   if (!p) return plErr('Pick the plan they bought first.');
+  if (PL_RETIRED_PLANS.includes(p)) return plErr('That plan is retired. Pick ' + PL_PLANS.map(plPlanWord).join(', ') + '.');
   if (!PL_PLANS.includes(p)) return plErr('That plan is not in the price list.');
-  /* a Pilot is a one-off: it has no term to choose */
-  const t = p !== 'pilot' && term === '3month' ? '3month' : 'monthly';
+  /* a one-off plan has no term to choose */
+  const t = PL_RETIRED_PLANS.includes(p) ? 'monthly' : (term === '3month' ? '3month' : 'monthly');
   return plRun(() => sb.rpc('close_won', { p_booking: bookingId, p_plan: p, p_term: t }), null);
 }
 
@@ -525,7 +534,8 @@ function renderPlOutcome(d) {
   const b = d.booking, id = b.id, s = String(b.status);
   if (d.client) {
     const c = d.client, inv = d.invoice;
-    const calls = String(c.calls_promised || 0) + (String(c.plan) === 'pilot' ? ' calls' : ' calls a month');
+    /* a one-off plan (the retired Pilot) promised its calls once, not every month */
+    const calls = String(c.calls_promised || 0) + (PL_RETIRED_PLANS.includes(String(c.plan)) ? ' calls' : ' calls a month');
     return `<div class="card pl-pad pl-outcome"><b>Won — they are a client</b><p class="muted">${esc(c.company || '')} is on ${esc(plPlanWord(c.plan) || 'a plan')}${String(c.term) === '3month' ? ' · 3 months' : ''}, ${esc(calls)}. This booking cannot make a second client.</p>
       ${inv ? `<p class="pl-small">${esc('Invoice ' + (inv.number || '') + ' · ' + plUsd(inv.amount) + ' ' + plInvoiceWord(inv))}</p>` : ''}
       <div class="pl-acts"><button type="button" class="btn" onclick="plOpenClient(${plAttr(c.id)})">Open client →</button></div></div>`;
@@ -565,13 +575,14 @@ function plPrice(plan, prices) {
   const k = String(plan || '');
   return (Array.isArray(prices) ? prices : []).find((p) => p && String(p.plan) === k) || null;
 }
-/* A Pilot is a one-off; a plan without a 3-month price is monthly whatever was picked. */
+/* A one-off plan (the retired Pilot) has no term; a plan without a 3-month price is
+   monthly whatever was picked. Kept so an old Pilot client still reads correctly. */
 function plTermOf(plan, term, prices) {
   const p = plPrice(plan, prices);
-  if (String(plan) === 'pilot' || (p && (!p.is_recurring || !Number(p.three_month_fee)))) return 'monthly';
+  if (PL_RETIRED_PLANS.includes(String(plan)) || (p && (!p.is_recurring || !Number(p.three_month_fee)))) return 'monthly';
   return term === '3month' ? '3month' : 'monthly';
 }
-/* What the first invoice comes to: a month, the quarter, or the Pilot once. */
+/* What the first invoice comes to: a month, the quarter, or a one-off once. */
 function plFirstInvoice(plan, term, prices) {
   const p = plPrice(plan, prices); if (!p) return null;
   const t = plTermOf(plan, term, prices);
@@ -582,7 +593,7 @@ function plPriceWords(plan, term, prices) {
   const p = plPrice(plan, prices); if (!p) return '';
   const name = plPlanWord(plan) || String(plan);
   const calls = Number(p.calls_promised) || 0;
-  if (String(plan) === 'pilot' || !p.is_recurring) return name + ' — ' + plUsd(p.monthly_fee) + ' once, ' + calls + ' calls';
+  if (PL_RETIRED_PLANS.includes(String(plan)) || !p.is_recurring) return name + ' — ' + plUsd(p.monthly_fee) + ' once, ' + calls + ' calls';
   if (plTermOf(plan, term, prices) === '3month') {
     return name + ' · 3 months — ' + calls + ' calls a month, ' + plUsd(p.three_month_fee) + ' a month (' + plUsd(Number(p.three_month_fee) * 3) + ' for the quarter)';
   }
@@ -605,8 +616,8 @@ function plRecommendedPlan(briefRow) {
 /* A call still in the future: Won is allowed, but it is said. */
 function plNotHappened(b, now) { const t = plMs(b && b.call_at); return Boolean(t) && t > (now || new Date()).getTime(); }
 
-/* The small plan picker the Won button opens: which plan, and (for everything but a
-   Pilot, which is a one-off) which term, with what that costs beside the button.
+/* The small plan picker the Won button opens: which plan and which term, with what
+   that costs beside the button. Every plan on offer is monthly or 3-month.
    The plan they chose on the website is already picked; failing that, the one the
    brief recommends. The button asks once ("Send the agreement and the $3,000
    invoice to …?") before anything is sent. Pure: data in, HTML out.
@@ -621,7 +632,7 @@ function renderPlWonPicker(b, meta) {
   return `<div id="plWonPick" class="pl-won-pick pl-outcome"${meta.open ? '' : ' style="display:none"'}>
     ${plNotHappened(b, meta.now) ? '<p class="pl-small pl-warn">This call hasn’t happened yet.</p>' : ''}
     <div class="field"><label for="plPlan">Which plan did they buy</label><select id="plPlan" data-tk-form onchange="plWonTermShow()"><option value="">Pick the plan</option>${PL_PLANS.map((p) => `<option value="${esc(p)}"${p === picked ? ' selected' : ''}>${esc(plPlanWord(p))}</option>`).join('')}</select>${!b.plan && rec ? '<p class="muted pl-small">The brief recommends ' + esc(plPlanWord(rec)) + '.</p>' : ''}</div>
-    <div class="field" id="plTermField"${picked === 'pilot' ? ' style="display:none"' : ''}><label for="plTerm">Term</label><select id="plTerm" data-tk-form onchange="plWonTermShow()"><option value="monthly">Monthly</option><option value="3month">3 months</option></select></div>
+    <div class="field" id="plTermField"><label for="plTerm">Term</label><select id="plTerm" data-tk-form onchange="plWonTermShow()"><option value="monthly">Monthly</option><option value="3month">3 months</option></select></div>
     <p class="pl-small" id="plWonPrice">${esc(price)}</p>
     <div class="pl-acts" id="plWonAskRow"><button class="btn" id="plWonGo" onclick="plWonAsk(${plAttr(id)})">Mark won and send the pack</button></div>
     <div id="plWonConfirm" class="pl-won-confirm" style="display:none"><p id="plWonConfirmText">${esc(plWonConfirmWords(b, picked, 'monthly', meta.prices))}</p>
@@ -743,14 +754,14 @@ function plOpenWon() {
   plWonTermShow();
   return show;
 }
-/* A Pilot has no term, so the term choice is hidden while Pilot is picked. The price
-   beside the button follows the plan and term picked. */
+/* Every plan on offer has a term, so the term choice always shows. The price beside
+   the button follows the plan and term picked. */
 function plWonTermShow() {
   const doc = typeof document !== 'undefined' ? document : null;
   const f = doc ? doc.getElementById('plTermField') : null;
   if (!f) return;
   const plan = plPick('plPlan');
-  f.style.display = plan === 'pilot' ? 'none' : '';
+  f.style.display = '';
   const prices = pl.one && pl.one.prices;
   const w = doc.getElementById('plWonPrice');
   if (w) w.textContent = plan ? plPriceWords(plan, plPick('plTerm'), prices) : '';
@@ -793,7 +804,7 @@ async function plMarkWon(id) {
   if (pl.winning) return plErr('Still working on it.');
   pl.winning = true;
   let r;
-  try { r = await plCloseWon(id, plan, plan === 'pilot' ? 'monthly' : (plPick('plTerm') || 'monthly')); }
+  try { r = await plCloseWon(id, plan, plPick('plTerm') || 'monthly'); }
   finally { pl.winning = false; }
   const b = pl.one && pl.one.booking && String(pl.one.booking.id) === String(id) ? pl.one.booking : null;
   const to = String((b && b.email) || '').trim() || 'them';

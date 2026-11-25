@@ -2,28 +2,27 @@
    A week of business days that fits the window with no scrolling, and a month
    grid; every call coloured by its plan. Every size,
    surface and border is a token from theme.css and nothing is under --fs-min.
-   The only colours this file brings are the five plan colours below, defined
+   The only colours this file brings are the four plan colours below, defined
    once, with their dark-theme values. Everything is prefixed mt- so it cannot
    collide with anything else. Under 700px the grids give way to lists. */
 
 /* ── the plan colours: one soft tint, a darker bar, readable ink ──────────
    Calm on purpose: the brand red is kept for "needs an outcome" and today.
-   Text on tint is 4.5:1 or better in both themes (tests/meetings.test.mjs). */
+   Text on tint is 4.5:1 or better in both themes (tests/meetings.test.mjs).
+   The retired Pilot has no colour of its own any more: meetings.js draws it
+   with the neutral "none" colour. */
 :root{
-  --mt-pilot-bg:#F3E7D3;   --mt-pilot-bar:#A8752A;   --mt-pilot-ink:#4A3310;
   --mt-starter-bg:#DFEAF4; --mt-starter-bar:#4A7BA6; --mt-starter-ink:#1D3A54;
   --mt-growth-bg:#DDEDE0;  --mt-growth-bar:#4F8A5B;  --mt-growth-ink:#1F4028;
   --mt-scale-bg:#E9E0F2;   --mt-scale-bar:#7B5BA0;   --mt-scale-ink:#3A2752;
   --mt-none-bg:#ECECE9;    --mt-none-bar:#8A8D92;    --mt-none-ink:#2E3033;
 }
 body.dark,:root[data-theme="dark"]{
-  --mt-pilot-bg:#3A2F1C;   --mt-pilot-bar:#C9A15C;   --mt-pilot-ink:#F1E3C8;
   --mt-starter-bg:#1E2E3D; --mt-starter-bar:#7FA9CF; --mt-starter-ink:#D5E5F3;
   --mt-growth-bg:#1F3324;  --mt-growth-bar:#7FB58A;  --mt-growth-ink:#D6EBDA;
   --mt-scale-bg:#2E2540;   --mt-scale-bar:#A98BD0;   --mt-scale-ink:#E4D9F2;
   --mt-none-bg:#2A2E33;    --mt-none-bar:#8A9099;    --mt-none-ink:#E1E3E6;
 }
-.mt-plan-pilot{--mt-bg:var(--mt-pilot-bg);--mt-bar:var(--mt-pilot-bar);--mt-ink:var(--mt-pilot-ink)}
 .mt-plan-starter{--mt-bg:var(--mt-starter-bg);--mt-bar:var(--mt-starter-bar);--mt-ink:var(--mt-starter-ink)}
 .mt-plan-growth{--mt-bg:var(--mt-growth-bg);--mt-bar:var(--mt-growth-bar);--mt-ink:var(--mt-growth-ink)}
 .mt-plan-scale{--mt-bg:var(--mt-scale-bg);--mt-bar:var(--mt-scale-bar);--mt-ink:var(--mt-scale-ink)}
