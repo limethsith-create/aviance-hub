@@ -560,7 +560,8 @@ test('team.html mentions no other part of the hub, and loads no hub module', () 
   const srcs = [...teamHtml.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(srcs.filter((s) => !/^https:/.test(s)), ['team-page.js'], 'one local script: ' + srcs.join(' '));
   const css = [...teamHtml.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(css, ['theme.css', 'polish.css', 'team-page.css']);
+  // brand.css is the shared look, like theme.css — not a hub module
+  assert.deepEqual(css, ['theme.css', 'polish.css', 'team-page.css', 'brand.css']);
   for (const hub of ['index.html', 'channels.js', 'clientbook.js', 'settings.js', 'portal.js', 'app.js']) {
     assert.ok(!teamHtml.includes(hub), 'no reference to ' + hub);
   }
