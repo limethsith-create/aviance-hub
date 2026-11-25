@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#F6F7F9">
+<title>Aviance — your calls</title>
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Aviance">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="polish.css">
+<link rel="stylesheet" href="caller-page.css">
+<!-- Pinned to one exact version with an integrity hash, as on every Aviance page. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script src="caller-page.js"></script>
+</head>
+<body>
+<!-- A cold caller's whole world: sign in with her email and the access code
+     she was given, then one lead at a time — the name, the company, a number
+     to tap, and seven buttons that each log the call and bring up the next
+     one. One screen and nothing else: no navigation, and no other Aviance
+     script is loaded here. What she may read or write is decided by the
+     database (row level security); this page only draws what the caller
+     functions handed over. -->
+<noscript><main class="cl-notice"><h1 class="cl-h1">Please turn on JavaScript.</h1><p class="cl-lede">This page needs it to show your calls.</p></main></noscript>
+<div id="clRoot"></div>
+<script>
+(function(){
+  const root = document.getElementById('clRoot');
+  let me = null;            /* what caller_me last said */
+  let lead = null;          /* the lead on screen */
+  let sheet = '';           /* '', 'callback', 'book' or 'booked' */
+  let book = null;          /* the booking panel's own state */
+  let booked = null;        /* the confirmation to show */
+  let clock = null, timer = null, busy = false, signing = false;
+
+  /* ---- signing in ---- */
+  function showSignIn(message, email){
+    stop();
+    document.title = 'Aviance — sign in';
+    root.innerHTML = clSignInHtml({ email: email || '', error: message || '' });
+    const h = root.querySelector('.cl-h1');
+    if (h) h.focus();
+  }
+
+  async function signIn(form){
+    if (signing) return;
+    const email = form.querySelector('#clInEmail').value.trim();
+    const code = form.querySelector('#clInCode').value;
+    const err = form.querySelector('#clInErr'), btn = form.querySelector('#clInBtn');
+    signing = true; btn.disabled = true; btn.textContent = 'Signing in…'; err.textContent = '';
+    const r = await clSignIn(email, code);
+    signing = false;
+    if (!r.ok) {
+      btn.disabled = false; btn.textContent = 'Sign in';
+      err.textContent = r.error;
+      const c = form.querySelector('#clInCode');
+      if (c) { c.value = ''; c.focus(); }
+      return;
+    }
+    enter(email);
+  }
+
+  async function enter(email){
+    root.innerHTML = clLoadingHtml();
+    const r = await clMe();
+    if (!r.ok) {
+      if (r.offline) { root.innerHTML = clOfflineHtml(); return; }
+      /* the functions may not be applied yet: say so, don't dump a code */
+      if (clIsNotReady(r.error)) { root.innerHTML = clNotReadyHtml(r.error); return; }
+      showSignIn(r.error, email);
+      return;
+    }
+    if (!r.data) {
+      /* a real login, but not a caller's: let her go rather than loop */
+      await clSignOut();
+      showSignIn(CL_NO_ACCOUNT, email);
+      return;
+    }
+    me = r.data;
+    lead = me.lead;
+    showDialler();
+  }
+
+  /* ---- the dialling screen ---- */
+  function showDialler(){
+    document.title = 'Aviance — your calls';
+    root.innerHTML = clDiallerHtml({ caller: me.caller, today: me.today, lead: lead, now: new Date() });
+    sheet = ''; book = null; booked = null;
+    clock = setInterval(function(){ if (!document.hidden) tickClock(); }, CL_CLOCK_MS);
+    timer = setInterval(function(){ if (!document.hidden && !lead && !sheet) again(); }, CL_POLL_MS);
+  }
+
+  function stop(){
+    if (clock) { clearInterval(clock); clock = null; }
+    if (timer) { clearInterval(timer); timer = null; }
+    me = null; lead = null; sheet = ''; book = null; booked = null; busy = false;
+  }
+
+  /* Only the one line moves, so her place on the page never jumps. */
+  function tickClock(){
+    const el = document.getElementById('clZone');
+    if (!el || !lead) return;
+    const z = clZoneNow(lead.timezone, new Date());
+    el.className = 'cl-zone' + (z.risky ? ' cl-zone-risky' : '');
+    el.textContent = (z.risky ? 'Careful: ' : '') + clZoneLine(lead.timezone, new Date());
+  }
+
+  function drawLead(){
+    const l = document.getElementById('clLead'), a = document.getElementById('clActions');
+    if (l) l.innerHTML = clLeadHtml(lead, new Date());
+    if (a) a.innerHTML = clActionsHtml(lead);
+    drawSheet();
+  }
+  function drawTally(){
+    const t = document.getElementById('clTally');
+    if (t) t.innerHTML = clTallyHtml(me && me.today);
+  }
+  function drawSheet(){
+    const box = document.getElementById('clSheet');
+    if (!box) return;
+    if (sheet === 'callback') box.innerHTML = clCallbackHtml(Object.assign({ now: new Date() }, book || {}));
+    else if (sheet === 'book') box.innerHTML = clBookHtml(Object.assign({ lead: lead, now: new Date() }, book || {}));
+    else if (sheet === 'booked') box.innerHTML = clBookedHtml(booked, new Date());
+    else box.innerHTML = '';
+    const first = box.querySelector('input,button');
+    if (first && sheet) first.focus();
+  }
+  function say(text){
+    const f = document.getElementById('clFlash');
+    if (f) f.textContent = text || '';
+  }
+  function trouble(text){
+    const e = document.getElementById('clErr');
+    if (e) e.textContent = text || '';
+  }
+  function noteValue(){
+    const n = document.getElementById('clNote');
+    return n ? n.value : '';
+  }
+
+  /* ---- logging a call ---- */
+
+  /* The single tap: log it, count it, and put the next lead on screen. */
+  async function log(outcome, callbackAt){
+    if (busy || !lead) return;
+    const o = clOutcome(outcome);
+    if (!o) return;
+    busy = true; trouble(''); say('Saving…');
+    const r = await clLog(lead.id, o.key, noteValue(), callbackAt || null);
+    busy = false;
+    if (!r.ok) {
+      say('');
+      if (sheet === 'callback') { book = Object.assign({}, book, { busy: false, error: r.error }); drawSheet(); return; }
+      trouble(r.error);
+      return;
+    }
+    if (me && me.today) {
+      me.today.dials += 1;
+      if (o.key === 'booked') me.today.booked += 1;
+      drawTally();
+    }
+    lead = r.data.next;
+    sheet = ''; book = null;
+    drawLead();
+    say(o.label + ' logged.');
+    const p = document.getElementById('clPhone');
+    if (p) p.focus();                       /* her thumb is already heading there */
+  }
+
+  /* "Check again" and the quiet poll when the list has run dry. */
+  async function again(){
+    if (busy) return;
+    busy = true; trouble('');
+    const r = await clNext();
+    busy = false;
+    if (!r.ok) { trouble(r.error); return; }
+    if (!r.data) { say('Still nothing. We will keep looking.'); return; }
+    lead = r.data;
+    say('');
+    drawLead();
+  }
+
+  /* ---- the callback panel ---- */
+  function openCallback(){
+    sheet = 'callback'; book = {}; drawSheet();
+  }
+  function saveCallback(form){
+    const day = form.querySelector('#clBackDay').value;
+    const time = form.querySelector('#clBackTime').value;
+    const at = clCallbackAt(day, time, new Date());
+    if (!at.ok) { book = Object.assign({}, book, { day: day, time: time, error: at.error }); drawSheet(); return; }
+    book = { day: day, time: time, busy: true, error: '' };
+    drawSheet();
+    log('callback', at.iso);
+  }
+
+  /* ---- the booking panel ---- */
+  async function openBook(){
+    sheet = 'book';
+    book = { loading: true, form: {}, slots: [] };
+    drawSheet();
+    const r = await clSlots(CL_SLOT_DAYS);
+    if (sheet !== 'book') return;
+    book.loading = false;
+    if (!r.ok) book.slotError = r.error; else book.slots = r.data;
+    drawSheet();
+  }
+
+  function readBookForm(){
+    const g = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+    return {
+      lead_id: lead ? lead.id : '',
+      start: (book && book.form && book.form.start) || '',
+      email: g('clBookEmail'), name: g('clBookName'), company: g('clBookCompany'),
+      phone: lead ? lead.phone : '', timezone: lead ? lead.timezone : '',
+    };
+  }
+
+  async function doBook(){
+    if (busy || !lead) return;
+    const form = readBookForm();
+    const bad = clBookProblem(form);
+    if (bad) { book = Object.assign({}, book, { form: form, error: bad }); drawSheet(); return; }
+    busy = true;
+    book = Object.assign({}, book, { form: form, busy: true, error: '' });
+    drawSheet();
+    const r = await clBook(form);
+    busy = false;
+    if (!r.ok) {
+      book = Object.assign({}, book, { form: form, busy: false, error: r.error });
+      drawSheet();
+      /* a time that has just gone means the list is stale: fetch it again */
+      if (/just gone/i.test(r.error)) openBook();
+      return;
+    }
+    booked = r.data;
+    sheet = 'booked';
+    drawSheet();
+    /* the booking is safe; now log it so the next lead comes up and the
+       tally moves. If the log fails she still has the booking and a button. */
+    log('booked', null);
+  }
+
+  /* ---- events ---- */
+  root.addEventListener('submit', function(e){
+    if (!e.target) return;
+    if (e.target.id === 'clInForm') { e.preventDefault(); signIn(e.target); }
+    if (e.target.id === 'clBackForm') { e.preventDefault(); saveCallback(e.target); }
+    if (e.target.id === 'clBookForm') { e.preventDefault(); doBook(); }
+  });
+
+  root.addEventListener('click', async function(e){
+    const t = e.target && e.target.closest
+      ? e.target.closest('#clOut,[data-cl-out],[data-cl-close],[data-cl-again],[data-cl-retry],[data-cl-quick],[data-cl-slot],[data-cl-onwards]')
+      : null;
+    if (!t) return;
+    if (t.id === 'clOut') { stop(); await clSignOut(); showSignIn(''); return; }
+    if (t.hasAttribute('data-cl-out')) {
+      const key = t.getAttribute('data-cl-out');
+      if (key === 'callback') { openCallback(); return; }
+      if (key === 'booked') { openBook(); return; }
+      log(key, null);
+      return;
+    }
+    if (t.hasAttribute('data-cl-close')) { sheet = ''; book = null; drawSheet(); return; }
+    if (t.hasAttribute('data-cl-again')) { again(); return; }
+    if (t.hasAttribute('data-cl-onwards')) { sheet = ''; booked = null; book = null; drawSheet(); return; }
+    if (t.hasAttribute('data-cl-quick')) {
+      const parts = String(t.getAttribute('data-cl-quick')).split('|');
+      book = Object.assign({}, book, { day: parts[0], time: parts[1], error: '' });
+      drawSheet();
+      return;
+    }
+    if (t.hasAttribute('data-cl-slot')) {
+      const form = readBookForm();
+      form.start = t.getAttribute('data-cl-slot');
+      book = Object.assign({}, book, { form: form, error: '' });
+      drawSheet();
+      return;
+    }
+    if (t.hasAttribute('data-cl-retry')) {
+      if (sheet === 'book') { openBook(); return; }
+      boot();
+      return;
+    }
+  });
+
+  /* Keys 1–7 are the seven outcomes, and only when she is not typing. */
+  document.addEventListener('keydown', function(e){
+    if (!me || !lead || sheet || busy) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const el = e.target;
+    const tag = el && el.tagName ? el.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || (el && el.isContentEditable)) return;
+    const hit = CL_OUTCOMES.filter(function(o){ return o.shortcut === e.key; })[0];
+    if (!hit) return;
+    e.preventDefault();
+    if (hit.key === 'callback') openCallback();
+    else if (hit.key === 'booked') openBook();
+    else log(hit.key, null);
+  });
+
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden && me) { tickClock(); if (!lead && !sheet) again(); } });
+  window.addEventListener('online', function(){ if (me && !lead && !sheet) again(); });
+
+  async function boot(){
+    root.innerHTML = clLoadingHtml();
+    const s = await clSession();
+    if (!s.ok) { root.innerHTML = clOfflineHtml(); return; }
+    if (s.data) enter(s.data.user && s.data.user.email); else showSignIn('');
+  }
+  clOnSignedOut(function(){ if (me) showSignIn('You have been signed out. Sign in again to carry on.'); });
+  boot();
+})();
+</script>
+</body>
+</html>

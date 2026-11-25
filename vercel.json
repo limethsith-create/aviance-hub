@@ -44,6 +44,10 @@
     {
       "source": "/team",
       "destination": "/team.html"
+    },
+    {
+      "source": "/callers",
+      "destination": "/callers.html"
     }
   ]
 }
