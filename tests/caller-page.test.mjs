@@ -574,7 +574,7 @@ test('callers.html loads only its own files and nothing from the hub', () => {
   const styles = [...HTML.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(scripts.filter((s) => !/^https:/.test(s)), ['caller-page.js'],
     'the only local script is her own: ' + scripts.join(', '));
-  assert.deepEqual(styles, ['theme.css', 'polish.css', 'caller-page.css'],
+  assert.deepEqual(styles, ['theme.css', 'polish.css', 'brand.css', 'caller-page.css'],
     'and the only stylesheets are the two shared ones plus her own');
   // every remote script is pinned with an integrity hash
   [...HTML.matchAll(/<script[^>]*src="(https:[^"]+)"[^>]*>/g)].forEach((m) => {
@@ -591,7 +591,7 @@ test('callers.html loads only its own files and nothing from the hub', () => {
 
 test('callers.html carries no link and no word pointing at the rest of the hub', () => {
   const hrefs = [...HTML.matchAll(/href="([^"]*)"/g)].map((m) => m[1]);
-  const allowed = /^(\/icon-192\.png|\/apple-touch-icon\.png|\/fonts\/inter-latin\.woff2|theme\.css|polish\.css|caller-page\.css)$/;
+  const allowed = /^(\/icon-192\.png|\/apple-touch-icon\.png|\/fonts\/inter-latin\.woff2|theme\.css|polish\.css|brand\.css|caller-page\.css)$/;
   hrefs.forEach((h) => assert.match(h, allowed, 'an unexpected link: ' + h));
   assert.equal(hrefs.filter((h) => /^(https?:)?\/\//.test(h)).length, 0, 'no link off this page at all');
   assert.equal([...HTML.matchAll(/<a\s/g)].length, 0, 'and not one anchor in the page');

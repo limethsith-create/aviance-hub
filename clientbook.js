@@ -124,6 +124,12 @@ function cbList(items){
 }
 function cbPossessive(n){ const s = cbTrim(n); return s ? s + (/s$/i.test(s) ? "'" : "'s") : 'Their' }
 
+/* The $300 Pilot is retired: it is never offered when a client is added, but a client
+   already on it keeps their label and their price, so it stays in the words below. */
+const CB_RETIRED_PLANS = ['pilot'];
+/* The plan_prices rows a new client may be put on. */
+function cbOffered(list){ return (Array.isArray(list) ? list : []).filter(p => p && CB_RETIRED_PLANS.indexOf(cbTrim(p.plan)) < 0) }
+
 /* "growth" → "Growth": a plan's name, as the owner reads it. */
 function cbPlanWord(p){
   const k = cbTrim(p).toLowerCase();
@@ -365,7 +371,8 @@ async function cbAddClient(fields){
 
   const plans = await cbPlans();
   if (!plans.ok) return plans;
-  const list = plans.data || [];
+  /* only the plans still on offer: a retired one (the Pilot) can be read, never sold */
+  const list = cbOffered(plans.data);
   const p = list.find(x => x && x.plan === cbTrim(f.plan));
   if (!p) return cbErr(list.length
     ? 'Pick a plan: ' + cbList(list.map(x => cbTrim(x.label) || cbTrim(x.plan))) + '.'
@@ -1222,7 +1229,7 @@ async function cbDoMove(clientId, toStage){
 /* Add a client by hand. The plans come from plan_prices, so the prices are never typed. */
 async function cbOpenAdd(bookingId){
   const plans = await cbPlans();
-  const list = plans.ok ? plans.data || [] : [];
+  const list = cbOffered(plans.ok ? plans.data : []);
   const opts = list.map(p => '<option value="' + cbE(p.plan) + '">' +
     cbE((cbTrim(p.label) || cbTrim(p.plan)) + ' — ' + cbInt(p.calls_promised) + ' calls, ' + cbUsd(p.monthly_fee) + ' a month') + '</option>').join('');
   const html = '<div class="cb-add"><h3>Add a client</h3>' +

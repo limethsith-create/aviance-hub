@@ -623,10 +623,14 @@ test('the month grid: November 2026 starts on Monday 26 October and is whole wee
   assert.match(visible(host('mtCalHost')), /30 Nov – 6 Dec 2026/);
 });
 
-test('each plan has its own colour class and its own initial; no plan is neutral grey; a meeting takes its client\'s plan', async () => {
-  const classes = ['pilot', 'starter', 'growth', 'scale'].map(mtPlanClass);
-  assert.deepEqual(classes, ['mt-plan-pilot', 'mt-plan-starter', 'mt-plan-growth', 'mt-plan-scale']);
-  assert.equal(new Set(classes).size, 4);
+test('each plan on offer has its own colour class and its own initial; no plan and the retired Pilot are neutral grey; a meeting takes its client\'s plan', async () => {
+  const classes = ['starter', 'growth', 'scale'].map(mtPlanClass);
+  assert.deepEqual(classes, ['mt-plan-starter', 'mt-plan-growth', 'mt-plan-scale']);
+  assert.equal(new Set(classes).size, 3);
+  /* the retired Pilot keeps its name and initial, so an old call still reads, but it has
+     no colour of its own any more: it falls back to the neutral one */
+  assert.equal(mtPlanClass('pilot'), 'mt-plan-none');
+  assert.equal(mtPlanWord('pilot'), 'Pilot');
   assert.deepEqual(['pilot', 'starter', 'growth', 'scale'].map(mtPlanTag), ['P', 'S', 'G', 'Sc'], 'the initial tells them apart without colour');
   for (const none of [null, undefined, '', 'enterprise', 'constructor']) assert.equal(mtPlanClass(none), 'mt-plan-none', String(none));
   assert.equal(mtPlanClass('Growth'), 'mt-plan-growth');
@@ -642,12 +646,12 @@ test('each plan has its own colour class and its own initial; no plan is neutral
   );
   const ev = (await mtCal('month', '2026-11-24')).data.events;
   const by = (id) => ev.find((e) => String(e.id) === id);
-  assert.equal(by('p').planClass, 'mt-plan-pilot'); assert.equal(by('n').planClass, 'mt-plan-none');
+  assert.equal(by('p').planClass, 'mt-plan-none'); assert.equal(by('n').planClass, 'mt-plan-none');
   assert.equal(by('m1').planClass, 'mt-plan-scale'); assert.equal(by('m2').planClass, 'mt-plan-none'); assert.equal(by('m3').planClass, 'mt-plan-none');
   assert.deepEqual([by('m1').kindWord, by('m2').kindWord, by('m3').kindWord, by('p').kindWord], ['Onboarding', 'Review', 'Booked sales call', ''], 'a meeting carries its kind; a discovery call does not need one');
   mt.day = '2026-11-24'; await mtLoadCal();
   const h = host('mtCalHost');
-  assert.match(h, /class="mt-chip mt-plan-pilot is-booking"[^>]*>.*?Pilot Co.*?<span class="mt-tagp" title="Pilot">P<\/span>/);
+  assert.match(h, /class="mt-chip mt-plan-none is-booking"[^>]*>.*?Pilot Co.*?<span class="mt-tagp" title="Pilot">P<\/span>/);
   assert.match(h, /class="mt-chip mt-plan-scale is-meeting"[^>]*>.*?Scale Client.*?<span class="mt-chip-k">Onboarding<\/span><span class="mt-tagp" title="Scale">Sc<\/span>/);
   assert.match(h, /class="mt-chip mt-plan-none is-booking"[^>]*>.*?Undecided Co/);
 
@@ -661,18 +665,19 @@ test('each plan has its own colour class and its own initial; no plan is neutral
   const ratio = (x, y) => { const [hi, lo] = [lum(x), lum(y)].sort((p, q) => q - p); return (hi + 0.05) / (lo + 0.05); };
   for (const [name, block] of [['light', light], ['dark', dark]]) {
     const v = {}; for (const m of block.matchAll(/--mt-([a-z]+)-(bg|bar|ink):(#[0-9A-Fa-f]{6})/g)) v[m[1] + '-' + m[2]] = m[3];
-    assert.equal(Object.keys(v).length, 15, name + ': five plans, three colours each');
-    const bgs = ['pilot', 'starter', 'growth', 'scale', 'none'].map((p2) => v[p2 + '-bg'].toUpperCase());
-    assert.equal(new Set(bgs).size, 5, name + ': five different tints');
-    const bars = ['pilot', 'starter', 'growth', 'scale', 'none'].map((p2) => v[p2 + '-bar'].toUpperCase());
-    assert.equal(new Set(bars).size, 5, name + ': five different bars');
-    for (const p2 of ['pilot', 'starter', 'growth', 'scale', 'none']) {
+    assert.equal(Object.keys(v).length, 12, name + ': three plans and no plan, three colours each');
+    const bgs = ['starter', 'growth', 'scale', 'none'].map((p2) => v[p2 + '-bg'].toUpperCase());
+    assert.equal(new Set(bgs).size, 4, name + ': four different tints');
+    const bars = ['starter', 'growth', 'scale', 'none'].map((p2) => v[p2 + '-bar'].toUpperCase());
+    assert.equal(new Set(bars).size, 4, name + ': four different bars');
+    for (const p2 of ['starter', 'growth', 'scale', 'none']) {
       assert.ok(ratio(v[p2 + '-ink'], v[p2 + '-bg']) >= 4.5, `${name} ${p2}: text on tint is ${ratio(v[p2 + '-ink'], v[p2 + '-bg']).toFixed(2)}:1`);
       assert.ok(ratio(v[p2 + '-bar'], v[p2 + '-bg']) >= 2.5, `${name} ${p2}: the bar stands out from the tint (${ratio(v[p2 + '-bar'], v[p2 + '-bg']).toFixed(2)}:1)`);
     }
   }
-  for (const p2 of ['pilot', 'starter', 'growth', 'scale', 'none']) assert.ok(css.includes('.mt-plan-' + p2 + '{'), 'a class for ' + p2);
-  assert.equal((css.match(/--mt-pilot-bg:/g) || []).length, 2, 'defined once per theme, nowhere else');
+  for (const p2 of ['starter', 'growth', 'scale', 'none']) assert.ok(css.includes('.mt-plan-' + p2 + '{'), 'a class for ' + p2);
+  assert.equal((css.match(/--mt-pilot-/g) || []).length, 0, 'the retired Pilot has no colour of its own');
+  assert.equal((css.match(/--mt-starter-bg:/g) || []).length, 2, 'defined once per theme, nowhere else');
 });
 
 test('needs an outcome: flagged on the call, counted above the grid, and the count filters to them', async () => {
@@ -1103,7 +1108,7 @@ test('on a phone: dots and a count per day with the picked day listed underneath
   db.discovery_bookings.push(bk({ id: 'b1', company: 'Acme Roofing', plan: 'pilot', call_at: '2026-11-25T15:00:00.000Z' }));
   mt.day = '2026-11-24'; await mtLoadCal();
   let h = host('mtCalHost');
-  assert.match(cellOf(h, '2026-11-25'), /<span class="mt-dots" aria-hidden="true"><i class="mt-dot mt-plan-pilot"><\/i><b>1<\/b><\/span>/);
+  assert.match(cellOf(h, '2026-11-25'), /<span class="mt-dots" aria-hidden="true"><i class="mt-dot mt-plan-none"><\/i><b>1<\/b><\/span>/);
   assert.match(h, /class="mt-under"><section class="mt-daylist"><h4>Tue 24 Nov/, 'the picked day is listed under the grid');
   assert.match(visible(h), /No calls on this day/);
   // picking another day in the same month only redraws — no new read
@@ -1114,7 +1119,7 @@ test('on a phone: dots and a count per day with the picked day listed underneath
   assert.match(cellOf(h, '2026-11-25'), /^ sel"/);
   const under = h.slice(h.indexOf('class="mt-under"'));
   assert.match(visible(under), /Wed 25 Nov/); assert.match(visible(under), /8:30 pm 10:00 am ET Acme Roofing/, 'Sri Lanka time, then Eastern'); assert.match(visible(under), /Open this day/);
-  assert.match(under, /class="mt-row mt-evrow mt-plan-pilot is-booking"/);
+  assert.match(under, /class="mt-row mt-evrow mt-plan-none is-booking"/);
 
   // the week: a strip of business days and one day's list, with its free times to tap
   db.discovery_bookings.push(bk({ id: 'b2', company: 'Night Owl Co', call_at: '2026-11-25T23:00:00.000Z' }));   // Wed 6 pm ET · THURSDAY 4:30 am Colombo
@@ -1178,8 +1183,9 @@ test('the colour key is not drawn until the three-dots button is pressed; outsid
     assert.equal(mtToggleLegend(), true);
     h = host('mtCalHost');
     assert.match(h, /aria-expanded="true"/);
-    assert.match(visible(h.slice(h.indexOf('id="mtKey"'), h.indexOf('class="mt-nav"'))), /P Pilot S Starter G Growth Sc Scale – No plan yet Red outline — needs an outcome Hatched band — blocked time/);
-    for (const k of ['pilot', 'starter', 'growth', 'scale', 'none']) assert.ok(h.includes('class="mt-sw mt-plan-' + k + '"'), 'a swatch for ' + k);
+    assert.match(visible(h.slice(h.indexOf('id="mtKey"'), h.indexOf('class="mt-nav"'))), /S Starter G Growth Sc Scale – No plan yet Red outline — needs an outcome Hatched band — blocked time/);
+    assert.ok(!h.includes('mt-plan-pilot'), 'the retired Pilot is not in the key');
+    for (const k of ['starter', 'growth', 'scale', 'none']) assert.ok(h.includes('class="mt-sw mt-plan-' + k + '"'), 'a swatch for ' + k);
     assert.equal(mtToggleLegend(), false);
     assert.ok(!host('mtCalHost').includes('mt-legend'));
     // a click inside it leaves it open; a click anywhere else, or Escape, closes it
@@ -1289,7 +1295,7 @@ test('a hand-added meeting is on the calendar at once, in its plan\'s colour und
   for (const id of ['mtAddTitle', 'mtAddName', 'mtAddEmail', 'mtAddDate', 'mtAddTime', 'mtAddEt', 'mtAddLen', 'mtAddPlan', 'mtAddLink', 'mtAddErr']) assert.ok(f.includes('id="' + id + '"'), 'the form has ' + id);
   assert.match(f, /id="mtAddDate" type="date" value="2026-11-24"/); assert.match(f, /id="mtAddTime" type="time" step="300" value="12:00"/, 'it opens on the next half hour, Sri Lanka time');
   assert.match(f, /<option value="15">15 minutes<\/option><option value="30" selected>30 minutes<\/option><option value="45">45 minutes<\/option><option value="60">60 minutes<\/option><option value="90">90 minutes<\/option>/);
-  assert.match(f, /<option value="">No plan<\/option><option value="pilot">Pilot<\/option><option value="starter">Starter<\/option><option value="growth">Growth<\/option><option value="scale">Scale<\/option>/);
+  assert.match(f, /<option value="">No plan<\/option><option value="starter">Starter<\/option><option value="growth">Growth<\/option><option value="scale">Scale<\/option>/);
   assert.match(visible(f), /Time \(SL\) US Eastern \(ET\) Tue 24 Nov · 1:30 am/);
   assert.match(f, /oninput="mtAddEtLine\(\)"/);
   // the Eastern time follows what is typed
@@ -1324,12 +1330,12 @@ test('a hand-added meeting is on the calendar at once, in its plan\'s colour und
   // no plan → grey; and a client's plan and name are still the fallback when the meeting has none of its own
   await mtAddOwn({ title: 'No plan on this', startsAt: '2026-11-26T16:00:00.000Z' });
   db.meetings.push({ id: 'm-cl', client_id: 'c1', kind: 'review', starts_at: '2026-11-25T16:00:00.000Z', minutes: 30, status: 'booked' },
-    { id: 'm-both', client_id: 'c1', kind: 'review', title: 'Renewal chat', guest_name: 'Their CFO', plan: 'pilot', starts_at: '2026-11-25T17:00:00.000Z', minutes: 30, status: 'booked' });
+    { id: 'm-both', client_id: 'c1', kind: 'review', title: 'Renewal chat', guest_name: 'Their CFO', plan: 'starter', starts_at: '2026-11-25T17:00:00.000Z', minutes: 30, status: 'booked' });
   await mtLoadCal();
   const by = (t) => mt.cal.events.find((e) => e.title === t);
   assert.equal(by('No plan on this').planClass, 'mt-plan-none');
   assert.deepEqual([by('Northwind').who, by('Northwind').planClass, by('Northwind').kindWord], ['Ravi Perera', 'mt-plan-scale', 'Review']);
-  assert.deepEqual([by('Renewal chat').who, by('Renewal chat').planClass, by('Renewal chat').company], ['Their CFO', 'mt-plan-pilot', 'Northwind'], 'its own title, guest and plan win over the client\'s');
+  assert.deepEqual([by('Renewal chat').who, by('Renewal chat').planClass, by('Renewal chat').company], ['Their CFO', 'mt-plan-starter', 'Northwind'], 'its own title, guest and plan win over the client\'s');
   // the month too
   await mtSetView('month');
   assert.match(cellOf(host('mtCalHost'), '2026-11-27'), /class="mt-chip mt-plan-growth is-meeting" title="Fri 9:30 pm SL · Fri 11:00 am ET · Growth plan &lt;review&gt; · Growth · Booked"[^>]*>(?:(?!<\/button>).)*<span class="mt-chip-t">9:30 pm<\/span><span class="mt-chip-n">Growth plan &lt;review&gt;/);

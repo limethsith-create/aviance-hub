@@ -558,9 +558,11 @@ test('plCloseWon calls close_won with the booking, plan and term, and hands back
   assert.deepEqual(rpcs, [{ name: 'close_won', args: { p_booking: 'b1', p_plan: 'growth', p_term: '3month' } }]);
   assert.equal(queries.length, 0, 'plCloseWon reads and writes no table itself');
 
-  // a Pilot has no term; anything but 3month is monthly
-  await plCloseWon('b2', 'pilot', '3month');
-  assert.deepEqual(rpcs.at(-1).args, { p_booking: 'b2', p_plan: 'pilot', p_term: 'monthly' });
+  // the retired Pilot is refused before the database is asked
+  const retired = await plCloseWon('b2', 'pilot', '3month');
+  assert.equal(retired.ok, false);
+  assert.match(retired.error, /retired/);
+  assert.equal(rpcs.length, 1, 'nothing was sent for a retired plan');
   await plCloseWon('b3', 'starter');
   assert.equal(rpcs.at(-1).args.p_term, 'monthly');
 
@@ -579,11 +581,12 @@ test('plCloseWon calls close_won with the booking, plan and term, and hands back
   finally { fakeSb.rpc = real; }
 });
 
-test('the won picker: four plans, the booking\'s plan already chosen, the term hidden for a Pilot', () => {
+test('the won picker: the three plans on offer, the booking\'s plan already chosen, the term always there', () => {
   fresh();
   const h = renderPlWonPicker(booking({ id: 'b1', plan: 'growth', email: 'dana@acme.test' }), { open: true });
   const t = text(h);
-  for (const w of ['Pilot', 'Starter', 'Growth', 'Scale', 'Monthly', '3 months', 'Mark won and send the pack', 'dana@acme.test']) assert.ok(t.includes(w), 'missing: ' + w);
+  for (const w of ['Starter', 'Growth', 'Scale', 'Monthly', '3 months', 'Mark won and send the pack', 'dana@acme.test']) assert.ok(t.includes(w), 'missing: ' + w);
+  assert.ok(!t.includes('Pilot'), 'the retired Pilot is not offered');
   assert.match(h, /<option value="growth" selected>Growth<\/option>/);
   assert.equal((h.match(/ selected/g) || []).length, 1);
   assert.match(h, /<option value="monthly">Monthly<\/option><option value="3month">3 months<\/option>/);
@@ -593,10 +596,11 @@ test('the won picker: four plans, the booking\'s plan already chosen, the term h
 
   // closed until Won is clicked, which is how the panel draws it
   assert.match(renderPlWonPicker(booking({ id: 'b1' }), {}), /id="plWonPick"[^>]*display:none/);
-  // a Pilot has no term to choose
+  // a booking that chose the retired Pilot on the website: nothing is preselected,
+  // the Pilot is not an option, and the owner has to pick one of the three
   const pilot = renderPlWonPicker(booking({ id: 'b1', plan: 'pilot' }), { open: true });
-  assert.match(pilot, /<option value="pilot" selected>/);
-  assert.match(pilot, /id="plTermField" style="display:none"/);
+  assert.ok(!/value="pilot"/.test(pilot) && !/ selected/.test(pilot), 'no Pilot option, nothing preselected');
+  assert.ok(!/id="plTermField"[^>]*display:none/.test(pilot), 'the term is always there');
   // no plan on the booking, a plan the list does not know, nothing at all
   for (const b of [booking({ id: 'b1', plan: null }), booking({ id: 'b1', plan: 'platinum' }), {}, null]) {
     const x = renderPlWonPicker(b, { open: true });
@@ -605,29 +609,28 @@ test('the won picker: four plans, the booking\'s plan already chosen, the term h
   assert.ok(!renderPlWonPicker(booking({ id: 'b1', email: '<img src=x onerror=alert(1)>' }), {}).includes('<img'));
 });
 
-test('Won opens the picker, hides the term for a Pilot, and confirming sends the pack through close_won', async () => {
+test('Won opens the picker, keeps the term for every plan on offer, and confirming sends the pack through close_won', async () => {
   fresh();
-  db.discovery_bookings = [booking({ id: 'b1', plan: 'pilot', email: 'dana@acme.test' })];
+  db.discovery_bookings = [booking({ id: 'b1', plan: 'starter', email: 'dana@acme.test' })];
   await plLoadEnquiry('b1');
   const said = [];
   const realToast = globalThis.toast;
   globalThis.toast = (m) => said.push(m);
   try {
-    el('plWonPick').style.display = 'none'; el('plTermField').style.display = '';
-    el('plPlan').value = 'pilot'; el('plTerm').value = '3month';
+    el('plWonPick').style.display = 'none'; el('plTermField').style.display = 'none';
+    el('plPlan').value = 'starter'; el('plTerm').value = 'monthly';
     assert.equal(plOpenWon(), true);
     assert.equal(el('plWonPick').style.display, '');
-    assert.equal(el('plTermField').style.display, 'none', 'no term for a Pilot');
+    assert.equal(el('plTermField').style.display, '', 'every plan on offer has a term');
     el('plPlan').value = 'growth'; plWonTermShow();
     assert.equal(el('plTermField').style.display, '');
     assert.equal(plOpenWon(), false, 'clicking Won again tucks it away');
     assert.equal(rpcs.length, 0, 'opening the picker writes nothing');
 
-    // a Pilot never carries a term, whatever the hidden select still holds
-    el('plPlan').value = 'pilot';
+    el('plPlan').value = 'starter'; el('plTerm').value = 'monthly';
     let r = await plMarkWon('b1');
     assert.equal(r.ok, true);
-    assert.deepEqual(rpcs.at(-1).args, { p_booking: 'b1', p_plan: 'pilot', p_term: 'monthly' });
+    assert.deepEqual(rpcs.at(-1).args, { p_booking: 'b1', p_plan: 'starter', p_term: 'monthly' });
     assert.equal(said.at(-1), 'Won. The agreement and invoice are on their way to dana@acme.test.');
     assert.equal(db.discovery_bookings[0].status, 'won');
     const after = renderPlEnquiry(pl.one, {});
@@ -658,7 +661,8 @@ test('the won picker shows the price beside the button, preselects the recommend
   assert.equal(plWonConfirmWords({ email: 'r@b.test' }, 'growth', '3month', PRICES), 'Send the agreement and the $7,200 invoice to r@b.test?');
   assert.equal(plWonConfirmWords({ email: 'r@b.test' }, 'pilot', '3month', PRICES), 'Send the agreement and the $300 invoice to r@b.test?');
   assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'Growth — budget fits and they want consistent volume' } }), 'growth');
-  assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'The $300 Pilot' } }), 'pilot');
+  // the brief may still name the retired Pilot: nothing is preselected then
+  assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'The $300 Pilot' } }), '');
   assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'whatever' } }), '');
   assert.equal(plRecommendedPlan(null), '');
 

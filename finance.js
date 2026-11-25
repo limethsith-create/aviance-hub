@@ -147,7 +147,8 @@ async function fnCalls(clientId, monthId){
 
 /* ---- invoices ----------------------------------------------------- */
 
-/* Raise the invoice for a month. Applies the $300 Pilot credit once. A month
+/* Raise the invoice for a month. Applies a client's Pilot credit once, where they
+   have one from the retired Pilot. A month
    that is already invoiced returns its existing invoice; a 3-month term only
    bills on months 1, 4, 7 and returns null in between. */
 async function fnRaiseInvoice(monthId, dueDays){
@@ -208,11 +209,14 @@ async function fnMarkRefundPaid(refundId, via){
 
 /* ---- adding a client ---------------------------------------------- */
 
-/* Won on the discovery call. Plan decides the number and the fee; a Pilot
-   client carries their $300 forward as a credit on their first plan invoice. */
+/* Won on the discovery call. Plan decides the number and the fee. The $300 Pilot is
+   retired, so no new client may be put on it; a client already on it keeps their
+   pilot_credit, which the database carries onto their first plan invoice. */
+const FN_RETIRED_PLANS = ['pilot'];
 async function fnAddClient(c){
   const plans = await fnPlans();
   if (!plans.ok) return plans;
+  if (FN_RETIRED_PLANS.includes(String((c && c.plan) || ''))) return fnErr('That plan is retired. Pick Starter, Growth or Scale.');
   const p = (plans.data || []).find(x => x.plan === c.plan);
   if (!p) return fnErr('That plan does not exist.');
 

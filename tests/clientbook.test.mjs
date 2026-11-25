@@ -278,12 +278,21 @@ test('cbAddClient takes the fee and the promise from plan_prices — never from 
 
   /* a plan with no 3-month price falls back to its monthly one */
   calls = [];
-  await cbAddClient({company:'Solo', contactName:'A B', contactEmail:'a@b.test', plan:'pilot', term:'3month'});
-  assert.equal(seen('clients','insert')[0].payload.monthly_fee, 300);
-  assert.equal(seen('clients','insert')[0].payload.calls_promised, 2);
+  tables['plan_prices.select'] = () => ({data:[{plan:'starter', label:'Starter', calls_promised:5, monthly_fee:1500, three_month_fee:null, is_recurring:true}], error:null});
+  await cbAddClient({company:'Solo', contactName:'A B', contactEmail:'a@b.test', plan:'starter', term:'3month'});
+  assert.equal(seen('clients','insert')[0].payload.monthly_fee, 1500);
+  assert.equal(seen('clients','insert')[0].payload.calls_promised, 5);
+  tables['plan_prices.select'] = () => ({data:PLANS, error:null});
 
-  /* every plan prices itself */
-  for (const plan of PLANS) {
+  /* the retired Pilot is never sold again, even though its price row is still there */
+  calls = [];
+  const retired = await cbAddClient({company:'Old Co', contactName:'A B', contactEmail:'a@b.test', plan:'pilot', term:'monthly'});
+  assert.equal(retired.ok, false);
+  assert.equal(retired.error, 'Pick a plan: Starter, Growth and Scale.');
+  assert.equal(seen('clients','insert').length, 0, 'no new client on a retired plan');
+
+  /* every plan on offer prices itself */
+  for (const plan of PLANS.filter(x => x.plan !== 'pilot')) {
     calls = [];
     await cbAddClient({company:'X', contactName:'A B', contactEmail:'a@b.test', plan:plan.plan, term:'monthly'});
     assert.equal(seen('clients','insert')[0].payload.monthly_fee, plan.monthly_fee, plan.plan);
@@ -340,7 +349,7 @@ test('cbAddClient asks plainly for what is missing, and never guesses a price', 
 
   const noPlan = await cbAddClient({company:'X', contactName:'A B', contactEmail:'a@b.test'});
   assert.equal(noPlan.ok, false);
-  assert.equal(noPlan.error, 'Pick a plan: Pilot, Starter, Growth and Scale.');
+  assert.equal(noPlan.error, 'Pick a plan: Starter, Growth and Scale.');
   assert.equal(seen('clients','insert').length, 0, 'no client without a price');
 
   /* no plans at all: say so rather than invent a number */
@@ -761,7 +770,8 @@ test('the add form offers the real plans and their real prices, and saves what w
 
   const form = await cbOpenAdd();
   assert.match(text(form), /Growth — 10 calls, \$3,000 a month/);
-  assert.match(text(form), /Pilot — 2 calls, \$300 a month/);
+  /* the retired Pilot is not on offer, even though plan_prices still carries its row */
+  assert.ok(!/Pilot/.test(text(form)), 'the Pilot is not offered');
   assert.ok(!/99|hard/.test(form.replace(/\$[\d,]+/g,'')), 'no price typed into the markup');
 
   Object.assign(fields, {cbAddCo:'Harbor Co', cbAddName:'Pat Lee', cbAddEmail:'pat@harbor.test', cbAddSite:'harbor.test', cbAddPlan:'growth', cbAddTerm:'3month'});

@@ -73,14 +73,20 @@ const MT_FREES_TIME = ['cancelled'];
 const MT_DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const MT_ZONE_NAMES = {'Asia/Colombo':'Sri Lanka','America/New_York':'US Eastern','America/Chicago':'US Central','America/Denver':'US Mountain','America/Los_Angeles':'US Pacific','America/Phoenix':'Arizona'};
 const MT_NOSHOW_DAYS = 45;      /* how far back viewNoShows looks */
-/* The plans, each with its own calm colour (meetings.css) and an initial, so the
-   colour is never the only thing telling two plans apart. */
+/* Every plan that has ever been sold, each with an initial, so the colour is never the
+   only thing telling two plans apart. A plan on offer has its own calm colour in
+   meetings.css; a retired one (the $300 Pilot) keeps its name and initial but takes the
+   neutral colour, so old calls still read correctly without the Pilot being a choice. */
 const MT_PLANS = {
   pilot:   {word:'Pilot',   tag:'P'},
   starter: {word:'Starter', tag:'S'},
   growth:  {word:'Growth',  tag:'G'},
   scale:   {word:'Scale',   tag:'Sc'}
 };
+/* Retired: never offered when a meeting is added, and drawn neutral. */
+const MT_RETIRED_PLANS = ['pilot'];
+/* The plans a meeting added by hand may be tagged with. */
+const MT_PLAN_CHOICES = Object.keys(MT_PLANS).filter(k => MT_RETIRED_PLANS.indexOf(k) < 0);
 const MT_NO_PLAN = {word:'No plan yet', tag:'–'};
 /* The short word on a chip that sets a call booked here apart from a website one. */
 const MT_KIND_SHORT = {discovery:'Discovery', strategy:'Strategy', onboarding:'Onboarding', qualified:'Booked sales call', review:'Review', check_in:'Check-in', other:'Call'};
@@ -456,7 +462,7 @@ async function mtAddOwn(a){
   const raw = o.minutes==null || o.minutes==='' ? 30 : Number(o.minutes);
   if(!Number.isInteger(raw) || raw < 15 || raw > 240) return mtErr('A meeting can be 15, 30, 45, 60 or 90 minutes long.');
   const planIn = String(o.plan==null?'':o.plan).trim();
-  if(planIn && !mtPlanKey(planIn)) return mtErr('That is not one of the plans. Pick Pilot, Starter, Growth or Scale, or leave it empty.');
+  if(planIn && MT_PLAN_CHOICES.indexOf(mtPlanKey(planIn)) < 0) return mtErr('That is not one of the plans. Pick Starter, Growth or Scale, or leave it empty.');
   const link = String(o.meetLink==null?'':o.meetLink).trim();
   if(link && !/^https:\/\/\S+$/i.test(link)) return mtErr('The Google Meet link has to start with https://');
 
@@ -717,7 +723,8 @@ async function mtMeetings(fromIso, toIso, opts){
 /* ---- one shape for every call ---- */
 function mtText(v){ return v==null ? '' : String(v).trim() }
 function mtPlanKey(p){ const k = String(p==null?'':p).toLowerCase(); return Object.prototype.hasOwnProperty.call(MT_PLANS,k) ? k : '' }
-function mtPlanClass(p){ return 'mt-plan-'+(mtPlanKey(p)||'none') }
+/* A retired plan has no colour of its own: it falls back to the neutral one. */
+function mtPlanClass(p){ const k = mtPlanKey(p); return 'mt-plan-'+(k && MT_RETIRED_PLANS.indexOf(k) < 0 ? k : 'none') }
 function mtPlanTag(p){ const k = mtPlanKey(p); return k ? MT_PLANS[k].tag : MT_NO_PLAN.tag }
 function mtPlanWord(p){ const k = mtPlanKey(p); return k ? MT_PLANS[k].word : MT_NO_PLAN.word }
 /* A call booked here that has been and gone and is still only "booked". */
@@ -1215,7 +1222,7 @@ function mtRenderWeekGrid(cal, shown){
 function mtRenderLegend(){
   const sw = (cls, tag, word) => '<li><span class="mt-sw '+cls+'">'+esc(tag)+'</span>'+esc(word)+'</li>';
   return '<div class="mt-key" id="mtKey" role="group" aria-label="What the colours mean"><ul class="mt-legend">'
-       + Object.keys(MT_PLANS).map(k=>sw('mt-plan-'+k, MT_PLANS[k].tag, MT_PLANS[k].word)).join('')
+       + MT_PLAN_CHOICES.map(k=>sw('mt-plan-'+k, MT_PLANS[k].tag, MT_PLANS[k].word)).join('')
        + sw('mt-plan-none', MT_NO_PLAN.tag, MT_NO_PLAN.word)
        + '<li><span class="mt-sw mt-sw-need"></span>Red outline — needs an outcome</li>'
        + '<li><span class="mt-sw mt-hatch"></span>Hatched band — blocked time</li></ul>'
@@ -2045,7 +2052,7 @@ function mtRenderAddForm(preset){
     + '<div class="field row2"><div><label for="mtAddLen">Length</label><select id="mtAddLen">'
     + MT_LENGTHS.map(n=>'<option value="'+n+'"'+(n===30?' selected':'')+'>'+n+' minutes</option>').join('')+'</select></div>'
     + '<div><label for="mtAddPlan">Plan (optional)</label><select id="mtAddPlan"><option value="">No plan</option>'
-    + Object.keys(MT_PLANS).map(k=>'<option value="'+esc(k)+'">'+esc(MT_PLANS[k].word)+'</option>').join('')+'</select></div></div>'
+    + MT_PLAN_CHOICES.map(k=>'<option value="'+esc(k)+'">'+esc(MT_PLANS[k].word)+'</option>').join('')+'</select></div></div>'
     + '<div class="field"><label for="mtAddLink">Google Meet link (optional)</label><input id="mtAddLink" type="url" placeholder="https://meet.google.com/…" autocomplete="off"></div>'
     + '<p class="mt-none">This time will also be taken off your public booking page.</p>'
     + '<div id="mtAddErr" class="login-err" role="alert"></div></div>'
