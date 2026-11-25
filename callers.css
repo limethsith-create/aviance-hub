@@ -1,0 +1,125 @@
+/* callers.css — the owner's Callers screen (prefix cal). A strip of today-beside-the-week figures, the
+   scoreboard table, the CSV upload and the live feed, stacked down the page. theme.css / polish.css
+   variables only: no new colours, no new fonts, and no transition longer than 150ms. */
+.cal{display:flex;flex-direction:column;gap:var(--s4,16px)}
+.cal-top{margin-bottom:0}
+.cal-card,.cal-up,.cal-feed,.cal-upbar{padding:var(--s4,16px);display:flex;flex-direction:column;gap:var(--s3,12px)}
+.cal h3{margin:0;font-size:var(--fs-h3)}
+.cal-note{margin:0;color:var(--muted);font-size:var(--fs-small);max-width:76ch}
+.cal-bad{margin:0;padding:var(--s2,8px) var(--s3,12px);background:var(--red-bg);color:var(--red);
+  border-radius:var(--r-xs,5px);font-size:var(--fs-small)}
+.cal-warn{margin:0;padding:var(--s2,8px) var(--s3,12px);background:var(--amber-bg);color:var(--amber);
+  border-radius:var(--r-xs,5px);font-size:var(--fs-small)}
+.cal-acts{display:flex;gap:var(--s2,8px);flex-wrap:wrap;align-items:center}
+.cal-main-acts{margin-top:calc(-1 * var(--s2,8px))}
+.cal-lab{font-weight:600;font-size:var(--fs-small)}
+/* said to a screen reader, never drawn */
+.cal-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ---- the strip: today big, the week beside it ---- */
+.cal-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:var(--s3,12px)}
+.cal-tile{display:flex;flex-direction:column;gap:2px;padding:var(--s3,12px);background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--r,10px)}
+.cal-tl{color:var(--muted);font-size:var(--fs-small)}
+.cal-tv{font-size:var(--fs-num-lg,28px);font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.cal-tw{color:var(--muted);font-size:var(--fs-min)}
+
+/* ---- the scoreboard ---- */
+.cal-ch{display:flex;align-items:center;justify-content:space-between;gap:var(--s3,12px);flex-wrap:wrap}
+.cal-switch{display:flex;gap:2px;padding:2px;background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--r-sm,7px)}
+.cal-seg{min-height:30px;padding:4px 12px;cursor:pointer;font:inherit;font-size:var(--fs-small);color:var(--muted);
+  background:none;border:0;border-radius:var(--r-xs,5px);transition:background .12s,color .12s}
+.cal-seg:hover{color:var(--text)}
+.cal-seg.on{background:var(--surface);color:var(--text);box-shadow:inset 0 0 0 1px var(--border-strong)}
+.cal-seg:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+.cal-scroll{overflow-x:auto;overscroll-behavior-x:contain}
+.cal-table{width:100%;border-collapse:collapse;font-size:var(--fs-base)}
+.cal-table th,.cal-table td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);vertical-align:middle}
+.cal-table thead th{color:var(--muted);font-size:var(--fs-small);font-weight:600;white-space:nowrap}
+.cal-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cal-table tfoot th,.cal-table tfoot td{border-bottom:0;border-top:1px solid var(--border-strong);font-weight:650}
+.cal-who{display:flex;align-items:center;gap:var(--s2,8px);font-weight:600}
+.cal-name{overflow-wrap:anywhere}
+.cal-r.quiet .cal-name{color:var(--muted)}
+.cal-owed{font-weight:650}
+.cal-rate{color:var(--muted)}
+.cal-acts-cell{white-space:nowrap}
+.cal-small th,.cal-small td{padding:6px 8px;font-size:var(--fs-small)}
+.cal-link{background:none;border:0;padding:0 6px 0 0;font:inherit;font-size:var(--fs-small);color:var(--text);
+  text-decoration:underline;cursor:pointer}
+.cal-link[disabled]{color:var(--muted);cursor:default;text-decoration:none}
+.cal-link:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+
+/* the status pill — the word is always there, the colour only helps */
+.cal-pill{flex:none;display:inline-block;padding:2px 8px;border-radius:var(--r-xs,5px);font-size:var(--fs-min);font-weight:600}
+.cal-pill.ok{background:var(--green-bg);color:var(--green)}
+.cal-pill.wait{background:var(--amber-bg);color:var(--amber)}
+.cal-pill.off{background:var(--surface-3);color:var(--muted)}
+
+/* ---- nothing to show ---- */
+.cal-blank{padding:var(--s6,32px) var(--s5,24px)}
+.cal-blank h3{margin:0 0 var(--s2,8px);font-size:var(--fs-h3)}
+.cal-blank p{margin:0 0 var(--s3,12px);color:var(--muted);max-width:60ch}
+
+/* ---- add a caller ---- */
+.cal-add{max-width:46ch}
+.cal-add input,.cal-prev input{width:100%;box-sizing:border-box;padding:8px 10px;font:inherit;font-size:var(--fs-base);
+  background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:var(--r-sm,7px)}
+.cal-add input:focus,.cal-prev input:focus{outline:2px solid var(--text);outline-offset:1px}
+
+/* inline "are you sure" — confirm() is never used */
+.cal-ask{padding:var(--s3,12px);background:var(--amber-bg);color:var(--amber);border-radius:var(--r-sm,7px);
+  display:flex;flex-direction:column;gap:var(--s2,8px)}
+.cal-ask p{margin:0;font-size:var(--fs-small)}
+
+/* ---- the code, shown once ---- */
+.cal-code{padding:var(--s4,16px);display:flex;flex-direction:column;gap:var(--s3,12px);border:1px solid var(--border-strong)}
+.cal-code-val{margin:0;font-family:var(--mono);font-size:clamp(24px,6vw,40px);font-weight:700;letter-spacing:.08em;
+  padding:var(--s3,12px);background:var(--surface-2);border-radius:var(--r-sm,7px);text-align:center;
+  overflow-wrap:anywhere;user-select:all}
+.cal-code-val:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.cal-code-warn{margin:0;color:var(--muted);font-size:var(--fs-small);max-width:60ch}
+
+/* ---- the CSV upload ---- */
+.cal-upbar{flex-direction:row;align-items:center;justify-content:space-between;gap:var(--s3,12px);flex-wrap:wrap}
+.cal-prev{display:flex;flex-direction:column;gap:var(--s3,12px);padding-top:var(--s3,12px);border-top:1px solid var(--border)}
+.cal-sum{margin:0;font-size:var(--fs-base)}
+.cal-split{margin:0;font-size:var(--fs-small);padding:var(--s2,8px) var(--s3,12px);background:var(--surface-2);
+  border-radius:var(--r-xs,5px);overflow-wrap:anywhere}
+.cal-bads{font-size:var(--fs-small)}
+.cal-bads summary{cursor:pointer;color:var(--muted)}
+.cal-bads ul{margin:var(--s2,8px) 0 0;padding-left:20px;display:flex;flex-direction:column;gap:2px;
+  max-height:220px;overflow-y:auto}
+.cal-bads li{overflow-wrap:anywhere}
+.cal-done{display:flex;flex-direction:column;gap:var(--s2,8px);padding:var(--s3,12px);background:var(--green-bg);
+  color:var(--green);border-radius:var(--r-sm,7px)}
+.cal-done p{margin:0;font-size:var(--fs-small)}
+.cal-done .cal-note{color:inherit;opacity:.85}
+
+/* ---- the live feed ---- */
+.cal-flist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;
+  max-height:46vh;overflow-y:auto;overscroll-behavior:contain}
+.cal-f{display:flex;align-items:baseline;gap:var(--s2,8px);padding:6px var(--s2,8px);border-radius:var(--r-xs,5px);
+  font-size:var(--fs-small);border-left:2px solid transparent}
+.cal-f:nth-child(odd){background:var(--surface-2)}
+.cal-f.talk{border-left-color:var(--border-strong)}
+.cal-f.win{border-left-color:var(--green);font-weight:600}
+.cal-fo{flex:none;min-width:11ch;color:var(--muted)}
+.cal-f.win .cal-fo{color:var(--green)}
+.cal-fw{flex:1;min-width:0;overflow-wrap:anywhere}
+.cal-fn{flex:1 1 100%;color:var(--muted);font-size:var(--fs-min);overflow-wrap:anywhere}
+.cal-ft{flex:none;color:var(--muted);font-size:var(--fs-min);font-variant-numeric:tabular-nums}
+
+/* ---- narrow: the table scrolls sideways rather than squeezing the figures ---- */
+@media (max-width:860px){
+  .cal-table{min-width:720px}
+  .cal-small{min-width:0}
+}
+@media (max-width:480px){
+  .cal-card,.cal-up,.cal-feed,.cal-upbar,.cal-add{padding:var(--s3,12px)}
+  .cal-acts .btn{flex:1;justify-content:center}
+  .cal-upbar{flex-direction:column;align-items:stretch}
+  .cal-fo{min-width:0}
+  .cal-flist{max-height:none}
+}
