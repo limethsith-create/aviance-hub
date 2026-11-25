@@ -8,7 +8,7 @@
                                instant and the strip at the top can show today beside the week.
      2. Where do the leads     The CSV upload — he picks a file, we parse it in the browser (headers in
         come from?             any order, extra columns, blank rows, quoted commas, a BOM, CRLF), show
-                               him what we read and how it will split across the active callers, and
+                               him what we read and who the leads go to, and
                                nothing is sent until he presses Import.
      3. How does a caller      "Add a caller" then the access code, exactly as the Employees screen does
         get in?                it: caller_add, then the staff-code edge function with his session token.
@@ -337,10 +337,16 @@ function calParseCsv(text, limit) {
     },
   };
 }
-/* How leads_import will split them: evenly across the active callers, the remainder to the first few.
+/* How leads_import will split them: evenly across the callers who can be given work, the
+   remainder to the first few. The statuses here must match leads_import in the database
+   ('new','invited','active'): a caller who has her code but has not signed in yet is still
+   'invited', and the server does give her leads. Filtering to 'active' alone told the owner
+   his leads would land unassigned while the server quietly assigned them.
    Shown before he presses Import so the split is never a surprise. */
+const CAL_TAKES_LEADS = ['new', 'invited', 'active'];
 function calSplitPlan(count, callers) {
-  const list = (Array.isArray(callers) ? callers : []).filter(c => c && c.id && c.status === 'active');
+  const list = (Array.isArray(callers) ? callers : [])
+    .filter(c => c && c.id && CAL_TAKES_LEADS.indexOf(String(c.status)) >= 0);
   const n = Math.max(0, Math.floor(calNum(count)));
   if (!list.length) return [];
   const base = Math.floor(n / list.length), extra = n % list.length;
@@ -600,7 +606,7 @@ function calAskHTML(what, caller) {
   if (/^import/.test(w)) {
     const n = Number(String(w).split(':')[1]) || 0;
     return `<div class="cal-ask" role="alert">
-      <p>Import ${esc(calCount(n, 'lead'))} and split them across your active callers? Leads already in Aviance are skipped.</p>
+      <p>Import ${esc(calCount(n, 'lead'))}? The split is shown above, and leads already in Aviance are skipped.</p>
       <div class="cal-acts">
         <button type="button" class="btn" onclick="calImportGo()">Yes, import them</button>
         <button type="button" class="btn ghost" onclick="calAskNo()">No, not yet</button>
@@ -629,8 +635,12 @@ function calBadRowHTML(b) {
 function calSplitHTML(plan, count) {
   const rows = Array.isArray(plan) ? plan : [];
   if (!rows.length) {
-    return `<p class="cal-warn" role="alert">No caller is active yet, so these ${esc(calCount(count, 'lead'))} would land
-      unassigned. Give at least one caller an access code first, or import now and assign later.</p>`;
+    return `<p class="cal-warn" role="alert">No caller has been added yet, so these ${esc(calCount(count, 'lead'))} would land
+      unassigned. That is safe: add a caller and the first one to open her list picks them up.</p>`;
+  }
+  /* One caller is the normal case at the start, and "split" reads strangely for one person. */
+  if (rows.length === 1) {
+    return `<p class="cal-split">All ${esc(calCount(count, 'lead'))} go to ${esc(rows[0].name)}.</p>`;
   }
   return `<p class="cal-split">How they will split: ${rows.map(p => esc(p.name) + ' <b>' + esc(String(p.share)) + '</b>').join(' · ')}</p>`;
 }
