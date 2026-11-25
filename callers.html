@@ -313,9 +313,14 @@
 
   async function boot(){
     root.innerHTML = clLoadingHtml();
+    /* A one-click invite link arrives as #k=... — spend it before anything else. */
+    const link = await clClaimLink();
+    if (link.ok && link.data) { enter(link.data.user && link.data.user.email); return; }
     const s = await clSession();
     if (!s.ok) { root.innerHTML = clOfflineHtml(); return; }
-    if (s.data) enter(s.data.user && s.data.user.email); else showSignIn('');
+    if (s.data) { enter(s.data.user && s.data.user.email); return; }
+    /* No session: say why the link did not work, if it was a link that brought her here. */
+    showSignIn((link.ok ? '' : link.error) || clLinkProblem() || '');
   }
   clOnSignedOut(function(){ if (me) showSignIn('You have been signed out. Sign in again to carry on.'); });
   boot();

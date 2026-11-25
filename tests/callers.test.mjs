@@ -84,6 +84,7 @@ vm.runInContext(SRC + `
   calFeedRowHTML,calFeedHTML,calScreenHTML,calCtx,viewCallers,calBodyHTML,calPaint,calForcePaint,
   calLoad,calLoadBoard,calLoadAll,calSetRange,calAddOpen,calAddCancel,calAddSave,calAskYes,
   calAskNo,calAskImport,calCodeGo,calCodeHide,calCopyCode,calStatusGo,calUploadOpen,
+  calLinkNew,calLinkGo,calLinkHide,calLinkHTML,calForgetLink,CAL_LINK_BASE,
   calUploadClose,calUploadReset,calPick,calBatchIn,calFileIn,calImportGo,calOnRender,
   CAL_OUTCOMES,CAL_TALKED,CAL_FIELDS,CAL_MAX_ROWS,CAL_BONUS_DEFAULT,CAL_DEAL_CUT,
   CAL_NOT_READY,CAL_CODE_NOT_READY,CAL_IMPORT_NOT_READY,CAL_FEED_MAX};`,
@@ -808,3 +809,65 @@ test('the split shown before Import matches what leads_import actually does', ()
   assert.match(html, /All 30 leads go to Vera\./);
   assert.ok(!/will split/i.test(html), 'with one caller he is never told about a split');
 });
+
+/* ═════════════════════════ 10. THE ONE-CLICK INVITE LINK ═════════════════════════
+   One URL he can send her on WhatsApp. She taps it and lands on her calling screen,
+   signed in: no email to type, no code to copy. The token is shown here once and
+   only its hash is kept, exactly like the access code. */
+
+test('a link is made from the token the database hands back, on our own domain', async () => {
+  reset();
+  rpcs.staff_link_new = (args) => {
+    assert.deepEqual(plain(args), { p_staff: 'c1', p_days: 14 }, 'fourteen days, and the caller it is for');
+    return { data: { ok: true, token: 'tok+en/with==junk', expires_at: '2026-12-09T00:00:00Z' }, error: null };
+  };
+  const r = await A.calLinkNew('c1');
+  assert.equal(r.ok, true, r.error || '');
+  assert.equal(r.data.url, 'https://aviance.store/go?k=tok%2Ben%2Fwith%3D%3Djunk',
+    'the token is escaped, and the link is an aviance.store one');
+  assert.equal(r.data.url.indexOf('supabase'), -1, 'she is never sent to a Supabase address');
+  assert.equal(A.CAL_LINK_BASE, 'https://aviance.store/go?k=');
+
+  // no caller, no link
+  assert.equal((await A.calLinkNew('')).ok, false);
+  // a reply with no token in it is a failure, not a broken link
+  rpcs.staff_link_new = () => ({ data: { ok: true }, error: null });
+  const empty = await A.calLinkNew('c1');
+  assert.equal(empty.ok, false);
+  assert.match(empty.error, /could not make a link/);
+});
+
+test('the link panel shows it once, says what it is, and is dropped on sign-out', async () => {
+  reset();
+  rpcs.staff_link_new = () => ({ data: { ok: true, token: 'abc123' }, error: null });
+  rpcs.callers_list = () => ({ data: CALLERS(), error: null });
+  await A.calLinkGo('c1');
+  assert.equal(A.cal.link.url, 'https://aviance.store/go?k=abc123');
+
+  const html = A.calLinkHTML(A.cal.link.url, { name: NASTY });
+  assert.match(html, /https:\/\/aviance\.store\/go\?k=abc123/);
+  assert.match(html, /shown once and will not be shown again/);
+  assert.match(html, /14 days/, 'he is told it runs out');
+  assert.match(html, /send it to her and nobody\s+else/, 'and that it is a key, not a page');
+  assert.doesNotMatch(html, /<script>/, "a caller's name is escaped here like everywhere else");
+  assert.match(html, /already signed in/, 'what she gets is spelled out');
+
+  // it never lingers: his own "done" button and a sign-out both clear it
+  A.calLinkHide();
+  assert.equal(A.cal.link, null);
+  A.cal.link = { staffId: 'c1', url: 'https://aviance.store/go?k=abc123' };
+  A.callersForget();
+  assert.equal(A.cal.link, null, 'a sign-out leaves no link on screen');
+  assert.equal(A.calLinkHTML('', { name: 'Nour' }), '', 'and with no link there is no panel');
+});
+
+test('a refused link says why, and leaves nothing half-shown', async () => {
+  reset();
+  /* a plpgsql `raise exception` arrives with code P0001, and its words are shown as they are */
+  rpcs.staff_link_new = () => ({ data: null, error: { code: 'P0001', message: 'Only the owner can make an invite link.' } });
+  await A.calLinkGo('c1');
+  assert.equal(A.cal.link, null);
+  assert.match(String(A.cal.codeErr), /owner/);
+  assert.ok(toasts.some((t) => /owner/.test(String(t))), 'he is told out loud, not just in the panel');
+});
+

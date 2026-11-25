@@ -32,6 +32,7 @@ let calls;                 // every rpc and every auth call, in order
 let rpcs;                  // name -> (args) => {data, error}  (or an Error to throw)
 let authAnswer;            // what signInWithPassword says
 let sessionAnswer;
+let otpAnswer;             // what verifyOtp says when a one-click link is spent
 
 const fakeSb = {
   from() { throw new Error('the caller page must never touch a table directly'); },
@@ -45,6 +46,7 @@ const fakeSb = {
     async signInWithPassword(p) { calls.push({ signIn: p }); if (authAnswer instanceof Error) throw authAnswer; return authAnswer; },
     async signOut(o) { calls.push({ signOut: o }); return {}; },
     async getSession() { calls.push({ getSession: 1 }); return sessionAnswer; },
+    async verifyOtp(p) { calls.push({ verifyOtp: p }); if (otpAnswer instanceof Error) throw otpAnswer; return otpAnswer; },
     onAuthStateChange(fn) { calls.push({ listen: 1 }); return { data: { subscription: { unsubscribe() {} } } }; },
   },
 };
@@ -65,6 +67,7 @@ vm.runInContext(SRC + `
   clTallyHtml,clLeadHtml,clActionsHtml,clCallbackHtml,clBookHtml,clBookedHtml,clScriptHtml,
   clScriptItemHtml,clOk,clErr,clSay,clIsNotReady,clUseClient,clRpc,clSignIn,clSignOut,clSession,
   clOnSignedOut,clMe,clNext,clLog,clSlots,clBook,
+  clLinkToken,clForgetLinkToken,clLinkProblem,clClaimLink,CL_LINK_BAD,
   CL_OUTCOMES,CL_SCRIPT,CL_OWNER,CL_URL,CL_KEY,CL_OFFLINE,CL_BAD_CODE,CL_NO_ACCOUNT,
   CL_NOT_READY,CL_NO_LEADS,CL_MAX_NOTE,CL_SLOT_DAYS};`,
   sandbox, { filename: 'caller-page.js' });
@@ -77,7 +80,15 @@ function reset() {
   calls = []; rpcs = {};
   authAnswer = { data: { session: { access_token: 'hers' } }, error: null };
   sessionAnswer = { data: { session: null }, error: null };
+  otpAnswer = { data: { session: { access_token: 'fromlink', user: { email: 'nour@example.com' } } }, error: null };
+  delete sandbox.location; delete sandbox.history;
   A.clUseClient(fakeSb);
+}
+
+/* The address bar, as the browser would hand it to her. */
+function atUrl(hash, search) {
+  sandbox.location = { pathname: '/callers', search: search || '', hash: hash || '' };
+  sandbox.history = { replaceState(a, b, url) { calls.push({ replaced: url }); sandbox.location.hash = ''; } };
 }
 
 /* a lead as a stranger's CSV would really write it */
@@ -89,6 +100,78 @@ const LEAD = (over) => Object.assign({
   callback_at: '', outcome: '', batch: 'Egypt list <b>1</b>',
 }, over || {});
 const NEXT = (over) => Object.assign({ id: 'l2', company: 'Birch Legal', name: 'Hana', phone: '0100 555 0102' }, over || {});
+
+/* ═════════════════════════ 0. THE ONE-CLICK INVITE LINK ═════════════════════════
+   The owner sends her one URL. The caller-link function checks the invite and bounces
+   her here with a one-time sign-in token in the fragment. These pin the three things
+   that must hold: the token is read, it is spent, and it leaves the address bar. */
+
+test('a one-click link signs her in and is wiped from the address bar', async () => {
+  reset();
+  atUrl('#k=one-time-token-abc');
+  assert.equal(A.clLinkToken(), 'one-time-token-abc', 'the token is read out of the fragment');
+
+  const r = await A.clClaimLink();
+  assert.equal(r.ok, true, r.error || '');
+  assert.equal(r.data.access_token, 'fromlink', 'she comes back with a session, not a code prompt');
+
+  const otp = calls.find((c) => c.verifyOtp);
+  assert.deepEqual(plain(otp.verifyOtp), { token_hash: 'one-time-token-abc', type: 'email' });
+  assert.ok(calls.some((c) => c.replaced === '/callers'), 'the token is taken out of the address bar at once');
+  assert.equal(sandbox.location.hash, '', 'and the fragment is empty afterwards');
+});
+
+test('a percent-encoded token is decoded, and junk around it is ignored', async () => {
+  reset();
+  atUrl('#k=a%2Bb%2Fc%3D%3D&other=1');
+  assert.equal(A.clLinkToken(), 'a+b/c==');
+  reset();
+  atUrl('#nothing=here');
+  assert.equal(A.clLinkToken(), '', 'no token means no token');
+  const none = await A.clClaimLink();
+  assert.equal(none.ok, true);
+  assert.equal(none.data, null, 'with no link in the bar she just sees the normal sign-in');
+  assert.equal(calls.filter((c) => c.verifyOtp).length, 0, 'and nothing is spent');
+});
+
+test('a used or expired link says so in her words, and never shows the plumbing', async () => {
+  reset();
+  atUrl('#k=stale-token');
+  otpAnswer = { data: { session: null }, error: { message: 'Token has expired or is invalid' } };
+  const r = await A.clClaimLink();
+  assert.equal(r.ok, false);
+  assert.match(r.error, /already been used or has run out/);
+  assert.match(r.error, /sign in with your code below/, 'she is always told what to do instead');
+  assert.equal(r.error.toLowerCase().indexOf('token'), -1, 'no word of tokens or otp');
+  assert.ok(calls.some((c) => c.replaced === '/callers'), 'a bad token is wiped too');
+
+  // a session that comes back empty is a failure, not a silent pass
+  reset(); atUrl('#k=empty-token');
+  otpAnswer = { data: { session: null }, error: null };
+  assert.equal((await A.clClaimLink()).ok, false);
+});
+
+test('the link checker can also turn her away before she gets here', () => {
+  reset();
+  atUrl('', '?link=expired');
+  assert.match(A.clLinkProblem(), /run out/);
+  reset(); atUrl('', '?link=team');
+  assert.match(A.clLinkProblem(), /Aviance account/);
+  reset(); atUrl('', '?link=made-up-reason');
+  assert.equal(A.clLinkProblem(), A.CL_LINK_BAD, 'anything we do not recognise reads as a dead link');
+  reset(); atUrl('', '');
+  assert.equal(A.clLinkProblem(), '', 'and nothing is said when she simply opened the page');
+});
+
+test('without a browser around, the link code stays quiet instead of throwing', async () => {
+  reset();                                  // no location, no history in the sandbox
+  assert.equal(A.clLinkToken(), '');
+  assert.equal(A.clLinkProblem(), '');
+  A.clForgetLinkToken();                    // must not throw
+  const r = await A.clClaimLink();
+  assert.equal(r.ok, true);
+  assert.equal(r.data, null);
+});
 
 /* ═════════════════════════ 1. THE SEVEN OUTCOME BUTTONS ═════════════════════════ */
 
@@ -622,7 +705,15 @@ test('callers.html carries no link and no word pointing at the rest of the hub',
   assert.equal(words.indexOf('password'), -1, 'the word "password" is never shown to her');
   assert.equal(words.indexOf('supabase'), -1, 'and she is never shown the plumbing');
   // nor any sign of a sidebar, a route or a way out
-  const code = HTML + SRC;
+  /* One block in caller-page.js is allowed to touch the address bar: the one that spends a
+     one-click invite link (#k=...) and then wipes it. It is fenced off with ---8<--- markers.
+     Cut it out, and nothing in either file may read or change where the browser is. */
+  const fenced = SRC.match(/---8<--- link-claim[\s\S]*?---8<--- end link-claim ---8<--- \*\//g) || [];
+  assert.equal(fenced.length, 1, 'exactly one fenced block may touch the address bar');
+  ['location.href', 'window.open', 'history.push', '<a ', '<nav'].forEach((x) =>
+    assert.equal(fenced[0].indexOf(x), -1, 'even the fenced block never navigates: ' + x));
+  const code = HTML.replace(/clClaimLink\(\)|clLinkProblem\(\)/g, ' ')
+    + SRC.replace(fenced[0], ' ');
   ['<nav', 'location.href', 'location.hash', 'window.open', 'window.location', 'history.push', '#clients']
     .forEach((x) => assert.equal(code.indexOf(x), -1, 'no ' + x + ' anywhere'));
   assert.match(HTML, /robots" content="noindex,nofollow/, 'and the page is not indexed');
