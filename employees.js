@@ -764,7 +764,6 @@ function empAskYes(what, id) { emp.ask = what + ':' + id; emp.menu = ''; empForc
 function empAskNo() { emp.ask = ''; empForcePaint(); }
 /* The "⋯" menu: open for one person at a time, and never left open behind a question. */
 function empMenuToggle(id) { emp.menu = emp.menu === id ? '' : String(id || ''); emp.ask = ''; empForcePaint(); }
-function empMenuClose() { if (emp.menu) { emp.menu = ''; empForcePaint(); } }
 
 /* Delete one message: soft, in this channel only, then repaint from the database. */
 async function empDelGo(msgId) {

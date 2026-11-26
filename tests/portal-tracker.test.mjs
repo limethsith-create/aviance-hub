@@ -471,7 +471,7 @@ test('portal.html is three tabs with the standing line above them', () => {
   assert.ok(html.indexOf('id="pcStanding"') < html.indexOf('role="tablist"'));
   assert.ok(html.indexOf('role="tablist"') < html.indexOf('id="pcPanel-chat"'));
   /* the chat keeps everything it had, inside its own panel */
-  ['id="pcTracker"', 'id="pcKick"', 'id="pcScroll"', 'id="pcCompose"'].forEach(id => assert.ok(html.includes(id)));
+  ['id="pcTracker"', 'id="pcScroll"', 'id="pcCompose"'].forEach(id => assert.ok(html.includes(id)));
   assert.ok(html.indexOf('id="pcPanel-chat"') < html.indexOf('id="pcScroll"'));
   assert.ok(html.indexOf('id="pcScroll"') < html.indexOf('id="pcPanel-campaign"'));
   /* and the tracker is told which tab is open, so a closed tab is never asked for */
@@ -721,7 +721,7 @@ test('nothing a client presses is ever retried for them', () => {
   const sched = fs.readFileSync(path.join(root, 'portal-schedule.js'), 'utf8');
   /* every write a client can trigger is awaited from exactly one place: there is
      no second attempt anywhere, so a dropped Send cannot become two messages */
-  for (const [what, src, call] of [['Send', send, 'await pcSend('], ['Book', send, 'await pcBookKickoff('],
+  for (const [what, src, call] of [['Send', send, 'await pcSend('],
                                    ['Approve', steps, 'await pstDecide('], ['Send answers', steps, 'await pstSubmitForm('],
                                    /* psCapped puts a time limit on this one ask; it does not ask twice */
                                    ['Pick a time', sched, "ctx.rpc('portal_offer_pick'"]]) {

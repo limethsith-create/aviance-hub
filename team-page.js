@@ -163,11 +163,6 @@ function tmcDayLabel(v, now){
   return TMC_DAYS[d.getDay()] + ', ' + TMC_MONTHS[d.getMonth()] + ' ' + d.getDate() + (d.getFullYear() === n.getFullYear() ? '' : ', ' + d.getFullYear());
 }
 
-function tmcFirstName(name){
-  const w = String(name == null ? '' : name).trim().split(/\s+/)[0];
-  return w || 'there';
-}
-
 /* What `staff_me` sent -> days of messages ready to draw. A message is hers
    when its author is her own id; everything else in her channel is his. */
 function tmcGroupMessages(me, now){

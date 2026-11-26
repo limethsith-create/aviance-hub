@@ -105,7 +105,7 @@ vm.runInContext(SRC + `
   empForcePaint,empOpen,empCloseOpen,empForgetCode,empCodeHide,empCopyCode,empCodeGo,
   empIsOwner,EMP_NOT_READY,EMP_CODE_NOT_READY,EMP_FILES_NOT_READY,EMP_BUCKET,EMP_BODY_MAX,
   empMenuHTML,empHeadHTML,empPresence,empDotHTML,empDeleteMessage,empClearChannel,
-  empMenuToggle,empMenuClose,empDelGo,empClearGo,
+  empMenuToggle,empDelGo,empClearGo,
   empLinkNew,empLinkHTML,empLinkGo,empLinkHide,empCopyLink,empCopyCode,empPaint,empLoadMessages,empOnRender,EMP_LINK_BASE};`,
   sandbox, { filename: 'employees.js' });
 const A = sandbox.api;

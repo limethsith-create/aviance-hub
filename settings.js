@@ -99,10 +99,6 @@ async function stOutreachAccounts(){
 async function stOutreachClients(){
   return stRun(()=>sb.from('clients').select('id,company').order('company'),[]);
 }
-function stProviders(){
-  const names=(typeof oaList==='function')?oaList():[];
-  return names.length?names:ST_OUT_PROVIDERS.map(p=>p[0]);
-}
 /* The exact Supabase secret name for this account. Must match oxEnvName in
    supabase/functions/outreach-sync/map.mjs — the sync looks the key up by this name. */
 function stKeyRef(provider,label){
@@ -160,7 +156,7 @@ const ST_BIZ_FIELDS=[
   ['legal_name','Company legal name','text','The name on the agreement and the invoice'],
   ['address','Company address','text','Printed on every invoice'],
   ['email','Billing email','email','Where a client writes about an invoice'],
-  ['kickoff_link','Kickoff booking link','url','Only used if a client cannot book inside their portal'],
+  ['kickoff_link','Kickoff booking link','url','Sent in the welcome email so a new client can book their kickoff'],
   ['signer_name','Who signs for Aviance','text','Your full name. Shown as the Aviance signature on every agreement and the welcome email'],
   ['phone','Business phone','text','Optional. Printed on invoices']
 ];

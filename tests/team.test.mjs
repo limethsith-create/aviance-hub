@@ -408,7 +408,7 @@ vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), tmcSandbox,
 const TMC_SRC = fs.readFileSync(path.join(root, 'team-page.js'), 'utf8');
 vm.runInContext(TMC_SRC + `
 ;globalThis.api={tmcEsc,tmcCleanBody,tmcEmailProblem,tmcCodeProblem,tmcCleanCode,tmcExt,tmcIsImage,
-  tmcSize,tmcFileProblem,tmcFilePath,tmcFileLabel,tmcTime,tmcDayKey,tmcDayLabel,tmcFirstName,
+  tmcSize,tmcFileProblem,tmcFilePath,tmcFileLabel,tmcTime,tmcDayKey,tmcDayLabel,
   tmcGroupMessages,tmcSeenLine,tmcLoadingHtml,tmcOfflineHtml,tmcNoticeHtml,tmcSignInHtml,
   tmcChannelHtml,tmcThreadHtml,tmcAttachmentHtml,tmcPendingHtml,tmcPathsToSign,tmcSay,
   tmcSignIn,tmcSignOut,tmcSession,tmcMe,tmcSend,tmcSeen,tmcUpload,tmcFileUrl,tmcUseClient,

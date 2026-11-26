@@ -37,7 +37,6 @@ const PR_SENTIMENT_LABEL = {
   positive:'Positive', neutral:'Neutral', negative:'Negative',
   out_of_office:'Out of office', unsubscribe:'Unsubscribed', unknown:'No reply yet'
 };
-const PR_STATUSES = ['open','answered','booked','closed'];
 const PR_STATUS_LABEL = {open:'Sequence running', answered:'They replied', booked:'Call booked', closed:'Closed'};
 const PR_DELIVERY_LABEL = {synced:'Sent', queued:'Queued', sending:'Sending', sent:'Sent', failed:'Failed'};
 const PR_BOOKED = {any:'Either way', yes:'Call booked', no:'No call yet'};

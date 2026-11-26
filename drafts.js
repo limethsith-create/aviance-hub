@@ -13,7 +13,7 @@
 
 /* ===================== 0. STATE ===================== */
 const DR_POLL_MS=30000;
-const dr={list:[],loaded:false,loading:false,err:null,count:0,countAt:0,timer:null,busy:{},edits:{},seq:0,shown:null};
+const dr={list:[],loaded:false,loading:false,err:null,count:0,timer:null,busy:{},edits:{},seq:0,shown:null};
 
 /* ===================== 1. DATA ===================== */
 function drSb(){try{if(typeof sb!=='undefined'&&sb)return sb;}catch(e){}return (typeof window!=='undefined'&&window.sb)||null;}
@@ -79,13 +79,13 @@ async function drTick(){
   if(r.ok)drSetCount(Number(r.data)||0);
 }
 function drSetCount(n){
-  const changed=n!==dr.count;dr.count=n;dr.countAt=Date.now();
+  const changed=n!==dr.count;dr.count=n;
   if(changed){try{if(typeof renderNav==='function')renderNav();}catch(e){}}
 }
 /* Ask again now (after a draft was made elsewhere, e.g. the onboarding tracker). */
 function drRefresh(){return drTick();}
 /* Sign-out: drop everything. */
-function draftsForget(){drStop();Object.assign(dr,{list:[],loaded:false,loading:false,err:null,count:0,countAt:0,busy:{},edits:{},seq:dr.seq+1,shown:null});}
+function draftsForget(){drStop();Object.assign(dr,{list:[],loaded:false,loading:false,err:null,count:0,busy:{},edits:{},seq:dr.seq+1,shown:null});}
 
 /* ===================== 3. VIEW ===================== */
 /* A value safe inside onclick="…" as a JavaScript string, from core.js. */
