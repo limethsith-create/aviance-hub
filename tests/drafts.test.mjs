@@ -29,15 +29,21 @@ const base = (over = {}) => ({
   ...over,
 });
 const reply = (text, over) => R.draftReply({ ...base(over), text });
-/* the style rules, checked on every draft */
-function casual(body) {
-  assert.ok(body.length > 0 && body.length < 220, 'short: ' + body);
-  const letters = body.replace(/https?:\/\/\S+/g, '').replace(/\bAV-\d+\b/g, '').replace(/\b(Sam|Dana)\b/g, '').replace(/\bangle [A-Z]\b/g, '').replace(/\b(ET|CT|MT|PT|GMT[+-]?\d*)\b/g, '');
-  assert.equal(letters, letters.toLowerCase(), 'lowercase apart from names, links, invoice numbers, zones: ' + body);
+/* the style rules, checked on every draft. These go to clients who have just paid
+   $1,500-$10,800, so: proper sentences, no text-speak, "target profile" not "ICP". */
+function professional(body) {
+  assert.ok(body.length > 0 && body.length < 260, 'short: ' + body);
+  assert.match(body, /^[A-Z"']/, 'starts with a capital letter: ' + body);
+  assert.match(body, /[.!?]$|https?:\/\/\S+$/, 'ends in a full stop (or a link): ' + body);
+  assert.doesNotMatch(body, /\b(ur|thx|thnx|tmrw|tmw|pls|plz|ty)\b/i, 'no text-speak: ' + body);
+  assert.doesNotMatch(body, /\bu\b(?!\.)/i, 'writes "you" in full: ' + body);
+  assert.doesNotMatch(body, /\bw\//i, 'writes "with" in full: ' + body);
+  assert.doesNotMatch(body, /\bICP\b/i, 'says "target profile" to a client: ' + body);
   assert.ok(((body.match(/\p{Extended_Pictographic}/gu)) || []).length <= 1, 'at most one emoji');
   assert.doesNotMatch(body, /refund|discount|money back|guarantee/i, 'no money promises');
   assert.doesNotMatch(body, /\bLee\b/, 'first name only');
 }
+const casual = professional;   /* the old name, so every call site below still reads */
 
 test('classify: the common intents', () => {
   const cases = {
@@ -55,16 +61,16 @@ test('classify: the common intents', () => {
 test('call: the real booked time in their zone + the meet link; not booked -> no invented date', () => {
   const a = reply("when's my call?");
   assert.equal(a.intent, 'call');
-  assert.equal(a.body, 'hey Sam, ur kickoff is thu nov 26, 10am ET — link: https://meet.google.com/abc-defg-hij');
+  assert.equal(a.body, 'Hi Sam, your kickoff is Thu Nov 26, 10am ET. Here is the link: https://meet.google.com/abc-defg-hij');
   casual(a.body);
   const london = reply("when's my call?", { timezone: 'Europe/London' });
-  assert.match(london.body, /thu nov 26, 3pm GMT/);
+  assert.match(london.body, /Thu Nov 26, 3pm GMT/);
   const tmrw = reply('what time is the call', { meetings: [{ title: 'Onboarding call — Stone Roofing', starts_at: '2026-11-25T19:30:00Z', status: 'booked', meet_link: null }] });
-  assert.equal(tmrw.body, 'hey Sam, ur onboarding call is tmrw, 2:30pm ET — the meet link lands here before the call');
+  assert.equal(tmrw.body, 'Hi Sam, your onboarding call is tomorrow, 2:30pm ET. The meeting link will appear here before the call.');
   const open = reply("when's the call", { meetings: [], offers: [{ status: 'open', kind: 'kickoff' }] });
-  assert.match(open.body, /pick one of the times i sent above \(reply 1, 2 or 3\)/);
+  assert.match(open.body, /pick one of the times above and reply with 1, 2 or 3\./);
   const none = reply("when's the call", { meetings: [] });
-  assert.equal(none.body, "hey Sam, not booked yet, i'll send u a few times for it shortly");
+  assert.equal(none.body, "Hi Sam, it is not booked yet. I'll send you a few times for it shortly.");
   assert.doesNotMatch(none.body, /\d/);
   // a past or cancelled call is not "the" call
   const past = reply("when's the call", { meetings: [{ title: 'Kickoff', starts_at: '2026-11-20T15:00:00Z', status: 'held' }, { title: 'Kickoff', starts_at: '2026-11-30T15:00:00Z', status: 'cancelled' }] });
@@ -74,15 +80,15 @@ test('call: the real booked time in their zone + the meet link; not booked -> no
 
 test('invoice and receipt: the real number and amount, never a promise about money', () => {
   const paid = reply('is the invoice paid?');
-  assert.equal(paid.body, 'hey Sam, invoice AV-0012 ($2,500) is paid, all good on ur side thx');
+  assert.equal(paid.body, 'Hi Sam, invoice AV-0012 ($2,500) is paid — thank you. There is nothing outstanding on your side.');
   const due = reply('how much do i owe', { invoices: [{ number: 'AV-0013', amount: 1800, currency: 'USD', status: 'sent', issued_on: '2026-11-23', due_on: '2026-11-30' }, { number: 'AV-0012', amount: 2500, status: 'paid', issued_on: '2026-11-20' }] });
-  assert.match(due.body, /^hey Sam, invoice AV-0013 is \$1,800, due nov 30\. the pay details are on the invoice link/);
+  assert.match(due.body, /^Hi Sam, invoice AV-0013 is \$1,800, due Nov 30\. The payment details are on the invoice itself/);
   const gbp = reply('invoice?', { invoices: [{ number: 'AV-0020', amount: 900, currency: 'GBP', status: 'sent', issued_on: '2026-11-23' }] });
   assert.match(gbp.body, /£900/);
   const rec = reply('can u send me a receipt');
-  assert.equal(rec.body, 'hey Sam, sure — ur receipt for invoice AV-0012 ($2,500, paid nov 22) is coming over shortly');
+  assert.equal(rec.body, 'Hi Sam, of course — your receipt for invoice AV-0012 ($2,500, paid Nov 22) is on its way.');
   const noPay = reply('can u send me a receipt', { invoices: [{ number: 'AV-0013', amount: 1800, status: 'sent' }] });
-  assert.match(noPay.body, /i don't see a payment on our side yet/);
+  assert.match(noPay.body, /I don't see a payment on our side yet/);
   const none = reply('is the invoice paid', { invoices: [] });
   assert.doesNotMatch(none.body, /\$|\d/);
   [paid, due, gbp, rec, noPay, none].forEach((x) => casual(x.body));
@@ -90,39 +96,39 @@ test('invoice and receipt: the real number and amount, never a promise about mon
 
 test("what's next: the journey's next step, its planned day and the launch countdown", () => {
   const a = reply("what's next?");
-  assert.equal(a.body, "hey Sam, we're on research (ur market, icp + a few angles) now, planned to wrap nov 28 · launch in 14 days");
+  assert.equal(a.body, "Hi Sam, we're on research (your market, your target profile and a few angles) now, due to wrap up Nov 28. Launch is in 14 days.");
   const steps2 = STEPS.map((s) => (s.step === 'research' ? { ...s, status: 'done' } : s));
   const b = reply('next steps?', { journey: R.journeySummary(steps2, '2026-11-24') });
-  assert.equal(b.body, 'hey Sam, next up is market testing on our warmed inboxes, planned for dec 5 · launch in 14 days');
+  assert.equal(b.body, 'Hi Sam, next up is market testing on our warmed inboxes, planned for Dec 5. Launch is in 14 days.');
   // a late step: no date that has already gone by
   const c = reply("what's next", { journey: R.journeySummary(STEPS, '2026-11-30') });
-  assert.equal(c.body, "hey Sam, we're on research (ur market, icp + a few angles) now · launch in 8 days");
+  assert.equal(c.body, "Hi Sam, we're on research (your market, your target profile and a few angles) now. Launch is in 8 days.");
   assert.match(c.reason, /late/);
   const live = reply("what's next", { journey: R.journeySummary(STEPS.map((s) => ({ ...s, status: 'done' })), '2026-12-09') });
-  assert.match(live.body, /ur live, month one is running/);
+  assert.match(live.body, /you're live and month one is running/);
   const noJ = reply("what's next", { journey: null });
-  assert.equal(noJ.body, 'hey Sam, ' + R.FALLBACK);
+  assert.equal(noJ.body, 'Hi Sam, ' + R.FALLBACK);
   [a, b, c, live, noJ].forEach((x) => casual(x.body));
 });
 
 test('testing: the logged numbers, added up, with the leading angle', () => {
   const t = reply("how's testing going", { testing: [{ on_date: '2026-12-01', sent: 60, replies: 2, leading_angle: 'angle A' }, { on_date: '2026-12-02', sent: 60, replies: 2 }, { on_date: '2026-12-03', sent: 60, replies: 3, leading_angle: 'angle B' }] });
-  assert.equal(t.body, 'hey Sam, day 3 of testing: 180 sent · 7 replies · angle B leading');
+  assert.equal(t.body, 'Hi Sam, day 3 of testing: 180 sent, 7 replies. The strongest angle so far is angle B.');
   const one = reply('any replies yet?', { testing: [{ on_date: '2026-12-01', sent: 40, replies: 1 }] });
-  assert.equal(one.body, 'hey Sam, day 1 of testing: 40 sent · 1 reply');
+  assert.equal(one.body, 'Hi Sam, day 1 of testing: 40 sent, 1 reply.');
   const notYet = reply("how's testing going");
-  assert.match(notYet.body, /testing hasn't started yet/);
+  assert.match(notYet.body, /testing hasn't started yet\./);
   [t, one, notYet].forEach((x) => casual(x.body));
 });
 
-test('thanks and anything else: short, casual, first name only', () => {
-  assert.equal(reply('thanks!').body, 'anytime Sam! shout if u need anything');
-  assert.equal(reply('thx', { firstName: '' }).body, 'anytime! shout if u need anything');
+test('thanks and anything else: short, warm, first name only', () => {
+  assert.equal(reply('thanks!').body, "You're welcome, Sam — just let me know if you need anything else.");
+  assert.equal(reply('thx', { firstName: '' }).body, "You're welcome — just let me know if you need anything else.");
   const o = reply('can we change the logo on the site');
-  assert.equal(o.body, 'hey Sam, got it, will get back to u on this shortly');
+  assert.equal(o.body, 'Hi Sam, let me look into this and come back to you shortly.');
   assert.equal(o.intent, 'other'); assert.ok(o.reason);
-  assert.equal(reply('hmm', { firstName: null }).body, 'hey, ' + R.FALLBACK);
-  casual(o.body);
+  assert.equal(reply('hmm', { firstName: null }).body, 'Hi there, ' + R.FALLBACK);
+  [o, reply('thanks!'), reply('thx', { firstName: '' })].forEach((x) => casual(x.body));
 });
 
 test('journeySummary: late is computed, next step and days to launch', () => {
@@ -136,11 +142,19 @@ test('journeySummary: late is computed, next step and days to launch', () => {
 
 test('the model: prompt carries the style rules and only real data; its text is cleaned', () => {
   const p = R.buildPrompt({ ...base(), text: 'when is my call', history: [{ who: 'client', body: 'hi' }, { who: 'us', body: 'hey!' }], company: 'Stone Roofing' });
-  assert.match(p.system, /lowercase/); assert.match(p.system, /never promise money, refunds/); assert.match(p.system, /at most one emoji/);
-  assert.match(p.user, /thu nov 26, 10am ET/); assert.match(p.user, /AV-0012/); assert.match(p.user, /client: hi\naviance: hey!/);
-  assert.equal(R.cleanModelText('"hey Sam, ur call is thu 🎉🎉 at 10am ET"'), 'hey Sam, ur call is thu 🎉 at 10am ET');
-  assert.equal(R.cleanModelText('Reply: sure thing'), 'sure thing');
+  assert.match(p.system, /warm, plain and professional/);
+  assert.match(p.system, /never "u", "ur", "thx", "tmrw"/);
+  assert.match(p.system, /Say "target profile", never "ICP"/);
+  assert.match(p.system, /Never promise money, refunds/);
+  assert.match(p.system, /At most one emoji/);
+  assert.doesNotMatch(p.system, /all lowercase/);
+  assert.match(p.user, /Thu Nov 26, 10am ET/); assert.match(p.user, /AV-0012/); assert.match(p.user, /client: hi\naviance: hey!/);
+  assert.equal(R.cleanModelText('"Your call is Thursday 🎉🎉 at 10am ET."'), 'Your call is Thursday 🎉 at 10am ET.');
+  assert.equal(R.cleanModelText('Reply: Sure thing.'), 'Sure thing.');
   assert.equal(R.cleanModelText("we'll refund u for the delay"), '', 'a money promise falls back to the rules');
+  assert.equal(R.cleanModelText('hey Sam, ur call is thu at 10am'), '', 'text-speak falls back to the rules');
+  assert.equal(R.cleanModelText('thx, see u then'), '', 'text-speak falls back to the rules');
+  assert.equal(R.cleanModelText('Most of our clients are in the U.S. market.'), 'Most of our clients are in the U.S. market.', '"U.S." is not text-speak');
   assert.equal(R.cleanModelText(''), '');
   assert.equal(R.cleanModelText('x'.repeat(700)), '');
 });
@@ -179,8 +193,8 @@ const dr = vm.runInThisContext('dr');
 after(() => { draftsForget(); });
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 const ROWS = () => [
-  { id: 'd1', client_id: 'k1', company: 'Stone Roofing', channel_id: 'ch1', kind: 'reply', body: 'hey Sam, ur kickoff is thu nov 26, 10am ET', msg_kind: 'bot', reason: 'asked about the call', created_at: new Date(Date.now() - 5 * 60000).toISOString(), last_client_message: "when's my call? <b>" },
-  { id: 'd2', client_id: 'k2', company: 'Acme <Ltd>', channel_id: 'ch2', kind: 'welcome', body: 'hey Dana! welcome in 👋', msg_kind: 'bot', reason: null, created_at: new Date().toISOString(), last_client_message: null },
+  { id: 'd1', client_id: 'k1', company: 'Stone Roofing', channel_id: 'ch1', kind: 'reply', body: 'Hi Sam, your kickoff is Thu Nov 26, 10am ET.', msg_kind: 'bot', reason: 'asked about the call', created_at: new Date(Date.now() - 5 * 60000).toISOString(), last_client_message: "when's my call? <b>" },
+  { id: 'd2', client_id: 'k2', company: 'Acme <Ltd>', channel_id: 'ch2', kind: 'welcome', body: 'Hi Dana, welcome aboard.', msg_kind: 'bot', reason: null, created_at: new Date().toISOString(), last_client_message: null },
 ];
 function setup() {
   draftsForget(); rpcCalls = []; toasts.length = 0; rendered = []; navs = 0;
@@ -201,7 +215,7 @@ test('viewDrafts: every pending draft with the client, their last message, an ed
   assert.match(h, /2 waiting/);
   assert.match(h, /Stone Roofing/); assert.match(h, /Acme &lt;Ltd&gt;/); assert.doesNotMatch(h, /<Ltd>/);
   assert.match(h, /They said<\/span>when&#39;s my call\? &lt;b&gt;|They said<\/span>when's my call\? &lt;b&gt;/);
-  assert.match(h, /<textarea class="dr-box" id="drBody-d1"[^>]*>hey Sam, ur kickoff is thu nov 26, 10am ET<\/textarea>/);
+  assert.match(h, /<textarea class="dr-box" id="drBody-d1"[^>]*>Hi Sam, your kickoff is Thu Nov 26, 10am ET\.<\/textarea>/);
   assert.match(h, /asked about the call/);
   assert.match(h, />Welcome</); assert.match(h, />Send</); assert.match(h, />Discard</);
   assert.match(h, /onkeydown="drKey\(event,&quot;d1&quot;\)"/);
@@ -211,9 +225,9 @@ test('viewDrafts: every pending draft with the client, their last message, an ed
 test('Send: the edited text goes out, the card goes, the count drops, a toast says where', async () => {
   setup();
   fakeEl('drRoot').innerHTML = viewDrafts(); await tick();
-  drEdit('d1', '  hey Sam, ur kickoff is thu at 10am ET  ');
+  drEdit('d1', '  Hi Sam, your kickoff is Thursday at 10am ET.  ');
   await drSendClick('d1');
-  assert.deepEqual(rpcCalls.find((c) => c[0] === 'draft_send')[1], { p_draft: 'd1', p_body: 'hey Sam, ur kickoff is thu at 10am ET' });
+  assert.deepEqual(rpcCalls.find((c) => c[0] === 'draft_send')[1], { p_draft: 'd1', p_body: 'Hi Sam, your kickoff is Thursday at 10am ET.' });
   assert.deepEqual(dr.list.map((d) => d.id), ['d2']);
   assert.equal(drCount(), 1);
   assert.deepEqual(toasts, ['Sent to Stone Roofing']);
@@ -223,7 +237,7 @@ test('Send: the edited text goes out, the card goes, the count drops, a toast sa
   let prevented = 0;
   drKey({ key: 'Enter', metaKey: true, preventDefault() { prevented++; } }, 'd2'); await tick();
   assert.equal(prevented, 1);
-  assert.deepEqual(rpcCalls.filter((c) => c[0] === 'draft_send')[1][1], { p_draft: 'd2', p_body: 'hey Dana! welcome in 👋' });
+  assert.deepEqual(rpcCalls.filter((c) => c[0] === 'draft_send')[1][1], { p_draft: 'd2', p_body: 'Hi Dana, welcome aboard.' });
   assert.match(fakeEl('drRoot').innerHTML, /Nothing to approve/);
 });
 

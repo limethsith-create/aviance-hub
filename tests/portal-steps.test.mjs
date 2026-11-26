@@ -166,16 +166,24 @@ test('the SQL keeps the contract: client RPCs derive the client from the login, 
   assert.doesNotMatch(SQL, /insert into public\.channel_messages[^;]*'(bot|chat)'/, 'only system facts are posted directly');
 });
 
-test('every bot line is casual: lowercase, at most one emoji', () => {
-  const lines = SQL.match(/'(?:[^']|'')*(?: u | ur |thx|tmrw|testing|approve)[^']*(?:'')?[^']*'/g) || [];
-  const said = SQL.match(/body := '([^']|'')+'|then '([^']|'')+'|'hey just checking[^']*'|'quick one[^']*'/g) || [];
+test('every line a client reads is warm, plain and professional — no text-speak, no "ICP"', () => {
+  const said = (SQL.match(/body := '([^']|'')+'|then '([^']|'')+'|'Just checking in[^']*'|'One quick thing[^']*'/g) || [])
+    /* a real sentence, not a SQL enum like then 'approved' */
+    .filter((m) => { const t = m.replace(/^[^']*'/, '').replace(/'$/, ''); return t.length > 20 && /\s/.test(t); });
   assert.ok(said.length >= 6, 'found the lines');
   for (const s of said) {
-    const text = s.replace(/^[^']*'/, '');
-    assert.equal(text, text.toLowerCase().replace(/icp \+/, 'icp +'), s);
-    assert.ok((text.match(/\p{Extended_Pictographic}/gu) || []).length <= 1, s);
+    const text = s.replace(/^[^']*'/, '').replace(/'$/, '');
+    /* a fragment that starts with a space continues an earlier sentence, so it is not capitalised */
+    if (!/^\s/.test(text)) assert.match(text, /^[A-Z]/, 'starts with a capital letter: ' + s);
+    assert.doesNotMatch(text, /\b(ur|thx|thnx|tmrw|tmw|pls|plz|ty)\b/i, 'no text-speak: ' + s);
+    assert.doesNotMatch(text, /\bu\b(?!\.)/i, 'writes "you" in full: ' + s);
+    assert.doesNotMatch(text, /\bw\//i, 'writes "with" in full: ' + s);
+    assert.doesNotMatch(text, /\bICP\b/i, 'says "target profile" to a client: ' + s);
+    assert.ok((text.match(/\p{Extended_Pictographic}/gu) || []).length <= 1, 'at most one emoji: ' + s);
   }
-  assert.ok(lines.length > 0);
+  // and the whole file holds no text-speak outside the patterns that READ what a client typed
+  const ours = SQL.split('\n').filter((l) => !/tail text|regexp_replace\(t,|^\s*--/.test(l)).join('\n');
+  assert.doesNotMatch(ours, /\b(ur|thx|tmrw)\b/i);
 });
 
 /* ───────────── perfection pass ───────────── */

@@ -47,7 +47,7 @@ const TM_PRIORITY_LABEL = {1:'Lowest', 2:'Low', 3:'Normal', 4:'High', 5:'Urgent'
 /* What each screen is holding right now. null means "not loaded yet". */
 const tmS = {
   people:null, tasks:null, mine:null, clients:null,
-  err:'', dept:'', who:'', busy:false
+  err:'', dept:'', who:'', busy:false, workSeq:0
 };
 
 /* ---- plumbing (same shape as finance.js) -------------------------- */
@@ -419,19 +419,20 @@ async function tmDoSetRole(id, role){
 
 /* ---- The work queue ------------------------------------------------ */
 
+/* Each filter click starts a fresh read. The one that answers last is not the one that
+   wins: only the newest read paints, so a slow answer for the old filter cannot land
+   under the chip he has just picked. */
 async function tmLoadWork(){
-  if (tmS.busy) return;
-  tmS.busy = true;
-  try {
-    if (tmS.clients === null) await tmLoadClients();
-    const [tasks, people] = await Promise.all([
-      tmTasks({department: tmS.dept || null, assignee: tmS.who || null, status: TM_BOARD_STATUSES}),
-      tmPeople()
-    ]);
-    tmS.err = tasks.ok ? (people.ok ? '' : people.error) : tasks.error;
-    tmS.tasks  = tasks.ok  ? tasks.data  : [];
-    tmS.people = people.ok ? people.data : [];
-  } finally { tmS.busy = false }
+  const seq = ++tmS.workSeq;
+  if (tmS.clients === null) await tmLoadClients();
+  const [tasks, people] = await Promise.all([
+    tmTasks({department: tmS.dept || null, assignee: tmS.who || null, status: TM_BOARD_STATUSES}),
+    tmPeople()
+  ]);
+  if (seq !== tmS.workSeq) return;
+  tmS.err = tasks.ok ? (people.ok ? '' : people.error) : tasks.error;
+  tmS.tasks  = tasks.ok  ? tasks.data  : [];
+  tmS.people = people.ok ? people.data : [];
   tmPaint('tmWorkHost', tmRenderWork());
 }
 
@@ -539,5 +540,5 @@ function viewMyWork(){
 
 /* Forget everything on sign-out. */
 function tmForget(){
-  Object.assign(tmS, {people:null, tasks:null, mine:null, clients:null, err:'', dept:'', who:'', busy:false});
+  Object.assign(tmS, {people:null, tasks:null, mine:null, clients:null, err:'', dept:'', who:'', busy:false, workSeq:tmS.workSeq + 1});
 }

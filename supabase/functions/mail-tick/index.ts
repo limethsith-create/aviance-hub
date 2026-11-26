@@ -1,5 +1,8 @@
-// Aviance OS — the mail room. Runs every minute on a schedule, and is poked the moment a new
-// email is queued (the mail_outbox_kick trigger), so nothing waits for the next minute.
+// Aviance OS — the mail room. Runs every minute on a schedule, and that is the only thing that
+// starts it: a queued email goes out on the next cron minute, not the moment it is written.
+// (A mail_outbox_kick trigger that would poke this function straight away is written up in
+// supabase/migrations/20261202_mail_instant_send_NOT_APPLIED.sql, but it is deliberately NOT
+// applied to the live database, so do not count on it.)
 //
 // Nothing in the browser sends mail. Everything that needs an email writes a
 // row to mail_outbox; this job picks the rows up and hands them to the Apps

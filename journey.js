@@ -350,7 +350,11 @@ function jyRenderTracker(clientId, j, meta){
   const pct = n.total ? Math.round(n.done / n.total * 100) : 0;
   return '<div class="jy-one-head">' +
       '<div><h3>Journey to launch</h3>' +
-      '<p class="jy-muted">' + jyE((n.paid_on ? 'Paid ' + jyDate(n.paid_on) : '') + (n.launch_on ? ' · launch ' + jyDate(n.launch_on) : '') + ' · ' + n.done + ' of ' + n.total + ' done') + '</p></div>' +
+      '<p class="jy-muted">' + jyE([
+        n.paid_on ? 'Paid ' + jyDate(n.paid_on) : '',
+        n.launch_on ? 'launch ' + jyDate(n.launch_on) : '',
+        n.done + ' of ' + n.total + ' done',
+      ].filter(Boolean).join(' · ')) + '</p></div>' +
       jyLaunchBadge(n) +
     '</div>' +
     '<div class="jy-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + jyE(pct) + '" aria-label="Steps done"><span style="width:' + jyE(pct) + '%"></span></div>' +

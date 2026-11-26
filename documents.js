@@ -103,7 +103,27 @@ function dcPreviewHTML(x){
     if(x.html)return head+`<iframe class="dc-frame" title="${esc(x.title)}" sandbox="" srcdoc="${esc(x.html)}"></iframe>`;
     return head+`<pre class="dc-text">${esc(x.text||'')}</pre>`;
   }
-  return head+`<iframe class="dc-frame tall" title="${esc(x.title)}" sandbox="allow-scripts" srcdoc="${esc(dcDocSrc(x))}"></iframe>`;
+  return head+dcPayNote(x)+`<iframe class="dc-frame tall" title="${esc(x.title)}" sandbox="allow-scripts" srcdoc="${esc(dcDocSrc(x))}"></iframe>`;
+}
+/* An invoice or receipt the owner is looking at: can it actually tell a client how to pay?
+   The answer is in the same `pay` block portal-client.js renders, so this never guesses.
+   Only the name of the method is shown — never an account number or a link. */
+const DC_PAY_NAMES={bank_wire:'Bank transfer',wise:'Bank transfer (second account)',payoneer:'Payoneer',paypal:'PayPal',card_link:'Card or online checkout'};
+function dcPayNote(x){
+  const o=x||{};
+  if(o.type!=='invoice')return '';
+  const doc=o.doc||{};
+  const pay=(doc.pay&&typeof doc.pay==='object')?doc.pay:null;
+  if(!pay)return '';
+  if(String(doc.status||'')==='paid')return '';
+  const list=Array.isArray(pay.methods)?pay.methods.filter(m=>m&&m.kind):[];
+  if(pay.ready===false||(!list.length&&!pay.wise_details&&!pay.payoneer_link)){
+    return `<p class="dc-err" role="status">This invoice cannot tell a client how to pay. It says the details are coming. Settings → Payment details fixes it.</p>`;
+  }
+  const first=list.find(m=>m.kind===pay.preferred)||list[0];
+  const name=first?(DC_PAY_NAMES[first.kind]||first.kind):'Bank transfer';
+  const others=list.filter(m=>m!==first).map(m=>DC_PAY_NAMES[m.kind]||m.kind);
+  return `<p class="dc-note">How to pay: <b>${esc(name)}</b> first${others.length?', then '+esc(others.join(', ')):''}. The values come from Settings when the client opens it.</p>`;
 }
 function dcChatExtra(x){
   const m=x.meta||{};

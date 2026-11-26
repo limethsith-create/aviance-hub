@@ -321,6 +321,23 @@ test('the screens hold up with rows, and everything from a person is escaped', a
 
 /* ───────────── the house rules ───────────── */
 
+test('two filter clicks in a row: the answer for the chip he left behind never lands', async () => {
+  reset();
+  db.tasks.push(task({ id: 't1', department: 'sales', title: 'Sales thing' }),
+                task({ id: 't2', department: 'operations', title: 'Ops thing' }));
+  A.tmS.dept = 'sales';
+  const first = A.tmLoadWork();            // the read for "sales" is already on its way
+  A.tmS.dept = 'operations';               // he clicks the next chip before it comes back
+  const second = A.tmLoadWork();
+  await Promise.all([first, second]);
+  assert.deepEqual(arr(A.tmS.tasks).map(t => t.id), ['t2'],
+    'the board holds the tasks for the chip he picked last, not the one he left behind');
+  // and a second click while nothing is in flight still loads: the old busy flag used to swallow it
+  A.tmS.dept = 'sales';
+  await A.tmLoadWork();
+  assert.deepEqual(arr(A.tmS.tasks).map(t => t.id), ['t1']);
+});
+
 test('nothing calls another server, and every global is prefixed tm', () => {
   assert.ok(!/machineFetch|MACHINE_URL|email-distributor/.test(SRC), 'no machine');
   assert.ok(!/\bimport\b|\brequire\(/.test(SRC), 'no imports, no build step');

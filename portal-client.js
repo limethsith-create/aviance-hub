@@ -300,6 +300,172 @@ function pcPayDetails(pay){
   return { ready, wise: ready ? wise : '', link: ready ? link : '' };
 }
 
+/* ---- how to pay ----------------------------------------------------
+   The owner switches rails on in Settings; the database hands this file a list.
+   Everything a rail needs is here, so turning one on needs no new code:
+
+     bank_wire  an international USD wire: beneficiary, account, IBAN, bank, SWIFT/BIC,
+                branch address, and the correspondent bank the sending bank routes through
+     wise       a historic key. To a client, simply a second bank account, same fields
+     payoneer   a payment-request link, or the receiving account details
+     paypal     a paypal.me link, or the email a goods-and-services payment goes to
+     card_link  a hosted checkout page (anything https)
+
+   Several may be on at once. The preferred one is shown large; the rest read as "or", in the
+   order above, so the wire leads and PayPal comes last.
+   Nothing here is a real account: every value comes from Settings at read time. */
+const PC_PAY_ORDER = ['bank_wire', 'wise', 'payoneer', 'card_link', 'paypal'];
+/* The order a US bank's wire form asks for them, so a finance person reads straight down.
+   These are the fields for a wire FROM a US company TO a bank abroad: there is no ABA on a
+   Sri Lankan account, and the correspondent bank is the line that is both most often missing
+   and most expensive to miss — without it the wire takes an extra hop and an extra cut. */
+const PC_PAY_BANK_FIELDS = ['account_holder', 'beneficiary_address', 'account_number', 'iban',
+  'bank_name', 'swift', 'bank_address', 'intermediary_bank', 'intermediary_swift', 'routing_number'];
+const PC_PAY_FIELD_LABELS = {
+  account_holder: 'Beneficiary name', beneficiary_address: 'Beneficiary address',
+  account_number: 'Account number', iban: 'IBAN', bank_name: 'Beneficiary bank',
+  swift: 'SWIFT / BIC', bank_address: 'Bank address',
+  intermediary_bank: 'Correspondent bank', intermediary_swift: 'Correspondent SWIFT / BIC',
+  routing_number: 'Routing number (ABA)', email: 'Email',
+};
+/* the ones a US finance person copies character for character */
+const PC_PAY_MONO_FIELDS = { account_number: true, iban: true, swift: true, intermediary_swift: true, routing_number: true };
+/* `wise` is a historic key, kept because older invoices and the wise_details setting use it.
+   To a client it is simply a second bank account: Wise cannot be held in Sri Lanka at all. */
+const PC_PAY_KINDS = {
+  bank_wire: { label: 'Bank transfer', fields: PC_PAY_BANK_FIELDS,
+    hint: 'An international USD wire. Your bank will charge its own fee for sending it — please send the full invoice amount so it arrives whole.' },
+  wise: { label: 'Bank transfer (second account)', fields: PC_PAY_BANK_FIELDS,
+    hint: 'An international USD wire. Your bank will charge its own fee for sending it — please send the full invoice amount so it arrives whole.' },
+  payoneer: { label: 'Payoneer', action: 'Pay with Payoneer', fields: PC_PAY_BANK_FIELDS,
+    hint: 'Payoneer. Open the link and pay by US bank debit or card — no Payoneer account needed. Or send to the account below.' },
+  card_link: { label: 'Card or online checkout', action: 'Pay by card', fields: [],
+    hint: 'Pay by card on a secure checkout page.' },
+  paypal: { label: 'PayPal', action: 'Pay with PayPal', fields: ['email'],
+    hint: 'PayPal. Send a goods-and-services payment to the email below — please do not mark it as a payment to a friend.' },
+};
+
+/* One rail, cleaned: only the fields the owner really filled in, never an admin
+   reminder in [brackets], and a link only if it is a plain https one. */
+function pcPayMethod(kind, fields, note, text){
+  const def = PC_PAY_KINDS[String(kind || '')];
+  if (!def) return null;
+  const f = (fields && typeof fields === 'object') ? fields : {};
+  const real = (v) => (typeof v === 'string' && v.trim() && v.trim().charAt(0) !== '[' ? v.trim() : '');
+  const rows = def.fields.map((k) => {
+    const v = real(f[k]);
+    return v ? { key: k, label: PC_PAY_FIELD_LABELS[k] || k, value: v, mono: !!PC_PAY_MONO_FIELDS[k] } : null;
+  }).filter(Boolean);
+  const url = pcSafeUrl(f.link);
+  const free = real(text);
+  if (!rows.length && !url && !free) return null;   /* switched on, nothing filled in */
+  return { kind: String(kind), label: def.label, hint: def.hint || '', action: def.action || 'Pay online',
+    rows, url, free, note: real(note), reference: real(f.reference) };
+}
+
+/* The whole "how to pay" picture: {ready, preferred, others, currency, terms}.
+   `pay.methods` is what Settings holds today; an invoice built before Settings had a
+   list of rails still carries wise_details / payoneer_link, and those still work. */
+function pcPayPlan(pay){
+  const p = (pay && typeof pay === 'object') ? pay : {};
+  const cur = String(p.currency || '').trim().toUpperCase();
+  const terms = typeof p.terms === 'string' ? p.terms.trim() : '';
+  const off = { ready: false, preferred: null, others: [], currency: cur, terms };
+  if (p.ready === false) return off;
+  const raw = Array.isArray(p.methods) ? p.methods : [];
+  let list = raw.map((m) => {
+    if (!m || typeof m !== 'object') return null;
+    const f = (m.fields && typeof m.fields === 'object') ? m.fields : {};
+    return pcPayMethod(m.kind, f, m.note || f.note, m.text || f.text);
+  }).filter(Boolean);
+  if (!list.length) {
+    const legacy = pcPayDetails(p);
+    list = [legacy.wise ? pcPayMethod('bank_wire', {}, '', legacy.wise) : null,
+      legacy.link ? pcPayMethod('card_link', { link: legacy.link }, '', '') : null].filter(Boolean);
+  }
+  const seen = {};
+  list = list.filter((m) => (seen[m.kind] ? false : (seen[m.kind] = true)));
+  list.sort((a, b) => PC_PAY_ORDER.indexOf(a.kind) - PC_PAY_ORDER.indexOf(b.kind));
+  if (!list.length) return off;
+  const want = String(p.preferred || '');
+  const first = list.find((m) => m.kind === want) || list[0];
+  return { ready: true, preferred: first, others: list.filter((m) => m !== first), currency: cur, terms };
+}
+
+/* One rail as HTML. `big` is the preferred one: its values are set to select in one
+   click (see .pc-pay-v in portal-client.css), so nothing has to be typed out by hand. */
+function pcPayMethodHtml(m, big){
+  if (!m) return '';
+  const fields = m.rows.length
+    ? `<dl class="pc-pay-fields">${m.rows.map((r) => `<div><dt class="pc-tag">${pcEsc(r.label)}</dt><dd class="pc-pay-v${r.mono ? ' pc-pay-num' : ''}">${pcEsc(r.value)}</dd></div>`).join('')}</dl>`
+    : '';
+  const btn = m.url ? `<p class="pc-noprint"><a class="pc-btn${big ? '' : ' pc-btn-line'}" href="${pcEsc(m.url)}" target="_blank" rel="noopener noreferrer">${pcEsc(m.action)}</a></p>
+      <p class="pc-pay-url pc-pay-v">${pcEsc(m.url)}</p>` : '';
+  return `<p class="pc-pay-kind">${pcEsc(m.label)}</p>
+    ${big && m.hint ? `<p class="pc-small pc-pay-hint">${pcEsc(m.hint)}</p>` : ''}
+    ${fields}
+    ${m.free ? `<pre class="pc-pre pc-pay-v">${pcEsc(m.free)}</pre>` : ''}
+    ${btn}
+    ${m.note ? `<p class="pc-small pc-pay-note">${pcEsc(m.note)}</p>` : ''}`;
+}
+
+/* The block on an unpaid invoice. o = {amount, currency, due_on, number, terms}.
+   With no rail configured it keeps today's honest sentence instead of inventing details. */
+function pcPayHtml(plan, o){
+  const p = plan || {};
+  const q = o || {};
+  if (!p.ready || !p.preferred) {
+    return `<section class="pc-pay pc-pay-later" aria-labelledby="pcPayH">
+      <h2 class="pc-tag pc-red" id="pcPayH">Payment details</h2>
+      <p class="pc-pay-lede">We’ll send these to you directly. Reply to our email if you need them now.</p>
+    </section>`;
+  }
+  const cur = String(q.currency || p.currency || '').trim().toUpperCase();
+  const money = pcMoney(q.amount, cur);
+  const due = pcDate(q.due_on);
+  const num = typeof q.number === 'string' ? q.number.trim() : '';
+  const terms = (typeof q.terms === 'string' ? q.terms.trim() : '') || p.terms || '';
+  let lede = 'Pay' + (money ? ` <strong class="pc-pay-amt">${pcEsc(money)}${cur ? ' ' + pcEsc(cur) : ''}</strong>` : ' this invoice');
+  lede += due ? ` by <strong>${pcEsc(due)}</strong>` : '';
+  lede += terms && !due ? ` · ${pcEsc(terms)}` : '';
+  lede += '.';
+  /* the invoice number unless the owner told his bank to expect something else */
+  const refText = p.preferred.reference || num;
+  const ref = refText
+    ? `<p class="pc-pay-ref"><span class="pc-tag">Reference to quote</span> <span class="pc-pay-v pc-pay-num">${pcEsc(refText)}</span></p>`
+    : '';
+  const alts = p.others.length
+    ? `<div class="pc-pay-alts"><p class="pc-tag">Or pay this way instead</p>
+      ${p.others.map((m) => `<div class="pc-pay-alt">${pcPayMethodHtml(m, false)}</div>`).join('')}</div>`
+    : '';
+  return `<section class="pc-pay" aria-labelledby="pcPayH">
+    <h2 class="pc-tag pc-red" id="pcPayH">How to pay</h2>
+    <p class="pc-pay-lede">${lede}</p>
+    ${ref}
+    <div class="pc-pay-main">${pcPayMethodHtml(p.preferred, true)}</div>
+    ${alts}
+    <p class="pc-small pc-pay-foot">Put the reference on the payment so it is matched to this invoice at once. Any question about it: reply to our email.</p>
+  </section>`;
+}
+
+/* The block on a receipt: what was paid and how, never how to pay.
+   The rail is only named when the database recorded one — a receipt never guesses. */
+function pcPaidHtml(d, plan){
+  const o = d || {};
+  const when = pcDate(o.paid_at);
+  const num = typeof o.number === 'string' ? o.number.trim() : '';
+  const kind = String((o.pay && o.pay.paid_method) || o.paid_method || '');
+  const def = PC_PAY_KINDS[kind];
+  const how = def ? `<p class="pc-pay-kind">Paid by ${pcEsc(def.label)}</p>` : '';
+  return `<section class="pc-pay pc-paidnote" aria-label="Payment received">
+    <p class="pc-tag pc-red">Payment received</p>
+    <p class="pc-pay-lede">Paid in full${when ? ' on ' + pcEsc(when) : ''}. Nothing more is owed on this invoice. Thank you.</p>
+    ${how}
+    ${num ? `<p class="pc-pay-ref"><span class="pc-tag">Reference</span> <span class="pc-pay-v pc-pay-num">${pcEsc(num)}</span></p>` : ''}
+    <p class="pc-small pc-pay-foot">Keep this receipt for your records.</p>
+  </section>`;
+}
+
 /* ---- HTML builders (everything escaped) ----------------------------- */
 
 function pcLogoHtml(){
@@ -400,7 +566,7 @@ function pcInvoiceHtml(doc){
   const paid = d.status === 'paid';
   const dead = d.status === 'void';
   const word = pcStatusWord(d);
-  const pay = pcPayDetails(d.pay);
+  const plan = pcPayPlan(d.pay);   /* pcPayDetails still reads the two keys an older invoice carried */
   const kind = paid ? 'Receipt' : 'Invoice';
   const period = typeof d.period === 'string' ? d.period.trim() : '';
   const rows = built.lines.map((l, i) => `<tr${l.credit ? ' class="pc-credit"' : ''}><td><span class="pc-line-t">${pcEsc(l.label)}</span>${l.detail ? `<span class="pc-line-d">${pcEsc(l.detail)}</span>` : ''}${!i && period ? `<span class="pc-line-d">${pcEsc(period)}</span>` : ''}</td><td class="pc-amt">${pcEsc(pcMoney(l.amount, cur))}</td></tr>`).join('');
@@ -424,27 +590,14 @@ function pcInvoiceHtml(doc){
   const service = typeof d.service === 'string' && d.service.trim() && !built.lines.some((l) => l.label === d.service) ? d.service : '';
   let how = '';
   if (paid) {
-    how = `<section class="pc-pay pc-paidnote" aria-label="Payment received">
-      <p class="pc-tag pc-red">Payment received</p>
-      <p class="pc-pay-lede">Paid in full${d.paid_at ? ' on ' + pcEsc(pcDate(d.paid_at)) : ''}. Nothing more is owed on this invoice. Thank you.</p>
-    </section>`;
+    how = pcPaidHtml(d, plan);
   } else if (dead) {
     how = `<section class="pc-pay" aria-label="Cancelled">
       <p class="pc-tag">Cancelled</p>
       <p class="pc-pay-lede">This invoice has been cancelled. Nothing is owed on it.</p>
     </section>`;
   } else {
-    how = pay.ready
-      ? `<section class="pc-pay" aria-labelledby="pcPayH">
-      <h2 class="pc-tag pc-red" id="pcPayH">How to pay</h2>
-      ${pay.wise ? `<p class="pc-pay-lede">Pay by bank transfer with the details below${d.number ? `, and put <strong>${pcEsc(d.number)}</strong> as the reference` : ''}.</p>
-      <pre class="pc-pre">${pcEsc(pay.wise)}</pre>` : ''}
-      ${pay.link ? `<p class="pc-noprint"><a class="pc-btn" href="${pcEsc(pay.link)}" target="_blank" rel="noopener noreferrer">Pay by card</a></p>` : ''}
-    </section>`
-      : `<section class="pc-pay pc-pay-later" aria-labelledby="pcPayH">
-      <h2 class="pc-tag pc-red" id="pcPayH">Payment details</h2>
-      <p class="pc-pay-lede">We’ll send these to you directly. Reply to our email if you need them now.</p>
-    </section>`;
+    how = pcPayHtml(plan, { amount: built.total, currency: cur, due_on: d.due_on, number: d.number, terms: d.terms });
   }
   const totalLabel = paid ? 'Total paid' : (dead ? 'Total' : 'Total due');
   return `<main class="pc-wrap pc-doc pc-invoice${paid ? ' pc-receipt' : ''}">

@@ -158,6 +158,38 @@ a{color:inherit}
 .pc-pay-later .pc-pay-lede{margin-bottom:0;max-width:34em}
 .pc-pay .pc-btn{margin-top:4px}
 
+/* invoice: HOW TO PAY — the preferred rail large, the rest as 'or'. Black on white,
+   one red, numbers in JetBrains Mono. A value is select-all so one click copies it. */
+.pc-pay-lede strong{font-weight:700}
+.pc-pay-amt{font-family:var(--pc-mono);font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.pc-pay-ref{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin:0 0 22px}
+.pc-pay-ref .pc-tag{flex:0 0 auto}
+.pc-pay-v{-webkit-user-select:all;user-select:all;overflow-wrap:anywhere}
+.pc-pay-num{font-family:var(--pc-mono);font-size:16px;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.pc-pay-main{border:2px solid #000;padding:24px 26px;margin:0 0 8px}
+.pc-pay-kind{font-size:20px;font-weight:700;letter-spacing:-.02em;margin:0}
+.pc-pay-hint{margin-top:6px;max-width:40em}
+.pc-pay-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px 28px;margin:20px 0 0}
+.pc-pay-fields .pc-tag{display:block;margin-bottom:4px}
+.pc-pay-fields dd{font-size:18px;font-weight:600;line-height:1.35}
+.pc-pay-fields dd.pc-pay-num{font-size:19px;font-weight:700}
+.pc-pay-main .pc-pre{margin:20px 0 0}
+.pc-pay-url{margin-top:8px;font:400 13px/1.6 var(--pc-mono);color:var(--pc-grey)}
+.pc-pay-note{margin-top:16px;max-width:40em}
+.pc-pay-alts{margin-top:26px}
+.pc-pay-alts>.pc-tag{display:block;margin-bottom:10px}
+.pc-pay-alt{border-top:1px solid var(--pc-line);padding:16px 0 0;margin-top:14px}
+.pc-pay-alt:first-of-type{border-top:0;margin-top:0;padding-top:0}
+.pc-pay-alt .pc-pay-kind{font-size:16px}
+.pc-pay-alt .pc-pay-fields{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 24px;margin-top:10px}
+.pc-pay-alt .pc-pay-fields dd{font-size:15px}
+.pc-pay-alt .pc-pay-fields dd.pc-pay-num{font-size:15px}
+.pc-pay-alt .pc-pre{font-size:13px;padding:14px 16px;margin:10px 0 0}
+.pc-pay-foot{margin-top:22px;max-width:40em}
+.pc-small.pc-pay-hint,.pc-small.pc-pay-note,.pc-small.pc-pay-foot{color:var(--pc-grey)}
+.pc-paidnote .pc-pay-kind{margin-top:14px}
+.pc-paidnote .pc-pay-ref{margin:12px 0 0}
+
 /* the portal's kickoff card */
 .pc-kick-box{flex:0 0 auto;max-height:55vh;overflow-y:auto}
 .pc-kick{flex:0 0 auto;max-width:820px;width:100%;margin:0 auto;padding:18px 24px 6px;border-bottom:1px solid var(--pc-line)}
@@ -231,5 +263,16 @@ a{color:inherit}
   .pc-guarantee{margin-top:16pt;padding-top:8pt;font-size:8pt;break-inside:avoid}
   .pc-pay{margin-top:20pt;padding-top:12pt;break-inside:avoid}
   .pc-pre{font-size:8.5pt;padding:10pt 12pt;margin-bottom:0}
+  .pc-pay-main{border-width:1.5pt;padding:10pt 12pt;break-inside:avoid}
+  .pc-pay-kind{font-size:12pt}
+  .pc-pay-fields{gap:7pt 16pt;margin-top:9pt;grid-template-columns:1fr 1fr}
+  .pc-pay-fields dd{font-size:10.5pt}
+  .pc-pay-fields dd.pc-pay-num{font-size:11pt}
+  .pc-pay-num{font-size:10pt}
+  .pc-pay-alts{margin-top:12pt;break-inside:avoid}
+  .pc-pay-alt{padding-top:7pt;margin-top:7pt}
+  .pc-pay-alt .pc-pay-kind{font-size:10.5pt}
+  .pc-pay-ref,.pc-pay-foot,.pc-pay-note,.pc-pay-hint{margin-bottom:8pt}
+  .pc-pay-foot{font-size:8pt}
   .pc-stamp,.pc-credit td,.pc-red,.pc-num{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }

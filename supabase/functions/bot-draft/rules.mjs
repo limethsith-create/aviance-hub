@@ -1,9 +1,11 @@
 // bot-draft/rules.mjs — the pure part of the reply bot (no network, no Deno, no DOM).
 // index.ts loads the data and calls these; tests/drafts.test.mjs tests them with node.
 //
-// Style (spec/JOURNEY.md "Style rules"): casual and short, lowercase, short forms (u, ur, thx, tmrw, w/),
-// no deliberate spelling mistakes, at most one emoji, first names only, never promise money, refunds or
-// dates that are not in the data. Every reply here is a DRAFT the owner approves; nothing is sent from here.
+// Style: warm, plain and professional. These are paying B2B clients, so proper sentences and
+// capitalisation, normal punctuation, contractions fine; never text-speak ("u", "ur", "thx", "tmrw"),
+// at most one emoji and usually none, first names only, "target profile" and never "ICP" to a client,
+// and never promise money, refunds or dates that are not in the data.
+// Every reply here is a DRAFT the owner approves; nothing is sent from here.
 //
 //   classify(text)            -> 'call' | 'invoice' | 'receipt' | 'next' | 'testing' | 'thanks' | 'other'
 //   draftReply(ctx)           -> { body, reason, intent }
@@ -17,14 +19,14 @@
 //         testing:[{on_date,sent,replies,leading_angle}], offers:[{status,kind}], approvals:[{status,title,kind}],
 //         company, history:[{who:'client'|'us', body}] }
 
-export const FALLBACK = 'got it, will get back to u on this shortly';
+export const FALLBACK = 'let me look into this and come back to you shortly.';
 
 const STEP_WORDS = {
-  kickoff: 'ur kickoff call',
-  research: 'research (ur market, icp + a few angles)',
+  kickoff: 'your kickoff call',
+  research: 'research (your market, your target profile and a few angles)',
   testing: 'market testing on our warmed inboxes',
   build: 'building the real campaign',
-  onboarding: 'ur onboarding call',
+  onboarding: 'your onboarding call',
   launch: 'launch, when month one starts',
 };
 
@@ -62,7 +64,7 @@ function ymdIn(d, tz) {
   const p = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
   return p; // YYYY-MM-DD
 }
-/** "tue nov 26, 10am ET" / "tmrw, 2:30pm GMT+1" / "today, 4pm ET" */
+/** "Tue Nov 26, 10am ET" / "tomorrow, 2:30pm GMT+1" / "today, 4pm ET" */
 export function whenText(v, tz, now) {
   const d = toDate(v); if (!d) return '';
   tz = zoneOf(tz || 'America/New_York');
@@ -72,17 +74,17 @@ export function whenText(v, tz, now) {
   const g = (t) => (parts.find((x) => x.type === t) || {}).value || '';
   const mins = g('minute');
   const time = g('hour') + (mins && mins !== '00' ? ':' + mins : '') + g('dayPeriod').toLowerCase();
-  const label = day === today ? 'today' : day === tmrw ? 'tmrw' : (g('weekday') + ' ' + g('month') + ' ' + g('day')).toLowerCase();
+  const label = day === today ? 'today' : day === tmrw ? 'tomorrow' : g('weekday') + ' ' + g('month') + ' ' + g('day');
   const abbr = zoneAbbr(d, tz).replace(/^E[SD]T$/, 'ET').replace(/^C[SD]T$/, 'CT').replace(/^M[SD]T$/, 'MT').replace(/^P[SD]T$/, 'PT');
   return label + ', ' + time + (abbr ? ' ' + abbr : '');
 }
-/** a plain date "nov 26" (date-only values like '2026-11-26' are read as that calendar day) */
+/** a plain date "Nov 26" (date-only values like '2026-11-26' are read as that calendar day) */
 export function dayText(v) {
   const s = String(v ?? '');
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   const d = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)) : toDate(s);
   if (!d) return '';
-  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(d).toLowerCase();
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(d);
 }
 export function money(amount, currency) {
   const n = Math.round(Number(amount) || 0);
@@ -106,7 +108,7 @@ export function journeySummary(steps, today) {
 
 /* ---------- the rules ---------- */
 export function firstName(name) { const f = String(name || '').trim().split(/\s+/)[0] || ''; return f ? f.charAt(0).toUpperCase() + f.slice(1).toLowerCase() : ''; }
-function hey(first) { const f = firstName(first); return f ? 'hey ' + f + ', ' : 'hey, '; }
+function hey(first) { const f = firstName(first); return f ? 'Hi ' + f + ', ' : 'Hi there, '; }
 function upcomingCall(ctx) {
   const now = (toDate(ctx.now) || new Date()).getTime();
   return (ctx.meetings || [])
@@ -128,57 +130,60 @@ const RULES = {
   call(ctx) {
     const m = upcomingCall(ctx);
     if (m) {
-      const link = m.meet_link && /^https:\/\/meet\.google\.com\//.test(m.meet_link) ? ' — link: ' + m.meet_link : ' — the meet link lands here before the call';
-      return { body: hey(ctx.firstName) + 'ur ' + callName(m) + ' is ' + whenText(m.starts_at, ctx.timezone, ctx.now) + link, reason: 'asked about the call · next one is booked' };
+      /* the link goes last: a full stop after a URL gets clicked along with it */
+      const link = m.meet_link && /^https:\/\/meet\.google\.com\//.test(m.meet_link)
+        ? '. Here is the link: ' + m.meet_link
+        : '. The meeting link will appear here before the call.';
+      return { body: hey(ctx.firstName) + 'your ' + callName(m) + ' is ' + whenText(m.starts_at, ctx.timezone, ctx.now) + link, reason: 'asked about the call · next one is booked' };
     }
     const open = (ctx.offers || []).find((o) => o && o.status === 'open');
-    if (open) return { body: hey(ctx.firstName) + 'not booked yet — just pick one of the times i sent above (reply 1, 2 or 3)', reason: 'asked about the call · an offer is open' };
-    return { body: hey(ctx.firstName) + "not booked yet, i'll send u a few times for it shortly", reason: 'asked about the call · nothing booked' };
+    if (open) return { body: hey(ctx.firstName) + 'it is not booked yet — just pick one of the times above and reply with 1, 2 or 3.', reason: 'asked about the call · an offer is open' };
+    return { body: hey(ctx.firstName) + "it is not booked yet. I'll send you a few times for it shortly.", reason: 'asked about the call · nothing booked' };
   },
   invoice(ctx) {
     const inv = latestInvoice(ctx, false);
-    if (!inv) return { body: hey(ctx.firstName) + "let me check on that and get back to u shortly", reason: 'asked about an invoice · none on file' };
+    if (!inv) return { body: hey(ctx.firstName) + 'let me check on that and come back to you shortly.', reason: 'asked about an invoice · none on file' };
     const amt = money(inv.amount, inv.currency);
-    if (inv.status === 'paid') return { body: hey(ctx.firstName) + 'invoice ' + inv.number + ' (' + amt + ') is paid, all good on ur side thx', reason: 'asked about the invoice · latest is paid' };
+    if (inv.status === 'paid') return { body: hey(ctx.firstName) + 'invoice ' + inv.number + ' (' + amt + ') is paid — thank you. There is nothing outstanding on your side.', reason: 'asked about the invoice · latest is paid' };
     const due = inv.due_on ? ', due ' + dayText(inv.due_on) : '';
-    return { body: hey(ctx.firstName) + 'invoice ' + inv.number + ' is ' + amt + due + '. the pay details are on the invoice link — shout if u can\'t find it', reason: 'asked about the invoice · ' + inv.status };
+    return { body: hey(ctx.firstName) + 'invoice ' + inv.number + ' is ' + amt + due + '. The payment details are on the invoice itself — just let me know if you can\'t find it.', reason: 'asked about the invoice · ' + inv.status };
   },
   receipt(ctx) {
     const inv = latestInvoice(ctx, true);
-    if (!inv) return { body: hey(ctx.firstName) + "i don't see a payment on our side yet, will check and get back to u shortly", reason: 'asked for a receipt · no paid invoice' };
-    return { body: hey(ctx.firstName) + 'sure — ur receipt for invoice ' + inv.number + ' (' + money(inv.amount, inv.currency) + ', paid ' + dayText(inv.paid_at) + ') is coming over shortly', reason: 'asked for a receipt · latest paid invoice' };
+    if (!inv) return { body: hey(ctx.firstName) + "I don't see a payment on our side yet. Let me check and come back to you shortly.", reason: 'asked for a receipt · no paid invoice' };
+    return { body: hey(ctx.firstName) + 'of course — your receipt for invoice ' + inv.number + ' (' + money(inv.amount, inv.currency) + ', paid ' + dayText(inv.paid_at) + ') is on its way.', reason: 'asked for a receipt · latest paid invoice' };
   },
   next(ctx) {
     const j = ctx.journey || {};
     const steps = j.steps || [];
     const next = steps.find((s) => s.step === j.next_step) || null;
     if (!next) {
-      if (steps.length && steps.every((s) => s.status === 'done')) return { body: hey(ctx.firstName) + "ur live, month one is running. i'll keep u posted here w the numbers", reason: 'asked what is next · all steps done' };
+      if (steps.length && steps.every((s) => s.status === 'done')) return { body: hey(ctx.firstName) + "you're live and month one is running. I'll keep you posted here with the numbers.", reason: 'asked what is next · all steps done' };
       return { body: hey(ctx.firstName) + FALLBACK, reason: 'asked what is next · no journey yet' };
     }
     const words = STEP_WORDS[next.step] || String(next.title || next.step).toLowerCase();
     const doing = next.status === 'doing';
     const day = next.planned_on && !next.late ? dayText(next.planned_on) : '';
-    let body = hey(ctx.firstName) + (doing ? "we're on " + words + ' now' + (day ? ', planned to wrap ' + day : '') : 'next up is ' + words + (day ? ', planned for ' + day : ''));
-    if (j.days_to_launch != null && j.days_to_launch > 0 && next.step !== 'launch') body += ' · launch in ' + j.days_to_launch + (j.days_to_launch === 1 ? ' day' : ' days');
+    let body = hey(ctx.firstName) + (doing ? "we're on " + words + ' now' + (day ? ', due to wrap up ' + day : '') : 'next up is ' + words + (day ? ', planned for ' + day : '')) + '.';
+    if (j.days_to_launch != null && j.days_to_launch > 0 && next.step !== 'launch') body += ' Launch is in ' + j.days_to_launch + (j.days_to_launch === 1 ? ' day.' : ' days.');
     return { body, reason: 'asked what is next · ' + next.step + (next.late ? ' (late)' : '') };
   },
   testing(ctx) {
     const days = (ctx.testing || []).filter(Boolean).slice().sort((a, b) => String(a.on_date).localeCompare(String(b.on_date)));
     if (!days.length) {
       const st = ((ctx.journey && ctx.journey.steps) || []).find((s) => s.step === 'testing');
-      if (st && st.status === 'todo' && st.planned_on) return { body: hey(ctx.firstName) + "testing hasn't started yet — i'll post the daily numbers here once it does", reason: 'asked about testing · not started' };
+      if (st && st.status === 'todo' && st.planned_on) return { body: hey(ctx.firstName) + "testing hasn't started yet. I'll post the daily numbers here as soon as it does.", reason: 'asked about testing · not started' };
       return { body: hey(ctx.firstName) + FALLBACK, reason: 'asked about testing · no numbers logged' };
     }
     const sent = days.reduce((n, d) => n + (Number(d.sent) || 0), 0);
     const replies = days.reduce((n, d) => n + (Number(d.replies) || 0), 0);
     const last = days[days.length - 1];
-    const lead = last.leading_angle ? ' · ' + String(last.leading_angle).trim() + ' leading' : '';
-    return { body: hey(ctx.firstName) + 'day ' + days.length + ' of testing: ' + sent + ' sent · ' + replies + (replies === 1 ? ' reply' : ' replies') + lead, reason: 'asked about testing · ' + days.length + ' day(s) logged' };
+    const lead = last.leading_angle ? ' The strongest angle so far is ' + String(last.leading_angle).trim() + '.' : '';
+    return { body: hey(ctx.firstName) + 'day ' + days.length + ' of testing: ' + sent + ' sent, ' + replies + (replies === 1 ? ' reply' : ' replies') + '.' + lead, reason: 'asked about testing · ' + days.length + ' day(s) logged' };
   },
   thanks(ctx) {
     const f = firstName(ctx.firstName);
-    return { body: 'anytime' + (f ? ' ' + f : '') + '! shout if u need anything', reason: 'said thanks' };
+    return { body: "You're welcome" + (f ? ', ' + f : '') + ' — just let me know if you need anything else.', reason: 'said thanks' };
   },
   other(ctx) {
     return { body: hey(ctx.firstName) + FALLBACK, reason: 'no rule matched · holding reply' };
@@ -197,12 +202,16 @@ function tidy(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
 
 /* ---------- the model (Groq) ---------- */
 export const STYLE = [
-  'you are drafting a chat reply from Aviance (a cold-email agency) to a client, for the owner to approve before it is sent.',
-  'style: casual and short (1-2 sentences), all lowercase except names and links, short forms like u, ur, thx, tmrw, w/, like a real person texting.',
-  'no spelling mistakes. at most one emoji. use the first name only.',
-  'only state facts that are in the data below (times, invoice numbers and amounts, step dates, testing numbers).',
-  'never promise money, refunds, discounts or dates that are not in the data. if unsure, say u will check and get back to them shortly.',
-  'output only the message text, nothing else.',
+  'You are drafting a chat reply from Aviance (a business-to-business cold-email agency) to a paying client, for the owner to approve before it is sent.',
+  'Style: warm, plain and professional — one to three short sentences, written the way one person writes to another at work.',
+  'Use proper sentences, capital letters and normal punctuation. Contractions are fine.',
+  'Never use text-speak or abbreviations: write "you", "your", "thank you", "tomorrow" and "with" in full, never "u", "ur", "thx", "tmrw" or "w/".',
+  'At most one emoji, and usually none. Use the first name only.',
+  'Say "target profile", never "ICP", when you are writing to a client.',
+  'No spelling mistakes.',
+  'Only state facts that are in the data below (times, invoice numbers and amounts, step dates, testing numbers).',
+  'Never promise money, refunds, discounts or dates that are not in the data. If you are unsure, say you will check and come back to them shortly.',
+  'Output only the message text, nothing else.',
 ].join('\n');
 
 export function buildPrompt(ctx) {
@@ -226,10 +235,15 @@ export function buildPrompt(ctx) {
 }
 
 const MONEY_PROMISE = /\b(refund|discount|money back|free month|credit (u|you)|compensat)/i;
+/* Text-speak from the model is thrown away rather than patched up: the rules in this file
+   already write the same message properly, and a half-fixed sentence reads worse than a
+   plain one. "u." is left alone so "U.S." is not mistaken for it. */
+const TXT_SPEAK = /\b(ur|thx|thnx|tmrw|tmw|pls|plz|ty|w\/)\b|\bu\b(?!\.)/i;
 export function cleanModelText(text) {
   let s = String(text ?? '').trim().replace(/^["'`]+|["'`]+$/g, '').replace(/^(aviance|reply)\s*:\s*/i, '').trim();
   if (!s || s.length > 600) return '';
   if (MONEY_PROMISE.test(s)) return '';
+  if (TXT_SPEAK.test(s)) return '';
   // at most one emoji
   let seen = 0;
   s = s.replace(/\p{Extended_Pictographic}️?/gu, (m) => (++seen > 1 ? '' : m)).replace(/\s{2,}/g, ' ').trim();

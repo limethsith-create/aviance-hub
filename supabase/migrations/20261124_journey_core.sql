@@ -392,7 +392,7 @@ begin
   if exists (select 1 from public.bot_drafts where client_id = new.client_id and kind = 'welcome') then return null; end if;
   v_first := nullif(split_part(btrim(coalesce(new.full_name, '')), ' ', 1), '');
   perform public.draft_write(new.client_id, 'welcome',
-    'hey ' || coalesce(v_first, 'there') || '! welcome in 👋 this is ur direct line to us. i''ll send a few times for ur kickoff call shortly',
+    'Hi ' || coalesce(v_first, 'there') || ', welcome aboard. This is your direct line to us — I''ll send a few times for your kickoff call shortly.',
     'bot', null, 'they just joined the portal');
   return null;
 end $$;

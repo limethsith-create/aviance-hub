@@ -480,12 +480,16 @@ function clCallbackHtml(state){
   const now = clToDate(s.now) || new Date();
   const day = s.day || clDateValue(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
   const time = s.time || '10:00';
+  /* "Later today" is only offered while there is still a later hour to offer: three hours
+     on from 18:00 is tomorrow, and capping it at 19:00 handed her a time already gone,
+     which the form then refused with "That is in the past." */
+  const laterHour = now.getHours() + 3;
   const quick = [
-    { label: 'Later today', day: clDateValue(now), time: ('0' + Math.min(19, now.getHours() + 3)).slice(-2) + ':00' },
+    laterHour <= 19 ? { label: 'Later today', day: clDateValue(now), time: ('0' + laterHour).slice(-2) + ':00' } : null,
     { label: 'Tomorrow morning', day: clDateValue(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)), time: '10:00' },
     { label: 'Tomorrow afternoon', day: clDateValue(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)), time: '15:00' },
     { label: 'In a week', day: clDateValue(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7)), time: '10:00' },
-  ];
+  ].filter(Boolean);
   return `<section class="cl-sheet" aria-label="When should she ring back">
     <h3 class="cl-h3">When should you ring back?</h3>
     <div class="cl-chips">${quick.map((q) => `<button type="button" class="cl-chip"
