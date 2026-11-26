@@ -739,22 +739,39 @@ const pcOk = coreOk;
    edge in the system: the person on the other side of it is paying us, so they
    must never be shown a Postgres message, a table or column name, an error code,
    a stack, or the bare word "undefined". Our own database messages (a plpgsql
-   `raise exception`, code P0001) are written for them and pass through; so do the
-   sentences this file writes itself. Everything else becomes a sentence that says
-   what failed and what to do next. */
+   `raise exception`, codes P0001 and ZS001) are written for them and pass through;
+   so do the sentences this file writes itself. Everything else becomes a sentence
+   that says what failed and what to do next.
+
+   ZS001 is the portal-seat rule in 20261207_seats.sql. It raises the one sentence
+   a second person at a client ever needs — "… already has all 2 of its Aviance
+   logins in use … ask whoever set up your Aviance portal to free a login" — with
+   the company and the real number in it. It arrives here two ways: straight off
+   an RPC, with its code, and through the portal-accept function, which answers
+   with the sentence and no code at all. So the code alone cannot save it.
+
+   Hence PC_MAX_SAY. The ceiling here was 180 characters, and the seat sentence is
+   211, so it was being replaced by PC_WAIT ("try again in a moment") — which is
+   false: trying again will refuse again for ever, and the person is left with no
+   idea that a login has to be freed. 400 is core.js's own ceiling (CORE_MAX_SAY)
+   and is the number that file arrived at for exactly this sentence. Everything
+   that smells of the machine room is already caught by the test above this one;
+   the ceiling is the last catch, not the first. */
 const PC_WAIT = 'Something went wrong at our end. Nothing you have done has been lost. Please try again in a moment, or tell us in Chat.';
 const PC_SIGNED_OUT = 'Your sign-in has run out. Please sign in again.';
+/* Past this, it is not a sentence, it is a dump. Same number as core.js. */
+const PC_MAX_SAY = 400;
 function pcPlain(m, code){
   const s = String(m == null ? '' : m), c = String(code == null ? '' : code);
   if (!s.trim() || /^(undefined|null|\[object object\]|error)$/i.test(s.trim())) return PC_WAIT;
   if (/failed to fetch|networkerror|load failed|network request failed|fetch failed|timeout|timed out/i.test(s)) return PC_OFFLINE;
   if (c === 'PGRST301' || /jwt|not authenticated|invalid.*session|session.*expired|refresh token/i.test(s)) return PC_SIGNED_OUT;
   if (c === '42501' || /permission denied|row-level security|not authorized|unauthorized/i.test(s)) return PC_SIGNED_OUT;
-  if (c === 'P0001') return s;                   /* written for the client already */
+  if (c === 'P0001' || c === 'ZS001') return s;  /* written for the client already */
   /* anything that smells of the machine room: a code, a relation, a constraint, a
      stack, a bare HTTP status, or a sentence too long to be ours */
   if (/^\s*\d{3}\s*$|\bPGRST\d+|\b\d{5}\b|relation |column |constraint|duplicate key|violates|schema cache|does not exist|could not find the function|syntax error|pg_|select |insert |update |delete from|\n\s+at |function public\./i.test(s)) return PC_WAIT;
-  if (s.length > 180) return PC_WAIT;
+  if (s.length > PC_MAX_SAY) return PC_WAIT;
   return s;
 }
 function pcErr(e){
@@ -762,6 +779,37 @@ function pcErr(e){
   const raw = String(m == null ? '' : m);
   const offline = /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(raw);
   return { ok: false, data: null, error: offline ? PC_OFFLINE : pcPlain(raw, e && e.code), offline };
+}
+
+/* A READ with a limit on it. The worst failure of the lot is the one that never
+   fails: no error, no rejection, and the screen reads "Loading" until the client
+   closes the tab. portal-tracker.js gives every read on the Campaign and Calls
+   tabs a limit for exactly this reason; the two reads that gate the FIRST paint
+   of the portal — the session, and the first page of messages — had none, so a
+   request that hung left the whole page on "Loading" for ever with no way back
+   but a reload.
+
+   Reads only. Nothing that writes goes through this: a `pcSend` or a
+   `pcBookKickoff` that is given up on may still have landed, and the answer to
+   "did my message go?" is never "send it again". Past the limit this reads as
+   offline, which is what the client's own screens already know how to say, and
+   the 20-second poll asks again by itself.
+
+   Never throws, whatever `fn` does. */
+const PC_READ_MS = 12000;
+async function pcRead(fn, ms){
+  const limit = Number(ms) > 0 ? Number(ms) : PC_READ_MS;
+  if (typeof fn !== 'function') return pcErr(PC_OFFLINE);
+  let timer = null;
+  try {
+    const run = Promise.resolve().then(fn);
+    if (typeof setTimeout !== 'function') return await run;
+    const capped = new Promise((_, no) => { timer = setTimeout(() => no(new Error('Failed to fetch')), limit); });
+    const r = await Promise.race([run, capped]);
+    return r && typeof r === 'object' && 'ok' in r ? r : pcOk(r);
+  }
+  catch (e) { return pcErr(e); }
+  finally { if (timer && typeof clearTimeout === 'function') clearTimeout(timer); }
 }
 
 /* Two clients, on purpose. 'anon' is for the link pages: it never looks at or

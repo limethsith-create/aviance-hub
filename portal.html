@@ -205,8 +205,11 @@
     const id = home.channel.id;
     let r;
     /* `loading` is cleared whatever happens: left true, the chat would never ask
-       again and the client would watch a thread that silently stopped arriving. */
-    try { r = await pcMessages(id); }
+       again and the client would watch a thread that silently stopped arriving.
+       pcRead puts a limit on it too: a read that never answers used to leave the
+       thread on "Loading" for ever. It is a read, so giving up on it is safe, and
+       the poll below asks again in twenty seconds. */
+    try { r = await pcRead(function(){ return pcMessages(id); }); }
     catch (e) { r = pcErr(e); }
     finally { loading = false; }
     if (!home || home.channel.id !== id) return;
@@ -297,7 +300,7 @@
 
   async function boot(){
     root.innerHTML = pcLoadingHtml();
-    const s = await pcSession();
+    const s = await pcRead(pcSession);
     if (!s.ok) { root.innerHTML = pcOfflineHtml(); return; }
     if (s.data) enter(s.data.user && s.data.user.email); else showSignIn('');
   }
