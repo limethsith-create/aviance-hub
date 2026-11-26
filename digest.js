@@ -297,27 +297,31 @@ async function dgHome(now){
   const today = dgDateOnly(at);
   const dayStartIso = dgDayStart(at).toISOString();
 
-  const money    = await dgAsk('fnMoney');
-  const exposure = await dgAsk('fnExposure');
-  const clients  = await dgAsk('fnClients');
+  /* Twelve separate reads, none waiting on another: ask for them all at once, so Today
+     opens in the time of the slowest one instead of the sum of them. */
+  const [money, exposure, clients, standing, invoices,
+         callsRes, deliveredRes, requestsRes, tasksRes, dialsRes, siteRes, profilesRes] = await Promise.all([
+    dgAsk('fnMoney'),
+    dgAsk('fnExposure'),
+    dgAsk('fnClients'),
+    dgStanding(null),
+    dgAsk('fnInvoices'),
+    dgQuery('qualified_calls',
+      q => q.select('*').gte('booked_for', week.fromIso).lt('booked_for', week.toIso), []),
+    dgQuery('qualified_calls',
+      q => q.select('*').gte('happened_at', week.fromIso).lt('happened_at', week.toIso), []),
+    dgQuery('client_requests',
+      q => q.select('*').in('status', DG_REQUEST_OPEN), []),
+    dgQuery('tasks',
+      q => q.select('*').in('status', DG_TASK_OPEN).lt('due_on', today), []),
+    dgQuery('call_log',
+      q => q.select('*').gte('called_at', dayStartIso), []),
+    /* discovery calls booked from the website for this week — not the preview ones, not the cancelled */
+    dgQuery('discovery_bookings',
+      q => q.select('*').gte('call_at', week.fromIso).lt('call_at', week.toIso), []),
+    dgQuery('client_profiles', q => q.select('client_id,signed_off_at'), [])
+  ]);
   const clientsQ = clients.ok ? clients : await dgQuery('clients', q => q.select('*'), []);
-  const standing = await dgStanding(null);
-  const invoices = await dgAsk('fnInvoices');
-
-  const callsRes = await dgQuery('qualified_calls',
-    q => q.select('*').gte('booked_for', week.fromIso).lt('booked_for', week.toIso), []);
-  const deliveredRes = await dgQuery('qualified_calls',
-    q => q.select('*').gte('happened_at', week.fromIso).lt('happened_at', week.toIso), []);
-  const requestsRes = await dgQuery('client_requests',
-    q => q.select('*').in('status', DG_REQUEST_OPEN), []);
-  const tasksRes = await dgQuery('tasks',
-    q => q.select('*').in('status', DG_TASK_OPEN).lt('due_on', today), []);
-  const dialsRes = await dgQuery('call_log',
-    q => q.select('*').gte('called_at', dayStartIso), []);
-  /* discovery calls booked from the website for this week — not the preview ones, not the cancelled */
-  const siteRes = await dgQuery('discovery_bookings',
-    q => q.select('*').gte('call_at', week.fromIso).lt('call_at', week.toIso), []);
-  const profilesRes = await dgQuery('client_profiles', q => q.select('client_id,signed_off_at'), []);
 
   /* clients live now: a client with sending under way and no end date */
   let clientsLive = null;

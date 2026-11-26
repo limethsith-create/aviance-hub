@@ -168,11 +168,14 @@
       drawTally();
     }
     lead = r.data.next;
-    sheet = ''; book = null;
+    /* The "Booked." panel stays up until she taps Next call: she is still on the phone and has to read
+       the time back. Every other outcome clears its panel and moves straight on. */
+    const keep = sheet === 'booked';
+    if (!keep) { sheet = ''; book = null; }
     drawLead();
     say(o.label + ' logged.');
     const p = document.getElementById('clPhone');
-    if (p) p.focus();                       /* her thumb is already heading there */
+    if (p && !keep) p.focus();              /* her thumb is already heading there */
   }
 
   /* "Check again" and the quiet poll when the list has run dry. */

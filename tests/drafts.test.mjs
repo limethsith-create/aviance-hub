@@ -274,3 +274,22 @@ test('drCount: 0 for a client or signed out; for staff it polls drafts_count and
   dr.count = 250; assert.equal(drCount(), '99+');
   draftsForget(); assert.equal(dr.timer, null);
 });
+
+/* ───────────── perfection pass ───────────── */
+test('the 30-second refresh redraws nothing when the drafts are the same, and does when one arrives', async () => {
+  setup();
+  fakeEl('drRoot').innerHTML = viewDrafts(); await tick();
+  const root = fakeEl('drRoot');
+  let writes = 0, html = root.innerHTML;
+  Object.defineProperty(root, 'innerHTML', { get: () => html, set: (v) => { writes++; html = v; }, configurable: true });
+  await drLoad(true);
+  assert.equal(writes, 0, 'a box he resized and the button he tabbed to are left alone');
+  const more = ROWS().concat([{ id: 'd3', company: 'Birch Legal', channel_id: 'ch3', kind: 'reply', body: 'new one', created_at: new Date().toISOString() }]);
+  rpcs.drafts_pending = () => ({ data: more, error: null });
+  await drLoad(true);
+  assert.equal(writes, 1);
+  assert.match(html, /Birch Legal/);
+  // his own actions always redraw, changed or not
+  drPaint();
+  assert.equal(writes, 2);
+});

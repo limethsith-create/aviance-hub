@@ -87,16 +87,17 @@ const ID = 'c-oak';
 function fullDb() {
   return {
     plan_prices: [
-      { plan: 'pilot', label: 'Pilot', calls_promised: 2, monthly_fee: 300, three_month_fee: null, is_recurring: false },
+      { plan: 'starter', label: 'Starter', calls_promised: 5, monthly_fee: 1500, three_month_fee: 1200, is_recurring: true },
       { plan: 'growth', label: 'Growth', calls_promised: 10, monthly_fee: 3000, three_month_fee: 2400, is_recurring: true },
+      { plan: 'scale', label: 'Scale', calls_promised: 15, monthly_fee: 4500, three_month_fee: 3600, is_recurring: true },
     ],
     clients: [{ id: ID, booking_id: 'b-1', company: 'Oak Roofing', contact_name: 'Sam Oak', contact_email: 'sam@oak.com',
       plan: 'growth', term: 'monthly', calls_promised: 10, monthly_fee: 3000, stage: 'won',
-      inputs_complete_on: null, day1_on: null, pilot_credit: 300, pilot_credit_used: false }],
+      inputs_complete_on: null, day1_on: null }],
     agreements: [{ id: 'a-1', booking_id: 'b-1', client_name: 'Sam Oak', client_email: 'sam@oak.com',
       client_company: 'Oak Roofing', plan: 'growth', term: 'monthly', monthly_fee: 3000, status: 'signed' }],
-    invoices: [{ id: 'i-1', client_id: ID, month_id: 'm-1', number: 'AV-1001', gross_amount: 3000, pilot_credit: 300,
-      amount: 2700, currency: 'USD', issued_on: '2026-11-01', due_on: '2026-11-01', status: 'paid' }],
+    invoices: [{ id: 'i-1', client_id: ID, month_id: 'm-1', number: 'AV-1001', gross_amount: 3000,
+      amount: 3000, currency: 'USD', issued_on: '2026-11-01', due_on: '2026-11-01', status: 'paid' }],
     client_profiles: [{ client_id: ID, sells_what: 'Roof repairs', sells_to: 'Facility managers',
       icp: ['50-500 staff'], never_email: ['rival.com'], calendar_url: 'https://cal.test/oak',
       slots_per_week: 10, sender_name: 'Sam Oak', sender_title: 'Owner', time_zone: 'America/New_York',
@@ -279,21 +280,45 @@ test('obDraftAgreement never drafts twice, and says so plainly when the plan has
   assert.match(r.error, /no price on file/i);
 });
 
-/* ───────────── billing and the pilot credit ───────────── */
-test('the pilot credit is shown once, on the invoice that carries it, and never twice', async () => {
+/* ───────────── billing: an invoice is its amount, with no credit line ───────────── */
+test('an invoice shows what is owed and nothing about a credit, even if an old row still carries the column', async () => {
   db.invoices = [
     { id: 'i-1', client_id: ID, number: 'AV-1001', gross_amount: 3000, pilot_credit: 300, amount: 2700, status: 'sent', issued_on: '2026-11-01' },
-    { id: 'i-2', client_id: ID, number: 'AV-1002', gross_amount: 3000, pilot_credit: 0, amount: 3000, status: 'sent', issued_on: '2026-12-01' },
+    { id: 'i-2', client_id: ID, number: 'AV-1002', gross_amount: 3000, amount: 3000, status: 'sent', issued_on: '2026-12-01' },
   ];
   await A.obLoadBilling();
   const html = A.obRenderBilling();
-  assert.equal(html.split('Pilot credit applied once').length - 1, 1, 'exactly one invoice shows the credit');
   assert.ok(html.includes('AV-1001') && html.includes('AV-1002'));
-  assert.ok(html.includes('$2,700') && html.includes('$300'));
+  assert.ok(html.includes('$2,700') && html.includes('$3,000'), 'the amount the database holds is the amount shown');
+  assert.ok(!/credit|pilot/i.test(html), 'no credit line, no old plan name');
+  assert.ok(!/\$300\b/.test(html));
+});
+test('a client left on a withdrawn plan: listed as "Retired plan", and no new agreement is drafted for them', async () => {
+  db.clients[0].plan = 'pilot';
+  db.agreements = [];
+  db.plan_prices.push({ plan: 'pilot', label: 'Old plan', calls_promised: 2, monthly_fee: 300, three_month_fee: null, is_recurring: false });
+  const r = await A.obDraftAgreement(ID);
+  assert.deepEqual([r.ok, r.data, r.error], [false, null, 'That plan is retired. They need to be on Starter, Growth or Scale before an agreement can be drafted.']);
+  assert.equal(db.agreements.length, 0, 'nothing was written, at any price');
+  await A.obLoadList();
+  const list = A.obRenderOnboarding();
+  assert.ok(list.includes('Retired plan') && !/pilot/i.test(list));
+  /* an agreement already on file for the old plan reads safely, without its old terms */
+  db.agreements = [{ id: 'a-9', booking_id: 'b-1', client_name: 'Sam Oak', client_email: 'sam@oak.com', client_company: 'Oak Roofing', plan: 'pilot', term: 'monthly', monthly_fee: 300, status: 'signed' }];
+  await A.obLoadOne(ID);
+  const one = A.obRenderOnboardingClient();
+  assert.ok(one.includes('Oak Roofing · Retired plan</p>'), 'the plan is named as retired and its old fee is not quoted');
+  assert.ok(!/pilot/i.test(one) && !/\$300\b/.test(one));
+});
+test('a plan reads as its name, not its code, on the list and on the agreement', async () => {
+  await A.obLoadList();
+  assert.ok(A.obRenderOnboarding().includes('<span class="muted">Growth</span>'));
+  await A.obLoadOne(ID);
+  assert.ok(A.obRenderOnboardingClient().includes('Oak Roofing · Growth · monthly · $3,000 a month'));
 });
 test('billing lists what to raise, send and chase, and the buttons call the finance side', async () => {
   db.v_invoice_work = [{ month_id: 'm-2', client_id: ID, company: 'Oak Roofing', month_no: 2, invoice_id: null, issued_on: null }];
-  db.invoices = [{ id: 'i-1', client_id: ID, number: 'AV-1001', gross_amount: 3000, pilot_credit: 0, amount: 3000, status: 'sent', issued_on: '2026-11-01' }];
+  db.invoices = [{ id: 'i-1', client_id: ID, number: 'AV-1001', gross_amount: 3000, amount: 3000, status: 'sent', issued_on: '2026-11-01' }];
   await A.obLoadBilling();
   const html = A.obRenderBilling();
   assert.ok(html.includes('obRaiseGo(&quot;m-2&quot;)'), 'raise calls fnRaiseInvoice through obRaiseGo');
@@ -325,7 +350,7 @@ test('every screen renders with zero rows in the database, and never throws', as
 });
 test('the onboarding list shows a row of ticks and what blocks each client', async () => {
   db.clients.push({ id: 'c-elm', company: 'Elm Glass', contact_name: 'Pat Elm', contact_email: 'pat@elm.com',
-    plan: 'growth', term: 'monthly', stage: 'won', pilot_credit: 0 });
+    plan: 'growth', term: 'monthly', stage: 'won' });
   db.meetings = [];
   await A.obLoadList();
   const html = A.obRenderOnboarding();
@@ -358,7 +383,7 @@ test('house rules: no machine, no hard-coded price, finance owns the money, ever
   const code = s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   assert.equal(/machineFetch|MACHINE_URL|email-distributor/.test(s), false);
   assert.equal(/\bimport\b|\brequire\(/.test(s), false);
-  assert.equal(/\b300\b/.test(code), false, 'the pilot price is never written down in the code');
+  assert.equal(/pilot|credit/i.test(s), false, 'the withdrawn plan and its credit are not in this file; finance.js holds the one guard');
   assert.equal(/\b(1500|2400|3000|4500|1200|3600)\b/.test(code), false, 'no plan price is written down here');
   assert.equal(/from\('client_months'\)|recount_month|lock_month|from\('refunds'\)/.test(code), false, 'the month clock and refunds stay in finance.js');
   assert.equal(/from\('invoices'\)/.test(code), false, 'invoices are read and written through finance.js');

@@ -114,7 +114,7 @@ const realRpcs = {
 /* ───────────── fixtures ───────────── */
 const CLIENT = { id: 'c1', company: 'Harbor Co', contact_name: 'Pat Lee', contact_email: 'pat@harbor.test', plan: 'growth', term: 'monthly', calls_promised: 10, monthly_fee: 3000, stage: 'sending', ended_on: null, end_reason: null, day1_on: '2026-08-01', website: null, pilot_credit: 0 };
 const month = (o) => Object.assign({ id: 'm1', client_id: 'c1', month_no: 1, starts_on: '2026-08-01', ends_on: '2026-08-31', calls_promised: 10, calls_delivered: 10, verdict: 'open', locked_at: null, refund_due: 0 }, o);
-const invoice = (o) => Object.assign({ id: 'i1', client_id: 'c1', month_id: 'm1', number: 'AV-1', gross_amount: 3000, pilot_credit: 0, amount: 3000, currency: 'USD', issued_on: '2026-08-01', due_on: '2026-08-01', status: 'sent', sent_at: null, paid_at: null }, o);
+const invoice = (o) => Object.assign({ id: 'i1', client_id: 'c1', month_id: 'm1', number: 'AV-1', gross_amount: 3000, amount: 3000, currency: 'USD', issued_on: '2026-08-01', due_on: '2026-08-01', status: 'sent', sent_at: null, paid_at: null }, o);
 const refund = (o) => Object.assign({ id: 'r1', client_id: 'c1', month_id: 'm1', amount: 3000, multiplier: 1, reason: 'short', status: 'owed', paid_at: null }, o);
 
 const base = (over) => Object.assign({

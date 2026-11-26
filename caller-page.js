@@ -214,6 +214,18 @@ function clZoneNow(timezone, now){
   } catch (e) { return none; }                            /* an unknown zone throws: say nothing */
 }
 
+/* A slot as the PROSPECT'S clock will show it: "Thu 10:00". She rings other countries, and the time she
+   must read out is theirs, not hers. '' when their zone is not known or is the same as hers at that moment. */
+function clTheirTime(v, timezone){
+  const d = clToDate(v);
+  if (!d) return '';
+  const z = clZoneNow(timezone, d);
+  if (!z.ok) return '';
+  const mine = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  if (z.time === mine && (!z.day || z.day === CL_DAYS[d.getDay()].slice(0, 3))) return '';
+  return (z.day ? z.day + ' ' : '') + z.time;
+}
+
 /* The line under the phone number. Short, because she reads it mid-dial. */
 function clZoneLine(timezone, now){
   const z = clZoneNow(timezone, now);
@@ -505,6 +517,8 @@ function clBookHtml(state){
   const f = s.form || {};
   const groups = clSlotGroups(s.slots, s.now);
   const chosen = String(f.start || '');
+  const their = (iso) => { const t = clTheirTime(iso, l.timezone); return t ? `<span class="cl-chip-their">${clEsc(t)} for them</span>` : ''; };
+  const anyTheirs = groups.some((g) => g.slots.some((sl) => !!clTheirTime(sl.iso, l.timezone)));
   let body;
   if (s.loading) {
     body = '<p class="cl-tag">Loading the free times…</p>';
@@ -517,12 +531,13 @@ function clBookHtml(state){
       <p class="cl-label">${clEsc(g.label)}</p>
       <div class="cl-chips">${g.slots.map((sl) => `<button type="button"
         class="cl-chip${sl.iso === chosen ? ' cl-chip-on' : ''}" data-cl-slot="${clEsc(sl.iso)}"
-        aria-pressed="${sl.iso === chosen ? 'true' : 'false'}">${clEsc(sl.time)}</button>`).join('')}</div>
+        aria-pressed="${sl.iso === chosen ? 'true' : 'false'}">${clEsc(sl.time)}${their(sl.iso)}</button>`).join('')}</div>
     </div>`).join('')}</div>`;
   }
   return `<section class="cl-sheet" aria-label="Book the discovery call">
     <h3 class="cl-h3">Book the call.</h3>
-    <p class="cl-small">Read the time back to them before you tap Book.</p>
+    <p class="cl-small">Read the time back to them before you tap Book.${anyTheirs
+      ? ' The small time under each one is the time on their clock, so read them that one.' : ''}</p>
     ${body}
     <form class="cl-two" id="clBookForm" novalidate>
       <div class="cl-field">
@@ -554,9 +569,11 @@ function clBookedHtml(booked, now){
   const b = booked || {};
   const at = clToDate(b.starts_at || b.start);
   const who = String(b.name == null ? '' : b.name).trim();
+  const theirs = at ? clTheirTime(at, b.timezone) : '';
   return `<section class="cl-sheet cl-sheet-win" aria-label="Booked">
     <h3 class="cl-h3">Booked.</h3>
     <p class="cl-lede">${at ? clEsc(clDayLabel(at, now) + ' at ' + clTime(at)) : 'The time is saved.'}${who ? clEsc(' · ' + who) : ''}</p>
+    ${theirs ? `<p class="cl-lede cl-their">${clEsc('On their clock: ' + theirs)}</p>` : ''}
     <p class="cl-small">The invite and the reminders go out on their own. Tell them to look out for it.</p>
     <div class="cl-sheet-row">
       <button type="button" class="cl-btn cl-btn-win cl-wide" data-cl-onwards>Next call</button>
@@ -600,7 +617,7 @@ function clErr(e){
 
 /* A raw database or auth message is never shown. This turns the ones we can
    expect into something she can act on, and anything unknown into one calm
-   sentence. `notReady` marks the ones that mean "agent A's work is not applied
+   sentence. `notReady` marks the ones that mean "the database update is not applied
    yet" or "the database said no", so the page can offer Try again. */
 function clSay(raw, fallback){
   const m = String((raw && (raw.message || raw.error)) || raw || '');
@@ -737,7 +754,7 @@ function clLinkProblem(){
   if (!m) return '';
   let why = m[1];
   try { why = decodeURIComponent(m[1]); } catch (e) { /* as it came */ }
-  return CL_LINK_SAY[String(why)] || CL_LINK_BAD;
+  return Object.prototype.hasOwnProperty.call(CL_LINK_SAY, String(why)) ? CL_LINK_SAY[String(why)] : CL_LINK_BAD;
 }
 
 /* Returns a session when the link worked, null when there was no link at all. */
@@ -843,5 +860,6 @@ async function clBook(form){
     booking_id: String(d.booking_id == null ? '' : d.booking_id),
     starts_at: d.starts_at || d.start || String(f.start),
     name: String(f.name).trim(),
+    timezone: String(f.timezone == null ? '' : f.timezone).trim(),
   });
 }

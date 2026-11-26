@@ -4,6 +4,8 @@
 //
 // verify_jwt: false — it checks the header x-aviance-secret against public.aviance_webhook_secret() instead.
 // Body: { message_id }.
+// It answers 202 straight away and does the work in the background: the trigger's request gives up after
+// 5 seconds, and a draft that takes longer than that (the model can) must not be lost with it.
 //
 // Data it reads (service role): the message, the channel -> client, the client person who wrote it (first name,
 // time zone), the website booking answers (clients.booking_id -> discovery_bookings) and its research brief,
@@ -65,7 +67,15 @@ async function queueDraft(clientId: string, channelId: string, body: string, rea
   const r = await sb.rpc("draft_write", { p_client: clientId, p_kind: "reply", p_body: body, p_msg_kind: "bot", p_meta: meta, p_reason: reason });
   if (!r.error && r.data) {
     // tie the draft to the message it answers (and to this channel)
-    await sb.from("bot_drafts").update({ source_message_id: messageId, channel_id: channelId }).eq("id", r.data);
+    const tie = await sb.from("bot_drafts").update({ source_message_id: messageId, channel_id: channelId }).eq("id", r.data);
+    if (tie.error) {
+      // Another run answered this message first (one reply per message is enforced by the table).
+      // Take this copy away again so the owner does not see the same reply twice.
+      await sb.from("bot_drafts").delete().eq("id", r.data).is("source_message_id", null);
+      const first = await rows(sb.from("bot_drafts").select("id").eq("source_message_id", messageId).limit(1));
+      if (first.length) return String(first[0].id);
+      throw new Error("draft not saved: " + tie.error.message);
+    }
     return String(r.data);
   }
   // draft_write refused (e.g. it checks for a team login): write the row directly with the service role
@@ -82,6 +92,18 @@ Deno.serve(async (req) => {
   try { messageId = String((await req.json())?.message_id ?? ""); } catch { /* empty */ }
   if (!/^[0-9a-f-]{36}$/i.test(messageId)) return json(400, { ok: false, error: "message_id missing" });
 
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt && typeof rt.waitUntil === "function") {
+    rt.waitUntil(draftFor(messageId).then(async (res) => {
+      if (res.status >= 500) console.error("bot-draft failed for message " + messageId + ": " + (await res.text()));
+    }).catch((e) => console.error("bot-draft failed for message " + messageId + ": " + String((e as Error)?.message ?? e))));
+    return json(202, { ok: true, started: true });
+  }
+  return await draftFor(messageId);      // no background runner (a local test): do it in line
+});
+
+async function draftFor(messageId: string): Promise<Response> {
   const msg = await one(sb.from("channel_messages").select("*").eq("id", messageId).maybeSingle());
   if (!msg) return json(404, { ok: false, error: "message not found" });
   if (!msg.author_person || (msg.msg_kind && msg.msg_kind !== "chat") || msg.deleted_at) return json(200, { ok: true, skipped: "not a client chat message" });
@@ -137,4 +159,4 @@ Deno.serve(async (req) => {
   } catch (e) {
     return json(500, { ok: false, error: String((e as Error).message ?? e) });
   }
-});
+}

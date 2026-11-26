@@ -184,9 +184,11 @@ test('data calls use the spec names and shapes, and never throw', async () => {
   /* a thrown error and a database error both come back as words */
   answers.journey_board = new Error('socket closed');
   const t = shape(await jyBoard());
-  assert.equal(t.ok, false); assert.equal(t.error, 'socket closed');
+  /* changed on purpose in the perfection pass: the plumbing's own wording ("socket closed",
+     "permission denied") is no longer shown to the owner; he gets a sentence he can act on. */
+  assert.equal(t.ok, false); assert.equal(t.error, "Can't reach Aviance right now. Check your connection and try again.");
   answers.journey_get = {data:null, error:{message:'permission denied'}};
-  assert.equal((await jyGet('c1')).error, 'permission denied');
+  assert.equal((await jyGet('c1')).error, "You don't have access to do that.");
   globalThis.sb = undefined;
   assert.equal((await jyBoard()).ok, false);
 });
@@ -252,4 +254,82 @@ test('the buttons: mark, offer, approval, testing — each says what happened', 
   answers.offer_times = {data:null, error:{message:'no free slots'}};
   await jyOffer('c1', 'onboarding');
   assert.equal(toasts.at(-1), 'no free slots');
+});
+
+/* ───────────── perfection pass ───────────── */
+
+test('errors read as plain sentences: the plumbing is translated, our own database messages pass through', async () => {
+  assert.equal(jyPlain('TypeError: Failed to fetch'), "Can't reach Aviance right now. Check your connection and try again.");
+  assert.equal(jyPlain('JWT expired'), 'Your sign-in has run out. Please sign in again.');
+  assert.equal(jyPlain('new row violates row-level security policy for table "client_journey"'), "You don't have access to do that.");
+  assert.match(jyPlain('Could not find the function public.journey_board in the schema cache'), /isn't switched on yet/);
+  assert.equal(jyPlain('That step is already done.'), 'That step is already done.', 'a raise exception from the database is already plain');
+  for (const raw of ['Failed to fetch', 'JWT expired', 'permission denied for table x', 'function journey_get(uuid) does not exist']) {
+    answers.journey_get = {data:null, error:{message:raw}};
+    const r = await jyGet('c1');
+    assert.doesNotMatch(r.error, /jwt|function|permission denied|fetch|schema|table/i, raw);
+  }
+  globalThis.sb = undefined;
+  assert.doesNotMatch((await jyBoard()).error, /database/i, 'and "the database" is not a thing he is told about');
+  globalThis.sb = fakeSb;
+});
+
+test('a double click never queues two drafts for the client', async () => {
+  let open = 0;
+  const slow = (out) => () => new Promise((r) => { open++; setTimeout(() => r(out), 10); });
+  answers.journey_board = {data:[], error:null}; answers.journey_get = {data:journey(), error:null};
+  fields.jyApTitle = 'Your copy'; fields.jyApBody = 'Email 1';
+  answers.approval_request = slow({data:'d1', error:null});
+  const [a, b] = await Promise.all([jySendApproval('c1', 'copy'), jySendApproval('c1', 'copy')]);
+  assert.equal(rpcs.filter(x => x.name === 'approval_request').length, 1, 'one approval, not two');
+  assert.equal([a, b].filter(r => r.ok).length, 1);
+  fields.jyTdSent = '100'; fields.jyTdReplies = '3'; fields.jyTdLead = ''; fields.jyTdNote = '';
+  answers.testing_day = slow({data:'d2', error:null});
+  await Promise.all([jySendTesting('c1'), jySendTesting('c1')]);
+  assert.equal(rpcs.filter(x => x.name === 'testing_day').length, 1);
+  fields.jyMvDay = '2026-12-05';
+  answers.journey_move = slow({data:journey(), error:null});
+  await Promise.all([jyDoMove('c1', 'research'), jyDoMove('c1', 'research')]);
+  assert.equal(rpcs.filter(x => x.name === 'journey_move').length, 1);
+  answers.journey_start = slow({data:journey(), error:null});
+  await Promise.all([jyStart('c1'), jyStart('c1')]);
+  assert.equal(rpcs.filter(x => x.name === 'journey_start').length, 1);
+  /* and once it is done, the next press works */
+  answers.approval_request = {data:'d3', error:null};
+  assert.equal((await jySendApproval('c1', 'copy')).ok, true);
+});
+
+test('the board stops refreshing, and forgets what it had, once nobody is signed in', async () => {
+  const realSet = globalThis.setInterval, realClear = globalThis.clearInterval;
+  let tickFn = null, cleared = 0;
+  globalThis.setInterval = (fn) => { tickFn = fn; return {unref(){}}; };
+  globalThis.clearInterval = () => { cleared++; };
+  globalThis.document = {hidden:false, getElementById: () => null};
+  globalThis.authUser = {role:'admin'};
+  try {
+    jyForget();
+    answers.journey_board = {data:[journey()], error:null};
+    jyLateCount();
+    await jyLoadBoard(true);
+    assert.equal(typeof tickFn, 'function', 'the minute timer is running');
+    assert.ok(jy.board);
+    const n = rpcs.length;
+    tickFn(); await new Promise(r => setTimeout(r, 5));
+    assert.ok(rpcs.length > n, 'signed in: it asks');
+    globalThis.authUser = null;                       /* he signs out */
+    const m = rpcs.length;
+    tickFn(); await new Promise(r => setTimeout(r, 5));
+    assert.equal(rpcs.length, m, 'signed out: nothing is asked');
+    assert.equal(jy.board, null, 'and the last login\'s board is gone');
+    assert.equal(jy.timer, null);
+    assert.ok(cleared >= 1);
+  } finally {
+    globalThis.setInterval = realSet; globalThis.clearInterval = realClear;
+    delete globalThis.document; delete globalThis.authUser; jyForget();
+  }
+});
+
+test('the title a client sees by default does not say "ICP"', () => {
+  const form = jyRenderApprovalForm('c1', 'icp');
+  assert.match(form, /value="Your target profile \+ 3 angles"/);
 });

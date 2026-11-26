@@ -31,7 +31,7 @@ const CHV_MAX_FILES=5;                // per message
 const CHV_FILES_ON=false;             // no 'chat-files' bucket yet: sending files is switched off
 const CHV_NO_FILES="Sending files isn't switched on yet. Send the message as text, or paste a link to the file.";
 const CHV_GROUP_MS=5*60*1000;         // same person within 5 minutes = one group
-const CHV_POLL_MS=60000;
+const CHV_POLL_MS=20000;              // unread counts for the channels that are not open (the open one is live)
 const CHV_TYPING_MS=4500;
 const chv={
   chs:[], loaded:false, err:null, loading:false,
@@ -44,7 +44,7 @@ const chv={
   archOpen:false, noChOpen:false, noChDone:{},
   urls:{}, urlWait:{},
   staff:null, loadStaff:null,
-  unreadTotal:0, peekAt:0, timer:null, seq:0,
+  unreadTotal:0, peekAt:0, timer:null, seq:0, tmpSeq:0, creating:false, visHooked:false, caught:'',
   bot:[], botEdits:{}, botBusy:{}, botErr:'', botSeq:0, botTimers:[],
 };
 
@@ -216,9 +216,30 @@ async function chvReload(){
   if(r.ok&&Array.isArray(r.data)){chv.chs=chvVisible(r.data);chv.loaded=true;chv.err=null;}
   else if(!chv.chs.length){chv.err=r.error||"The channels didn't load. Try again.";}
   // the open channel's unread stays zero while it is open
-  const c=chvFindCh(chv.cur);if(c&&chvViewing())c.unread=0;
+  const c=chvFindCh(chv.cur);
+  const missed=!!(c&&chvViewing()&&chvBehind(c));
+  if(c&&chvViewing())c.unread=0;
   chvUpdateTotal();
   chvPaintList();
+  if(missed)await chvCatchUp();
+}
+/* True when the list says the open channel has a newer message than the thread shows: the live line dropped
+   (a laptop that slept, a phone that lost signal) and missed something. */
+function chvBehind(c){
+  if(chv.msgsLoading||chv.sending)return false;
+  const last=chv.msgs.length?chv.msgs[chv.msgs.length-1]:null;
+  const listAt=Date.parse((c&&c.lastMessageAt)||'')||0,haveAt=last?(Date.parse(last.createdAt||'')||0):0;
+  if(listAt<=haveAt||chv.caught===c.id+'|'+c.lastMessageAt)return false;   // already looked for this one
+  chv.caught=c.id+'|'+c.lastMessageAt;
+  return true;
+}
+/* Fetch the newest page again and add whatever the live line missed, exactly as if it had arrived live. */
+async function chvCatchUp(){
+  const id=chv.cur;if(!id)return;
+  const r=await chvCall('chMessages',id,{limit:CHV_PAGE});
+  if(id!==chv.cur||!r.ok||!Array.isArray(r.data))return;
+  const have={};chv.msgs.forEach(m=>{have[m.id]=1;});
+  r.data.filter(m=>m&&m.id&&!have[m.id]).forEach(chvOnMessage);
 }
 function chvViewing(){return typeof currentView!=='undefined'&&currentView==='channels'&&!!chv.cur;}
 
@@ -325,8 +346,8 @@ function chvMsgHTML(m,first,own,d){
   }else{
     body=(m.body?`<div class="chv-text">${chvLinkify(m.body)}${m.editedAt?` <span class="chv-edited">(edited)</span>`:''}</div>`:'')+chvAttsHTML(m);
   }
-  const actions=own&&chv.editing!==m.id&&!(chvFindCh(chv.cur)||{}).archived?`<span class="chv-macts"><button type="button" class="chv-link" onclick="chvEditStart(${chvA(m.id)})">Edit</button><button type="button" class="chv-link" onclick="chvDelete(${chvA(m.id)})">Delete</button></span>`:'';
-  return `<div class="chv-msg${first?' first':''}${own?' own':''}${cl?' from-client':''}" id="${idAttr}">${gut}<div class="chv-col">${head}<div class="chv-body">${body}${actions}</div></div></div>`;
+  const actions=own&&!m.sending&&chv.editing!==m.id&&!(chvFindCh(chv.cur)||{}).archived?`<span class="chv-macts"><button type="button" class="chv-link" onclick="chvEditStart(${chvA(m.id)})">Edit</button><button type="button" class="chv-link" onclick="chvDelete(${chvA(m.id)})">Delete</button></span>`:'';
+  return `<div class="chv-msg${first?' first':''}${own?' own':''}${cl?' from-client':''}${m.sending?' sending':''}" id="${idAttr}">${gut}<div class="chv-col">${head}<div class="chv-body">${body}${actions}</div></div></div>`;
 }
 function chvAttsHTML(m){
   const atts=chvAttOf(m);if(!atts.length)return '';
@@ -556,24 +577,55 @@ function chvPaste(e){
   if(!files.length)return;
   e.preventDefault();chvAddFiles(files);
 }
+/* What is left in the box once `sent` has gone: whatever was typed after it while it was on its way. Pure. */
+function chvLeftover(sent,now){
+  const a=String(sent==null?'':sent),b=String(now==null?'':now);
+  if(b===a)return '';
+  return b.indexOf(a)===0?b.slice(a.length).replace(/^\s+/,''):b;
+}
+/* Send. The message is drawn the moment Enter is pressed and the box is emptied, so there is no wait on the
+   network; if it does not go, it is taken back out of the thread and the words are put back in the box. */
 async function chvSend(){
   const id=chv.cur,c=chvFindCh(id);if(!c||c.archived||chv.sending)return;
   const input=chvEl('chvInput');
-  const body=String(input?input.value:(chv.drafts[id]||'')).trim();
+  const raw=String(input?input.value:(chv.drafts[id]||''));
+  const body=raw.trim();
   if(!body&&!chv.pending.length)return;
   chv.sending=true;chv.cerr='';
+  const ce=chvEl('chvCErr');if(ce)ce.textContent='';
   const btn=chvEl('chvSend');if(btn)btn.disabled=true;
   const files=chv.pending.slice();
+  let tmp=null;
+  if(body&&!files.length){
+    tmp={id:'chv-sending-'+(++chv.tmpSeq),channelId:id,userId:chvMe(),name:(typeof authUser!=='undefined'&&authUser&&authUser.name)||'',body,attachments:[],createdAt:new Date(chvNow()).toISOString(),sending:true};
+    chv.msgs.push(tmp);chv.drafts[id]='';chv.divId=null;
+    if(input){input.value='';if(input.style)input.style.height='auto';}
+    chvPaintThread(false);chvScrollBottom();
+  }
   const r=await chvCall('chSend',id,body,files);
   chv.sending=false;
-  if(id!==chv.cur){return;}
+  if(tmp)chv.msgs=chv.msgs.filter(x=>x!==tmp);
+  if(id!==chv.cur){
+    // he moved to another channel while it was on its way: never lose the words
+    if(!r.ok){if(tmp&&!chv.drafts[id])chv.drafts[id]=raw;toast((r.error||"Your message didn't send.")+' It is back in the box in '+(c.name||'that channel')+'.');}
+    return;
+  }
+  const box=chvEl('chvInput');
   if(!r.ok){
     chv.cerr=r.error||"Your message didn't send. Try again.";
+    if(tmp){
+      const typed=box?String(box.value||''):'';
+      chv.drafts[id]=typed?raw+'\n'+typed:raw;
+      if(box)box.value=chv.drafts[id];
+      chvPaintThread(true);
+    }
     const e=chvEl('chvCErr');if(e)e.textContent=chv.cerr;
     const b=chvEl('chvSend');if(b)b.disabled=false;
     return;
   }
-  chv.drafts[id]='';chv.pending=[];chv.cerr='';
+  // anything typed while it was on its way stays in the box
+  chv.drafts[id]=tmp?String(box?box.value||'':''):chvLeftover(raw,box?box.value:raw);
+  chv.pending=[];chv.cerr='';
   const m=r.data&&typeof r.data==='object'&&r.data.id?r.data:null;
   if(m){
     if(!m.userId)m.userId=chvMe();
@@ -584,8 +636,14 @@ async function chvSend(){
   }
   chv.divId=null;
   chvPaintThread(false);chvScrollBottom();
-  chvPaintComposer();
-  const i2=chvEl('chvInput');if(i2){if(i2.style)i2.style.height='auto';if(i2.focus&&!chvIsPhone())i2.focus();}
+  if(tmp){
+    // the box was emptied when Enter was pressed and may hold the next message already: leave it alone
+    const b=chvEl('chvSend');if(b)b.disabled=false;
+  }else{
+    chvPaintComposer();
+    const i2=chvEl('chvInput');if(i2&&i2.style)i2.style.height='auto';
+  }
+  const i3=chvEl('chvInput');if(i3&&i3.focus&&!chvIsPhone())i3.focus();
   chvPaintList();
 }
 
@@ -631,9 +689,10 @@ async function chvLoadStaffList(){
   if(chv.staff)return chv.staff;
   try{
     if(chv.loadStaff){chv.staff=await chv.loadStaff();return chv.staff;}
-    const {data}=await sb.from('profiles').select('id,name,email,role,approved');
-    chv.staff=(data||[]).filter(p=>p&&p.approved&&(p.role==='admin'||p.role==='employee')).map(p=>({id:p.id,name:p.name||p.email||'Team member'}));
-  }catch(e){chv.staff=[];}
+    const {data,error}=await sb.from('profiles').select('id,name,email,role,approved');
+    if(error||!Array.isArray(data))return [];   // a failed lookup is not remembered: the next open asks again
+    chv.staff=data.filter(p=>p&&p.approved&&(p.role==='admin'||p.role==='employee')).map(p=>({id:p.id,name:p.name||p.email||'Team member'}));
+  }catch(e){return [];}
   return chv.staff;
 }
 async function chvNewChannel(){
@@ -652,7 +711,10 @@ async function chvCreate(n){
   if(!name)return chvModalErr('Give the channel a name.');
   const ids=[];
   for(let i=0;i<n;i++){const b=chvEl('chvNm'+i);if(b&&b.checked&&b.value)ids.push(b.value);}
+  if(chv.creating)return;                       // a double click must not make two channels
+  chv.creating=true;
   const r=await chvCall('chCreateChannel',name,ids);
+  chv.creating=false;
   if(!r.ok)return chvModalErr(r.error||"The channel wasn't created. Try again.");
   closeModal();
   await chvReload();
@@ -819,6 +881,11 @@ function channelsStartTimer(){
   if(chv.timer||typeof setInterval!=='function')return;
   chv.timer=setInterval(chvTick,CHV_POLL_MS);
   if(chv.timer&&chv.timer.unref)chv.timer.unref();
+  // coming back to the tab checks at once instead of waiting for the next tick
+  if(!chv.visHooked&&typeof document!=='undefined'&&typeof document.addEventListener==='function'){
+    chv.visHooked=true;
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden&&chv.timer)chvTick();});
+  }
 }
 function channelsStopTimer(){if(chv.timer){clearInterval(chv.timer);chv.timer=null;}}
 async function chvTick(){
@@ -841,6 +908,6 @@ function channelsForget(){
   channelsStopTimer();
   if(chv.unsub){try{chv.unsub();}catch(e){}chv.unsub=null;}
   clearTimeout(chv.searchTimer);clearTimeout(chv.typingTimer);
-  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',typing:{},q:'',hits:[],panelSet:false,panelOpen:false,pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,unreadTotal:0,peekAt:0,seq:chv.seq+1});
+  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',typing:{},q:'',hits:[],panelSet:false,panelOpen:false,pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,unreadTotal:0,peekAt:0,creating:false,caught:'',seq:chv.seq+1});
   chvBotClear();
 }

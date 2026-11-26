@@ -22,7 +22,7 @@ h1,h2,h3,h4{letter-spacing:-.011em;color:var(--text)}
 .nav-item.active{background:var(--sidebar-on);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
 .nav-item.active::before{left:-12px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0}
 .nav-item.active svg{color:var(--brand)}
-.nav-group{color:var(--sidebar-dim);text-transform:none;letter-spacing:0;font-size:var(--fs-min);font-weight:600;padding:18px 12px 6px}
+
 .nav-item .ext{color:var(--sidebar-dim)}
 .sidebar-foot{border-top-color:var(--sidebar-line)}
 .who{border-radius:var(--r-sm);padding:8px}
@@ -40,16 +40,11 @@ h1,h2,h3,h4{letter-spacing:-.011em;color:var(--text)}
 @media(max-width:860px){.topbar{background:var(--surface);padding:12px 16px 10px;padding-top:calc(12px + env(safe-area-inset-top))}}
 
 /* ---- surfaces: soft hairline + a whisper of depth, one radius family ---- */
-.card,.tk-person,.tk-app-row,.tk-stages,.tk-key,.tk-allclear,.pp-summary,.pp-row,.jy-board,.cal-grid-wrap{border-color:var(--border);box-shadow:var(--sh)}
-.tk-person,.tk-app-row,.pp-row{transition:background .12s,border-color .12s,box-shadow .12s}
-.tk-person:hover,.tk-app-row:hover{background:var(--surface);border-color:var(--border-strong);box-shadow:var(--sh-hover)}
+.card,.jy-board{border-color:var(--border);box-shadow:var(--sh)}
+
 /* coloured edges keep their inset stripe and gain the resting shadow */
-.tk-person.needs{box-shadow:inset 3px 0 0 var(--red),var(--sh)}
-.tk-person.needs:hover{box-shadow:inset 3px 0 0 var(--red),var(--sh-hover)}
-.tk-key{background:var(--surface)}
-.tk-key b,.tk-stage b,.pp-summary b,.jy-tile b{letter-spacing:-.02em}
-.tk-stage.on,body.dark .tk-stage.on{background:var(--surface);box-shadow:inset 0 -2px 0 var(--brand)}
-.tk-stage.on b{color:var(--text)}
+
+.jy-tile b{letter-spacing:-.02em}
 
 /* ---- buttons: primary carries a faint top light; secondary is a quiet raised outline ---- */
 .btn{box-shadow:var(--sh-btn),inset 0 1px 0 rgba(255,255,255,.14);letter-spacing:-.003em;transition:background .12s,border-color .12s,color .12s,box-shadow .12s}
@@ -59,27 +54,21 @@ h1,h2,h3,h4{letter-spacing:-.011em;color:var(--text)}
 .btn.danger,.btn.ghost.danger{box-shadow:var(--sh-btn)}
 .btn:disabled,.btn:disabled:hover{box-shadow:none}
 .btn:focus-visible{outline:2px solid var(--brand)!important;outline-offset:2px}
-.tk-sysbtn{box-shadow:0 1px 2px rgba(224,41,15,.25),inset 0 1px 0 rgba(255,255,255,.16)}
-.tk-sysbtn:hover{box-shadow:0 4px 12px rgba(224,41,15,.25),inset 0 1px 0 rgba(255,255,255,.16)}
 
 /* ---- segmented controls and tabs ---- */
 .seg{background:var(--surface-2);border-color:var(--border)}
 .seg button{font-weight:550;transition:color .12s,background .12s}
 .seg button.active,body.dark .seg button.active{background:var(--surface);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(15,26,43,.08),inset 0 0 0 1px var(--border)}
-.tk-systab{transition:color .12s,background .12s}
 
 /* ---- badges, counts, pills: rounder and lighter ---- */
 .badge{border-radius:999px;padding:0 7px;letter-spacing:.01em}
-.section-head .count,.tk-done-count{border-radius:999px;background:var(--surface-3);color:var(--muted);font-weight:600}
+.section-head .count{border-radius:999px;background:var(--surface-3);color:var(--muted);font-weight:600}
 .pill{border-radius:999px;padding:3px 10px;font-weight:600;box-shadow:inset 0 0 0 1px rgba(15,26,43,.04)}
 .pill.grey{background:var(--surface-3)}
-.tk-person-owner,.tk-app-plan{border-radius:999px}
 
 /* ---- tables: quiet sentence-case headers, roomy rows, soft hover ---- */
-.tk-table th,.pp-table th{text-transform:none;letter-spacing:0;font-size:var(--fs-small);font-weight:600;color:var(--muted);background:var(--surface-2)}
-.tk-table td,.pp-table td{transition:background .1s}
-.tk-table tbody tr:hover td,.pp-tr:hover td{background:var(--surface-2)}
-.tk-group,.dc-gname{text-transform:none;letter-spacing:0;font-size:var(--fs-small);font-weight:650}
+
+.dc-gname{text-transform:none;letter-spacing:0;font-size:var(--fs-small);font-weight:650}
 .jy-tile small{text-transform:none;letter-spacing:0;font-size:var(--fs-small)}
 
 /* ---- forms: sentence-case labels in ink, a soft brand halo on focus ---- */

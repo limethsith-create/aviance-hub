@@ -13,7 +13,7 @@
 
 /* ===================== 0. STATE ===================== */
 const DR_POLL_MS=30000;
-const dr={list:[],loaded:false,loading:false,err:null,count:0,countAt:0,timer:null,busy:{},edits:{},seq:0};
+const dr={list:[],loaded:false,loading:false,err:null,count:0,countAt:0,timer:null,busy:{},edits:{},seq:0,shown:null};
 
 /* ===================== 1. DATA ===================== */
 function drSb(){try{if(typeof sb!=='undefined'&&sb)return sb;}catch(e){}return (typeof window!=='undefined'&&window.sb)||null;}
@@ -85,7 +85,7 @@ function drSetCount(n){
 /* Ask again now (after a draft was made elsewhere, e.g. the onboarding tracker). */
 function drRefresh(){return drTick();}
 /* Sign-out: drop everything. */
-function draftsForget(){drStop();Object.assign(dr,{list:[],loaded:false,loading:false,err:null,count:0,countAt:0,busy:{},edits:{},seq:dr.seq+1});}
+function draftsForget(){drStop();Object.assign(dr,{list:[],loaded:false,loading:false,err:null,count:0,countAt:0,busy:{},edits:{},seq:dr.seq+1,shown:null});}
 
 /* ===================== 3. VIEW ===================== */
 function drA(v){return esc(JSON.stringify(v==null?'':String(v)));}
@@ -100,7 +100,8 @@ function drAgo(s){
 }
 function viewDrafts(){
   drLoad(false);
-  return `<div class="dr" id="drRoot">${drBodyHTML()}</div>`;
+  const html=drBodyHTML();dr.shown=html;
+  return `<div class="dr" id="drRoot">${html}</div>`;
 }
 function drBodyHTML(){
   if(!dr.loaded&&dr.err)return `<div class="card dr-empty" role="alert"><h3>The drafts didn't load</h3><p>${esc(dr.err)}</p><button type="button" class="btn" onclick="drLoad(true)">Try again</button></div>`;
@@ -126,7 +127,14 @@ function drCardHTML(d){
     </div>
   </article>`;
 }
-function drPaint(){const r=drEl('drRoot');if(r)r.innerHTML=drBodyHTML();}
+/* force=false is the 30-second refresh: when nothing changed it must not redraw, or a box he resized snaps back
+   and the button he had tabbed to loses focus. */
+function drPaint(force){
+  const r=drEl('drRoot');if(!r)return;
+  const html=drBodyHTML();
+  if(force===false&&html===dr.shown)return;
+  r.innerHTML=html;dr.shown=html;
+}
 async function drLoad(force){
   if(dr.loading&&!force)return;
   dr.loading=true;
@@ -143,7 +151,7 @@ async function drLoad(force){
   // keep what the owner is typing: repaint only when no draft box has focus
   const a=typeof document!=='undefined'?document.activeElement:null;
   if(a&&a.id&&String(a.id).startsWith('drBody-')&&dr.loaded)return;
-  drPaint();
+  drPaint(false);
 }
 function drEdit(id,v){dr.edits[id]=String(v==null?'':v);}
 function drKey(e,id){

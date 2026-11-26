@@ -137,3 +137,7 @@
   .emp-msg{max-width:100%}
   .emp-del{opacity:1}
 }
+/* the thread's wrapper: it exists only so new messages can be drawn without touching the send box */
+.emp-live{display:contents}
+/* an invite link is long: smaller than a code, and allowed to wrap anywhere */
+.emp-code-url{font-size:var(--fs-small,13px);letter-spacing:0;font-weight:500;overflow-wrap:anywhere;word-break:break-all;user-select:all}

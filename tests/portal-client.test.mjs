@@ -83,24 +83,41 @@ test('money: whole dollars in, a full figure out', () => {
 });
 
 /* ───────────── invoice lines ───────────── */
-test('invoice lines: the pilot credit is its own negative line and the total checks out', () => {
-  const r = P('pcInvoiceLines')({ lines: [{ label: 'Growth', amount: 3997 }, { label: 'Pilot credit', amount: -300 }], gross: 3997, pilot_credit: 300, amount: 3697 });
+test('invoice lines: what the database sent, with the total checked', () => {
+  const r = P('pcInvoiceLines')({ lines: [{ label: 'Growth', amount: 3000 }, { label: 'Discount', amount: -300 }], gross: 3000, amount: 2700 });
   assert.equal(r.lines.length, 2);
-  assert.deepEqual(r.lines[1], { label: 'Pilot credit', amount: -300, credit: true });
-  assert.equal(r.sum, 3697); assert.equal(r.total, 3697); assert.equal(r.matches, true);
+  assert.deepEqual(r.lines[1], { label: 'Discount', amount: -300, credit: true, detail: '' });
+  assert.equal(r.sum, 2700); assert.equal(r.total, 2700); assert.equal(r.matches, true);
+  const none = P('pcInvoiceLines')({ gross: 1500, amount: 1500 });
+  assert.deepEqual(none.lines, [{ label: 'Services', amount: 1500, credit: false, detail: '' }]);
 });
-test('invoice lines: a credit the lines forgot is added, never doubled', () => {
+test('invoice lines: fields left over from the retired trial plan are ignored, never drawn', () => {
   const f = P('pcInvoiceLines');
-  const a = f({ lines: [{ label: 'Starter', amount: 2497 }], gross: 2497, pilot_credit: 300, amount: 2197 });
-  assert.deepEqual(a.lines.map((l) => l.amount), [2497, -300]); assert.equal(a.matches, true);
-  const b = f({ gross: 2497, pilot_credit: 300, amount: 2197 });
-  assert.deepEqual(b.lines.map((l) => l.amount), [2497, -300]); assert.equal(b.total, 2197);
-  const c = f({ lines: [{ label: 'Pilot', amount: 300 }], gross: 300, pilot_credit: 0, amount: 300 });
-  assert.equal(c.lines.length, 1); assert.equal(c.matches, true);
+  /* the old credit field alone adds no line */
+  const a = f({ lines: [{ label: 'Starter', amount: 1500 }], gross: 1500, pilot_credit: 300, amount: 1500 });
+  assert.deepEqual(a.lines.map((l) => l.amount), [1500]); assert.equal(a.matches, true);
+  const b = f({ gross: 1500, pilot_credit: 300, amount: 1500 });
+  assert.deepEqual(b.lines.map((l) => l.amount), [1500]); assert.equal(b.total, 1500);
+  /* an old credit line is dropped; the database's amount is still the total shown */
+  const c = f({ lines: [{ label: 'Growth', amount: 3000 }, { label: 'Pilot credit', amount: -300 }], gross: 3000, pilot_credit: 300, amount: 2700 });
+  assert.deepEqual(c.lines.map((l) => l.label), ['Growth']); assert.equal(c.total, 2700); assert.equal(c.matches, false);
+  /* junk in those fields cannot throw */
+  for (const junk of [{ pilot_credit: 'abc' }, { pilot_credit: {} }, { lines: [null, 7, { label: null, amount: 'x' }, { amount: null }] }, { lines: 'nope', pilot_credit: -1 }]) {
+    assert.doesNotThrow(() => f(junk)); assert.deepEqual(f(junk).lines, []);
+  }
+});
+test('invoice lines: a 3-month term shows months × the monthly price, and the saving', () => {
+  const d = P('pcLineDetail');
+  assert.equal(d({ months: 3, unit: 1200, list_unit: 1500 }, 'USD'), '3 months × $1,200.00 a month · 20% off the $1,500.00 monthly price');
+  assert.equal(d({ months: 3, unit: 2400 }, 'USD'), '3 months × $2,400.00 a month');
+  assert.equal(d({ months: 3, unit: 1500, list_unit: 1500 }, 'USD'), '3 months × $1,500.00 a month');
+  for (const quiet of [{ months: 1, unit: 3000 }, { months: 3 }, { months: 'x', unit: 5 }, { months: 3, unit: 0 }, { months: 2.5, unit: 10 }, {}, null]) assert.equal(d(quiet, 'USD'), '');
+  const r = P('pcInvoiceLines')({ currency: 'USD', lines: [{ label: 'Starter · 5 qualified calls a month · 3-month term', amount: 3600, months: 3, unit: 1200, list_unit: 1500 }], amount: 3600 });
+  assert.equal(r.lines[0].detail, '3 months × $1,200.00 a month · 20% off the $1,500.00 monthly price'); assert.equal(r.matches, true);
 });
 test('invoice lines: the database total wins, and a mismatch is flagged', () => {
-  const r = P('pcInvoiceLines')({ lines: [{ label: 'Growth', amount: 3997 }], pilot_credit: 0, amount: 3500 });
-  assert.equal(r.total, 3500); assert.equal(r.sum, 3997); assert.equal(r.matches, false);
+  const r = P('pcInvoiceLines')({ lines: [{ label: 'Growth', amount: 3000 }], amount: 2500 });
+  assert.equal(r.total, 2500); assert.equal(r.sum, 3000); assert.equal(r.matches, false);
   const empty = P('pcInvoiceLines')(null);
   assert.deepEqual(empty, { lines: [], sum: 0, total: 0, matches: true });
 });
@@ -229,18 +246,18 @@ test('agreement: once signed, the form is replaced by who signed and when', () =
 });
 
 const INVOICE = { kind: 'invoice', number: 'AV-1042', status: 'sent', issued_on: '2026-11-24', due_on: '2026-12-01', paid_at: null, currency: 'USD',
-  lines: [{ label: 'Growth <plan>', amount: 3997 }, { label: 'Pilot credit', amount: -300 }], gross: 3997, pilot_credit: 300, amount: 3697,
+  lines: [{ label: 'Growth <plan>', amount: 3000 }, { label: 'Agreed discount', amount: -300 }], gross: 3000, amount: 2700,
   bill_to: { company: 'Acme & Co', contact_name: 'Dana', contact_email: 'dana@acme.example' },
   from: { legal_name: '[YOUR COMPANY LEGAL NAME]', address: '[YOUR COMPANY ADDRESS]', email: 'aviancelk@gmail.com' },
   pay: { wise_details: 'IBAN: GB00 <TEST>', payoneer_link: 'https://pay.example/x' } };
 
-test('invoice: lines, credit, total and how to pay', () => {
+test('invoice: lines, a negative line, total and how to pay', () => {
   const h = P('pcInvoiceHtml')(INVOICE);
   assert.ok(h.includes('>Invoice</h1>') && h.includes('AV-1042'));
   assert.ok(h.includes('November 24, 2026') && h.includes('December 1, 2026'));
   assert.ok(h.includes('Growth &lt;plan&gt;') && h.includes('Acme &amp; Co'));
   assert.ok(h.includes('class="pc-credit"') && h.includes('−$300.00'));
-  assert.ok(h.includes('Total due') && h.includes('$3,697.00'));
+  assert.ok(h.includes('Total due · USD') && h.includes('$2,700.00') && h.includes('>Invoice no.</dt><dd>AV-1042</dd>'));
   assert.ok(h.includes('How to pay') && h.includes('IBAN: GB00 &lt;TEST&gt;'));
   assert.ok(h.includes('href="https://pay.example/x"') && h.includes('>Pay by card</a>'));
 });
@@ -254,6 +271,15 @@ test('invoice: once paid it reads as a receipt', () => {
   assert.ok(h.includes('>Receipt</h1>') && h.includes('pc-stamp-paid') && h.includes('November 26, 2026'));
   assert.ok(h.includes('Total paid') && !h.includes('How to pay') && !h.includes('Pay by card'));
   assert.doesNotThrow(() => P('pcInvoiceHtml')(null));
+  /* a receipt is its own document: says so, says when, and asks for nothing */
+  assert.ok(h.includes('pc-receipt') && h.includes('<p class="pc-tag">Receipt</p>') && h.includes('>Paid on</dt><dd>November 26, 2026</dd>'));
+  assert.ok(h.includes('Paid in full on November 26, 2026. Nothing more is owed on this invoice.') && h.includes('Received from'));
+  assert.ok(!h.includes('>Due</dt>') && !h.includes('>Terms</dt>') && !h.includes('Total due') && !h.includes('Bill to'));
+  const u = P('pcInvoiceHtml')(INVOICE);
+  assert.ok(!u.includes('pc-receipt') && u.includes('>Due</dt><dd>December 1, 2026</dd>') && u.includes('Bill to') && !u.includes('Paid in full'));
+  /* paid with no date recorded still reads properly */
+  const nd = P('pcInvoiceHtml')({ ...INVOICE, status: 'paid', paid_at: null });
+  assert.ok(nd.includes('Paid in full. Nothing more is owed') && !nd.includes('>Paid on</dt>') && !nd.includes('undefined'));
 });
 test('thread: the empty state, and message text escaped', () => {
   const t = P('pcThreadHtml');
@@ -544,4 +570,111 @@ test('portal.html shows the kickoff card above the chat', () => {
   const html = fs.readFileSync(path.join(root, 'portal.html'), 'utf8');
   assert.ok(html.indexOf('id="pcKick"') > 0 && html.indexOf('id="pcKick"') < html.indexOf('id="pcScroll"'));
   assert.ok(html.includes('pcKickoffHtml(') && html.includes('pcBookKickoff(') && html.includes('pcKickoff(10)'));
+});
+
+/* ───────────── no trial plan; the 3-month term; the guarantee line ───────────── */
+const TERM3 = { kind: 'invoice', number: 'AV-2026-1051', status: 'sent', status_word: 'Unpaid', issued_on: '2026-11-26', due_on: '2026-12-03', paid_at: null, currency: 'USD',
+  service: 'Starter · 5 qualified calls a month · 3-month term', period: 'Months 1–3 · starts the day your first emails go out', terms: 'Net 7',
+  lines: [{ label: 'Starter · 5 qualified calls a month · 3-month term', amount: 3600, months: 3, unit: 1200, list_unit: 1500 }], gross: 3600, amount: 3600,
+  bill_to: { company: 'Sample Co', contact_name: 'Sam Lee', contact_email: 'sam@sample.example' },
+  from: { ready: false, legal_name: 'Aviance', email: 'hi@aviance.example' }, pay: { ready: false, wise_details: null, payoneer_link: '' } };
+
+test('invoice: a 3-month term names the term, the monthly price and the total billed up front', () => {
+  const h = P('pcInvoiceHtml')(TERM3);
+  assert.ok(h.includes('<span class="pc-line-t">Starter · 5 qualified calls a month · 3-month term</span>'));
+  assert.ok(h.includes('<span class="pc-line-d">3 months × $1,200.00 a month · 20% off the $1,500.00 monthly price</span>'));
+  assert.ok(h.includes('<span class="pc-line-d">Months 1–3 · starts the day your first emails go out</span>'));
+  assert.ok(h.includes('$3,600.00') && h.includes('>Terms</dt><dd>Net 7</dd>'));
+  assert.ok(!h.includes('class="pc-service"'), 'the service is not said twice when the line already says it');
+  /* a monthly invoice has no "months ×" line */
+  const m = P('pcInvoiceHtml')({ ...TERM3, period: 'Month 1 · starts the day your first emails go out', lines: [{ label: 'Growth · 10 qualified calls a month', amount: 3000, months: 1, unit: 3000 }], service: 'Growth · 10 qualified calls a month', gross: 3000, amount: 3000 });
+  assert.ok(!m.includes('months ×') && m.includes('Month 1 · starts the day') && m.includes('$3,000.00'));
+});
+test('invoice: the guarantee is one line at the foot, on the invoice and the receipt, never on a cancelled one', () => {
+  const g = P('PC_GUARANTEE');
+  assert.ok(/twice that month’s fee/.test(g) && /refund that month in full/.test(g) && /Money back, not credit/.test(g));
+  const h = P('pcInvoiceHtml')(TERM3);
+  assert.equal((h.match(/class="pc-guarantee"/g) || []).length, 1);
+  assert.ok(h.indexOf('pc-guarantee') > h.indexOf('pc-total') && h.indexOf('pc-guarantee') > h.indexOf('pc-pay'));
+  assert.ok(P('pcInvoiceHtml')({ ...TERM3, status: 'paid', paid_at: '2026-11-27T10:00:00Z' }).includes('class="pc-guarantee"'));
+  const v = P('pcInvoiceHtml')({ ...TERM3, status: 'void', status_word: 'Void' });
+  assert.ok(!v.includes('pc-guarantee') && !v.includes('How to pay') && !v.includes('Payment details') && !v.includes('Total due'));
+  assert.ok(v.includes('This invoice has been cancelled. Nothing is owed on it.') && v.includes('<p class="pc-stamp"><strong>Void</strong></p>'));
+});
+test('invoice: an old document that still carries the retired plan\'s fields draws without them', () => {
+  const old = { ...TERM3, pilot_credit: 300, gross: 3000, amount: 2700, service: undefined, period: undefined,
+    lines: [{ label: 'Growth · 10 qualified calls · month 1', amount: 3000 }, { label: 'Pilot credit', amount: -300 }] };
+  let h;
+  assert.doesNotThrow(() => { h = P('pcInvoiceHtml')(old); });
+  assert.ok(!/pilot/i.test(h) && !h.includes('pc-credit') && !h.includes('−$300.00'));
+  assert.ok(h.includes('$2,700.00'), 'the amount the database says is owed is still the total');
+  for (const junk of [{ pilot_credit: 'x' }, { pilot_credit: null, lines: null }, { kind: 'invoice', pilot_credit: 300 }]) {
+    assert.doesNotThrow(() => P('pcInvoiceHtml')(junk));
+    assert.ok(!/pilot/i.test(P('pcInvoiceHtml')(junk)));
+  }
+});
+test('invoice: nothing breaks, and nothing reads "undefined", when details are missing', () => {
+  const f = P('pcInvoiceHtml');
+  for (const d of [null, {}, { status: 'sent' }, { status: 'paid' }, { ...TERM3, pay: undefined }, { ...TERM3, pay: null, from: null, bill_to: null },
+    { ...TERM3, pay: { ready: true, wise_details: '', payoneer_link: '' } }, { ...TERM3, number: null, issued_on: null, due_on: null, terms: null, currency: null },
+    { ...TERM3, lines: [], gross: null, amount: null }]) {
+    let h;
+    assert.doesNotThrow(() => { h = f(d); });
+    assert.ok(!/undefined|null|NaN|\[object/.test(h.replace(/class="[^"]*"/g, '')), JSON.stringify(d));
+  }
+  /* no bank details and no card link: the calm block, no empty pay box, no button */
+  const none = f({ ...TERM3, pay: { ready: true, wise_details: '', payoneer_link: '' } });
+  assert.ok(none.includes('We’ll send these to you directly') && !none.includes('<pre') && !none.includes('Pay by card'));
+  /* no one to bill yet: the block is left out, not left empty; "From" still names us */
+  const bare = f({ ...TERM3, bill_to: {}, from: {} });
+  assert.ok(!bare.includes('Bill to') && bare.includes('<p class="pc-strong">Aviance</p>'));
+  /* a card link alone is enough to pay */
+  const card = f({ ...TERM3, pay: { ready: true, wise_details: null, payoneer_link: 'https://pay.example/x' } });
+  assert.ok(card.includes('How to pay') && card.includes('Pay by card') && !card.includes('<pre'));
+});
+
+/* The agreement the database writes (agreement_terms, 20261129): numbered clauses, bracketed defaults. */
+const TERMS_V3 = { title: 'Service Agreement', intro: 'This is the whole agreement between Aviance ("we") and Sample Co ("you").',
+  parties: [{ label: 'Aviance (we)', value: 'Aviance' }, { label: 'Client (you)', value: 'Sample Co' }],
+  sections: [
+    { h: '1. What you are buying', body: ['1.1 You are on the Growth plan: 10 booked calls a month.', '1.3 [Your first month starts on the day your first emails go out (your launch day), not the day you sign.]'] },
+    { h: '5. Our guarantee', body: ['5.1 Month one: if we deliver fewer than 10 booked calls in your first month, we refund twice that month\'s fee: $6,000 back.',
+      '5.4 A refund is money back, not a credit. We pay it [by bank transfer to the account you paid from] within [10 business days] of the end of the month we missed.'] },
+    { h: '9. The small print', body: ['9.3 This agreement is governed by [the laws of Sri Lanka].'] }],
+  signatures: [{ label: 'For Aviance', name: 'Limethsith', role: 'Founder', org: 'Aviance' }] };
+test('agreement: numbered clauses read as plain text, with no brackets left for the client', () => {
+  const h = P('pcAgreementHtml')({ kind: 'agreement', company: 'Sample Co', status: 'sent', terms: TERMS_V3 });
+  assert.equal((h.match(/class="pc-sec"/g) || []).length, 3);
+  assert.ok(h.includes('<span class="pc-num">1</span>What you are buying</h2>') && h.includes('<span class="pc-num">3</span>The small print</h2>'));
+  assert.ok(h.includes('<p>1.1 You are on the Growth plan: 10 booked calls a month.</p>'));
+  assert.ok(h.includes('<p>1.3 Your first month starts on the day your first emails go out (your launch day), not the day you sign.</p>'));
+  assert.ok(h.includes('We pay it by bank transfer to the account you paid from within 10 business days of'));
+  assert.ok(h.includes('governed by the laws of Sri Lanka.') && !/[\[\]]/.test(h.replace(/<[^>]+>/g, '')) && !h.includes('pc-fill'));
+  assert.ok(h.includes('Limethsith, Founder') && h.includes('Sign agreement'));
+});
+test('agreement: an old snapshot written for the retired plan, or a broken one, still draws', () => {
+  const f = P('pcAgreementHtml');
+  const old = { kind: 'agreement', company: 'Old Co', status: 'signed', signed_name: 'Pat Q', signed_at: '2026-10-02T09:00:00Z', pilot_credit: 300,
+    terms: { title: 'Service Agreement', sections: [{ h: '3. Fees and payment', body: ['The Pilot costs $300, paid once.'] }], pilot: true } };
+  let h;
+  assert.doesNotThrow(() => { h = f(old); });
+  assert.ok(h.includes('Signed by Pat Q') && h.includes('The Pilot costs $300, paid once.'), 'a signed document is shown as it was signed');
+  for (const junk of [{ terms: null }, { terms: { sections: 'x', parties: 7, signatures: {} } }, { terms: { sections: [null, {}, { h: null, body: null }, { h: 'A', body: 'one paragraph' }] } }, { status: 'signed' }]) {
+    assert.doesNotThrow(() => f(junk));
+    assert.ok(!/undefined|\[object/.test(f(junk)));
+  }
+});
+test('the migration that retires the trial plan ships, with its self-check', () => {
+  const sql = fs.readFileSync(path.join(root, 'supabase', 'migrations', '20261129_no_pilot_and_agreement_v3.sql'), 'utf8');
+  for (const fn of ['close_won', 'raise_invoice', 'agreement_terms', 'mail_pack', 'doc_get_core', 'documents_preview']) {
+    assert.ok(new RegExp('create or replace function public\\.' + fn + '\\(').test(sql), fn);
+  }
+  assert.ok(sql.includes("raise exception 'That plan is no longer offered. Choose Starter, Growth or Scale.'"));
+  assert.ok(!/pilot_credit\b/.test(sql.replace(/^\s*--.*$/gm, '')), 'no statement reads or writes the old credit columns');
+  assert.ok(!/drop\s+(column|table)|alter\s+table|delete\s+from/i.test(sql), 'nothing is dropped or deleted');
+  /* outside comments, the word appears only in the self-check that hunts for it */
+  const code = sql.replace(/^\s*--.*$/gm, '').split('\n').filter((l) => /pilot/i.test(l));
+  assert.equal(code.length, 1); assert.ok(code[0].includes("~* 'pilot'"));
+  assert.ok(sql.includes("array['starter','starter3','growth','growth3','scale','scale3']"));
+  assert.ok(sql.includes('governed by [the laws of Sri Lanka]'));
 });

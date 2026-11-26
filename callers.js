@@ -17,7 +17,7 @@
 
    Plus the live feed: the last calls logged, newest first, so he can watch the dialling happen.
 
-   Data (database functions in 20261126_callers.sql, owner only; see /home/claude/callers/SPEC.md):
+   Data (database functions in 20261126_callers.sql, owner only):
      callers_list()                              -> [{id,name,email,status,code_set,last_seen_at,created_at}]
      callers_board(p_days)                       -> {bonus, callers:[{caller_id,name,dials,conversations,
                                                      booked,showed,closed,closed_value,owed}], feed:[...]}
@@ -28,8 +28,8 @@
    once, held in cal.code only while that panel is open, never written to storage and never logged.
    (That function also emails the person her invite, so he is told so in one line.)
 
-   Nothing here is applied yet — agent A's migration lands at the end — so every data function says
-   "not switched on yet" in plain English instead of throwing when an RPC is missing.
+   If a database function is missing, every data function says "not switched on yet" in plain English
+   instead of throwing.
 
    House rules: data functions (cal*) resolve to {ok, data, error, missing} and never throw; render
    functions are pure (data in, HTML string out) so the tests can call them; every string goes through
@@ -85,6 +85,7 @@ const cal = {
   fileName: '', fileErr: null, parsing: false,
   batch: '', importBusy: false, importErr: null, importDone: null,
   timer: null, seq: 0, bseq: 0,
+  shown: null,                       // the HTML last painted, so a refresh that changed nothing paints nothing
 };
 
 /* ===================== 1. DATA ===================== */
@@ -441,7 +442,7 @@ function callersForget() {
     code: null, codeErr: null, busy: {}, ask: '',
     up: false, parsed: null, fileName: '', fileErr: null, parsing: false,
     batch: '', importBusy: false, importErr: null, importDone: null,
-    seq: cal.seq + 1, bseq: cal.bseq + 1,
+    seq: cal.seq + 1, bseq: cal.bseq + 1, shown: null,
   });
 }
 
@@ -811,7 +812,9 @@ function calCtx() {
 function viewCallers() {
   calLoadAll(false);
   calStart();
-  return `<div class="cal" id="calRoot">${calBodyHTML()}</div>`;
+  const html = calBodyHTML();
+  cal.shown = html;
+  return `<div class="cal" id="calRoot">${html}</div>`;
 }
 function calBodyHTML() {
   if (!cal.loaded && cal.missing) {
@@ -831,10 +834,14 @@ function calPaint() {
   /* Don't wipe what he is typing: a repaint while a box has focus would lose the caret. */
   const a = typeof document !== 'undefined' ? document.activeElement : null;
   if (a && a.id && (a.id === 'calAddName' || a.id === 'calAddEmail' || a.id === 'calBatch')) return;
-  r.innerHTML = calBodyHTML();
+  /* The 30-second refresh usually changes nothing. Redrawing anyway would close the list of skipped rows,
+     drop a selected code or link, and have a screen reader read the code card out again. */
+  const html = calBodyHTML();
+  if (html === cal.shown) return;
+  r.innerHTML = html; cal.shown = html;
 }
 /* A repaint the focus guard must not skip (the form itself changed). */
-function calForcePaint() { const r = calEl('calRoot'); if (r) r.innerHTML = calBodyHTML(); }
+function calForcePaint() { const r = calEl('calRoot'); if (r) { const html = calBodyHTML(); r.innerHTML = html; cal.shown = html; } }
 
 async function calLoad(force) {
   if (cal.loading && !force) return;
@@ -941,7 +948,7 @@ function calCopyCode() {
   if (!code) return;
   const done = () => { if (typeof toast === 'function') toast('Code copied. Send it to her yourself.'); };
   try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, calCopyFallback); return; }
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, () => calCopyFallback()); return; }
   } catch (e) { }
   calCopyFallback();
 }
@@ -1013,8 +1020,8 @@ async function calImportGo() {
   calLoadBoard(true);
 }
 
-/* render() calls this after every screen change: the code and the picked file never outlive the screen. */
+/* render() calls this after every screen change: the code and the invite link never outlive the screen. */
 function calOnRender(view) {
   if (view === 'callers') { calStart(); return; }
-  calStop(); calForgetCode(); cal.ask = ''; cal.adding = false;
+  calStop(); calForgetCode(); calForgetLink(); cal.ask = ''; cal.adding = false;
 }

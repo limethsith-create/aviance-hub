@@ -54,11 +54,12 @@ and `created_at timestamptz not null default now()` unless said otherwise.
 `*` marks NOT NULL. Check-constrained values are listed in brackets.
 
 ### Money (built — read only, through finance.js)
-- **plan_prices** — plan* (pk: pilot|starter|growth|scale), label*, calls_promised*, monthly_fee*, three_month_fee*, is_recurring*, updated_at*
-- **clients** — booking_id, company*, contact_name*, contact_email*, website, plan*, term*, calls_promised*, monthly_fee*, stage*, inputs_complete_on date, day1_on date, pilot_credit*, pilot_credit_used*, owner_id, ended_on date, end_reason, notes, updated_at*
+- **plan_prices** — plan* (pk: starter|growth|scale; a leftover `pilot` row is retired and finance.js `fnPlans` never returns it), label*, calls_promised*, monthly_fee*, three_month_fee*, is_recurring*, updated_at*
+- **clients** — booking_id, company*, contact_name*, contact_email*, website, plan*, term*, calls_promised*, monthly_fee*, stage*, inputs_complete_on date, day1_on date, owner_id, ended_on date, end_reason, notes, updated_at*
 - **client_months** — client_id*, month_no*, starts_on* date, ends_on* date, calls_promised*, calls_delivered*, verdict*, locked_at, refund_due*
 - **qualified_calls** — client_id*, month_id, prospect_name, prospect_email, prospect_company, booked_for* timestamptz, matched_icp*, happened*, happened_at, dispute_status*, dispute_reason, counts (generated)
-- **invoices** — client_id*, month_id, number*, gross_amount*, pilot_credit*, amount*, currency*, issued_on* date, due_on* date, status*, sent_at, paid_at, paid_via, notes
+- **invoices** — client_id*, month_id, number*, gross_amount*, amount*, currency*, issued_on* date, due_on* date, status*, sent_at, paid_at, paid_via, notes
+- Retired with the $300 Pilot plan: `clients.pilot_credit`, `clients.pilot_credit_used` and `invoices.pilot_credit`. If the columns are still in the database no browser code reads or writes them, and no invoice shows a credit line.
 - **refunds** — client_id*, month_id, amount*, multiplier* numeric, reason*, status*, paid_at, paid_via, notes
 
 ### The journey
@@ -76,7 +77,7 @@ time: the hub's slot finder treats any booking that is not `cancelled` as taken.
 (the research engine), then `held`, `no_show`, `won`, `lost` or `cancelled`. A
 booking is open unless it is `won`, `lost` or `cancelled` — never test for a list
 of "open" words.
-- **meetings** — client_id, booking_id, kind*, starts_at* timestamptz, minutes* (15–240), time_zone*, status*, meet_link (a trigger fills in a stand-in room when it is left empty), calendar_event_id, invited_at, reminded_24h_at, reminded_1h_at, held_at, notes, title (≤160), guest_name (≤120), guest_email (a valid email or null), plan [null|pilot|starter|growth|scale]. **Unique index on starts_at for every meeting that is not `cancelled`**, so two live meetings can never start at the same instant; a clash comes back as duplicate key (23505) and the Calendar says "There is already a call at that time." A meeting the owner adds by hand (meetings.js `mtAddOwn`) is `kind = 'other'` with its own `title`, `guest_name`, `guest_email` and `plan`; the Calendar colours it by that `plan` and falls back to the client's company and plan when a meeting has none of its own. `kind = 'qualified'` requires `client_id`.
+- **meetings** — client_id, booking_id, kind*, starts_at* timestamptz, minutes* (15–240), time_zone*, status*, meet_link (a trigger fills in a stand-in room when it is left empty), calendar_event_id, invited_at, reminded_24h_at, reminded_1h_at, held_at, notes, title (≤160), guest_name (≤120), guest_email (a valid email or null), plan [null|starter|growth|scale] (`pilot` is retired: meetings.js refuses it and shows an old row as "Retired plan"). **Unique index on starts_at for every meeting that is not `cancelled`**, so two live meetings can never start at the same instant; a clash comes back as duplicate key (23505) and the Calendar says "There is already a call at that time." A meeting the owner adds by hand (meetings.js `mtAddOwn`) is `kind = 'other'` with its own `title`, `guest_name`, `guest_email` and `plan`; the Calendar colours it by that `plan` and falls back to the client's company and plan when a meeting has none of its own. `kind = 'qualified'` requires `client_id`.
 - **calendar_settings** — id int4 (single row, id=1), open_time* ('07:00'), close_time* ('21:00'), days* int4[] ({1,2,3,4,5}), slot_minutes* (30), min_notice_h*, days_ahead*, us_zone* ('America/New_York'), owner_zone* ('Asia/Colombo'), meeting_link, updated_at*
 - **calendar_blocks** — starts_at* timestamptz, ends_at* timestamptz, reason
 
@@ -126,7 +127,7 @@ View **v_outreach_summary** — client_id, client_name, campaigns, running, sent
 
 ### Already there, untouched
 - **profiles** — id (= auth user), email, name, role*, approved*, title, loc, init, color, workload, status, phone, emp_no
-- **discovery_bookings** — name*, email*, role, company*, website, city, country, industry, budget, decision_maker, goal, timeline, current_lead_gen, capacity, phone, sells, tried_outbound, plan [pilot|starter|growth|scale], call_at* timestamptz, minutes*, timezone, source, status*, score, calendar_event_id, meet_link, lost_reason, lost_at, day_before_sent_at
+- **discovery_bookings** — name*, email*, role, company*, website, city, country, industry, budget, decision_maker, goal, timeline, current_lead_gen, capacity, phone, sells, tried_outbound, plan [starter|growth|scale] (`pilot` is retired), call_at* timestamptz, minutes*, timezone, source, status*, score, calendar_event_id, meet_link, lost_reason, lost_at, day_before_sent_at
 - **research_briefs** — booking_id* (pk), brief* jsonb, raw jsonb, agents jsonb, writer, ms  *(the research engine stays)*
 - **research_log** — id int8, at*, booking_id, event jsonb
 - **agreements** — booking_id, client_name*, client_email*, client_company*, plan*, term*, monthly_fee*, status*, gmail_message_id, sent_by, error
@@ -149,14 +150,14 @@ English that the screen shows as it is.
    `portal-accept` → lands on portal.html and sees only their channel.
 
 Team (admin only):
-- `close_won(p_booking uuid, p_plan text, p_term text default 'monthly')` → `{client_id, invoice_id, agreement_id, invoice_number}`. `p_plan` in pilot|starter|growth|scale; `p_term` in monthly|3month. Raises 'That call is already a client.' if done twice.
+- `close_won(p_booking uuid, p_plan text, p_term text default 'monthly')` → `{client_id, invoice_id, agreement_id, invoice_number}`. `p_plan` in starter|growth|scale (`pilot` is retired: pipeline.js `plCloseWon` refuses it before the rule is called); `p_term` in monthly|3month. Raises 'That call is already a client.' if done twice.
 - `mark_paid(p_invoice uuid, p_via text default null)` → `{invoice_id, client_id, welcome_sent boolean}`.
 - `biz_get()` → `{legal_name, address, email, wise_details, payoneer_link, kickoff_link, site}` — the business details on agreements, invoices and emails. Stand-ins until set: a value that starts with `[` is not set yet (Settings → "Payments and documents", settings.js).
 - `biz_set(p jsonb)` → the same shape; merges the keys given.
 - `portal_invite_create(p_client uuid, p_email text, p_person uuid default null)` → `text`, the RAW token, shown once. Only its hash is stored; earlier pending invites for that email + client are revoked.
 
 Public (anon, by link token):
-- `doc_get(p_token text)` → an agreement `{kind:'agreement', company, contact_name, status [sent|signed|void], signed_name, signed_at, terms}` or an invoice `{kind:'invoice', number, status [draft|sent|paid|overdue|void], issued_on, due_on, paid_at, currency, lines:[{label, amount}], gross, pilot_credit, amount, bill_to, from, pay:{wise_details, payoneer_link}}`; raises 'This link is not valid.'
+- `doc_get(p_token text)` → an agreement `{kind:'agreement', company, contact_name, status [sent|signed|void], signed_name, signed_at, terms}` or an invoice `{kind:'invoice', number, status [draft|sent|paid|overdue|void], issued_on, due_on, paid_at, currency, lines:[{label, amount}], gross, amount, bill_to, from, pay:{wise_details, payoneer_link}}`; raises 'This link is not valid.'
 - `doc_sign(p_token text, p_name text, p_agent text)` → the agreement as `doc_get`, now signed. Once only.
 - `invite_peek(p_token text)` → `{ok:true, email, company, name}` or `{ok:false, reason: used|expired|invalid}`.
 
@@ -189,7 +190,9 @@ one, change it here and in `tests/vocabulary.test.mjs` in the same commit.**
 - **meetings.status** — `requested, booked, held, no_show, cancelled` (`confirmed` is retired, now `booked`)
 - **channels.kind** — `team, internal, client`
 - **tasks.department** — the eight: `marketing, sales, onboarding, operations, deliverability, finance, client_success, admin`
-- **discovery_bookings.plan** — `pilot, starter, growth, scale`
+- **plans** (plan_prices.plan, clients.plan, meetings.plan, discovery_bookings.plan, close_won `p_plan`) — `starter, growth, scale`
+  (`pilot` is retired. Old rows may still carry it. finance.js holds the one guard, `fnPlanRetired`:
+  every write refuses it with "That plan is retired. Pick Starter, Growth or Scale." and every screen shows "Retired plan".)
 - **discovery_bookings.lost_reason** — `price, timing, no_budget, went_elsewhere, not_a_fit, no_show, ghosted, other`
 
 ## What the website may do

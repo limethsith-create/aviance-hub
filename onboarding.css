@@ -53,7 +53,6 @@
 .ob-inv-no{flex:0 0 96px;font-family:var(--mono);font-size:var(--fs-small);color:var(--muted)}
 .ob-inv-who{flex:1 1 160px;font-size:var(--fs-base)}
 .ob-inv-sum{flex:1 1 220px;display:flex;flex-direction:column;gap:2px;font-variant-numeric:tabular-nums}
-.ob-credit{font-size:var(--fs-min);color:var(--green)}
 .ob-inv-btns{display:flex;flex-wrap:wrap;gap:var(--s2)}
 .ob-inv-btns .btn{min-height:36px}
 

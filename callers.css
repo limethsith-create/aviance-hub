@@ -161,3 +161,5 @@
   .cal-fo{min-width:0}
   .cal-flist{max-height:none}
 }
+/* an invite link is long: smaller than a code, and allowed to wrap anywhere so it never runs off the card */
+.cal-code-url{font-size:var(--fs-small,13px);letter-spacing:0;font-weight:500;overflow-wrap:anywhere;word-break:break-all;user-select:all}

@@ -1,7 +1,6 @@
 /* ===================== AVIANCE OS — Finance =====================
-   The money, and the only part of the hub that does NOT go through the machine
-   the old backend. Everything here talks straight to Supabase through the
-   shell's `sb` client, so it keeps working when the machine is gone.
+   The money. Everything here talks straight to Supabase through the
+   shell's `sb` client.
 
    Schema: supabase/migrations/2026112209*_finance_*.sql
      plan_prices  clients  client_months  qualified_calls  invoices  refunds
@@ -16,8 +15,6 @@
    Every function returns {ok, data, error} and never throws (same shape as
    channels-api.js). `error` is plain words, safe to show a person.
    ================================================================= */
-
-const FN_MONEY_RELOAD_MS = 60000;
 
 /* ---- plumbing ---------------------------------------------------- */
 
@@ -50,10 +47,36 @@ async function fnExposure(){
   return fnRun(() => sb.from('v_exposure').select('*').maybeSingle(), null);
 }
 
+/* ---- the plans on offer ------------------------------------------- */
+
+/* Three plans, and only three. What each one costs lives in plan_prices. */
+const FN_PLAN_WORDS = {starter:'Starter', growth:'Growth', scale:'Scale'};
+const FN_PLANS = Object.keys(FN_PLAN_WORDS);
+function fnPlanOffered(plan){ return FN_PLANS.includes(String(plan == null ? '' : plan).toLowerCase()) }
+
+/* LEGACY GUARD, the only one in the owner's code. Rows written before a plan was
+   withdrawn can still carry its code. That code is never sold, priced or named:
+   every write refuses it with FN_RETIRED_SAYS and every screen shows FN_RETIRED_WORD.
+   clientbook.js, pipeline.js, meetings.js and onboarding.js all ask fnPlanRetired. */
+const FN_RETIRED_PLANS = ['pilot'];
+const FN_RETIRED_WORD = 'Retired plan';
+const FN_RETIRED_SAYS = 'That plan is retired. Pick Starter, Growth or Scale.';
+function fnPlanRetired(plan){ return FN_RETIRED_PLANS.includes(String(plan == null ? '' : plan).toLowerCase()) }
+
+/* "growth" -> "Growth". A retired code reads "Retired plan"; anything else is ''. */
+function fnPlanWord(plan){
+  if (fnPlanRetired(plan)) return FN_RETIRED_WORD;
+  return FN_PLAN_WORDS[String(plan == null ? '' : plan).toLowerCase()] || '';
+}
+
 /* ---- clients and their months ------------------------------------ */
 
+/* The price list: the plans on offer, cheapest first. A row for any other plan
+   code is left out, so nothing can price or pick it. */
 async function fnPlans(){
-  return fnRun(() => sb.from('plan_prices').select('*').order('monthly_fee'), []);
+  const r = await fnRun(() => sb.from('plan_prices').select('*').order('monthly_fee'), []);
+  if (!r.ok) return r;
+  return fnOk((Array.isArray(r.data) ? r.data : []).filter(p => p && fnPlanOffered(p.plan)));
 }
 
 async function fnClients(stage){
@@ -83,7 +106,7 @@ async function fnBehind(){
 
 /* ---- the month clock --------------------------------------------- */
 
-/* Open the next month. Safe to call twice: returns the month that already exists. */
+/* Open the next month: the one after the last month this client has. NOT safe to call twice. */
 async function fnOpenMonth(clientId){
   return fnRun(() => sb.rpc('open_next_month', {p_client: clientId}), null);
 }
@@ -147,10 +170,9 @@ async function fnCalls(clientId, monthId){
 
 /* ---- invoices ----------------------------------------------------- */
 
-/* Raise the invoice for a month. Applies a client's Pilot credit once, where they
-   have one from the retired Pilot. A month
-   that is already invoiced returns its existing invoice; a 3-month term only
-   bills on months 1, 4, 7 and returns null in between. */
+/* Raise the invoice for a month. A month that is already invoiced returns its
+   existing invoice; a 3-month term only bills on months 1, 4, 7 and returns
+   null in between. */
 async function fnRaiseInvoice(monthId, dueDays){
   return fnRun(() => sb.rpc('raise_invoice',
     {p_month: monthId, p_due_days: Number.isFinite(dueDays) ? dueDays : 0}), null);
@@ -207,35 +229,7 @@ async function fnMarkRefundPaid(refundId, via){
     .eq('id', refundId).select().single(), null);
 }
 
-/* ---- adding a client ---------------------------------------------- */
-
-/* Won on the discovery call. Plan decides the number and the fee. The $300 Pilot is
-   retired, so no new client may be put on it; a client already on it keeps their
-   pilot_credit, which the database carries onto their first plan invoice. */
-const FN_RETIRED_PLANS = ['pilot'];
-async function fnAddClient(c){
-  const plans = await fnPlans();
-  if (!plans.ok) return plans;
-  if (FN_RETIRED_PLANS.includes(String((c && c.plan) || ''))) return fnErr('That plan is retired. Pick Starter, Growth or Scale.');
-  const p = (plans.data || []).find(x => x.plan === c.plan);
-  if (!p) return fnErr('That plan does not exist.');
-
-  const fee = c.term === '3month' && p.three_month_fee ? p.three_month_fee : p.monthly_fee;
-  return fnRun(() => sb.from('clients').insert({
-    booking_id:     c.bookingId || null,
-    company:        c.company,
-    contact_name:   c.contactName,
-    contact_email:  c.contactEmail,
-    website:        c.website || null,
-    plan:           c.plan,
-    term:           c.term === '3month' ? '3month' : 'monthly',
-    calls_promised: p.calls_promised,
-    monthly_fee:    fee,
-    pilot_credit:   c.pilotCredit || 0,
-    owner_id:       c.ownerId || null,
-    stage:          'won'
-  }).select().single(), null);
-}
+/* ---- starting a client -------------------------------------------- */
 
 /* Sending started. This sets the anchor the whole month clock hangs off,
    then opens month one. */
@@ -244,6 +238,13 @@ async function fnStartSending(clientId, day1){
   const up = await fnRun(() => sb.from('clients')
     .update({day1_on:d, stage:'live'}).eq('id', clientId).select().single(), null);
   if (!up.ok) return up;
+  /* The database opens month one itself the moment day1_on is first set (clients_first_month), and
+     ties the first invoice to it. Calling open_next_month here as well would open month TWO, because
+     it always opens the month after the last one. So read month one back, and only open it from here
+     if the database did not (an older database without the trigger). */
+  const got = await fnRun(() => sb.from('client_months').select('*')
+    .eq('client_id', clientId).eq('month_no', 1).maybeSingle(), null);
+  if (got.ok && got.data) return fnOk({client: up.data, month: got.data});
   const m = await fnOpenMonth(clientId);
   if (!m.ok) return m;
   return fnOk({client: up.data, month: m.data});

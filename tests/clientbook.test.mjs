@@ -71,7 +71,6 @@ vm.runInThisContext(fs.readFileSync(path.join(root, 'clientbook.js'), 'utf8'), {
 
 /* ───────────── fixtures ───────────── */
 const PLANS = [
-  {plan:'pilot',   label:'Pilot',   calls_promised:2,  monthly_fee:300,  three_month_fee:null, is_recurring:false},
   {plan:'starter', label:'Starter', calls_promised:5,  monthly_fee:1500, three_month_fee:1200, is_recurring:true},
   {plan:'growth',  label:'Growth',  calls_promised:10, monthly_fee:3000, three_month_fee:2400, is_recurring:true},
   {plan:'scale',   label:'Scale',   calls_promised:15, monthly_fee:4500, three_month_fee:3600, is_recurring:true},
@@ -79,7 +78,7 @@ const PLANS = [
 const client = (o={}) => ({
   id:'c1', company:'Stone Roofing', contact_name:'Sam Stone', contact_email:'sam@stone.test',
   website:'stone.test', plan:'growth', term:'monthly', calls_promised:10, monthly_fee:3000,
-  stage:'live', pilot_credit:0, pilot_credit_used:false, owner_id:'u1',
+  stage:'live', owner_id:'u1',
   created_at:'2026-09-01T10:00:00Z', updated_at:'2026-11-01T10:00:00Z', ...o,
 });
 const month = (o={}) => ({
@@ -284,18 +283,31 @@ test('cbAddClient takes the fee and the promise from plan_prices — never from 
   assert.equal(seen('clients','insert')[0].payload.calls_promised, 5);
   tables['plan_prices.select'] = () => ({data:PLANS, error:null});
 
-  /* the retired Pilot is never sold again, even though its price row is still there */
+  /* a plan code from before the three plans is refused in one plain sentence, even when
+     a price row for it is still in the table, and is never turned into another plan */
+  const STALE = PLANS.concat([{plan:'pilot', label:'Old plan', calls_promised:2, monthly_fee:300, three_month_fee:null, is_recurring:false}]);
+  tables['plan_prices.select'] = () => ({data:STALE, error:null});
   calls = [];
   const retired = await cbAddClient({company:'Old Co', contactName:'A B', contactEmail:'a@b.test', plan:'pilot', term:'monthly'});
-  assert.equal(retired.ok, false);
-  assert.equal(retired.error, 'Pick a plan: Starter, Growth and Scale.');
+  assert.deepEqual(retired, {ok:false, data:null, error:'That plan is retired. Pick Starter, Growth or Scale.'});
   assert.equal(seen('clients','insert').length, 0, 'no new client on a retired plan');
+  /* and a plan nobody has heard of is told what the three are */
+  const unknown = await cbAddClient({company:'Old Co', contactName:'A B', contactEmail:'a@b.test', plan:'platinum', term:'monthly'});
+  assert.equal(unknown.error, 'Pick a plan: Starter, Growth and Scale.');
+  assert.equal(seen('clients','insert').length, 0);
+  tables['plan_prices.select'] = () => ({data:PLANS, error:null});
 
-  /* every plan on offer prices itself */
-  for (const plan of PLANS.filter(x => x.plan !== 'pilot')) {
-    calls = [];
-    await cbAddClient({company:'X', contactName:'A B', contactEmail:'a@b.test', plan:plan.plan, term:'monthly'});
-    assert.equal(seen('clients','insert')[0].payload.monthly_fee, plan.monthly_fee, plan.plan);
+  /* every plan on offer prices itself, on both terms, straight from the offer */
+  const OFFER = {starter:[5,1500,1200], growth:[10,3000,2400], scale:[15,4500,3600]};
+  assert.deepEqual(PLANS.map(x => x.plan), Object.keys(OFFER));
+  for (const plan of PLANS) {
+    for (const term of ['monthly','3month']) {
+      calls = [];
+      await cbAddClient({company:'X', contactName:'A B', contactEmail:'a@b.test', plan:plan.plan, term});
+      const pay = seen('clients','insert')[0].payload;
+      assert.deepEqual([pay.calls_promised, pay.monthly_fee], [OFFER[plan.plan][0], OFFER[plan.plan][term === 'monthly' ? 1 : 2]], plan.plan + ' ' + term);
+      assert.ok(!Object.keys(pay).some(k => /credit/i.test(k)), 'no credit of any kind is written');
+    }
   }
 });
 
@@ -769,9 +781,13 @@ test('the add form offers the real plans and their real prices, and saves what w
   tables['profiles.select'] = () => ({data:[], error:null});
 
   const form = await cbOpenAdd();
-  assert.match(text(form), /Growth — 10 calls, \$3,000 a month/);
-  /* the retired Pilot is not on offer, even though plan_prices still carries its row */
-  assert.ok(!/Pilot/.test(text(form)), 'the Pilot is not offered');
+  assert.match(text(form), /Starter — 5 calls a month, \$1,500 a month Growth — 10 calls a month, \$3,000 a month Scale — 15 calls a month, \$4,500 a month/);
+  /* a row for a withdrawn plan left in plan_prices is never offered */
+  tables['plan_prices.select'] = () => ({data:PLANS.concat([{plan:'pilot', label:'Old plan', calls_promised:2, monthly_fee:300}]), error:null});
+  const stale = await cbOpenAdd();
+  assert.equal((stale.match(/<option value="(starter|growth|scale)"/g) || []).length, 3);
+  assert.ok(!/pilot|Old plan|\$300/i.test(stale), 'the withdrawn plan is not offered, named or priced');
+  tables['plan_prices.select'] = () => ({data:PLANS, error:null});
   assert.ok(!/99|hard/.test(form.replace(/\$[\d,]+/g,'')), 'no price typed into the markup');
 
   Object.assign(fields, {cbAddCo:'Harbor Co', cbAddName:'Pat Lee', cbAddEmail:'pat@harbor.test', cbAddSite:'harbor.test', cbAddPlan:'growth', cbAddTerm:'3month'});
@@ -818,6 +834,8 @@ test('the history reads as dated sentences, whoever wrote the line', () => {
     'Moved from Won to Onboarding — Inputs agreed');
   assert.equal(cbEventWords({area:'stage', event:'moved', detail:{to:'won'}}), 'Moved to Won');
   assert.equal(cbEventWords({area:'client', event:'added', detail:{plan:'growth'}}), 'Added as a client on the Growth plan.');
+  assert.equal(cbEventWords({area:'client', event:'added', detail:{plan:'pilot'}}), 'Added as a client.', 'a withdrawn plan is not named in the history');
+  assert.equal(cbEventWords({area:'client', event:'added', detail:{}}), 'Added as a client.', 'no plan on the line: no "the  plan"');
   /* another module's line: its own words when it gave any */
   assert.equal(cbEventWords({area:'invoice', event:'sent', detail:{words:'Invoice AV-2026-11 sent for $3,000.'}}), 'Invoice AV-2026-11 sent for $3,000.');
   assert.equal(cbEventWords({area:'meeting', event:'no_show', detail:{note:'Sam did not join'}}), 'no show — Sam did not join');
@@ -932,6 +950,24 @@ test('cbWaiting: an unsigned agreement and an unpaid first invoice read as "Wait
   const page = cbRenderClients([r], {});
   assert.match(text(page), /Need a person 0/, "waiting on the client (not late) needs nobody");
   assert.match(text(page), /Growth/, 'the plan is capitalised in the list');
+});
+
+test('a client left on a withdrawn plan still opens: "Retired plan", with no old name, term or credit line', async () => {
+  assert.equal(cbPlanWord('pilot'), 'Retired plan');
+  assert.equal(cbPlanLine('pilot', '3month'), 'Retired plan');
+  assert.equal(cbPlanLine('pilot', 'monthly', true), 'Retired plan');
+  assert.deepEqual([cbPlanLine('growth', 'monthly'), cbPlanLine('growth', '3month'), cbPlanLine('growth', 'monthly', true), cbPlanLine('growth', '3month', true)],
+    ['Growth · monthly', 'Growth · 3-month term', 'Growth', 'Growth · 3 months']);
+  /* the old columns may still be on the row the database hands back: they are never shown */
+  tables['clients.select'] = () => ({data:[client({plan:'pilot', calls_promised:2, monthly_fee:300, pilot_credit:300, pilot_credit_used:false})], error:null});
+  await cbLoadOne('c1', true);
+  cbOpenId = 'c1';
+  const h = viewClient(), t = text(h);
+  assert.ok(t.includes('Plan Retired plan'), t);
+  assert.ok(!/pilot/i.test(h) && !/credit/i.test(t) && !/undefined|NaN/.test(t), 'nothing of the old plan is named');
+  await cbLoadAll(true);
+  const list = viewClients();
+  assert.ok(text(list).includes('Retired plan') && !/pilot/i.test(list));
 });
 
 test('the client page: phone, role, agreement, the booking and the channel, Message them and the onboarding checklist', async () => {

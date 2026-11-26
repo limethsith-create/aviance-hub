@@ -74,15 +74,19 @@
     var want = [];
     (ids || []).forEach(function (id) { if (id && !names.has(id) && want.indexOf(id) < 0) want.push(id); });
     if (want.length) {
+      var asked = false;
       try {
         var res = await need(client()).rpc('channel_people', { p_ids: want });
+        asked = !(res && res.error);
         (res && res.data || []).forEach(function (p) {
           if (!p || !p.id) return;
           var isClient = p.kind === 'client' || p.role === 'client';
           names.set(p.id, { name: p.name || (isClient ? 'Client' : 'Someone'), role: p.role || null, kind: isClient ? 'client' : 'team', company: p.company || null });
         });
-      } catch (e) { /* names are nice to have: fall through to the fallback below */ }
-      want.forEach(function (id) { if (!names.has(id)) names.set(id, { name: 'Someone', role: null, kind: null, company: null, guess: true }); });
+      } catch (e) { /* names are nice to have: the thread says "Someone" this once */ }
+      /* Only an answered lookup is remembered. If the lookup itself failed, nothing is cached, so the next
+         message asks again instead of everyone reading as "Someone" until the page is reloaded. */
+      if (asked) want.forEach(function (id) { if (!names.has(id)) names.set(id, { name: 'Someone', role: null, kind: null, company: null, guess: true }); });
     }
     return names;
   }
@@ -145,9 +149,14 @@
     var t = String(text == null ? '' : text).trim();
     if (!t) return [];
     var pattern = '%' + t.replace(/[\\%_]/g, function (c) { return '\\' + c; }) + '%';
-    var rows = check(await need(client()).from(MSG_TABLE).select(MSG_COLS).ilike('body', pattern).is('deleted_at', null).order('created_at', { ascending: false }).limit(50), "Couldn't search the messages.") || [];
+    /* the messages and the channel names are asked for together, not one after the other */
+    var both = await Promise.all([
+      need(client()).from(MSG_TABLE).select(MSG_COLS).ilike('body', pattern).is('deleted_at', null).order('created_at', { ascending: false }).limit(50),
+      listRaw().catch(function () { return []; })   // names of channels are optional
+    ]);
+    var rows = check(both[0], "Couldn't search the messages.") || [];
     var chans = {};
-    try { (await listRaw()).forEach(function (c) { chans[c.id] = c.name; }); } catch (e) { /* names of channels are optional */ }
+    both[1].forEach(function (c) { chans[c.id] = c.name; });
     var mapped = await mapMessages(rows);
     return mapped.map(function (m) { m.channelName = chans[m.channelId] || ''; return m; });
   });

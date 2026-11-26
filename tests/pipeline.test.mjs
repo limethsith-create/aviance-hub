@@ -129,6 +129,8 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="finance.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
+/* finance.js loads first in the browser too: it owns the plans on offer and the one legacy guard */
+vm.runInThisContext(fs.readFileSync(path.join(root, 'finance.js'), 'utf8'), { filename: 'finance.js' });
 const SRC = fs.readFileSync(path.join(root, 'pipeline.js'), 'utf8');
 vm.runInThisContext(SRC, { filename: 'pipeline.js' });
 supa.session = { access_token: 'test-token' };
@@ -138,7 +140,6 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
 const text = (h) => String(h || '').replace(/<[^>]*>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim();
 const BROKEN = /\bundefined\b|\bNaN\b|\[object Object\]|Invalid Date/;
 const PRICES = [
-  { plan: 'pilot', label: 'Pilot', calls_promised: 2, monthly_fee: 300, three_month_fee: null, is_recurring: false },
   { plan: 'starter', label: 'Starter', calls_promised: 5, monthly_fee: 1500, three_month_fee: 1200, is_recurring: true },
   { plan: 'growth', label: 'Growth', calls_promised: 10, monthly_fee: 3000, three_month_fee: 2400, is_recurring: true },
   { plan: 'scale', label: 'Scale', calls_promised: 15, monthly_fee: 4500, three_month_fee: 3600, is_recurring: true },
@@ -159,9 +160,10 @@ test('pipeline.js talks only to Supabase, and never writes a price or a brief of
   assert.ok(!/from\('research_briefs'\)[\s\S]{0,80}?\.(insert|update|upsert|delete)/.test(SRC), 'research_briefs is read only');
   assert.ok(!/from\('research_log'\)[\s\S]{0,80}?\.(insert|update|upsert|delete)/.test(SRC), 'research_log is read only');
   // no price is ever typed into this file
-  const inserted = SRC.slice(SRC.indexOf('async function plWon'), SRC.indexOf('/* ---- the outcome: lost'));
-  assert.ok(/calls_promised: p\.calls_promised/.test(inserted) && /monthly_fee: fee/.test(inserted));
   assert.ok(!/monthly_fee:\s*\d/.test(SRC) && !/calls_promised:\s*\d/.test(SRC), 'no hard-coded price or call count');
+  assert.ok(!/\$\s?(300|1,?500|3,?000|4,?500|1,?200|2,?400|3,?600|7,?200|10,?800)\b/.test(SRC.replace(/\/\*[\s\S]*?\*\//g, '')), 'no plan price is written down in the code');
+  assert.ok(!/from\('clients'\)[\s\S]{0,40}?\.insert/.test(SRC), 'a client is only ever made by close_won');
+  assert.ok(!/pilot|credit/i.test(SRC), 'the withdrawn plan is not named here; finance.js holds the one guard');
   assert.ok(/plResearchNow/.test(SRC) && /\/\/ TODO: trigger the research engine/.test(SRC), 'the research action leaves a marked TODO');
 });
 
@@ -282,201 +284,8 @@ test('a brief whose shape is not what we expect still reads as a brief, and neve
 });
 
 /* ───────────── 5. won ───────────── */
-test('plWon takes calls_promised and monthly_fee from plan_prices, links the booking, and marks it won', async () => {
+test('an empty book: no booking, no funnel, and neither screen breaks', async () => {
   fresh();
-  db.discovery_bookings = [booking({ id: 'b1' })];
-  const r = await plWon('b1', { plan: 'growth', term: 'monthly', owner: 'u1' });
-  assert.equal(r.ok, true, r.error);
-  const c = r.data.client;
-  assert.equal(c.plan, 'growth');
-  assert.equal(c.calls_promised, 10); assert.equal(c.monthly_fee, 3000);
-  assert.equal(c.stage, 'won'); assert.equal(c.booking_id, 'b1'); assert.equal(c.owner_id, 'u1');
-  assert.equal(c.company, 'Acme Roofing'); assert.equal(c.contact_email, 'dana@acme.test');
-  assert.equal(db.discovery_bookings[0].status, 'won', 'the booking is marked won');
-  assert.ok(queries.some((q) => q.table === 'plan_prices' && q.op === 'select'), 'the price was read, not assumed');
-
-  // the price list is the only source: change it and the client changes with it
-  fresh();
-  db.plan_prices = [{ plan: 'growth', calls_promised: 12, monthly_fee: 3300, three_month_fee: 2600 }];
-  db.discovery_bookings = [booking({ id: 'b2' })];
-  const two = await plWon('b2', { plan: 'growth' });
-  assert.equal(two.data.client.calls_promised, 12); assert.equal(two.data.client.monthly_fee, 3300);
-  assert.equal(two.data.client.term, 'monthly');
-  // three months up front is the price list's own three-month fee
-  fresh();
-  db.discovery_bookings = [booking({ id: 'b3' })];
-  const three = await plWon('b3', { plan: 'starter', term: '3month' });
-  assert.equal(three.data.client.monthly_fee, 1200); assert.equal(three.data.client.term, '3month');
-  assert.equal(three.data.client.calls_promised, 5);
-  // a plan that is not in the price list buys nothing
-  fresh();
-  db.discovery_bookings = [booking({ id: 'b4' })];
-  const bad = await plWon('b4', { plan: 'platinum' });
-  assert.equal(bad.ok, false); assert.match(bad.error, /not in the price list/);
-  assert.equal(db.clients.length, 0);
-  assert.equal((await plWon('b4', {})).ok, false, 'no plan, no client');
-  assert.equal((await plWon('', { plan: 'growth' })).ok, false);
-  assert.equal((await plWon('ghost', { plan: 'growth' })).ok, false);
-  assert.equal(db.clients.length, 0);
-});
-
-test('plWon refuses a second client from the same booking, and says so', async () => {
-  fresh();
-  db.discovery_bookings = [booking({ id: 'b1' })];
-  const first = await plWon('b1', { plan: 'starter' });
-  assert.equal(first.ok, true);
-  assert.equal(db.clients.length, 1);
-
-  const again = await plWon('b1', { plan: 'scale' });
-  assert.equal(again.ok, false);
-  assert.equal(again.data, null);
-  assert.match(again.error, /already a client/);
-  assert.ok(again.error.includes('Acme Roofing'), 'it says who');
-  assert.equal(db.clients.length, 1, 'no second client');
-  assert.equal(db.clients[0].plan, 'starter', 'the first one is untouched');
-});
-
-/* ───────────── 6. lost, and nobody came ───────────── */
-test('plLost takes a reason from the fixed list only; a made-up one is refused', async () => {
-  const reasons = ['price', 'timing', 'no_budget', 'went_elsewhere', 'not_a_fit', 'no_show', 'ghosted', 'other'];
-  assert.deepEqual(PL_LOSS_REASONS, reasons, 'the list is the agreed one');
-  for (const reason of reasons) {
-    fresh();
-    db.discovery_bookings = [booking({ id: 'b1' })];
-    const r = await plLost('b1', reason);
-    assert.equal(r.ok, true, reason + ': ' + r.error);
-    assert.equal(db.discovery_bookings[0].status, 'lost');
-    assert.equal(db.discovery_bookings[0].lost_reason, reason);
-    assert.ok(db.discovery_bookings[0].lost_at, 'when we lost them is recorded');
-  }
-  for (const made of ['too_dear', 'PRICE', '', null, undefined, 'other ', 42, {}]) {
-    fresh();
-    db.discovery_bookings = [booking({ id: 'b1' })];
-    const r = await plLost('b1', made);
-    assert.equal(r.ok, false, String(made) + ' should be refused');
-    assert.match(r.error, /Pick why we lost them/);
-    assert.equal(db.discovery_bookings[0].status, 'new', 'nothing was changed');
-  }
-  assert.equal((await plLost('', 'price')).ok, false);
-});
-
-test('plNoShow: a discovery call nobody turned up to', async () => {
-  fresh();
-  db.discovery_bookings = [booking({ id: 'b1' })];
-  const r = await plNoShow('b1');
-  assert.equal(r.ok, true);
-  assert.equal(db.discovery_bookings[0].status, 'no_show');
-  assert.equal((await plNoShow('')).ok, false);
-  failTable = 'discovery_bookings';
-  const bad = await plNoShow('b1');
-  assert.equal(bad.ok, false); assert.equal(bad.error, 'The database said no.');
-});
-
-test('plHeld: the call happened, which is not yet won or lost', async () => {
-  fresh();
-  db.discovery_bookings = [booking({ id: 'b1', status: 'brief_sent' })];
-  const r = await plHeld('b1');
-  assert.equal(r.ok, true);
-  assert.equal(db.discovery_bookings[0].status, 'held');
-  assert.equal(plIsOpen(db.discovery_bookings[0]), true, 'held is still in play');
-  assert.equal(db.clients.length, 0, 'marking a call done never makes a client');
-  assert.equal((await plHeld('')).ok, false);
-  failTable = 'discovery_bookings';
-  const bad = await plHeld('b1');
-  assert.equal(bad.ok, false); assert.equal(bad.error, 'The database said no.');
-});
-
-test('plBookings can be asked for one span of time, which is what the Calendar does', async () => {
-  fresh();
-  db.discovery_bookings = [
-    booking({ id: 'before', call_at: '2026-11-22T23:59:00.000Z' }),
-    booking({ id: 'in1', call_at: '2026-11-23T00:00:00.000Z', status: 'booked' }),
-    booking({ id: 'in2', call_at: '2026-11-29T23:30:00.000Z', status: 'brief_sent' }),
-    booking({ id: 'after', call_at: '2026-11-30T00:00:00.000Z' }),
-  ];
-  db.research_briefs = [{ booking_id: 'in2', brief: { a: 1 } }];
-  const r = await plBookings({ from: '2026-11-23T00:00:00.000Z', to: '2026-11-30T00:00:00.000Z' });
-  assert.equal(r.ok, true);
-  assert.deepEqual(r.data.map((b) => b.id), ['in1', 'in2'], 'the start is in, the end is out');
-  assert.deepEqual(r.data.map((b) => b.has_brief), [false, true]);
-});
-
-test('needs an outcome: the call has gone, the booking is still open, and nobody has said what happened', () => {
-  const now = new Date('2026-11-25T12:00:00Z');
-  const b = (status, call_at) => ({ id: 'x', status, call_at: call_at || '2026-11-25T10:00:00Z' });
-  // the website writes 'booked', the research engine moves it to 'brief_sent' — both are open
-  for (const s of ['booked', 'brief_sent', 'new', 'some_word_nobody_planned_for']) assert.equal(plNeedsOutcome(b(s), now), true, s);
-  // closed, or already answered, is not waiting on anyone
-  for (const s of ['won', 'lost', 'cancelled', 'held', 'no_show', 'contacted', 'agreement_sent']) assert.equal(plNeedsOutcome(b(s), now), false, s);
-  assert.equal(plNeedsOutcome(b('booked', '2026-11-25T11:45:00Z'), now), false, '15 minutes ago is still inside the 20-minute grace');
-  assert.equal(plNeedsOutcome(b('booked', '2026-11-25T11:39:00Z'), now), true, '21 minutes ago is not');
-  assert.equal(plNeedsOutcome(b('booked', '2026-11-26T10:00:00Z'), now), false, 'a call still to come');
-  assert.equal(plNeedsOutcome(null, now), false); assert.equal(plNeedsOutcome({ status: 'booked' }, now), false);
-  // there is no list of "open" words to fall out of step with the database
-  assert.ok(!/s === 'new' \|\| s === 'booked'/.test(SRC));
-});
-
-/* ───────────── 7. the funnel ───────────── */
-test('plFunnel counts rows, and its show rate and win rate add up', async () => {
-  fresh();
-  const mk = (id, o) => booking(Object.assign({ id, created_at: '2026-11-10T09:00:00Z' }, o));
-  db.discovery_bookings = [
-    mk('e1', { status: 'new' }),                                   // booked, not held yet
-    mk('e2', { status: 'no_show' }),                               // booked, nobody came
-    mk('e3', { status: 'held' }),                                  // held, undecided
-    mk('e4', { status: 'contacted' }),                             // held, undecided
-    mk('e5', { status: 'won' }),                                   // held, won
-    mk('e6', { status: 'won' }),                                   // held, won
-    mk('e7', { status: 'won' }),                                   // held, won
-    mk('e8', { status: 'lost', lost_reason: 'price' }),            // held, lost
-    mk('e9', { status: 'lost', lost_reason: 'ghosted' }),          // never held
-    mk('e10', { status: 'new', call_at: null }),                   // an enquiry with no call booked
-  ];
-  const r = await plFunnel({ from: '2026-11-01T00:00:00Z', to: '2026-11-30T00:00:00Z' });
-  assert.equal(r.ok, true);
-  const f = r.data;
-  assert.equal(f.enquiries, 10);
-  assert.equal(f.booked, 9, 'nine of them booked a call');
-  assert.equal(f.held, 6, 'e3 e4 e5 e6 e7 e8 — a no-show and a ghosting are not a held call');
-  assert.equal(f.no_shows, 2);
-  assert.equal(f.won, 3); assert.equal(f.lost, 2); assert.equal(f.decided, 5);
-  assert.equal(f.show_rate, 66.7, '6 of 9');
-  assert.equal(f.win_rate, 60, '3 of 5');
-  assert.deepEqual(f.reasons, { price: 1, ghosted: 1 });
-  // the dates really do filter, and nothing is read from a stored total
-  const narrow = await plFunnel({ from: '2026-11-15T00:00:00Z', to: '2026-11-30T00:00:00Z' });
-  assert.equal(narrow.data.enquiries, 0);
-  assert.ok(queries.every((q) => ['discovery_bookings'].includes(q.table) || q.op === 'select'));
-  assert.ok(!/v_funnel|funnel_totals|\.rpc\(/.test(String(plFunnel)), 'counted from rows');
-  // zero rows: zeros, not a crash and not a divide by zero
-  fresh();
-  const none = await plFunnel({});
-  assert.deepEqual([none.data.enquiries, none.data.booked, none.data.held, none.data.won, none.data.lost, none.data.show_rate, none.data.win_rate], [0, 0, 0, 0, 0, 0, 0]);
-  // one booked call, one held: a clean 100%
-  db.discovery_bookings = [booking({ id: 'x', status: 'won' })];
-  const one = await plFunnel({});
-  assert.equal(one.data.show_rate, 100); assert.equal(one.data.win_rate, 100);
-  // every call held, none decided: an honest 0% win rate on nothing decided
-  fresh();
-  db.discovery_bookings = [booking({ id: 'y', status: 'held' })];
-  const undecided = await plFunnel({});
-  assert.equal(undecided.data.show_rate, 100); assert.equal(undecided.data.win_rate, 0);
-  assert.equal(undecided.data.decided, 0); assert.equal(undecided.data.open, 1);
-});
-
-/* ───────────── 8. the screens ───────────── */
-test('every screen draws with zero rows in the database', async () => {
-  fresh();
-  const first = viewFunnel();
-  assert.ok(first.includes('id="plHost"'), 'a host to repaint');
-  await tick(); await tick();
-  const h = el('plHost').innerHTML;
-  const t = text(h);
-  assert.ok(t.length, 'something is said');
-  assert.ok(!BROKEN.test(t), 'the funnel reads badly: ' + t);
-  assert.ok(!/<(script|img)\b/i.test(h), 'nothing odd in the html');
-  assert.ok(t.includes('0'), 'the funnel shows zeros');
-  // the pure renderers, with nothing at all
   assert.ok(text(renderPlEnquiry(null, {})).includes('Booking not found'));
   const zero = text(renderPlFunnel((await plFunnel({})).data, {}));
   assert.ok(zero.includes('Show rate') && zero.includes('Win rate') && zero.includes('No enquiries in this period'));
@@ -486,8 +295,9 @@ test('every screen draws with zero rows in the database', async () => {
 test('the Bookings list screen is gone; the data layer and the funnel stay', () => {
   for (const gone of ['viewEnquiries', 'viewEnquiry', 'renderPlEnquiries', 'renderPlBookingCard', 'plLoadEnquiries', 'plOpenEnquiry'])
     assert.equal(typeof globalThis[gone], 'undefined', gone + ' should be gone');
-  for (const kept of ['plBookings', 'plBooking', 'plWon', 'plLost', 'plNoShow', 'plHeld', 'plFunnel', 'plBrief', 'plBriefSections', 'plResearchState', 'renderPlBrief', 'renderPlEnquiry', 'viewFunnel'])
+  for (const kept of ['plBookings', 'plBooking', 'plCloseWon', 'plLost', 'plNoShow', 'plHeld', 'plFunnel', 'plBrief', 'plBriefSections', 'plResearchState', 'renderPlBrief', 'renderPlEnquiry', 'viewFunnel'])
     assert.equal(typeof globalThis[kept], 'function', kept);
+  assert.equal(typeof globalThis.plWon, 'undefined', 'the old path that wrote a client row from the browser is gone');
   assert.equal(views.enquiries, undefined); assert.equal(views.enquiry, undefined);
   assert.ok(views.funnel && views.calendar, 'the funnel and the calendar are still routes');
 });
@@ -558,10 +368,10 @@ test('plCloseWon calls close_won with the booking, plan and term, and hands back
   assert.deepEqual(rpcs, [{ name: 'close_won', args: { p_booking: 'b1', p_plan: 'growth', p_term: '3month' } }]);
   assert.equal(queries.length, 0, 'plCloseWon reads and writes no table itself');
 
-  // the retired Pilot is refused before the database is asked
+  // a plan code from before the three plans is refused in one plain sentence, before the
+  // database is asked, and is never quietly turned into another plan
   const retired = await plCloseWon('b2', 'pilot', '3month');
-  assert.equal(retired.ok, false);
-  assert.match(retired.error, /retired/);
+  assert.deepEqual(retired, { ok: false, data: null, error: 'That plan is retired. Pick Starter, Growth or Scale.' });
   assert.equal(rpcs.length, 1, 'nothing was sent for a retired plan');
   await plCloseWon('b3', 'starter');
   assert.equal(rpcs.at(-1).args.p_term, 'monthly');
@@ -586,7 +396,8 @@ test('the won picker: the three plans on offer, the booking\'s plan already chos
   const h = renderPlWonPicker(booking({ id: 'b1', plan: 'growth', email: 'dana@acme.test' }), { open: true });
   const t = text(h);
   for (const w of ['Starter', 'Growth', 'Scale', 'Monthly', '3 months', 'Mark won and send the pack', 'dana@acme.test']) assert.ok(t.includes(w), 'missing: ' + w);
-  assert.ok(!t.includes('Pilot'), 'the retired Pilot is not offered');
+  assert.ok(!/pilot/i.test(h), 'the withdrawn plan is not offered or named');
+  assert.equal((h.match(/<option value="(starter|growth|scale)"/g) || []).length, 3, 'three plans, no more');
   assert.match(h, /<option value="growth" selected>Growth<\/option>/);
   assert.equal((h.match(/ selected/g) || []).length, 1);
   assert.match(h, /<option value="monthly">Monthly<\/option><option value="3month">3 months<\/option>/);
@@ -596,11 +407,11 @@ test('the won picker: the three plans on offer, the booking\'s plan already chos
 
   // closed until Won is clicked, which is how the panel draws it
   assert.match(renderPlWonPicker(booking({ id: 'b1' }), {}), /id="plWonPick"[^>]*display:none/);
-  // a booking that chose the retired Pilot on the website: nothing is preselected,
-  // the Pilot is not an option, and the owner has to pick one of the three
-  const pilot = renderPlWonPicker(booking({ id: 'b1', plan: 'pilot' }), { open: true });
-  assert.ok(!/value="pilot"/.test(pilot) && !/ selected/.test(pilot), 'no Pilot option, nothing preselected');
-  assert.ok(!/id="plTermField"[^>]*display:none/.test(pilot), 'the term is always there');
+  // an old booking that carries the withdrawn plan code: nothing is preselected, it is
+  // not an option, no price is quoted, and the owner has to pick one of the three
+  const old = renderPlWonPicker(booking({ id: 'b1', plan: 'pilot' }), { open: true, prices: PRICES.concat([{ plan: 'pilot', calls_promised: 2, monthly_fee: 300 }]) });
+  assert.ok(!/pilot/i.test(old) && !/ selected/.test(old) && !old.includes('$'), 'no such option, nothing preselected, nothing priced');
+  assert.ok(!/id="plTermField"[^>]*display:none/.test(old), 'the term is always there');
   // no plan on the booking, a plan the list does not know, nothing at all
   for (const b of [booking({ id: 'b1', plan: null }), booking({ id: 'b1', plan: 'platinum' }), {}, null]) {
     const x = renderPlWonPicker(b, { open: true });
@@ -617,13 +428,13 @@ test('Won opens the picker, keeps the term for every plan on offer, and confirmi
   const realToast = globalThis.toast;
   globalThis.toast = (m) => said.push(m);
   try {
-    el('plWonPick').style.display = 'none'; el('plTermField').style.display = 'none';
+    el('plWonPick').style.display = 'none';
     el('plPlan').value = 'starter'; el('plTerm').value = 'monthly';
     assert.equal(plOpenWon(), true);
     assert.equal(el('plWonPick').style.display, '');
-    assert.equal(el('plTermField').style.display, '', 'every plan on offer has a term');
-    el('plPlan').value = 'growth'; plWonTermShow();
-    assert.equal(el('plTermField').style.display, '');
+    assert.equal(el('plWonPrice').textContent, 'Starter · monthly — 5 calls a month, $1,500 a month');
+    el('plPlan').value = 'growth'; el('plTerm').value = '3month'; plWonTermShow();
+    assert.equal(el('plWonPrice').textContent, 'Growth · 3 months — 10 calls a month, $2,400 a month ($7,200 billed up front)');
     assert.equal(plOpenWon(), false, 'clicking Won again tucks it away');
     assert.equal(rpcs.length, 0, 'opening the picker writes nothing');
 
@@ -653,15 +464,27 @@ test('Won opens the picker, keeps the term for every plan on offer, and confirmi
 /* ───────────── dress rehearsal: the Won flow says what it will do ───────────── */
 test('the won picker shows the price beside the button, preselects the recommended plan, warns of a call still to come, and asks once', () => {
   fresh();
-  assert.equal(plPriceWords('growth', 'monthly', PRICES), 'Growth · monthly — 10 calls, $3,000 a month');
-  assert.equal(plPriceWords('pilot', '3month', PRICES), 'Pilot — $300 once, 2 calls');
-  assert.equal(plPriceWords('growth', '3month', PRICES), 'Growth · 3 months — 10 calls a month, $2,400 a month ($7,200 for the quarter)');
+  /* the offer, plan by plan: calls a month, the monthly price, and the 3-month price billed up front */
+  assert.deepEqual(['starter', 'growth', 'scale'].map((p) => plPriceWords(p, 'monthly', PRICES)), [
+    'Starter · monthly — 5 calls a month, $1,500 a month',
+    'Growth · monthly — 10 calls a month, $3,000 a month',
+    'Scale · monthly — 15 calls a month, $4,500 a month']);
+  assert.deepEqual(['starter', 'growth', 'scale'].map((p) => plPriceWords(p, '3month', PRICES)), [
+    'Starter · 3 months — 5 calls a month, $1,200 a month ($3,600 billed up front)',
+    'Growth · 3 months — 10 calls a month, $2,400 a month ($7,200 billed up front)',
+    'Scale · 3 months — 15 calls a month, $3,600 a month ($10,800 billed up front)']);
+  assert.deepEqual(['starter', 'growth', 'scale'].map((p) => plFirstInvoice(p, '3month', PRICES)), [3600, 7200, 10800]);
+  /* the withdrawn plan code has no price to say, even if a row for it is still in the list */
+  const stale = PRICES.concat([{ plan: 'pilot', label: 'Old plan', calls_promised: 2, monthly_fee: 300, three_month_fee: null }]);
+  assert.equal(plPriceWords('pilot', '3month', stale), '');
+  assert.equal(plFirstInvoice('pilot', 'monthly', stale), null);
+  assert.equal(plWonConfirmWords({ email: 'r@b.test' }, 'pilot', '3month', stale), 'Send the agreement and the invoice to r@b.test?', 'no amount is ever quoted for it');
+  assert.equal(plPlanWord('pilot'), 'Retired plan');
   assert.equal(plPriceWords('growth', 'monthly', []), '', 'no price list, no made-up price');
   assert.equal(plWonConfirmWords({ email: 'riley@brightline.test' }, 'growth', 'monthly', PRICES), 'Send the agreement and the $3,000 invoice to riley@brightline.test?');
   assert.equal(plWonConfirmWords({ email: 'r@b.test' }, 'growth', '3month', PRICES), 'Send the agreement and the $7,200 invoice to r@b.test?');
-  assert.equal(plWonConfirmWords({ email: 'r@b.test' }, 'pilot', '3month', PRICES), 'Send the agreement and the $300 invoice to r@b.test?');
   assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'Growth — budget fits and they want consistent volume' } }), 'growth');
-  // the brief may still name the retired Pilot: nothing is preselected then
+  // an old brief may still name the withdrawn plan: nothing is preselected then
   assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'The $300 Pilot' } }), '');
   assert.equal(plRecommendedPlan({ brief: { recommended_plan: 'whatever' } }), '');
   assert.equal(plRecommendedPlan(null), '');
@@ -671,7 +494,13 @@ test('the won picker shows the price beside the button, preselects the recommend
   const t = text(h);
   assert.match(h, /<option value="growth" selected>Growth<\/option>/, 'the recommended plan is picked when they chose none');
   assert.ok(t.includes('The brief recommends Growth.'));
-  assert.ok(t.includes('Growth · monthly — 10 calls, $3,000 a month'));
+  /* a booking whose own plan cannot be used (withdrawn, or unknown) falls back to the brief's, and says so */
+  for (const stale of ['pilot', 'platinum']) {
+    const fb = renderPlWonPicker(Object.assign({}, future, { plan: stale }), { open: true, prices: PRICES, recommended: 'growth' });
+    assert.ok(/value="growth" selected/.test(fb) && text(fb).includes('The brief recommends Growth.'), stale + ': the preselection is explained');
+  }
+  assert.ok(!text(renderPlWonPicker(Object.assign({}, future, { plan: 'scale' }), { open: true, prices: PRICES, recommended: 'growth' })).includes('The brief recommends'), 'their own choice needs no note');
+  assert.ok(t.includes('Growth · monthly — 10 calls a month, $3,000 a month'));
   assert.ok(t.includes('This call hasn’t happened yet.'));
   assert.ok(h.includes('onclick="plWonAsk(&quot;b1&quot;)"'), 'the first button only asks');
   assert.match(h, /id="plWonConfirm"[^>]*display:none/);
@@ -687,7 +516,7 @@ test('the won picker shows the price beside the button, preselects the recommend
   assert.equal(plWonAsk('b1').data.asked, 'Send the agreement and the $7,200 invoice to r@b.test?');
   assert.equal(el('plWonConfirm').style.display, ''); assert.equal(el('plWonAskRow').style.display, 'none');
   plWonTermShow();
-  assert.equal(el('plWonPrice').textContent, 'Growth · 3 months — 10 calls a month, $2,400 a month ($7,200 for the quarter)');
+  assert.equal(el('plWonPrice').textContent, 'Growth · 3 months — 10 calls a month, $2,400 a month ($7,200 billed up front)');
   assert.equal(el('plWonConfirm').style.display, 'none', 'changing the plan or term goes back a step');
   assert.equal(rpcs.length, 0, 'nothing was sent by asking');
 });
@@ -699,6 +528,11 @@ test('after Won: the invoice line and Open client; capitalised plan; the country
   assert.ok(t.includes('Acme Roofing is on Growth, 10 calls a month'));
   assert.ok(t.includes('Invoice AV-2026-1001 · $3,000 sent'));
   assert.ok(h.includes('plOpenClient(&quot;cl-1&quot;)') && t.includes('Open client →'));
+  assert.ok(text(renderPlOutcome(Object.assign({}, d, { client: Object.assign({}, d.client, { term: '3month' }) }))).includes('Acme Roofing is on Growth · 3 months, 10 calls a month'));
+  /* a client from before the three plans: shown safely, with none of the old name, price or call count */
+  const oldOne = renderPlOutcome(Object.assign({}, d, { client: { id: 'cl-0', company: 'Old Co', plan: 'pilot', calls_promised: 2, term: 'monthly' }, invoice: null }));
+  assert.ok(text(oldOne).includes('Old Co is on a retired plan. This booking cannot make a second client.'), text(oldOne));
+  assert.ok(!/pilot/i.test(oldOne) && !/2 calls/.test(oldOne) && !BROKEN.test(text(oldOne)));
   assert.ok(!renderPlEnquiry(Object.assign({}, d, { booking: Object.assign({}, d.booking, { meet_link: 'https://meet.google.com/x' }) }), {}).includes('Join the call'), 'no Join for a won call');
   assert.equal(plCountry('us'), 'US'); assert.equal(plCountry('Sri Lanka'), 'Sri Lanka'); assert.equal(plCountry(null), '');
   assert.ok(plAnswers({ city: 'Austin', country: 'us' }).some((a) => a.value === 'Austin, US'));

@@ -36,7 +36,7 @@ const journey = (o={}) => ({client_id:'c1', company:'Stone', paid_on:'2026-11-18
   ], ...o});
 const text = (h) => String(h).replace(/<[^>]*>/g,' ').replace(/&amp;/g,'&').replace(/&#?[a-z0-9]+;/gi,' ').replace(/\s+/g,' ').trim();
 
-beforeEach(() => { pct.open = false; pct.drawn = ''; pct.at = 0; pct.data = null; pct.busy = false; box.innerHTML = ''; });
+beforeEach(() => { pct.open = false; pct.drawn = ''; pct.at = 0; pct.data = null; pct.busy = false; pct.who = "|"; box.innerHTML = ""; });
 
 test('it hooks into the portal: one mount and the toggle action', () => {
   assert.ok(PC.mounts.includes(pctMount));
@@ -115,4 +115,25 @@ test('mount: a failed answer leaves the box empty and does not throw', async () 
   await pctMount({rpc: async () => { throw new Error('boom') }});
   await pctMount(null);
   assert.equal(box.innerHTML, '');
+});
+
+/* ───────────── perfection pass ───────────── */
+test('a different client signing in on the same browser is never shown the last client\'s plan', async () => {
+  const home = (id) => ({person:{id}, channel:{id:'ch-'+id}});
+  const j = journey(); j.steps[0].title = 'Kickoff for CLIENT A';
+  await pctMount({home: home('a'), rpc: async () => ({ok:true, data:j, error:''})});
+  assert.match(box.innerHTML, /CLIENT A/);
+  /* A signs out, B signs in at once (well inside the 30 seconds): B's plan is slow to arrive */
+  let finish;
+  const slow = new Promise((r) => { finish = r });
+  const p = pctMount({home: home('b'), rpc: () => slow});
+  assert.equal(box.innerHTML, '', 'nothing of A is on B\'s screen while B\'s plan loads');
+  finish({ok:true, data:journey(), error:''});
+  await p;
+  assert.match(box.innerHTML, /Your launch plan/);
+  assert.doesNotMatch(box.innerHTML, /CLIENT A/);
+  /* and the same client still is not asked twice within 30s */
+  let n = 0;
+  await pctMount({home: home('b'), rpc: async () => { n++; return {ok:true, data:journey(), error:''} }});
+  assert.equal(n, 0);
 });

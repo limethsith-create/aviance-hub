@@ -7,7 +7,8 @@
    What this page may touch is decided by the database, not by this file:
    it only ever calls the three staff-callable functions (`staff_me`,
    `staff_send`, `staff_seen`) and the private `chat-files` bucket under her
-   own channel's folder. It never reads a table directly, so a mistake here
+   own channel's folder. A one-click invite link is swapped for a
+   session through Supabase's own sign-in and nothing else. It never reads a table directly, so a mistake here
    cannot widen what she can see.
 
    Rules this file keeps (house style):
@@ -74,6 +75,14 @@ function tmcCodeProblem(code){
   if (!c) return 'Enter your access code.';
   if (c.length < 6) return 'That code looks too short. Check it with ' + TMC_OWNER + '.';
   return '';
+}
+
+/* What stays in the box after `sent` has gone: whatever she typed after it while it was on its way.
+   Without this, a fast typist loses the start of her next message when the first one lands. */
+function tmcLeftover(sent, now){
+  const a = String(sent == null ? '' : sent), b = String(now == null ? '' : now);
+  if (b === a) return '';
+  return b.indexOf(a) === 0 ? b.slice(a.length).replace(/^\s+/, '') : b;
 }
 
 /* She types a code with spaces or in lower case; Supabase wants it exactly. */
@@ -444,6 +453,82 @@ async function tmcSession(){
     return tmcOk(res && res.data ? res.data.session : null);
   } catch (e) { return tmcErr(e); }
 }
+
+/* ---- the one-click invite link --------------------------------------
+   The owner sends her one URL. The link checker (the caller-link function)
+   makes sure the invite is real and unexpired, then bounces her here with a
+   one-time sign-in token in the fragment: #k=...
+
+   A fragment, never a query string, because fragments are not sent to any
+   server or written into server logs. We swap it for a session and wipe it
+   from the address bar in the same breath. The token is good for one use. */
+/* ---8<--- link-claim: the only place this page touches the address bar ---8<---
+   It reads the fragment, swaps it for a session and clears it. Nothing here
+   navigates anywhere. The test in tests/team-page.test.mjs cuts this block
+   out and then checks that the rest of the file cannot read or change where
+   the browser is. */
+const TMC_LINK_BAD = 'That link has already been used or has run out. Ask ' + TMC_OWNER + ' for a new one, or sign in with your code below.';
+const TMC_LINK_SAY = {
+  expired: 'That link has run out. Ask ' + TMC_OWNER + ' for a new one, or sign in with your code below.',
+  bad: TMC_LINK_BAD,
+  team: 'That link cannot be used for this page. Ask ' + TMC_OWNER + ' for a new one.',
+  email: 'There is no email address on your record yet. Ask ' + TMC_OWNER + ' to add one.',
+  again: 'Something went wrong opening that link. Try it once more, or sign in with your code below.',
+  method: TMC_LINK_BAD,
+};
+
+function tmcLinkToken(){
+  if (typeof window === 'undefined' || !window.location) return '';
+  const m = /[#&]k=([^&]+)/.exec(String(window.location.hash || ''));
+  if (!m) return '';
+  let t = m[1];
+  try { t = decodeURIComponent(m[1]); } catch (e) { /* take it as it came */ }
+  return String(t).trim();
+}
+
+/* Take the token out of the address bar without reloading the page. */
+function tmcForgetLinkToken(){
+  if (typeof window === 'undefined' || !window.location) return;
+  try {
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', String(window.location.pathname || '/') + String(window.location.search || ''));
+    } else {
+      window.location.hash = '';
+    }
+  } catch (e) { /* it stays in the bar; the token is one-use, so little is lost */ }
+}
+
+/* What the link checker said when it would not let her in. */
+function tmcLinkProblem(){
+  if (typeof window === 'undefined' || !window.location) return '';
+  const m = /[?&]link=([^&]+)/.exec(String(window.location.search || ''));
+  if (!m) return '';
+  let why = m[1];
+  try { why = decodeURIComponent(m[1]); } catch (e) { /* as it came */ }
+  return Object.prototype.hasOwnProperty.call(TMC_LINK_SAY, String(why)) ? TMC_LINK_SAY[String(why)] : TMC_LINK_BAD;
+}
+
+/* Returns a session when the link worked, null when there was no link at all. */
+async function tmcClaimLink(){
+  const token = tmcLinkToken();
+  if (!token) return tmcOk(null);
+  tmcForgetLinkToken();
+  const sb = tmcClient();
+  if (!sb) return tmcErr(TMC_OFFLINE);
+  if (!sb.auth || typeof sb.auth.verifyOtp !== 'function') return tmcErr(TMC_LINK_BAD);
+  try {
+    const res = await sb.auth.verifyOtp({ token_hash: token, type: 'email' });
+    if (res && res.error) {
+      const r = tmcErr(res.error);
+      if (!r.offline) r.error = TMC_LINK_BAD;      /* whatever the reason, the fix is the same: a new link or her code */
+      return r;
+    }
+    const session = (res && res.data && res.data.session) || null;
+    if (!session) return tmcErr(TMC_LINK_BAD);
+    return tmcOk(session);
+  } catch (e) { const r = tmcErr(e); if (!r.offline) r.error = TMC_LINK_BAD; return r; }
+}
+/* ---8<--- end link-claim ---8<--- */
 
 /* Tells the page when the login ends (he revoked it, or it ran out). */
 function tmcOnSignedOut(fn){

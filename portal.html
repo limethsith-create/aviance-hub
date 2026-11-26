@@ -181,13 +181,16 @@
   async function send(){
     if (sendBusy || !home) return;
     const el = document.getElementById('pcText'), err = document.getElementById('pcSendErr'), btn = document.getElementById('pcSendBtn');
-    const text = pcCleanBody(el.value);
+    const raw = el.value;
+    const text = pcCleanBody(raw);
     if (!text) { el.focus(); return; }
     sendBusy = true; btn.disabled = true; err.textContent = '';
     const r = await pcSend(home.channel.id, home.person.id, text);
     sendBusy = false; btn.disabled = false;
     if (!r.ok) { err.textContent = 'That message did not go. ' + r.error; el.focus(); return; }
-    el.value = ''; grow(el); count(el); el.focus();
+    /* keep whatever was typed while the message was on its way */
+    el.value = el.value === raw ? '' : (el.value.indexOf(raw) === 0 ? el.value.slice(raw.length).replace(/^\s+/, '') : el.value);
+    grow(el); count(el); el.focus();
     if (r.data && r.data.id != null && !rows.some(function(m){ return m.id === r.data.id; })) rows = rows.concat([r.data]);
     draw(true);
     refresh(true);

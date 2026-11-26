@@ -170,3 +170,5 @@
 .chv-msg.from-client .chv-col{box-shadow:inset 2px 0 0 #1F5FBF;padding-left:8px}
 .chv-kind.client{color:#1F5FBF;font-weight:600}
 .chv-row.client .chv-hash{color:#1F5FBF;font-weight:700}
+/* a message that is still on its way: drawn at once, a shade lighter until the database has it */
+.chv-msg.sending .chv-text{opacity:.55}

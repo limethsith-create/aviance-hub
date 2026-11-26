@@ -2,10 +2,8 @@
    clientbook.js — Aviance OS · the clients and the journey
    ----------------------------------------------------------------------------
    Who every client is, what stage they are at, and what needs a person today.
-   This replaces the old Clients screen. It talks to Supabase only,
-   through the shell's `sb` client. There is no other server to call and no
-   other server to call it from. Nothing here sends email, buys an inbox, warms
-   anything up or touches an API key — those features are gone.
+   It talks to Supabase only, through the shell's `sb` client. Nothing here
+   sends email.
 
    Tables it owns:   clients  client_profiles  client_stage_history  client_events
    Views it reads:   v_month_standing  v_exposure          (finance.js owns the money)
@@ -35,8 +33,6 @@ const CB_STAGES = [
   ['ended',      'Ended',      'They have left. Kept for the record.',                0],
 ];
 const CB_STAGE_KEYS = CB_STAGES.map(s => s[0]);
-/* The stages whose clients are still work: Ended is history, Enquiry is not ours yet. */
-const CB_LIVE_STAGES = ['booked', 'won', 'onboarding', 'live', 'at_risk'];
 /* A month with this many days or fewer to go, still short, is late enough to shout about. */
 const CB_WARN_DAYS = 10;
 const CB_RELOAD_MS = 60000;
@@ -124,16 +120,22 @@ function cbList(items){
 }
 function cbPossessive(n){ const s = cbTrim(n); return s ? s + (/s$/i.test(s) ? "'" : "'s") : 'Their' }
 
-/* The $300 Pilot is retired: it is never offered when a client is added, but a client
-   already on it keeps their label and their price, so it stays in the words below. */
-const CB_RETIRED_PLANS = ['pilot'];
-/* The plan_prices rows a new client may be put on. */
-function cbOffered(list){ return (Array.isArray(list) ? list : []).filter(p => p && CB_RETIRED_PLANS.indexOf(cbTrim(p.plan)) < 0) }
+/* The plan_prices rows a new client may be put on: the three plans on offer
+   (finance.js), whatever else the table still holds. */
+function cbOffered(list){ return (Array.isArray(list) ? list : []).filter(p => p && fnPlanOffered(cbTrim(p.plan))) }
 
-/* "growth" → "Growth": a plan's name, as the owner reads it. */
+/* "growth" → "Growth": a plan's name, as the owner reads it. A plan code that is no
+   longer on offer reads "Retired plan" (finance.js), so an old client still shows. */
 function cbPlanWord(p){
   const k = cbTrim(p).toLowerCase();
-  return ({pilot:'Pilot', starter:'Starter', growth:'Growth', scale:'Scale'})[k] || (k ? k.charAt(0).toUpperCase() + k.slice(1) : '');
+  return fnPlanWord(k) || (k ? k.charAt(0).toUpperCase() + k.slice(1) : '');
+}
+/* "Growth · monthly" for the client's page, "Growth · 3 months" for a row. A retired
+   plan has no term worth saying. */
+function cbPlanLine(plan, term, short){
+  const w = cbPlanWord(plan);
+  if (!w || fnPlanRetired(plan)) return w;
+  return w + (term === '3month' ? (short ? ' · 3 months' : ' · 3-month term') : (short ? '' : ' · monthly'));
 }
 
 function cbStageIndex(key){ return CB_STAGE_KEYS.indexOf(String(key || '')) }
@@ -371,7 +373,8 @@ async function cbAddClient(fields){
 
   const plans = await cbPlans();
   if (!plans.ok) return plans;
-  /* only the plans still on offer: a retired one (the Pilot) can be read, never sold */
+  /* a plan code from before the three plans: refused in words, never mapped to another */
+  if (fnPlanRetired(cbTrim(f.plan))) return cbErr(FN_RETIRED_SAYS);
   const list = cbOffered(plans.data);
   const p = list.find(x => x && x.plan === cbTrim(f.plan));
   if (!p) return cbErr(list.length
@@ -393,7 +396,6 @@ async function cbAddClient(fields){
     term:           term,
     calls_promised: p.calls_promised,
     monthly_fee:    fee,
-    pilot_credit:   cbInt(f.pilotCredit),
     owner_id:       cbTrim(f.ownerId) || null,
     stage:          stage,
     notes:          cbTrim(f.notes).slice(0,2000) || null
@@ -413,26 +415,6 @@ async function cbAddClient(fields){
     });
   }
   return cbOk(made.data);
-}
-
-/* Save their ICP and inputs, and sign them off. Onboarding cannot finish without this. */
-async function cbSaveProfile(clientId, patch){
-  if (!clientId) return cbErr('Which client is this about?');
-  const p = patch || {};
-  const row = {client_id: clientId, updated_at: new Date().toISOString()};
-  ['sells_what','sells_to','calendar_url','sender_name','sender_title','time_zone'].forEach(k => {
-    if (p[k] !== undefined) row[k] = cbTrim(p[k]) || null;
-  });
-  if (p.icp !== undefined) row.icp = p.icp && typeof p.icp === 'object' ? p.icp : {};
-  if (p.never_email !== undefined) row.never_email = p.never_email && typeof p.never_email === 'object' ? p.never_email : {};
-  if (p.slots_per_week !== undefined) row.slots_per_week = cbInt(p.slots_per_week);
-  if (p.signedOff !== undefined) row.signed_off_at = p.signedOff ? new Date().toISOString() : null;
-
-  const r = await cbRun(() => sb.from('client_profiles').upsert(row, {onConflict:'client_id'}).select().single(), null);
-  if (!r.ok) return r;
-  if (p.signedOff !== undefined) await cbEvent(clientId, 'onboarding', p.signedOff ? 'inputs_signed_off' : 'inputs_reopened', {});
-  else await cbEvent(clientId, 'onboarding', 'inputs_changed', {fields: Object.keys(row).filter(k => k !== 'client_id' && k !== 'updated_at')});
-  return r;
 }
 
 /* ===================== 5. WHAT THE NUMBERS MEAN ===================== */
@@ -611,7 +593,7 @@ function cbRenderRow(r){
       (r.person ? '<span class="cb-person">' + cbE(r.person) + '</span>' : '') +
       (r.owner ? '<span class="cb-owner" title="' + cbE('Looked after by ' + r.owner) + '">' + cbE(r.owner) + '</span>' : '<span class="cb-owner none">Nobody</span>') +
     '</span>' +
-    '<span class="cb-row-plan">' + (r.plan ? cbPill(cbPlanWord(r.plan) + (r.term === '3month' ? ' · 3 months' : ''), 'grey') : '<span class="cb-dim">No plan</span>') + '</span>' +
+    '<span class="cb-row-plan">' + (r.plan ? cbPill(cbPlanLine(r.plan, r.term, true), 'grey') : '<span class="cb-dim">No plan</span>') + '</span>' +
     '<span class="cb-row-stage">' + cbStagePill(r.stage) + '</span>' +
     '<span class="cb-row-calls">' + cbCallsCell(r) + '</span>' +
     '<span class="cb-row-days">' + cbDaysCell(r) + '</span>' +
@@ -720,7 +702,7 @@ function cbRenderFacts(r, x){
       pair('Phone', cbTrim(per.phone) ? cbE(per.phone) : '') +
       pair('Their role', cbTrim(per.role) ? cbE(per.role) : '') +
       pair('Website', url ? '<a href="' + cbE(url) + '" target="_blank" rel="noopener noreferrer">' + cbE(site) + '</a>' : '') +
-      pair('Plan', r.plan ? cbE(cbPlanWord(r.plan) + (r.term === '3month' ? ' · 3-month term' : ' · monthly')) : '') +
+      pair('Plan', r.plan ? cbE(cbPlanLine(r.plan, r.term)) : '') +
       pair('Agreement', o.agreement ? cbE(cbAgreementWords(o.agreement)) : '') +
       pair('Their booking', c.booking_id ? link('Open the discovery call', 'cbOpenBooking(' + cbAttr(c.booking_id) + ')') : '') +
       pair('Their channel', o.channel && o.channel.id ? link('Open ' + (cbTrim(o.channel.name) || 'their channel'), 'cbOpenChannel(' + cbAttr(o.channel.id) + ')') : '') +
@@ -729,7 +711,6 @@ function cbRenderFacts(r, x){
       pair('Looked after by', r.owner ? cbE(r.owner) : '') +
       pair('Inputs signed off', c.inputs_complete_on ? cbE(cbDate(c.inputs_complete_on)) : '') +
       pair('Day one', c.day1_on ? cbE(cbDate(c.day1_on)) : '') +
-      (cbInt(c.pilot_credit) ? pair('Pilot credit', cbE(cbUsd(c.pilot_credit) + (c.pilot_credit_used ? ' · used' : ' · not used yet'))) : '') +
       (c.ended_on ? pair('Ended', cbE(cbDate(c.ended_on) + (c.end_reason ? ' · ' + c.end_reason : ''))) : '') +
     '</div>' +
     (cbTrim(c.notes) ? '<p class="cb-notes">' + cbE(c.notes) + '</p>' : '') +
@@ -807,7 +788,7 @@ function cbEventWords(ev){
     return 'Moved ' + (d.from ? 'from ' + cbStageLabel(d.from) + ' ' : '') + 'to ' + cbStageLabel(d.to) +
       (cbTrim(d.note) ? ' — ' + cbTrim(d.note) : '');
   }
-  if (area === 'client' && name === 'added') return 'Added as a client on the ' + cbPlanWord(d.plan) + ' plan.';
+  if (area === 'client' && name === 'added') return fnPlanRetired(d.plan) || !cbPlanWord(d.plan) ? 'Added as a client.' : 'Added as a client on the ' + cbPlanWord(d.plan) + ' plan.';
   /* Anything another module wrote: its own words if it gave any, else the name. */
   if (cbTrim(d.words)) return cbTrim(d.words);
   if (cbTrim(d.note))  return name.replace(/_/g,' ') + ' — ' + cbTrim(d.note);
@@ -1231,7 +1212,7 @@ async function cbOpenAdd(bookingId){
   const plans = await cbPlans();
   const list = cbOffered(plans.ok ? plans.data : []);
   const opts = list.map(p => '<option value="' + cbE(p.plan) + '">' +
-    cbE((cbTrim(p.label) || cbTrim(p.plan)) + ' — ' + cbInt(p.calls_promised) + ' calls, ' + cbUsd(p.monthly_fee) + ' a month') + '</option>').join('');
+    cbE((cbTrim(p.label) || cbTrim(p.plan)) + ' — ' + cbInt(p.calls_promised) + ' calls a month, ' + cbUsd(p.monthly_fee) + ' a month') + '</option>').join('');
   const html = '<div class="cb-add"><h3>Add a client</h3>' +
     (!list.length ? cbErrNote('There are no plans set up, so there is no price to put on a client yet.') : '') +
     '<input type="hidden" id="cbAddBooking" value="' + cbE(bookingId || '') + '">' +
@@ -1262,10 +1243,4 @@ async function cbSaveAdd(){
   await cbLoadAll(true);
   cbPaint();
   return r;
-}
-
-/* The shell calls this after every render. Keeps the lists warm, nothing else. */
-function cbOnRender(view){
-  if (view === 'clients' || view === 'needsYou') cbLoadAll().then(() => {});
-  else if (view === 'client' && cbOpenId) cbLoadOne(cbOpenId).then(() => {});
 }

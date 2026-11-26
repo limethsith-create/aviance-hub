@@ -25,7 +25,7 @@ const PAGE: Record<string, string> = { caller: "/callers", employee: "/team" };
 
 /** Every exit from this function is a redirect: she clicked a link, she should land on a page. */
 function go(to: string): Response {
-  return new Response(null, { status: 302, headers: { Location: to, "Cache-Control": "no-store" } });
+  return new Response(null, { status: 302, headers: { Location: to, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
 }
 const bad = (why: string, page = "/callers") => go(`${SITE}${page}?link=${encodeURIComponent(why)}`);
 
@@ -37,7 +37,7 @@ function randomSecret(): string {
 }
 
 Deno.serve(async (req) => {
-  if (req.method !== "GET" && req.method !== "HEAD") return bad("method");
+  if (req.method !== "GET") return bad("method");   // a HEAD (a link preview) must not make a login or count as a use
 
   const token = (new URL(req.url).searchParams.get("k") ?? "").trim();
   // 24 random bytes in base64 is 32 characters; be generous but refuse junk.
@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
   const claim = await sb.rpc("staff_link_claim", { p_token: token });
   if (claim.error) return bad("again");
   const who = claim.data as
-    | { ok: boolean; error?: string; id?: string; email?: string; kind?: string; name?: string }
+    | { ok: boolean; error?: string; id?: string; email?: string; kind?: string; name?: string; user_id?: string | null }
     | null;
   if (!who?.ok) return bad(who?.error === "expired" ? "expired" : "bad");
 
@@ -61,6 +61,14 @@ Deno.serve(async (req) => {
   const ex = found.data as { id: string; team: boolean } | null;
   if (ex?.team) return bad("team", page);
 
+  if (ex?.id && "user_id" in who && who.user_id !== ex.id) {
+    // A login for this address already exists but her staff row is not tied to it (it was made
+    // another way, or her row was added again). Without this she lands signed in and is told to
+    // "sign in again" for ever. An empty code hash means "no access code issued".
+    const linked = await sb.rpc("staff_link_auth", { p_staff: who.id, p_user: ex.id, p_code_hash: "" });
+    if (linked.error) return bad("again", page);
+  }
+
   if (!ex?.id) {
     const mk = await sb.auth.admin.createUser({
       email,
@@ -69,10 +77,11 @@ Deno.serve(async (req) => {
       user_metadata: { name: String(who.name ?? "") },
     });
     if (mk.error || !mk.data?.user) return bad("again", page);
-    // Tie the new login to her row, her channel seat and her role. The code hash is
-    // random so that no access code works until the owner actually issues one.
+    // Tie the new login to her row, her channel seat and her role. No access code has been issued,
+    // so the code hash stays empty: the Callers screen reads it to say whether she has a code, and a
+    // random value here made it say "yes" when she had none. (Her password is the random one above.)
     const linked = await sb.rpc("staff_link_auth", {
-      p_staff: who.id, p_user: mk.data.user.id, p_code_hash: randomSecret(),
+      p_staff: who.id, p_user: mk.data.user.id, p_code_hash: "",
     });
     if (linked.error) {
       await sb.auth.admin.deleteUser(mk.data.user.id).catch(() => {});

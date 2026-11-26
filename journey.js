@@ -40,25 +40,37 @@ const JY_RELOAD_MS = 60000;
 const JY_DRAFT_SAID = 'Draft ready — approve it in Replies';
 
 const jy = { board: null, at: 0, err: '', tried: false, one: {}, oneErr: {}, els: {}, busy: {}, late: 0, timer: null };
+/* Sign-out: drop what was loaded and stop asking. */
 function jyForget(){
+  if (jy.timer) { try { clearInterval(jy.timer); } catch (e) {} jy.timer = null; }
   jy.board = null; jy.at = 0; jy.err = ''; jy.tried = false; jy.one = {}; jy.oneErr = {}; jy.els = {}; jy.busy = {}; jy.late = 0;
 }
 
 /* ===================== 1. PLUMBING ===================== */
 
 function jyOk(data){ return {ok:true, data, error:''} }
+/* What went wrong, in words the owner can act on. Our own database messages (a plpgsql `raise exception`)
+   are already plain and pass through; the plumbing's own wording never reaches the screen. */
+function jyPlain(m){
+  const s = String(m || '');
+  if (/failed to fetch|networkerror|network request|load failed|fetch failed|socket/i.test(s)) return "Can't reach Aviance right now. Check your connection and try again.";
+  if (/jwt|not authenticated|invalid.*session|session.*expired/i.test(s)) return 'Your sign-in has run out. Please sign in again.';
+  if (/permission denied|row-level security|not authorized|unauthorized/i.test(s)) return "You don't have access to do that.";
+  if (/could not find the function|does not exist|schema cache|PGRST\d+/i.test(s)) return "That part of Aviance isn't switched on yet. Try again once the database update is applied.";
+  return s;
+}
 function jyErr(e){
   const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
+  return {ok:false, data:null, error:jyPlain(m)};
 }
 function jyWrap(res, whenEmpty){
-  if (!res) return jyErr('No answer from the database.');
+  if (!res) return jyErr('No answer from Aviance. Try again.');
   if (res.error) return jyErr(res.error);
   return jyOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
 }
 async function jyRpc(name, args, whenEmpty){
   try {
-    if (typeof sb === 'undefined' || !sb || typeof sb.rpc !== 'function') return jyErr('Not connected to the database.');
+    if (typeof sb === 'undefined' || !sb || typeof sb.rpc !== 'function') return jyErr('Aviance is not ready yet. Please reload the page.');
     return jyWrap(await sb.rpc(name, args || {}), whenEmpty);
   } catch (e) { return jyErr(e); }
 }
@@ -249,7 +261,7 @@ function jyRenderBoardRow(j, today){
     '<div class="jy-row-who">' +
       '<button type="button" class="jy-co" onclick="jyOpen(' + jyAttr(n.client_id) + ')">' + jyE(n.company) + '</button>' +
       '<span class="jy-sub">' + jyE((n.paid_on ? 'Paid ' + jyDate(n.paid_on) : 'Not paid yet') + ' · ' + n.done + ' of ' + (n.total || 6) + ' done') +
-        (n.late ? ' · <b class="jy-late-t">' + jyE(n.late + (n.late === 1 ? ' late' : ' late')) + '</b>' : '') + '</span>' +
+        (n.late ? ' · <b class="jy-late-t">' + jyE(n.late + ' late') + '</b>' : '') + '</span>' +
     '</div>' +
     '<ol class="jy-pills" aria-label="' + jyE('Steps for ' + n.company) + '">' +
       (n.steps.length ? n.steps.map(s => jyPill(s, {next: nx && s.step === nx.step})).join('') : '<li class="jy-none">Not started</li>') +
@@ -351,7 +363,7 @@ function jyRenderApprovalForm(clientId, kind){
   return '<div class="jy-form"><h3>' + jyE(copy ? 'Send copy for approval' : 'Send ICP + angles for approval') + '</h3>' +
     '<p class="jy-muted">This queues a draft in Replies. Nothing reaches them until you send it there.</p>' +
     '<label class="cb-lab" for="jyApTitle">Title they see</label>' +
-    '<input id="jyApTitle" class="cb-in" type="text" maxlength="200" value="' + jyE(copy ? 'Your campaign copy' : 'Your ICP + 3 angles') + '">' +
+    '<input id="jyApTitle" class="cb-in" type="text" maxlength="200" value="' + jyE(copy ? 'Your campaign copy' : 'Your target profile + 3 angles') + '">' +
     '<label class="cb-lab" for="jyApBody">What they are approving</label>' +
     '<textarea id="jyApBody" class="cb-in jy-ta" rows="10" maxlength="8000" placeholder="' + jyE(copy ? 'The emails, in order' : 'Who we target, and the angles we will test') + '"></textarea>' +
     '<div class="cb-err" id="jyApErr" role="alert"></div>' +
@@ -419,7 +431,14 @@ function jyLateCount(){
     jyLoadBoard(true).then(() => {});
   }
   if (!isClient && !jy.timer && typeof setInterval === 'function' && typeof document !== 'undefined' && document && document.getElementById) {
-    jy.timer = setInterval(() => { if (typeof document === 'undefined' || !document.hidden) jyLoadBoard(true).then(jyPaint); }, JY_RELOAD_MS);
+    jy.timer = setInterval(() => {
+      /* signed out: stop asking, and keep nothing of the last login */
+      let signedIn = true;
+      try { signedIn = typeof authUser === 'undefined' || !!authUser; } catch (e) { signedIn = true; }
+      if (!signedIn) { jyForget(); return; }
+      if (typeof document === 'undefined' || !document.hidden) jyLoadBoard(true).then(jyPaint);
+    }, JY_RELOAD_MS);
+    if (jy.timer && jy.timer.unref) jy.timer.unref();
   }
   return jy.late || 0;
 }
@@ -499,8 +518,14 @@ async function jyMark(clientId, step, status){
   await jyAfter(clientId, r.data);
   return r;
 }
+/* One press, one request: a double click on these must never queue two drafts for the client. */
+async function jyOnce(key, fn){
+  if (jy.busy[key]) return jyErr('Still working on it.');
+  jy.busy[key] = true;
+  try { return await fn(); } finally { delete jy.busy[key]; }
+}
 async function jyStart(clientId){
-  const r = await jyStartJourney(clientId);
+  const r = await jyOnce('start:' + clientId, () => jyStartJourney(clientId));
   if (!r.ok) { jySay(r.error); return r; }
   jySay('Tracker started');
   await jyAfter(clientId);
@@ -513,7 +538,7 @@ function jyAskMove(clientId, step){
 }
 async function jyDoMove(clientId, step){
   jyShowErr('jyMvErr', '');
-  const r = await jyMoveStep(clientId, step, jyField('jyMvDay'));
+  const r = await jyOnce('move:' + clientId + ':' + step, () => jyMoveStep(clientId, step, jyField('jyMvDay')));
   if (!r.ok) { jyShowErr('jyMvErr', r.error); return r; }
   jyClose();
   jySay(jyStepTitle(step) + ' moved to ' + jyDate(jyField('jyMvDay')));
@@ -534,7 +559,7 @@ async function jyOffer(clientId, kind){
 function jyAskApproval(clientId, kind){ return jyModal(jyRenderApprovalForm(clientId, kind)); }
 async function jySendApproval(clientId, kind){
   jyShowErr('jyApErr', '');
-  const r = await jyApprovalRequest(clientId, kind, jyField('jyApTitle'), jyField('jyApBody'));
+  const r = await jyOnce('approval:' + clientId + ':' + kind, () => jyApprovalRequest(clientId, kind, jyField('jyApTitle'), jyField('jyApBody')));
   if (!r.ok) { jyShowErr('jyApErr', r.error); return r; }
   jyClose();
   jyDraftToast();
@@ -545,7 +570,7 @@ async function jySendTesting(clientId){
   jyShowErr('jyTdErr', '');
   const sent = jyField('jyTdSent'), rep = jyField('jyTdReplies');
   if (sent === '' || rep === '') { jyShowErr('jyTdErr', 'Fill in sent and replies.'); return jyErr('Fill in sent and replies.'); }
-  const r = await jyTestingDay(clientId, Number(sent), Number(rep), jyField('jyTdLead'), jyField('jyTdNote'));
+  const r = await jyOnce('testing:' + clientId, () => jyTestingDay(clientId, Number(sent), Number(rep), jyField('jyTdLead'), jyField('jyTdNote')));
   if (!r.ok) { jyShowErr('jyTdErr', r.error); return r; }
   jyClose();
   jyDraftToast();

@@ -147,13 +147,12 @@
     const days = tmcGroupMessages(me, new Date());
     const want = tmcPathsToSign(days, urls, 12);
     if (!want.length) return;
-    let got = false;
-    for (const p of want) {
-      const r = await tmcFileUrl(p);
-      if (!me) return;
-      if (r.ok) { urls[p] = r.data; got = true; }
-    }
-    if (got) draw(false);
+    /* all at once: twelve pictures signed one after another kept the newest ones blank for seconds */
+    const got = await Promise.all(want.map(function(p){ return tmcFileUrl(p); }));
+    if (!me) return;
+    let any = false;
+    got.forEach(function(r, i){ if (r.ok) { urls[want[i]] = r.data; any = true; } });
+    if (any) draw(false);
   }
 
   /* ---- sending ---- */
@@ -179,7 +178,8 @@
     if (sendBusy || !me) return;
     const el = document.getElementById('tmcText');
     const err = document.getElementById('tmcSendErr'), btn = document.getElementById('tmcSendBtn');
-    const text = tmcCleanBody(el.value);
+    const raw = el.value;
+    const text = tmcCleanBody(raw);
     if (!text && !pending) { el.focus(); return; }
     sendBusy = true; btn.disabled = true; err.textContent = '';
     let attachment = '';
@@ -196,7 +196,7 @@
     const r = await tmcSend(text, attachment);
     sendBusy = false; btn.disabled = false; btn.textContent = 'Send';
     if (!r.ok) { err.textContent = r.error; el.focus(); return; }
-    el.value = ''; grow(el); count(el);
+    el.value = tmcLeftover(raw, el.value); grow(el); count(el);   /* keep what she typed while it was sending */
     pending = null; drawPending();
     const f = document.getElementById('tmcFile');
     if (f) f.value = '';
@@ -256,9 +256,14 @@
 
   async function boot(){
     root.innerHTML = tmcLoadingHtml();
+    /* A one-click invite link arrives as #k=... — spend it before anything else. */
+    const link = await tmcClaimLink();
+    if (link.ok && link.data) { enter(link.data.user && link.data.user.email); return; }
     const s = await tmcSession();
     if (!s.ok) { root.innerHTML = tmcOfflineHtml(); return; }
-    if (s.data) enter(s.data.user && s.data.user.email); else showSignIn('');
+    if (s.data) { enter(s.data.user && s.data.user.email); return; }
+    /* No session: say why the link did not work, if it was a link that brought her here. */
+    showSignIn((link.ok ? '' : link.error) || tmcLinkProblem() || '');
   }
   tmcOnSignedOut(function(){ if (me) showSignIn('You have been signed out. Sign in again to carry on.'); });
   boot();
