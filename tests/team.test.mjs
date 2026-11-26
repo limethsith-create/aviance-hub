@@ -12,13 +12,15 @@ import { fileURLToPath } from 'node:url';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ───────────── a fake Supabase: rows in memory, same chain as the real one ───────────── */
-const db = { profiles: [], tasks: [], clients: [] };
+const db = { profiles: [], tasks: [], clients: [], prospect_grants: [] };
 const seen = [];                       // every query, for the assertions that care
 let nextId = 1;
 
 const same = (a, b) => String(a) === String(b);
 const keep = (rows, filters) => rows.filter(r => filters.every(([kind, col, v]) =>
-  kind === 'in' ? v.some(x => same(r[col], x)) : same(r[col], v)));
+  kind === 'in' ? v.some(x => same(r[col], x))
+  : kind === 'is' ? (v === null ? (r[col] === null || r[col] === undefined) : r[col] === v)
+  : same(r[col], v)));
 
 function run(st) {
   seen.push(st);
@@ -42,6 +44,7 @@ function builder(table) {
     select() { return b }, insert(r) { st.op = 'insert'; st.payload = r; return b },
     update(r) { st.op = 'update'; st.payload = r; return b }, delete() { st.op = 'delete'; return b },
     eq(c, v) { st.filters.push(['eq', c, v]); return b }, in(c, v) { st.filters.push(['in', c, v]); return b },
+    is(c, v) { st.filters.push(['is', c, v]); return b },
     order(c, o) { st.orders.push([c, o]); return b },
     single() { st.single = true; return b }, maybeSingle() { st.single = true; return b },
     then(res, rej) { return run(st).then(res, rej) },
@@ -68,13 +71,14 @@ vm.runInContext(SRC + `
 ;globalThis.api={tmPeople,tmPending,tmApprove,tmSetRole,tmSetStatus,tmSetPersonStatus,
   tmTasks,tmAddTask,tmAssign,tmSetTaskStatus,tmSetDue,tmSetPriority,tmMine,tmByDepartment,
   tmWorkload,viewTeam,viewWork,viewMyWork,tmRenderTeam,tmRenderWork,tmRenderMine,
-  tmLoadTeam,tmLoadWork,tmLoadMine,tmForget,tmSortMine,tmS,TM_DEPARTMENTS,TM_ROLES};`,
+  tmLoadTeam,tmLoadWork,tmLoadMine,tmForget,tmSortMine,tmS,TM_DEPARTMENTS,TM_ROLES,
+  tmLoadClients,tmLoadGrants,tmRenderGrants,tmRoleLabel};`,
   sandbox, { filename: 'team.js' });
 const A = sandbox.api;
 
 const TODAY = '2026-11-22';
 const reset = (over) => {
-  db.profiles = []; db.tasks = []; db.clients = []; seen.length = 0; toasts.length = 0; nextId = 1;
+  db.profiles = []; db.tasks = []; db.clients = []; db.prospect_grants = []; seen.length = 0; toasts.length = 0; nextId = 1;
   A.tmForget();
   sandbox.authUser = Object.assign({ id: 'u1', uid: 'u1', name: 'Owner', role: 'admin', email: 'owner@aviance.store' }, over || {});
 };
@@ -90,7 +94,7 @@ test('an admin cannot take away their own admin role', async () => {
   reset();
   db.profiles.push(person({ id: 'u1', name: 'Owner', role: 'admin' }));
 
-  for (const role of ['staff', 'viewer']) {
+  for (const role of ['employee']) {
     const r = await A.tmSetRole('u1', role);
     assert.equal(r.ok, false);
     assert.equal(r.data, null);
@@ -100,14 +104,14 @@ test('an admin cannot take away their own admin role', async () => {
   }
   // the same change to somebody else is fine, and so is staying admin
   db.profiles.push(person({ id: 'u2', name: 'Nimal', role: 'admin' }));
-  assert.equal((await A.tmSetRole('u2', 'staff')).ok, true);
-  assert.equal(db.profiles[1].role, 'staff');
+  assert.equal((await A.tmSetRole('u2', 'employee')).ok, true);
+  assert.equal(db.profiles[1].role, 'employee');
   assert.equal((await A.tmSetRole('u1', 'admin')).ok, true);
   assert.equal(db.profiles[0].role, 'admin');
   // and a role that does not exist is refused in plain words
   const bad = await A.tmSetRole('u2', 'owner');
   assert.equal(bad.ok, false);
-  assert.match(bad.error, /admin, staff or viewer/);
+  assert.match(bad.error, /admin or team member/);
 });
 
 /* ───────────── the screen that matters on day one ───────────── */
@@ -955,4 +959,96 @@ test('"Seen" appears once he has read her: the read time comes inside owner', ()
   const unread = JSON.parse(JSON.stringify(STAFF_ME_REPLY));
   unread.owner.last_read_at = at(24, 9, 1);
   assert.equal(C.tmcSeenLine(unread, new Date(2026, 10, 24, 12, 0)), 'Sent');
+});
+
+
+/* ───────────── the rehearsal pass ───────────── */
+
+/* A read that failed and a list that is empty look identical once the rows are
+   gone. The grant card used to tell the owner "There are no clients to give out
+   yet" when the truth was that his client list had not loaded — a confident zero
+   where it meant "I could not load this". */
+test('a client list that FAILED to load never reads as "no clients"', async () => {
+  reset();
+  db.profiles.push(person({ id: 'u1', name: 'Owner', role: 'admin' }));
+  db.profiles.push(person({ id: 'u2', name: 'Jane' }));
+  db.clients.push({ id: 'c1', company: 'RH5 Stone Roofing' });
+
+  const real = sandbox.sb.from;
+  sandbox.sb.from = (table) => table === 'clients'
+    ? { select: () => ({ then: (res) => Promise.resolve({ data: null, error: { message: 'Failed to fetch' } }).then(res) }) }
+    : real(table);
+  try { await A.tmLoadGrants(); } finally { sandbox.sb.from = real; }
+
+  const html = A.tmRenderGrants();
+  assert.ok(!/no clients to give out/i.test(html), 'it does not claim he has no clients');
+  assert.match(html, /did not load/i, 'it says the list did not load');
+  assert.match(html, /connection/i, 'and what to do about it');
+  assert.ok(!/\{|\[object|error|PGRST/i.test(html.replace(/<[^>]*>/g, '')), 'no database wording reaches the screen');
+
+  /* and with the read working, the empty case still reads as empty */
+  reset();
+  db.profiles.push(person({ id: 'u1', name: 'Owner', role: 'admin' }));
+  db.profiles.push(person({ id: 'u2', name: 'Jane' }));
+  await A.tmLoadGrants();
+  const ok = A.tmRenderGrants();
+  assert.match(ok, /no clients to give out yet/i);
+  assert.ok(!/did not load/i.test(ok));
+});
+
+test('the grant card asks for its three lists together, not one after the other', async () => {
+  reset();
+  db.profiles.push(person({ id: 'u1', name: 'Owner', role: 'admin' }));
+  db.clients.push({ id: 'c1', company: 'RH5 Stone Roofing' });
+  let open = 0, mostAtOnce = 0;
+  const real = sandbox.sb.from;
+  sandbox.sb.from = (table) => {
+    const b = real(table), realThen = b.then;
+    b.then = (res, rej) => { open++; mostAtOnce = Math.max(mostAtOnce, open);
+      return realThen.call(b, (v) => { open--; return res(v) }, rej) };
+    return b;
+  };
+  try { await A.tmLoadGrants(); } finally { sandbox.sb.from = real; }
+  assert.ok(mostAtOnce >= 3, 'clients, people and grants are in flight together (saw ' + mostAtOnce + ')');
+});
+
+/* The Team screen can only hand out a role the DATABASE will let into the hub.
+   `is_approved()` is `role in ('admin','employee') and approved`, and the shell
+   agrees with it. The screen used to offer 'staff' and 'viewer' instead:
+   'staff' is forced to approved = false by the live staff_never_approved()
+   trigger, so picking it quietly took the person's access away, and a 'viewer'
+   is approved but still fails is_approved(), so the shell posted them off to the
+   client portal, which holds nothing for a team member. Either way, you could
+   not give a real employee the hub. This pins the two lists together. */
+test('every role the Team screen offers is one the hub actually lets in', () => {
+  const roles = Array.from(A.TM_ROLES).sort();
+  assert.deepEqual(roles, ['admin', 'employee'], 'the screen hands out exactly the two is_approved() accepts');
+  for (const dead of ['staff', 'viewer']) {
+    assert.ok(roles.indexOf(dead) < 0, `'${dead}' cannot be handed out: the database will not let that person in`);
+  }
+
+  /* the shell's own gate, read from the file, so this breaks if one side moves */
+  const shell = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const gate = /prof\.approved&&\(([^)]*)\)/.exec(shell);
+  assert.ok(gate, "index.html still decides who is team with prof.approved && (...)");
+  const admitted = (gate[1].match(/'([a-z_]+)'/g) || []).map((x) => x.replace(/'/g, '')).sort();
+  assert.deepEqual(admitted, roles, 'the shell admits exactly the roles the Team screen hands out');
+
+  /* a role that is still on somebody's row reads as words, not as a raw code */
+  for (const old of ['staff', 'viewer']) {
+    const label = A.tmRoleLabel ? A.tmRoleLabel(old) : null;
+    if (label) assert.ok(/no hub|contractor/i.test(label), `'${old}' says plainly that it has no hub: ${label}`);
+  }
+});
+
+test('a role the database would refuse is refused here first, in plain words', async () => {
+  reset();
+  db.profiles.push(person({ id: 'u1', name: 'Owner', role: 'admin' }));
+  db.profiles.push(person({ id: 'u2', name: 'Jane', role: 'employee' }));
+  for (const bad of ['staff', 'viewer', 'owner', '']) {
+    const r = await A.tmSetRole('u2', bad);
+    assert.equal(r.ok, false, `'${bad}' is refused`);
+    assert.match(r.error, /admin or team member|Pick the person/i);
+    assert.equal(db.profiles[1].role, 'employee', 'and nothing was written');
+  }
 });

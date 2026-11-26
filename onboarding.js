@@ -209,16 +209,33 @@ async function obChecklist(clientId){
     typeof fnInvoices === 'function' ? fnInvoices(clientId) : obOk([]),
   ]);
   if (!ag.ok) return ag;
-  const agree = ag.data || {row:null, state:'none'};
   if (!pr.ok) return pr;
   if (!pe.ok) return pe;
   if (!me.ok) return me;
   if (!inv.ok) return obErr(inv.error);
 
-  const profile  = pr.data || null;
-  const people   = pe.data || [];
-  const meetings = me.data || [];
-  const invoices = inv.data || [];
+  return obOk(obChecklistFrom(client, {
+    agreement: (ag.data || {row:null, state:'none'}).row,
+    profile:   pr.data || null,
+    people:    pe.data || [],
+    meetings:  me.data || [],
+    invoices:  inv.data || [],
+  }));
+}
+
+/* The seven items, worked out from rows that are already in hand. PURE: it reads
+   nothing, so the one screen that needs a dozen clients' checklists can read the
+   rows for all of them in six queries and then call this once per client (see
+   obChecklistMany), instead of six queries EACH. */
+function obChecklistFrom(client, rows){
+  const r = rows || {};
+  const agreeRow = r.agreement || null;
+  const agree    = {row: agreeRow, state: obAgreementState(agreeRow)};
+  const profile  = r.profile || null;
+  const people   = Array.isArray(r.people) ? r.people : [];
+  const meetings = Array.isArray(r.meetings) ? r.meetings : [];
+  const invoices = Array.isArray(r.invoices) ? r.invoices : [];
+  const clientId = client && client.id;
   const paid     = invoices.filter(i => obText(i.status).toLowerCase() === 'paid');
   const primary  = people.find(p => p && p.is_primary) || null;
   const held     = meetings.find(obMeetingHeld) || null;
@@ -246,13 +263,73 @@ async function obChecklist(clientId){
      why: meetings.length ? 'Their strategy call is booked but has not been held yet.' : 'Their strategy call has not been booked yet.'},
   ];
   const left  = items.filter(i => !i.done);
-  return obOk({
+  return {
     clientId, client, profile, people, meetings, invoices,
     agreement: agree.row, agreementState: agree.state,
     items, ready: left.length === 0, missing: left,
     blocking: left.length ? left[0].why : '',
     blockingLabel: left.length ? left[0].label : '',
-  });
+  };
+}
+
+/* Everyone's checklist at once. The screen that lists the clients being
+   onboarded used to call obChecklist per client — seven queries each, so a dozen
+   clients was eighty-four round trips. This reads the same rows for the whole
+   list in six, and works each checklist out from them in memory. The order of
+   `clients` is the order of the answer, and a client with no rows comes back
+   with the same "nothing yet" items obChecklist would have given.
+
+   The agreements table has no client_id, so it is matched the same two ways as
+   obAgreement does for one client: on the booking first, then on the email. */
+async function obChecklistMany(clients){
+  const list = (Array.isArray(clients) ? clients : []).filter(c => c && c.id != null);
+  if (!list.length) return obOk([]);
+  const ids      = list.map(c => c.id);
+  const bookings = list.map(c => c.booking_id).filter(Boolean);
+  const emails   = list.map(c => obText(c.contact_email)).filter(Boolean);
+
+  const [agByBooking, agByEmail, prs, pes, mes, invs] = await Promise.all([
+    bookings.length ? obRun(() => sb.from('agreements').select('*')
+      .in('booking_id', bookings).order('created_at', {ascending:false}), []) : obOk([]),
+    emails.length ? obRun(() => sb.from('agreements').select('*')
+      .in('client_email', emails).order('created_at', {ascending:false}), []) : obOk([]),
+    obRun(() => sb.from('client_profiles').select('*').in('client_id', ids), []),
+    obRun(() => sb.from('client_people').select('id,client_id,full_name,email,is_primary,created_at')
+      .in('client_id', ids).order('created_at'), []),
+    obRun(() => sb.from('meetings').select('id,client_id,kind,starts_at,status,held_at')
+      .in('client_id', ids).eq('kind', 'strategy').order('starts_at', {ascending:false}), []),
+    typeof fnInvoices === 'function' ? fnInvoices() : obOk([]),
+  ]);
+  /* The same order of reporting as obChecklist: the agreement first. */
+  for (const r of [agByBooking, agByEmail, prs, pes, mes]) if (!r.ok) return r;
+  if (!invs.ok) return obErr(invs.error);
+
+  const byBooking = {}, byEmail = {};
+  (agByBooking.data || []).forEach(a => { const k = String(a.booking_id);
+    if (a && a.booking_id != null && !(k in byBooking)) byBooking[k] = a });
+  (agByEmail.data || []).forEach(a => { const k = String(a.client_email);
+    if (a && a.client_email && !(k in byEmail)) byEmail[k] = a });
+  const group = (rows, key) => {
+    const out = {};
+    (rows || []).forEach(r => { if (!r) return; const k = String(r[key || 'client_id']);
+      (out[k] || (out[k] = [])).push(r) });
+    return out;
+  };
+  const profiles = group(prs.data), peopleBy = group(pes.data),
+        meetsBy  = group(mes.data), invBy = group(invs.data);
+
+  return obOk(list.map(c => {
+    const k = String(c.id);
+    const agreement = (c.booking_id && byBooking[String(c.booking_id)])
+      || (obText(c.contact_email) && byEmail[obText(c.contact_email)]) || null;
+    return obChecklistFrom(c, {
+      agreement,
+      profile:  (profiles[k] || [])[0] || null,
+      people:   peopleBy[k] || [],
+      meetings: meetsBy[k] || [],
+      invoices: invBy[k] || [],
+    });
+  }));
 }
 
 /* True only when every item is done. */
@@ -402,6 +479,9 @@ const ob = {list:null, listErr:'', one:null, oneErr:'', billing:null, billErr:''
 
 function obHost(){ return typeof document !== 'undefined' && document.getElementById ? document.getElementById('obHost') : null }
 function obPaint(html){ const h = obHost(); if (h) h.innerHTML = html; return Boolean(h) }
+/* The shell's own icon set, or nothing. DESIGN.md has six motifs and a bare
+   typographic ring is not one of them. */
+function obIcon(name){ return (typeof I !== 'undefined' && I && I[name]) || '' }
 function obSay(msg){ if (typeof toast === 'function') toast(msg) }
 
 /* Everyone still being onboarded, each with their checklist. */
@@ -410,16 +490,14 @@ async function obLoadList(){
   const cs = typeof fnClients === 'function' ? await fnClients() : obOk([]);
   if (!cs.ok) { ob.listErr = cs.error; ob.list = []; return obErr(cs.error); }
   const mine = (cs.data || []).filter(c => c && OB_STAGES.includes(obText(c.stage)));
-  /* One checklist per client, all at once. Read one after the other this was
-     a dozen clients' worth of waiting stacked end to end; the order of the
-     list is still the order of `mine`. */
-  const checks = await Promise.all(mine.map(c => obChecklist(c.id)));
-  const out = mine.map((c, i) => {
-    const ck = checks[i];
-    return ck.ok ? ck.data : {clientId:c.id, client:c, items:[], ready:false, missing:[], blocking:ck.error, blockingLabel:''};
-  });
-  ob.list = out;
-  return obOk(out);
+  /* Every checklist out of ONE set of reads. This used to be obChecklist per
+     client — seven queries each, fired together but still seven times the
+     clients' worth of traffic, and it grew with every client won. Now it is six
+     queries whatever the length of the list. */
+  const all = await obChecklistMany(mine);
+  if (!all.ok) { ob.listErr = all.error; ob.list = []; return all; }
+  ob.list = all.data;
+  return all;
 }
 async function obLoadOne(clientId){
   ob.oneErr = ''; ob.clientId = clientId;
@@ -466,7 +544,7 @@ function obRenderOnboarding(){
   if (ob.list === null) return `<div class="card ob-card"><b>Reading the list…</b><p class="muted">One moment.</p></div>`;
   if (!ob.list.length) {
     return typeof emptyState === 'function'
-      ? emptyState('○', 'Nobody is being onboarded', 'A client appears here the moment a deal is won, and leaves it on day one.', '', '')
+      ? emptyState(obIcon('steps'), 'Nobody is being onboarded', 'A client appears here the moment a deal is won, and leaves it on day one.', '', '')
       : `<div class="card ob-card"><b>Nobody is being onboarded</b><p class="muted">A client appears here the moment a deal is won.</p></div>`;
   }
   const head = `<div class="ob-row ob-row-head"><span class="ob-who">Client</span>${obTickRow(OB_ITEMS.map(i => ({key:i[0], label:i[1], done:false, detail:''})))}<span class="ob-block">What is blocking them</span></div>`;
@@ -560,7 +638,7 @@ function obInvoiceRow(inv){
   if (st !== 'paid' && st !== 'void' && st !== 'cancelled') btns.push(`<button type="button" class="btn ghost" onclick="obMarkPaidGo(${obArg(inv.id)})">Mark paid</button>`);
   return `<li class="ob-inv"><span class="ob-inv-no">${obEsc(obText(inv.number) || '—')}</span>
     <span class="ob-inv-who">${obEsc(obText(inv.client_name || inv.company) || '')}</span>
-    <span class="ob-inv-sum"><b>${obEsc(obMoney(inv.amount))}</b>${inv.due_on ? ` <span class="muted">· due ${obEsc(obText(inv.due_on))}${Number(inv.days_overdue) > 0 ? ` · ${obEsc(String(inv.days_overdue))} days late` : ''}</span>` : ''}</span>
+    <span class="ob-inv-sum"><b class="fig">${obEsc(obMoney(inv.amount))}</b>${inv.due_on ? ` <span class="muted">· due ${obEsc(obText(inv.due_on))}${Number(inv.days_overdue) > 0 ? ` · ${obEsc(String(inv.days_overdue))} days late` : ''}</span>` : ''}</span>
     <span class="pill ${st === 'paid' ? 'green' : st === 'sent' ? 'amber' : 'grey'}">${obEsc(obText(inv.status) || 'draft')}</span>
     <span class="ob-inv-btns">${btns.join('')}</span></li>`;
 }
@@ -586,7 +664,7 @@ function obRenderBilling(){
 
   if (!toRaise.length && !open.length) {
     return typeof emptyState === 'function'
-      ? emptyState('○', 'No invoices need you', 'Invoices to raise, send and chase show up here as months open.', '', '')
+      ? emptyState(obIcon('money'), 'No invoices need you', 'Invoices to raise, send and chase show up here as months open.', '', '')
       : `<div class="card ob-card"><b>No invoices need you</b><p class="muted">Invoices show up here as months open.</p></div>`;
   }
   return `<div class="section-head"><h3>To raise</h3>${toRaise.length ? `<span class="count">${toRaise.length}</span>` : ''}</div>

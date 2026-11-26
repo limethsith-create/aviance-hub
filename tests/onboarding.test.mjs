@@ -16,7 +16,11 @@ const src = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 let db, writes, reads, rpcs, toasts, painted;
 let nextId = 1;
 
-function matches(row, filters) { return filters.every(([k, v]) => String(row[k]) === String(v)); }
+function matches(row, filters) {
+  return filters.every(([k, v, kind]) => kind === 'in'
+    ? (v || []).some((x) => String(row[k]) === String(x))
+    : String(row[k]) === String(v));
+}
 function builder(table) {
   const q = { table, op: 'select', cols: '*', payload: null, opts: null, filters: [], single: false, maybe: false, lim: null };
   const settle = () => {
@@ -54,6 +58,7 @@ function builder(table) {
     update(p) { q.op = 'update'; q.payload = p; return b; },
     upsert(p, o) { q.op = 'upsert'; q.payload = p; q.opts = o; return b; },
     eq(k, v) { q.filters.push([k, v]); return b; },
+    in(k, v) { q.filters.push([k, v, 'in']); return b; },
     order() { return b; },
     limit(n) { q.lim = n; return b; },
     single() { q.single = true; return b; },
@@ -453,10 +458,11 @@ test('the onboarding list costs the same number of reads per client however many
   const forOne = await one(1);
   const forFour = await one(4);
   const perClient = (forFour - forOne) / 3;
-  assert.ok(perClient <= 6, 'at most six reads per client on the list, got ' + perClient);
-  /* The client row is read once per client, not twice — the regression that
-     doubled this screen's cost. */
-  assert.equal(readsOf('clients').length, 5, 'one list read plus one row per client');
+  /* The list used to cost one set of reads PER CLIENT. It now costs one set for
+     the whole list, so a client added to it costs nothing extra. */
+  assert.equal(perClient, 0, 'a client added to the list costs no extra read, got ' + perClient);
+  assert.ok(forFour <= 7, 'the whole list is read in at most seven queries, got ' + forFour);
+  assert.equal(readsOf('clients').length, 1, 'the clients are read once for the whole list');
 });
 
 test('the strategy-call read asks for the four columns that answer "was it held?"', async () => {

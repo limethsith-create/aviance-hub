@@ -178,3 +178,37 @@ test('no retired meeting or channel word is left in the code', () => {
   assert.ok(!code.includes("'confirmed'"), "meetings.js uses 'confirmed'; the status is 'booked' now");
 });
 
+
+/* ───────────── the house look, checked across every file ───────────── */
+
+/* DESIGN.md: "no emoji in a document", and nothing in the hub either — an emoji
+   renders at whatever size and colour the reader's font felt like, which is the
+   opposite of a system. The icon slot of an empty state wants an inline SVG. */
+test('no screen draws an emoji', () => {
+  /* the pictographic blocks and the emoji-presentation selector. Typographic
+     marks a document really does use — an en dash, an arrow in a comment, a
+     check mark — are not emoji and are left alone. */
+  const EMOJI = /[\u{1F000}-\u{1FAFF}\u{FE0F}\u{1F1E6}-\u{1F1FF}]/u;
+  for (const f of jsFiles.concat(['index.html', 'portal.html', 'team.html', 'doc.html', 'join.html'])) {
+
+    const src = fs.readFileSync(path.join(root, f), 'utf8');
+    src.split('\n').forEach((line, i) => {
+      assert.ok(!EMOJI.test(line), f + ':' + (i + 1) + ' draws an emoji: ' + line.trim().slice(0, 90));
+    });
+  }
+});
+
+/* DESIGN.md: "Every money figure, invoice number, SWIFT code, account number and
+   date-stamp is mono. This is the strongest single signal of care in the whole
+   system." The shell carries one figure recipe, `.fig`, for the screens whose own
+   stylesheet has none. If it is used, it has to exist. */
+test('the shell defines the figure class the screens ask for', () => {
+  const shell = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  assert.match(shell, /\.fig\{[^}]*font-family:var\(--mono\)/, 'index.html defines .fig as mono');
+  assert.match(shell, /\.fig\{[^}]*tabular-nums/, 'and lines its digits up');
+  for (const [file, what] of [['pipeline.js', 'the funnel counts'], ['digest.js', "the Friday update's facts"],
+                              ['onboarding.js', 'the invoice amounts']]) {
+    assert.match(fs.readFileSync(path.join(root, file), 'utf8'), /class="[^"]*\bfig\b/,
+      file + ' puts ' + what + ' in the figure face');
+  }
+});

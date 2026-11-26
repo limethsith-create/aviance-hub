@@ -543,3 +543,43 @@ test('after Won: the invoice line and Open client; capitalised plan; the country
   assert.ok(!JSON.stringify(secs).includes('News') && !JSON.stringify(secs).includes('Reputation') && !JSON.stringify(secs).includes('Writer note'), JSON.stringify(secs));
   assert.ok(JSON.stringify(secs).includes('Acme') && JSON.stringify(secs).includes('Kept'));
 });
+
+/* ───────────── the rehearsal pass ───────────── */
+
+test('opening one booking reads the brief once, and asks for everything at once', async () => {
+  /* plBooking read research_briefs itself and then called plResearchState,
+     which read it AGAIN; and the booking, the brief, the log, the client and
+     the price list were read one after the other — six waits end to end for a
+     screen that could have waited twice. */
+  fresh();
+  db.discovery_bookings = [booking({ id: 'b1' })];
+  db.research_briefs = [{ booking_id: 'b1', brief: { summary: 'A roofer' }, writer: 'engine' }];
+  db.research_log = [{ booking_id: 'b1', at: '2026-11-20T10:00:00Z', event: { event: 'finished' } }];
+  db.plan_prices = [{ plan: 'growth', monthly: 3000 }];
+
+  queries.length = 0;
+  const r = await plBooking('b1');
+  assert.equal(r.ok, true, r.error);
+  const briefReads = queries.filter((q) => q.table === 'research_briefs').length;
+  assert.equal(briefReads, 1, 'the brief is read once, not twice');
+  assert.equal(r.data.research.state, 'done', 'and the research state still comes out right');
+  assert.ok(queries.length <= 6, 'six queries at most for one booking, got ' + queries.length);
+});
+
+test('plResearchFrom works the state out from rows already in hand, and reads nothing', () => {
+  queries.length = 0;
+  const none = plResearchFrom({ ok: true, data: null, error: '' }, { ok: true, data: [], error: '' });
+  assert.equal(none.data.state, 'none');
+  const running = plResearchFrom({ ok: true, data: null, error: '' },
+    { ok: true, data: [{ at: new Date().toISOString(), event: { event: 'started' } }], error: '' });
+  assert.equal(running.data.state, 'running');
+  const failed = plResearchFrom({ ok: true, data: null, error: '' },
+    { ok: true, data: [{ at: new Date().toISOString(), event: { event: 'crashed' } }], error: '' });
+  assert.equal(failed.data.state, 'failed');
+  const done = plResearchFrom({ ok: true, data: { updated_at: 'x', writer: 'engine' }, error: '' }, { ok: true, data: [], error: '' });
+  assert.equal(done.data.state, 'done');
+  /* a brief that could not be read is passed straight back, not called 'none' */
+  const bad = plResearchFrom({ ok: false, data: null, error: 'The database said no.' }, { ok: true, data: [], error: '' });
+  assert.equal(bad.ok, false);
+  assert.equal(queries.length, 0, 'it reads nothing');
+});

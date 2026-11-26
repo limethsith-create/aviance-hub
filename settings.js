@@ -397,11 +397,14 @@ function stReadPay(){
   });
   return f;
 }
-async function stLoadPay(){
+function stShowPay(r){
   const el=document.getElementById('stPay'); if(!el)return;
-  const r=await stPay();
   if(!r.ok){ el.innerHTML=`<p class="st-err">${esc(r.error)}</p>`; return }
   el.innerHTML=stRenderPay(r.data);
+}
+async function stLoadPay(){
+  const el=document.getElementById('stPay'); if(!el)return;
+  stShowPay(await stPay());
 }
 async function stSubmitPay(){
   const msg=document.getElementById('stPayMsg'); if(msg)msg.textContent='Saving…';
@@ -435,13 +438,24 @@ function viewSettings(){
   <div id="stPay" class="st-wrap">Loading…</div></div>`:'');
 }
 
-async function stLoad(){ stLoadMe(); stLoadCal(); stLoadOut(); stLoadBiz(); stLoadPay(); }
-
-async function stLoadBiz(){
-  const el=document.getElementById('stBiz'); if(!el)return;
+/* "Payments and documents" and "Payment details" are two cards over ONE database
+   row, and each used to ask for it on open: biz_get twice, every time Settings
+   was opened. One read now fills both. */
+async function stLoad(){
+  stLoadMe(); stLoadCal(); stLoadOut();
+  if(!stIsAdmin())return;
   const r=await stBiz();
+  stShowBiz(r); stShowPay(r);
+}
+
+function stShowBiz(r){
+  const el=document.getElementById('stBiz'); if(!el)return;
   if(!r.ok){ el.innerHTML=`<p class="st-err">${esc(r.error)}</p>`; return }
   el.innerHTML=stRenderBiz(r.data);
+}
+async function stLoadBiz(){
+  const el=document.getElementById('stBiz'); if(!el)return;
+  stShowBiz(await stBiz());
 }
 async function stSubmitBiz(){
   const msg=document.getElementById('stBizMsg'); if(msg)msg.textContent='Saving…';
@@ -451,7 +465,11 @@ async function stSubmitBiz(){
   if(!r.ok){ if(msg)msg.textContent=r.error; return r }
   const el=document.getElementById('stBiz'); if(el)el.innerHTML=stRenderBiz(r.data);
   const again=document.getElementById('stBizMsg'); if(again)again.textContent='Saved.';
-  if(typeof toast==='function')toast('The payment details are saved.');
+  /* This card is the business details — the legal name, the address, the signer,
+     the kickoff link. The card BELOW it is the payment details. Both used to
+     say "The payment details are saved", so a save on either one read as a save
+     on the other. */
+  if(typeof toast==='function')toast('Your business details are saved.');
   return r;
 }
 
@@ -504,9 +522,13 @@ async function stSubmitCal(){
 }
 
 /* Pure render. Everything escaped, and the only thing said about the key is its NAME. */
-function stRenderOut(rows,clients){
+/* `clientsErr` is the difference between "you have no clients yet" and "your
+   clients did not load". The picker used to say the first when it meant the
+   second, and the owner would have gone looking for his missing clients. */
+function stRenderOut(rows,clients,clientsErr){
   const list=Array.isArray(rows)?rows:[];
   const cl=Array.isArray(clients)?clients:[];
+  const noClients=clientsErr?'Your clients did not load':'No clients yet';
   const table=!list.length
     ? `<div class="empty"><h3>Nothing connected yet</h3><p>Connect a client's Instantly or Smartlead account below. Until one is connected their campaign screens have nothing to show.</p></div>`
     : `<table class="st-tab"><thead><tr><th>Client</th><th>Tool</th><th>Label</th><th>Their id</th><th>Key secret</th><th>State</th><th>Last read</th></tr></thead><tbody>`
@@ -518,7 +540,8 @@ function stRenderOut(rows,clients){
         <td>${esc(stWhen(a.last_synced_at))}
           <div class="st-act"><button class="btn" onclick="stTogglePause('${esc(a.id)}',${a.status==='paused'?'false':'true'})">${a.status==='paused'?'Resume':'Pause'}</button></div></td></tr>` }).join('')
       +`</tbody></table>`;
-  const form=stRow('Client',`<select id="stOutClient">${cl.length?cl.map(c=>`<option value="${esc(c.id)}">${esc(c.company||c.id)}</option>`).join(''):'<option value="">No clients yet</option>'}</select>`)
+  const form=stRow('Client',`<select id="stOutClient">${cl.length?cl.map(c=>`<option value="${esc(c.id)}">${esc(c.company||c.id)}</option>`).join(''):`<option value="">${esc(noClients)}</option>`}</select>`
+    +(clientsErr?`<p class="st-err">${esc(clientsErr)}</p>`:''))
     +stRow('Tool',`<select id="stOutProvider">${ST_OUT_PROVIDERS.map(p=>`<option value="${esc(p[0])}">${esc(p[1])}</option>`).join('')}</select>`)
     +stRow('Label',`<input id="stOutLabel" placeholder="Main">`,'Short. It becomes part of the secret name, so keep it the same once it is set.')
     +stRow('Their account id',`<input id="stOutExt" placeholder="optional">`,'The id the tool itself shows for this workspace, if it shows one. Not required.')
@@ -533,7 +556,7 @@ async function stLoadOut(){
   const el=document.getElementById('stOut'); if(!el)return;
   const [r,c]=await Promise.all([stOutreachAccounts(),stOutreachClients()]);
   if(!r.ok){ el.innerHTML=`<p class="st-err">${esc(r.error)}</p>`; return }
-  el.innerHTML=stRenderOut(r.data||[],c.ok?(c.data||[]):[]);
+  el.innerHTML=stRenderOut(r.data||[],c.ok?(c.data||[]):[],c.ok?'':c.error);
 }
 async function stSubmitOut(){
   const msg=document.getElementById('stOutMsg'); if(msg)msg.textContent='Connecting…';
