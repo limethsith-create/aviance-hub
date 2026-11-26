@@ -198,6 +198,7 @@ function pctMonthNorm(m, j, now){
     have: false, state: 'before', monthNo: x ? Math.round(pctNum(x.month_no)) || 1 : 1,
     promised, delivered, left: Math.max(0, promised - delivered),
     daysLeft: null, total: 0, elapsed: 0, expected: 0, share: 0, pace: 0,
+    band: 'none', rate: null,
     starts: starts ? pctKey(starts) : '', ends: ends ? pctKey(ends) : '',
     launch: jn.launch, toLaunch: jn.days, live: jn.live, label: x ? String(x.plan_label || '') : '',
   };
@@ -216,7 +217,23 @@ function pctMonthNorm(m, j, now){
      last day still counts, so the month is only closed once the day is past. */
   const over = today > ends;
   out.daysLeft = Math.max(0, Math.round((ends - today) / PCT_DAY_MS));
-  out.expected = promised * (out.elapsed / out.total);
+  /* THE ONE SUM. corePace in core.js does this arithmetic for both sides of the
+     business: this line, which the client reads about their own month, and the
+     owner's commitment board (guarantee.js), which reads the same months across
+     every client. They used to each have their own test and the two did not
+     agree — the owner's was "short, and ten days or less to go", this one was
+     "behind the straight line" — so a client could be told "Behind" here while
+     the owner's screen left them off the list of clients who are behind.
+     Checked live on 2026-11-26: that is exactly what one $9,000 Scale month was
+     doing. One sum now, read twice.
+     `onLine` is the gentle test and it is what decides what the CLIENT is told,
+     unchanged. `band` is the harsher one and is for the owner; it is carried
+     here so the client's screen and the owner's screen are provably reading the
+     same numbers, and because corePace guarantees band 'ontrack' only when
+     onLine is true — the owner is never more optimistic than the client. */
+  out.rate = corePace(promised, delivered, out.elapsed, out.total, out.daysLeft);
+  out.band = out.rate.band;
+  out.expected = out.rate.expected;
   out.share = Math.max(0, Math.min(1, delivered / promised));
   /* how often a call has to land from here to finish the month on the number */
   out.pace = out.left > 0 && out.daysLeft > 0 ? out.daysLeft / out.left : 0;
@@ -226,7 +243,7 @@ function pctMonthNorm(m, j, now){
   else if (over) out.state = 'short';
   /* "behind" only once a whole call behind the straight line: a client should
      never be told they are behind on a rounding error. */
-  else if (delivered < Math.floor(out.expected)) out.state = 'behind';
+  else if (!out.rate.onLine) out.state = 'behind';
   else out.state = 'ontrack';
   return out;
 }

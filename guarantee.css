@@ -1,0 +1,57 @@
+/* guarantee.css — the commitment board at the top of Today.
+   Tokens only (theme.css / brand.css): Ink, Paper, Mist, Line, Muted, Red.
+   Every figure is monospace, through .fig in index.html. */
+
+.gu{background:var(--surface,#fff);border:1px solid var(--border,#DCDCE0);border-radius:14px;
+  padding:18px 18px 16px;margin:0 0 16px}
+.gu-head{display:flex;flex-direction:column;gap:4px;margin:0 0 14px}
+.gu-head h3{margin:0;font-size:1.05rem}
+.gu-sub,.gu-blurb,.gu-row-sub,.gu-tile-n,.gu-recon{color:var(--muted,#63636A);font-size:.8rem;line-height:1.45}
+
+.gu-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 16px}
+.gu-tile{border:1px solid var(--border,#DCDCE0);border-radius:10px;padding:11px 12px;
+  background:var(--mist,#F6F7F9);display:flex;flex-direction:column;gap:3px;min-width:0}
+.gu-tile-l{font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#63636A)}
+.gu-tile-v{font-size:1.55rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.gu-tile.gu-warn{border-color:var(--red,#C42408)}
+.gu-tile.gu-warn .gu-tile-v{color:var(--red,#C42408)}
+body.dark .gu-tile.gu-warn{border-color:#E0290F}
+body.dark .gu-tile.gu-warn .gu-tile-v{color:#E0290F}
+
+.gu-group{margin:0 0 16px}
+.gu-group h4{margin:0 0 4px;font-size:.9rem}
+.gu-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.gu-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:12px;align-items:center;
+  border:1px solid var(--border,#DCDCE0);border-left-width:3px;border-radius:10px;padding:10px 12px}
+.gu-row-main{min-width:0;display:flex;flex-direction:column;gap:2px}
+.gu-row-main b{font-size:.92rem}
+.gu-row-figs,.gu-row-side{display:flex;flex-direction:column;gap:2px;text-align:right;white-space:nowrap}
+.gu-count{font-size:1.05rem;font-weight:700;font-variant-numeric:tabular-nums}
+.gu-money{font-size:1rem;font-weight:700;font-variant-numeric:tabular-nums}
+.gu-stamp{font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#63636A)}
+.gu-row-act .btn{white-space:nowrap}
+
+.gu-row.gu-gone{border-left-color:var(--red,#C42408)}
+.gu-row.gu-gone .gu-stamp,.gu-row.gu-gone .gu-money{color:var(--red,#C42408)}
+.gu-row.gu-atrisk{border-left-color:#C47A08}
+.gu-row.gu-behind{border-left-color:var(--muted,#63636A)}
+.gu-row.gu-ontrack,.gu-row.gu-met{border-left-color:var(--border,#DCDCE0)}
+body.dark .gu-row.gu-gone{border-left-color:#E0290F}
+body.dark .gu-row.gu-gone .gu-stamp,body.dark .gu-row.gu-gone .gu-money{color:#E0290F}
+
+.gu-none,.gu-fine{color:var(--muted,#63636A);font-size:.85rem;margin:0 0 10px}
+.gu-fail{color:var(--red,#C42408);font-size:.85rem;line-height:1.5;margin:0 0 12px}
+body.dark .gu-fail{color:#E0290F}
+.gu-extras{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-direction:column;gap:6px;
+  font-size:.82rem;color:var(--muted,#63636A)}
+.gu-extras li{padding-left:12px;position:relative}
+.gu-extras li::before{content:"";position:absolute;left:0;top:.6em;width:4px;height:4px;border-radius:50%;
+  background:var(--border,#DCDCE0)}
+.gu-recon{margin:10px 0 0;padding-top:10px;border-top:1px solid var(--border,#DCDCE0)}
+
+@media (max-width:720px){
+  .gu-row{grid-template-columns:minmax(0,1fr) auto;row-gap:8px}
+  .gu-row-side{text-align:left;align-items:flex-start}
+  .gu-row-act{grid-column:1/-1}
+  .gu-row-act .btn{width:100%}
+}

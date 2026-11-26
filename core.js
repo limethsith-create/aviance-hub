@@ -265,3 +265,164 @@ function coreAgo(v, whenUnknown, now){
   var day = Math.round(h / 24);
   return day + (day === 1 ? ' day ago' : ' days ago');
 }
+
+/* ===================== 5. PACE =====================
+   One piece of arithmetic, shared by the two screens that must never disagree
+   about the same month: the owner's board and the reader's own standing line.
+
+   WHY IT IS HERE AND NOT IN EITHER OF THEM
+   Both screens answer "is this on course?" and both used to answer it with
+   their own copy of the sum. They did not agree: one tested COUNT AND DAYS
+   ("short, and ten days or less to go"), the other tested PACE ("behind the
+   straight line"). So a span could be a fortnight from the end, already
+   past saving, and show as fine on one screen while the other said "behind" —
+   the worst of the two failures, because the owner believes the calm one.
+   Now there is one sum, in leaf code, and the two read it.
+
+   WHAT IT MEASURES
+   Not the gap. The RATE. A gap of eight with twenty days to go and a gap of
+   eight with two days to go are the same number and not the same trouble, and
+   the second one cannot be worked out of. So two rates are compared:
+
+     perDayNeed    what has to land every remaining day to finish on target
+     perDayTarget  what the target asks for over the whole span
+     perDayDone    what has actually landed per day so far
+
+   ratio = perDayNeed / perDayTarget   — how many times the ordinary rate is
+                                         needed from here
+   lift  = perDayNeed / perDayDone     — how many times the rate ACHIEVED so
+                                         far is needed from here
+
+   `ratio` is the kinder test and is honest from day one. `lift` is the harsher
+   and the more real, but it means nothing until there is enough of the span
+   behind us to have a rate at all, so it is only consulted once CORE_PACE_SEEN
+   of the span has gone. The worse of the two decides. The thresholds are
+   values, not magic numbers in a branch, so a screen can print them beside the
+   answer and the reader can judge the judgement.
+
+   `onLine` is a SEPARATE, older and gentler question: is the count at or above
+   the straight line through the span? It is kept because that is the test a
+   reader's own screen has always shown them, and changing what a person is
+   told about their own standing is not a thing to do inside a refactor.
+
+   The relationship between the two is deliberate and one-way:
+   band 'ontrack' can only happen when onLine is true. So whoever reads `band`
+   is never more optimistic than whoever reads `onLine` — never the other way
+   round. A screen for the person doing the work may be warned early; a screen
+   for the person waiting is not alarmed on a rounding error.
+
+   Everything here is arithmetic on five numbers. It knows nothing about what
+   is being counted. */
+
+/* ratio thresholds: at or under 1 is on course, then behind, then at risk, then
+   past saving. lift thresholds are looser because a rate measured over part of
+   a span is a noisier thing than the target itself. */
+var CORE_PACE_RATIO = [1, 1.5, 3];
+var CORE_PACE_LIFT  = [1, 2, 4];
+/* how much of the span must have gone before the achieved rate is evidence */
+var CORE_PACE_SEEN  = 1 / 3;
+/* and how much of it must have gone before NOTHING landed is evidence on its
+   own. Nothing landed gives no rate at all, so it cannot be a ratio; what it
+   can be is a standing start, and a standing start two thirds of the way
+   through is a different thing from one on the second morning. Two thirds, not
+   a third, because this claim is the harshest one on the scale. */
+var CORE_PACE_COLD  = 2 / 3;
+var CORE_PACE_BANDS = ['ontrack', 'behind', 'atrisk', 'gone'];
+
+/* a number, or 0. Never NaN, so no sum downstream turns into NaN. */
+function coreNum(v){ var n = Number(v); return Number.isFinite(n) ? n : 0 }
+
+/* which step of `steps` a value falls past: 0 for at-or-under the first, up to
+   steps.length for past the last. Infinity lands on the last step, which is the
+   point of it: "needed a rate out of nothing" is the worst band, not an error. */
+function coreStep(v, steps){
+  for (var i = 0; i < steps.length; i++) if (v <= steps[i]) return i;
+  return steps.length;
+}
+
+/* target   how many are wanted in the whole span
+   done     how many have landed
+   elapsed  days of the span gone, including today (1 on the first day)
+   total    days in the whole span
+   left     days after today, so 0 means today is the last day */
+function corePace(target, done, elapsed, total, left){
+  var t = Math.max(0, Math.round(coreNum(target)));
+  var d = Math.max(0, Math.round(coreNum(done)));
+  var tot = Math.max(1, Math.round(coreNum(total)));
+  var el = Math.min(tot, Math.max(0, Math.round(coreNum(elapsed))));
+  var lf = Math.max(0, Math.round(coreNum(left)));
+  var gap = Math.max(0, t - d);
+  /* today still counts: `left` 0 means the last day, and something can still
+     land on it. One day out here is a month settled on the wrong number. */
+  var remaining = lf + 1;
+  var expected = t * (el / tot);
+  var perDayTarget = t / tot;
+  var perDayNeed = gap > 0 ? gap / remaining : 0;
+  var perDayDone = el > 0 ? d / el : 0;
+  var ratio = perDayTarget > 0 ? perDayNeed / perDayTarget : 0;
+  var lift = perDayDone > 0 ? perDayNeed / perDayDone : (gap > 0 ? Infinity : 0);
+  /* the straight line, floored: at or above it is on the line. Floored because
+     nobody is behind on a fraction of one. */
+  var onLine = d >= Math.floor(expected);
+  var band;
+  if (t <= 0) band = 'none';
+  else if (d >= t) band = 'met';
+  else {
+    var worst = coreStep(ratio, CORE_PACE_RATIO);
+    /* the achieved rate, but only where there IS one and only once there is
+       enough behind us to mean something. A rate of nothing is not a very
+       large ratio, it is no ratio, and treating it as one called a month past
+       saving on its fifteenth day with the needed rate still under one a day. */
+    if (perDayDone > 0 && el >= tot * CORE_PACE_SEEN) worst = Math.max(worst, coreStep(lift, CORE_PACE_LIFT));
+    /* nothing at all, most of the way through: one band worse than the ratio
+       alone would say */
+    else if (perDayDone === 0 && el >= tot * CORE_PACE_COLD) worst = worst + 1;
+    /* off the straight line is never called on course */
+    if (worst === 0 && !onLine) worst = 1;
+    band = CORE_PACE_BANDS[Math.min(worst, CORE_PACE_BANDS.length - 1)];
+  }
+  return {
+    target: t, done: d, gap: gap, total: tot, elapsed: el, left: lf, remaining: remaining,
+    expected: expected, onLine: onLine,
+    perDayTarget: perDayTarget, perDayNeed: perDayNeed, perDayDone: perDayDone,
+    ratio: ratio, lift: lift, band: band,
+    /* worth a person's time: off course, and the arithmetic still closes */
+    savable: band === 'behind' || band === 'atrisk'
+  };
+}
+
+/* '1.5', '0.3', '2' — a rate, to one decimal place, without a trailing '.0'.
+   A rate of Infinity reads as the caller's own word for it, because "Infinity
+   calls a day" is not a sentence. */
+function coreRate(v, whenEndless){
+  var n = Number(v);
+  if (!Number.isFinite(n)) return whenEndless == null ? '—' : whenEndless;
+  var s = (Math.round(n * 10) / 10).toFixed(1);
+  return s.replace(/\.0$/, '');
+}
+
+/* ===================== 6. THE BOOKING HOURS, WHEN THE ROW IS MISSING =====
+   One copy of the defaults for `calendar_settings` row 1 — the hours a call can
+   be offered in, the slot length, the notice needed, how far ahead a caller may
+   book, and the two zones.
+
+   WHY IT IS HERE
+   There were two copies, in settings.js and meetings.js, and they had already
+   drifted: one said a caller may book 21 days ahead, the other 30. The live row
+   says 21, so nothing was wrong on screen — the fallback is only reached when
+   the row cannot be read — but the day that row is missing, the screen that
+   SETS the hours and the screen that OFFERS the slots would have disagreed
+   about how far ahead the diary goes, and neither would have said so. 21 is the
+   survivor because it is what the live row holds (checked 2026-11-26).
+
+   This is a shape with no behaviour: no times are compared here, no zone is
+   resolved here, and nothing here reads the database. The two files that want
+   it keep their own name for it, as with every other helper in this file. */
+var CORE_HOURS_FALLBACK = {
+  id: 1,
+  open_time: '07:00', close_time: '21:00',
+  days: [1, 2, 3, 4, 5],
+  slot_minutes: 30, min_notice_h: 12, days_ahead: 21,
+  us_zone: 'America/New_York', owner_zone: 'Asia/Colombo',
+  meeting_link: null
+};

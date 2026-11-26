@@ -53,7 +53,7 @@ const chv={
   archOpen:false, noChOpen:false, noChDone:{},
   urls:{}, urlWait:{},
   staff:null, staffErr:'', loadStaff:null,
-  unreadTotal:0, peekAt:0, timer:null, seq:0, tmpSeq:0, creating:false, visHooked:false, caught:'',
+  unreadTotal:0, peekAt:0, wasOpen:false, timer:null, seq:0, tmpSeq:0, creating:false, visHooked:false, caught:'',
   bot:[], botEdits:{}, botBusy:{}, botErr:'', botSeq:0, botTimers:[],
 };
 
@@ -934,13 +934,26 @@ function chvTogglePanel(){
 
 /* ===================== 10. LIFECYCLE (called by the shell) ===================== */
 /* Called by the shell's render() for every view: the Channels timer / unsubscribe, and the nav badge. */
+/* WHY chvPeek IS NOT FORCED HERE ANY MORE
+   render() calls this for EVERY screen the owner opens, and it used to force
+   the unread count, which is one my_channels() round trip each time: a single
+   walk of the hub fired it 33 times. my_channels is a security-definer rpc that
+   joins every channel, its last message and its unread count for the signed-in
+   person, so 33 of them is 33 of the most expensive read in the hub, for a
+   number that only changes when somebody writes a message.
+   It is still forced in exactly the case that needs it: coming OFF the Channels
+   screen, where the owner has just read messages and the badge would otherwise
+   sit there wrong for up to half a minute. Every other navigation takes the
+   30-second throttle chvPeek already had, and the poll timer keeps the badge
+   fresh regardless. */
 function channelsOnRender(v){
-  if(v==='channels'){channelsStartTimer();return;}
+  if(v==='channels'){chv.wasOpen=true;channelsStartTimer();return;}
   if(chv.unsub){try{chv.unsub();}catch(e){}chv.unsub=null;}
   chv.seq++;
   try{if(/^#channels/.test(location.hash||'')&&history.replaceState)history.replaceState(null,'',(location.pathname||'/')+(location.search||''));}catch(e){}
   channelsStartTimer();
-  chvPeek(true);
+  const leaving=!!chv.wasOpen; chv.wasOpen=false;
+  chvPeek(leaving);
 }
 function channelsStartTimer(){
   if(chv.timer||typeof setInterval!=='function')return;
@@ -973,6 +986,6 @@ function channelsForget(){
   channelsStopTimer();
   if(chv.unsub){try{chv.unsub();}catch(e){}chv.unsub=null;}
   clearTimeout(chv.searchTimer);clearTimeout(chv.typingTimer);
-  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',unsure:{},typing:{},q:'',hits:[],panelSet:false,panelOpen:false,pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,staffErr:'',unreadTotal:0,peekAt:0,creating:false,caught:'',seq:chv.seq+1});
+  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',unsure:{},typing:{},q:'',hits:[],panelSet:false,panelOpen:false,pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,staffErr:'',unreadTotal:0,peekAt:0,wasOpen:false,creating:false,caught:'',seq:chv.seq+1});
   chvBotClear();
 }
