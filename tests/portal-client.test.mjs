@@ -519,55 +519,26 @@ test('pcWhen: "Fri, Nov 27 · 10:00 AM ET" in any zone', () => {
   assert.equal(w('2026-11-27T15:00:00Z', 'Asia/Colombo'), 'Fri, Nov 27 · 8:30 PM Colombo time');
   assert.equal(w('nonsense', 'America/New_York'), '');
 });
-test('kickoff slots are grouped by the client\'s own day, with ET beside them', () => {
-  const slots = [{ starts_at: '2026-11-27T15:30:00Z' }, { starts_at: '2026-11-27T15:00:00Z' }, { starts_at: '2026-11-27T20:00:00Z' }, { starts_at: '2026-11-27T15:00:00Z' }, null];
-  const col = P('pcKickoffDays')(slots, 'Asia/Colombo', 'America/New_York');
-  assert.deepEqual(col.map((d) => d.label), ['Fri, Nov 27', 'Sat, Nov 28']);
-  assert.deepEqual(col[0].slots.map((s) => s.time + ' / ' + s.other), ['8:30 PM / 10:00 AM ET', '9:00 PM / 10:30 AM ET']);
-  assert.equal(col[1].slots[0].time, '1:30 AM');
-  const ny = P('pcKickoffDays')(slots, 'America/New_York', 'America/New_York');
-  assert.equal(ny.length, 1);
-  assert.equal(ny[0].slots[0].other, '', 'no second time when the client is on ET');
-  assert.deepEqual(P('pcKickoffDays')(null), []);
+/* The client's old self-booking kickoff card is gone. The kickoff is offered in
+   the chat now (portal-schedule.js, portal_offer_pick): the team puts up three
+   times and the client taps one. The old card asked portal_kickoff_slots /
+   portal_book_kickoff, its loadKick() was never called, so it drew nothing and
+   nobody could reach it. Left in place it was ~200 lines of a second way to book
+   the same call, and the first thing a reader would try to keep working. */
+test('nothing of the old self-booking kickoff card is left in the portal', () => {
+  const page = fs.readFileSync(path.join(root, 'portal.html'), 'utf8');
+  const src = fs.readFileSync(path.join(root, 'portal-client.js'), 'utf8');
+  for (const gone of ['pcKickoffHtml', 'pcKickoffDays', 'pcBookKickoff', 'portal_kickoff_slots',
+                      'portal_book_kickoff', 'pcLocalWhen', 'drawKick', 'loadKick', 'pcKick',
+                      'data-pc-slot', 'data-pc-unpick']) {
+    assert.ok(!src.includes(gone), 'portal-client.js still has ' + gone);
+    assert.ok(!page.includes(gone), 'portal.html still has ' + gone);
+  }
+  /* and the one that is live is still live */
+  const sched = fs.readFileSync(path.join(root, 'portal-schedule.js'), 'utf8');
+  assert.ok(sched.includes("'portal_offer_pick'"));
 });
-test('kickoff card: pick a day, pick a time, confirm; once booked it shows the time and the link', () => {
-  const k = { zone: 'America/New_York', booked: null, slots: [{ starts_at: '2026-11-27T15:00:00Z' }, { starts_at: '2026-11-30T15:00:00Z' }] };
-  const h = P('pcKickoffHtml')(k, { viewerZone: 'Asia/Colombo' });
-  assert.ok(h.includes('Book your kickoff') && h.includes('data-pc-day="2026-11-27"') && h.includes('aria-pressed="true">Fri, Nov 27'));
-  assert.ok(h.includes('data-pc-slot="2026-11-27T15:00:00.000Z"') && h.includes('10:00 AM ET') && !h.includes('data-pc-book'));
-  const pick = P('pcKickoffHtml')(k, { viewerZone: 'Asia/Colombo', day: '2026-11-30', pick: '2026-11-30T15:00:00.000Z' });
-  assert.ok(pick.includes('Book Mon, Nov 30 · 10:00 AM ET?') && pick.includes('data-pc-book="2026-11-30T15:00:00.000Z"') && pick.includes('Mon, Nov 30 · 8:30 PM your time'));
-  const busy = P('pcKickoffHtml')(k, { viewerZone: 'Asia/Colombo', pick: '2026-11-27T15:00:00.000Z', busy: true, error: 'That time has just <gone>.' });
-  assert.ok(busy.includes(' disabled>Booking…') && busy.includes('That time has just &lt;gone&gt;.'));
-  const done = P('pcKickoffHtml')({ zone: 'America/New_York', booked: { starts_at: '2026-11-27T15:00:00Z', minutes: 45, status: 'booked', meet_link: 'https://meet.jit.si/aviance-x' } },
-    { viewerZone: 'America/New_York', now: '2026-11-25T00:00:00Z' });
-  assert.ok(done.includes('Kickoff: Fri, Nov 27 · 10:00 AM ET') && done.includes('href="https://meet.jit.si/aviance-x"') && !done.includes('your time'));
-  assert.equal(P('pcKickoffHtml')({ booked: { starts_at: '2026-11-27T15:00:00Z', minutes: 45, status: 'booked' } }, { now: '2026-12-01T00:00:00Z' }), '', 'gone once it has happened');
-  const bad = P('pcKickoffHtml')({ booked: { starts_at: '2099-11-27T15:00:00Z', meet_link: 'javascript:alert(1)' } }, {});
-  assert.ok(!bad.includes('javascript:'));
-  assert.ok(P('pcKickoffHtml')({ zone: 'America/New_York', slots: [] }, {}).includes('Message us below'));
-  assert.doesNotThrow(() => P('pcKickoffHtml')(null, null));
-});
-test('pcKickoff / pcBookKickoff ask the portal functions and never throw', async () => {
-  reset();
-  answer = { data: { zone: 'America/New_York', booked: null, slots: [] }, error: null };
-  assert.equal((await P('pcKickoff')(10)).ok, true);
-  assert.deepEqual(rpcs[0], { name: 'portal_kickoff_slots', args: { p_days: 10 } });
-  answer = { data: 'nonsense', error: null };
-  assert.equal((await P('pcKickoff')(99)).ok, false);
-  assert.equal(rpcs[1].args.p_days, 21);
-  answer = { data: { starts_at: '2026-11-27T15:00:00Z', meet_link: 'https://m' }, error: null };
-  const b = await P('pcBookKickoff')('2026-11-27T15:00:00Z');
-  assert.equal(b.ok, true);
-  assert.deepEqual(rpcs[2], { name: 'portal_book_kickoff', args: { p_start: '2026-11-27T15:00:00.000Z' } });
-  const n = rpcs.length;
-  assert.equal((await P('pcBookKickoff')('')).ok, false);
-  assert.equal(rpcs.length, n, 'no time, no question');
-  answer = { data: null, error: { message: 'That time has just gone. Please pick another.' } };
-  assert.equal((await P('pcBookKickoff')('2026-11-27T15:00:00Z')).error, 'That time has just gone. Please pick another.');
-  answer = new Error('Failed to fetch');
-  assert.equal((await P('pcKickoff')(10)).offline, true);
-});
+
 test('join.html explains the channel, the link and where to get help', () => {
   const html = fs.readFileSync(path.join(root, 'join.html'), 'utf8');
   assert.ok(html.includes('Your private line to the Aviance team — updates, approvals and questions, all in one place.'));
@@ -576,12 +547,6 @@ test('join.html explains the channel, the link and where to get help', () => {
   assert.ok(html.includes("Reply to our email and we\\'ll send a fresh link."));
   assert.match(P('pcInviteMessage')('expired'), /fresh link/);
 });
-test('portal.html shows the kickoff card above the chat', () => {
-  const html = fs.readFileSync(path.join(root, 'portal.html'), 'utf8');
-  assert.ok(html.indexOf('id="pcKick"') > 0 && html.indexOf('id="pcKick"') < html.indexOf('id="pcScroll"'));
-  assert.ok(html.includes('pcKickoffHtml(') && html.includes('pcBookKickoff(') && html.includes('pcKickoff(10)'));
-});
-
 /* ───────────── no trial plan; the 3-month term; the guarantee line ───────────── */
 const TERM3 = { kind: 'invoice', number: 'AV-2026-1051', status: 'sent', status_word: 'Unpaid', issued_on: '2026-11-26', due_on: '2026-12-03', paid_at: null, currency: 'USD',
   service: 'Starter · 5 qualified calls a month · 3-month term', period: 'Months 1–3 · starts the day your first emails go out', terms: 'Net 7',
@@ -1089,9 +1054,93 @@ test('a read that never answers is given up on, and a write never is', async () 
   /* and the writes are not wrapped in it: a message or a booking that may already
      have landed is never given up on and retried */
   const src = read.toString();
-  assert.ok(!/pcSend|pcBookKickoff|pcAccept|pcDocSign/.test(src));
+  assert.ok(!/pcSend|pcAccept|pcDocSign/.test(src));
   const page = fs.readFileSync(path.join(root, 'portal.html'), 'utf8');
   assert.match(page, /pcRead\(\s*function\(\)\{\s*return pcMessages\(id\)/);
   assert.match(page, /pcRead\(pcSession\)/);
-  assert.doesNotMatch(page, /pcRead\(\s*(function\(\)\s*\{\s*return\s*)?(pcSend|pcBookKickoff)/);
+  assert.doesNotMatch(page, /pcRead\(\s*(function\(\)\s*\{\s*return\s*)?pcSend/);
+});
+
+/* ───────────── money coming back to them ─────────────
+   lock_month() raises a refund at status 'owed' and the portal used to say only
+   "your refund is being worked out". These are the words a client reads instead,
+   and the rule that a database without portal_refunds() says NOTHING rather than
+   telling someone who is owed money that there is none. */
+
+test('a refund that is owed says so, with the figure and no asking required', () => {
+  const one = P('pcRefundOne')({ amount: 3000, currency: 'USD', status: 'owed', month_no: 1, raised_at: '2026-11-26T10:00:00Z' });
+  assert.equal(one.state, 'owed');
+  assert.equal(one.head, 'We owe you $3,000.00');
+  assert.equal(one.month, 'Month 1');
+  assert.match(one.note, /on its way. You do not have to ask/);
+});
+
+test('a refund that was paid says when, how and the reference', () => {
+  const one = P('pcRefundOne')({ amount: 3000, currency: 'USD', status: 'paid', paid_amount: 3000,
+    paid_at: '2026-12-02T09:00:00Z', paid_via: 'bank transfer', paid_reference: 'TRN-4471' });
+  assert.equal(one.state, 'paid');
+  assert.equal(one.head, '$3,000.00 refunded');
+  assert.match(one.detail, /Sent December 2, 2026/);
+  assert.match(one.detail, /by bank transfer/);
+  assert.match(one.detail, /reference TRN-4471/);
+  assert.equal(one.note, '');
+});
+
+test('a part payment tells them what is still to come', () => {
+  const one = P('pcRefundOne')({ amount: 3000, status: 'paid', paid_amount: 1000, paid_via: 'Wise' });
+  assert.equal(one.head, '$1,000.00 refunded');
+  assert.match(one.note, /\$2,000\.00 of it is still to come\./);
+});
+
+test('a refund set aside promises a client nothing', () => {
+  assert.equal(P('pcRefundOne')({ amount: 3000, status: 'waived' }), null);
+  assert.equal(P('pcRefundsHtml')([{ amount: 3000, status: 'waived' }]), '');
+});
+
+test('the block is empty when there is nothing honest to show', () => {
+  for (const rows of [[], null, undefined, 'nonsense']) assert.equal(P('pcRefundsHtml')(rows), '');
+});
+
+test('everything in the block goes through the escape, and no figure reads undefined', () => {
+  const html = P('pcRefundsHtml')([
+    { amount: 3000, status: 'owed', month_no: 1 },
+    { amount: 500, status: 'paid', paid_amount: 500, paid_via: `<script>alert(1)</script>`, paid_reference: `O'Brien` },
+    {},
+  ]);
+  assert.ok(!/<script>/.test(html), 'no script tag survives');
+  assert.ok(html.includes('&lt;script&gt;') && html.includes('&#39;'));
+  assert.ok(!/undefined|NaN|\[object/.test(html), html);
+  assert.match(html, /Money coming back to you/);
+  /* and it is headed differently when there is nothing outstanding */
+  assert.match(P('pcRefundsHtml')([{ amount: 500, status: 'paid', paid_amount: 500 }]), /Money we have sent back/);
+});
+
+test('the client asks the rule, never the refunds table', async () => {
+  reset(); answer = { data: [{ id: 'r1', amount: 3000, status: 'owed' }], error: null };
+  const r = await P('pcRefunds')();
+  assert.equal(r.ok, true);
+  assert.equal(r.data.length, 1);
+  assert.deepEqual(rpcs.map((x) => x.name), ['portal_refunds']);
+  assert.equal(queries.length, 0, 'the refunds table is staff-only and is never selected from here');
+  const src = fs.readFileSync(path.join(root, 'portal-client.js'), 'utf8');
+  assert.ok(!/from\('refunds'\)/.test(src), 'portal-client.js must not read the refunds table');
+});
+
+test('a rule this database does not have yet draws nothing at all', async () => {
+  reset(); answer = { data: null, error: { message: 'Could not find the function public.portal_refunds', code: 'PGRST202' } };
+  const r = await P('pcRefunds')();
+  assert.equal(r.ok, false);
+  /* and whatever it says, it is a sentence a client could read */
+  assert.ok(!/PGRST|public\.|function/.test(r.error), r.error);
+  /* nothing is drawn: there is no document in this test context, so the proof is
+     that drawing does not throw and leaves no promise behind */
+  await P('pcDrawRefunds')();
+  assert.equal(P('pcBack').drawn, '');
+});
+
+test('an answer that is not a list is not an empty list', async () => {
+  reset(); answer = { data: null, error: null };
+  const r = await P('pcRefunds')();
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.data, []);
 });

@@ -169,7 +169,9 @@
    out and keeps its ring; the plain :focus case, which fires on a mouse click, stays
    quiet as intended. */
 .chv .chv-cbox textarea,.chv .chv-cbox textarea:focus{outline:0!important;box-shadow:none!important;border-color:transparent!important}
-.chv .chv-cbox textarea:focus-visible{box-shadow:none!important;border-color:transparent!important}
+/* outline is restated here WITH !important: the rule above matches this element too
+   (a focused textarea is still a textarea) and its outline:0!important would win. */
+.chv .chv-cbox textarea:focus-visible{outline:2px solid var(--text)!important;outline-offset:-2px;box-shadow:none!important;border-color:transparent!important}
 .chv-side .nm-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
 .chv-side .nm-table{display:block;overflow-x:auto;white-space:nowrap}
 .chv-solo .chv-list{display:none}

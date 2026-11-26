@@ -239,6 +239,47 @@ function dgVerdict(month, delivered, now){
     shortBy, pace};
 }
 
+/* Has this month's end date gone by? Asked of a standing row. */
+function dgMonthEnded(m, now){
+  const ends = dgParse(dgPick(m, ['ends_on']));
+  if (ends) return dgDayStart(ends) < dgDayStart(dgNow(now));
+  const left = dgPickNum(m, ['days_left']);
+  return left !== null && left < 0;
+}
+/* The months that are over and still open: how many, what they would refund,
+   and how long the oldest of them has been waiting. Counts nothing it cannot
+   read: a refund it does not know makes the total null, never a smaller number. */
+function dgEndedOpen(rows, now){
+  const at = dgNow(now);
+  let count = 0, refund = 0, known = true, oldest = null;
+  (rows || []).forEach(m => {
+    if (!m || dgPick(m, ['locked_at'])) return;
+    if (String(dgPick(m, ['verdict']) || 'open') !== 'open') return;
+    if (!dgMonthEnded(m, at)) return;
+    count++;
+    const due = dgRefundIfLocked(m).amount;
+    if (due === null) known = false; else refund += dgNum(due);
+    const over = dgDays(dgPick(m, ['ends_on']), at);
+    if (over !== null && (oldest === null || over > oldest)) oldest = over;
+  });
+  return {count, refund: known ? refund : null, oldestDays: oldest};
+}
+/* How much of the exposure total belongs to months that have not started yet.
+   Counted only from rows that say when they start AND what they are worth;
+   a row missing either is not guessed at, it just is not counted. */
+function dgExposureNotStarted(rows, now){
+  const at = dgNow(now);
+  let total = 0;
+  (rows || []).forEach(m => {
+    if (!m || dgPick(m, ['locked_at'])) return;
+    if (String(dgPick(m, ['verdict']) || 'open') !== 'open') return;
+    const starts = dgParse(dgPick(m, ['starts_on']));
+    if (!starts || dgDayStart(starts) <= dgDayStart(at)) return;    /* already begun */
+    total += dgNum(dgPickNum(m, ['at_risk', 'refund_due']));
+  });
+  return total;
+}
+
 /* What locking a short month costs, read off the finance side — never worked out here. */
 function dgRefundIfLocked(month){
   const due = dgPickNum(month, ['refund_due', 'refund_amount', 'refund']);
@@ -328,6 +369,10 @@ async function dgHome(now){
   if (dgGot(standing)) {
     dgRows(standing).forEach(m => {
       if (!m || dgPick(m, ['locked_at'])) return;
+      /* A month that is OVER is not running short, it is waiting to be closed:
+         it belongs under "months to close", and counting it in both places
+         counted it twice in the sidebar badge. */
+      if (dgMonthEnded(m, at)) return;
       const v = dgVerdict(m, null, at);
       if (v.state !== 'behind' && v.state !== 'short') return;
       shortMonths.push({
@@ -347,13 +392,51 @@ async function dgHome(now){
     shortMonths.sort((a, b) => dgNum(b.shortBy) - dgNum(a.shortBy));
   }
 
+  /* MONTHS THAT ARE OVER AND STILL OPEN — counted, not drawn here.
+     Round 2 agent 5 owns the commitment board at the top of Today and already
+     gives these a line of their own, so this screen does not draw a second
+     copy of them. What is added here is the count, the money and how long the
+     oldest has waited, off rows dgHome has already read, for whatever draws
+     them; the ACTION (lock, with the outstanding-verdict check) lives on the
+     Month end screen, which is where locking happens.
+     THE ORIGINAL BUG, for the record: Today's only mention of month end was a
+     link reading "Close the months that have ended", the same words whether
+     there were none or five and whether they owed nothing or $6,000. The month
+     that ended on 9 October owing $3,000 sat 48 days behind that sentence.
+     Until this was counted here, Today's only mention of month end was a link
+     that said "Close the months that have ended" whether there were none or
+     five, and whether they owed nothing or $6,000. The month that ended on
+     9 October owing $3,000 sat 48 days behind that sentence. Counted off the
+     same rows, so it needs no extra read and works whether or not the
+     month-end engine is in the database yet. */
+  const endedOpen = dgGot(standing) ? dgEndedOpen(dgRows(standing), at) : null;
+
+  /* WHAT THE EXPOSURE FIGURE IS MADE OF — again counted, not drawn here.
+     The tile's own wording belongs to the screen that draws it.
+     v_exposure adds up every open month, months that have not started
+     included. On the live database on 2026-11-26 that was $69,300, of which
+     $30,000 was 14 months whose first day has not come — a month that has not
+     begun cannot miss today. The headline figure is left exactly as the
+     finance view states it (this file does not re-work the money), but the
+     part of it that cannot be lost today is counted separately, so whatever
+     draws the tile can say so instead of letting the number read as a hole
+     $30,000 bigger than it is. */
+  const exposureNotStarted = dgGot(standing) ? dgExposureNotStarted(dgRows(standing), at) : null;
+
   /* money. v_money first; invoice rows only as a fallback for a key it does not carry. */
   const m = money.ok ? money.data : null;
   const invRows = dgGot(invoices) ? dgRows(invoices) : null;
   const sumInv = pick => invRows === null ? null : invRows.reduce((t, r) => t + (pick(r) ? dgNum(dgPick(r, ['amount', 'gross_amount'])) : 0), 0);
+  /* v_money's own names, checked against the live view on 2026-11-26:
+     unpaid_invoiced, paid_this_month, paid_all_time, refunds_owed, refunds_paid.
+     'unpaid_invoiced' and 'paid_all_time' were not in these lists either, so
+     both tiles were quietly being added up in the browser off the invoice rows
+     instead of being read from the view. They agreed, this time. The view has no
+     column for everything ever invoiced, so that one is still a browser sum —
+     labelled as such in the note above. */
   const invoiced = dgPickNum(m, ['invoiced', 'invoiced_total', 'billed', 'gross_invoiced']);
-  const owed     = dgPickNum(m, ['invoiced_unpaid', 'unpaid', 'owed', 'outstanding', 'awaiting_payment']);
-  const paidEver = dgPickNum(m, ['paid_ever', 'paid', 'paid_total', 'received_ever']);
+  const owed     = dgPickNum(m, ['unpaid_invoiced', 'invoiced_unpaid', 'unpaid', 'owed', 'outstanding', 'awaiting_payment']);
+  const paidEver = dgPickNum(m, ['paid_all_time', 'paid_ever', 'paid', 'paid_total', 'received_ever']);
   const paidMonth= dgPickNum(m, ['paid_this_month', 'paid_month', 'received_this_month']);
   const refundsOwed = dgPickNum(m, ['refunds_owed', 'refunds_unpaid', 'owed_refunds']);
   /* A view that answered with no rows means zero, not "we do not know". A view
@@ -369,9 +452,17 @@ async function dgHome(now){
     refundsOwed: first(refundsOwed, null)
   };
 
+  /* v_exposure's columns are open_months, at_risk_total and at_risk_month_one.
+     This list did not have at_risk_total in it, so dgPick found nothing, and the
+     line below turned that into a confident 0: on 2026-11-26 the Today screen
+     said "$0 refunds exposed" while the view itself said $69,300. The real name
+     goes first; the old guesses stay behind it in case the view is ever renamed.
+     A view that answered with NO ROW AT ALL still means zero — there are no open
+     months — but a view that answered without the column we wanted does not, and
+     that case is now a dash. */
   const exp = exposure.ok ? exposure.data : null;
-  let refundsExposed = dgPickNum(exp, ['at_risk', 'exposure', 'refund_at_risk', 'would_owe', 'amount', 'total']);
-  if (refundsExposed === null && exposure.ok) refundsExposed = 0;
+  let refundsExposed = dgPickNum(exp, ['at_risk_total', 'at_risk', 'exposure', 'refund_at_risk', 'would_owe', 'amount', 'total']);
+  if (refundsExposed === null && exposure.ok && exp === null) refundsExposed = 0;
 
   const salesBooked = dgGot(callsRes) ? dgRows(callsRes).length : null;
   const siteBooked = dgGot(siteRes) ? dgRows(siteRes).filter(dgRealBooking).length : null;
@@ -396,6 +487,8 @@ async function dgHome(now){
     onboardingWaiting,
     clientsLive,
     shortMonths,
+    endedOpen,
+    exposureNotStarted,
     money: moneyOut,
     refundsExposed,
     openRequests: dgGot(requestsRes) ? dgRows(requestsRes).length : null,
@@ -653,7 +746,97 @@ async function dgFridayAll(now){
 /* ---- dgMonthClose: the months ready to close --------------------- */
 /* =================================================================== */
 
+/* THE ENGINE AND THIS SCREEN READ THE SAME ROW.
+   20261209_month_end_engine.sql adds v_months_to_close — every month whose end
+   date has passed in the house US zone and that is still open — and
+   month_end_close(), an hourly pg_cron sweep that locks the ones it can lock
+   safely. The view carries the whole decision: `ready` and, when it is false,
+   `why_not` in a sentence. This screen shows that list, so what the owner sees
+   and what the sweep will do cannot drift apart.
+
+   Until that migration is applied the view is not there, and the browser falls
+   back to working it out from v_month_standing, as it always did. The fallback
+   cannot know whether a month is held, so it says so rather than implying every
+   month on it is safe to lock. */
+
+const DG_TO_CLOSE_VIEW = 'v_months_to_close';
+
+/* One row of the view, in this file's words. */
+function dgCloseRow(m, nameOf){
+  const promised = dgPickNum(m, ['calls_promised']);
+  const delivered = dgPickNum(m, ['calls_delivered']);
+  const short = promised === null || delivered === null ? null : Math.max(0, promised - delivered);
+  const over = dgPickNum(m, ['days_over']);
+  const waiting = dgPickNum(m, ['awaiting_verdict']);
+  return {
+    monthId: dgPick(m, ['month_id', 'id']),
+    clientId: dgPick(m, ['client_id']),
+    company: (nameOf && nameOf[dgPick(m, ['client_id'])]) || dgName(m),
+    monthNo: dgPickNum(m, ['month_no']),
+    promised, delivered,
+    shortBy: short,
+    endsOn: dgPick(m, ['ends_on']),
+    daysOver: over,
+    verdict: String(dgPick(m, ['verdict']) || 'open'),
+    state: short ? 'short' : 'hit',
+    refundDue: dgPickNum(m, ['refund_if_locked', 'refund_due', 'at_risk']),
+    multiplier: dgPickNum(m, ['multiplier']),
+    multiplierWords: dgMultWords(dgPickNum(m, ['multiplier'])),
+    awaitingVerdict: waiting,
+    ready: m.ready === undefined ? null : !!m.ready,
+    whyNot: String(dgPick(m, ['why_not']) || ''),
+    line: (short
+      ? 'Ended short: ' + dgShow(delivered) + ' of ' + dgShow(promised) + ' calls, ' +
+        dgShow(short) + ' ' + dgPlural(short, 'call') + ' short.'
+      : 'Ended having met the promise: ' + dgShow(delivered) + ' of ' + dgShow(promised) + ' calls.') +
+      (over === null || over <= 0 ? '' : ' ' + dgShow(over) + ' ' + dgPlural(over, 'day') + ' ago.')
+  };
+}
+
 async function dgMonthClose(now){
+  /* The engine's own view first: one answer, shared with the sweep. A database
+     without the migration answers with an error (the view is not there), which
+     core.js turns into "that part isn't switched on yet"; a database WITH it and
+     nothing to close answers with no rows, and then the two ways of counting
+     agree anyway, so the cheaper one is used and the screen still says the
+     engine is running. */
+  const viaView = await dgQuery(DG_TO_CLOSE_VIEW, q => q.select('*').order('ends_on'), []);
+  const viewRows = dgGot(viaView) ? dgRows(viaView) : null;
+  if (viewRows && viewRows.length) {
+    const clients = await dgAsk('fnClients');
+    const clientsQ = clients.ok ? clients : await dgQuery('clients', q => q.select('*'), []);
+    const nameOf = {};
+    dgRows(clientsQ).forEach(c => { if (c && c.id) nameOf[c.id] = dgName(c); });
+    const all = viewRows.map(m => dgCloseRow(m, nameOf));
+    const byMoney = (a, b) => dgNum(b.refundDue) - dgNum(a.refundDue);
+    const ready = all.filter(x => x.ready !== false).sort(byMoney);
+    const held  = all.filter(x => x.ready === false).sort(byMoney);
+    return dgOk({
+      months: ready, held, engine: true,
+      totalRefund: dgCloseTotal(ready),
+      heldRefund: dgCloseTotal(held),
+      missing: []
+    });
+  }
+  const fb = await dgMonthCloseFromStanding(now);
+  if (viewRows && fb.ok && fb.data && !fb.data.months.length) {
+    fb.data.engine = true;
+    fb.data.missing = [];
+  }
+  return fb;
+}
+
+/* What locking this lot would refund. null when any one of them is unknown,
+   because a total with a hole in it is worse than no total. */
+function dgCloseTotal(rows){
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return 0;
+  if (list.some(x => x.refundDue === null || x.refundDue === undefined)) return null;
+  return list.reduce((t, x) => t + dgNum(x.refundDue), 0);
+}
+
+/* The old way, kept for a database that does not have the engine yet. */
+async function dgMonthCloseFromStanding(now){
   const at = dgNow(now);
   const standing = await dgStanding(null);
   if (!dgGot(standing)) return dgOk({months: [], totalRefund: null, missing: ['the month standings'], error: standing.error || ''});
@@ -690,11 +873,12 @@ async function dgMonthClose(now){
     });
   });
   months.sort((a, b) => dgNum(b.refundDue) - dgNum(a.refundDue));
-  const known = months.filter(x => x.refundDue !== null);
+  months.forEach(m => { m.ready = null; m.whyNot = ''; m.awaitingVerdict = null; m.daysOver = dgDays(m.endsOn, at); });
   return dgOk({
-    months,
-    totalRefund: known.length === months.length ? known.reduce((t, x) => t + dgNum(x.refundDue), 0) : (known.length ? known.reduce((t, x) => t + dgNum(x.refundDue), 0) : null),
-    missing: []
+    months, held: [], engine: false,
+    totalRefund: dgCloseTotal(months),
+    heldRefund: 0,
+    missing: ['whether each month is safe to lock']
   });
 }
 
@@ -732,7 +916,7 @@ function dgRenderHome(data){
     dgTile('Clients live', dgShow(d.clientsLive)),
     dgTile('Invoiced', dgUsd(m.invoiced)),
     dgTile('Owed to us', dgUsd(m.owed)),
-    dgTile('Refunds exposed', dgUsd(d.refundsExposed), 'if every open month missed today'),
+    dgTile('Refunds exposed', dgUsd(d.refundsExposed), 'every open month, started or not'),
     dgTile('Open requests', dgShow(d.openRequests)),
     dgTile('Overdue tasks', dgShow(d.overdueTasks))
   ].join('');
@@ -809,22 +993,66 @@ function dgRenderFriday(data){
 }
 
 /* --- the months ready to close --- */
+
+/* How overdue a month is, in words. A month that ended yesterday is not news; a
+   month that ended seven weeks ago is the whole problem. */
+function dgOverWords(days){
+  const n = dgPickNum({d: days}, ['d']);
+  if (n === null) return '';
+  if (n <= 0) return 'today';
+  if (n === 1) return 'yesterday';
+  return n + ' days ago';
+}
+function dgCloseTable(rows, withButton){
+  return '<table class="dg-table"><thead><tr><th>Client</th><th>Month</th><th>Calls</th><th>Ended</th>' +
+    '<th>Refund if locked</th><th>At</th><th>' + (withButton ? '' : 'Waiting on') + '</th></tr></thead><tbody>' +
+    rows.map(x =>
+      '<tr><td>' + dgEsc(x.company) + '</td><td>' + dgEsc(x.monthNo === null ? DG_DASH : String(x.monthNo)) + '</td>' +
+      '<td>' + dgEsc(dgShow(x.delivered) + ' of ' + dgShow(x.promised)) + '</td>' +
+      '<td>' + dgEsc((dgNiceDate(x.endsOn) || DG_DASH) + (dgOverWords(x.daysOver) ? ' · ' + dgOverWords(x.daysOver) : '')) + '</td>' +
+      '<td class="dg-amount">' + dgEsc(x.refundDue === null ? DG_DASH : dgUsd(x.refundDue)) + '</td>' +
+      '<td>' + dgEsc(x.refundDue ? x.multiplierWords : DG_DASH) + '</td>' +
+      '<td>' + (withButton
+        ? dgLink('Lock month ' + (x.monthNo === null ? '' : x.monthNo), "dgLockMonth('" + dgEsc(String(x.monthId || '')) + "')", true)
+        /* The reason first, then the override. The owner can always lock a month
+           by hand — the engine declining to do it for him is not a veto. */
+        : '<span class="dg-row-sub">' + dgEsc(x.whyNot || 'Something about this month needs a person.') + '</span> ' +
+          dgLink('Open this client', "dgOpenClient('" + dgEsc(String(x.clientId || '')) + "')") + ' ' +
+          dgLink('Lock it anyway', "dgLockMonth('" + dgEsc(String(x.monthId || '')) + "')")) +
+      '</td></tr>').join('') +
+    '</tbody></table>';
+}
 function dgRenderMonthEnd(data){
   const d = data || {};
   const months = Array.isArray(d.months) ? d.months : [];
-  if (!months.length) return '<div class="dg-screen"><p class="dg-none">No month has ended and is waiting to be locked.</p>' + dgMissingLine(d.missing) + '</div>';
-  return '<div class="dg-screen"><div class="dg-head"><h3>Ready to close</h3>' +
-    '<span class="dg-sub">' + dgEsc('Locking a month is final. A short month raises its refund at the multiplier the finance side set: double in month one, that month in full after.') + '</span></div>' +
-    '<table class="dg-table"><thead><tr><th>Client</th><th>Month</th><th>Calls</th><th>Ended</th><th>Refund if locked</th><th>At</th><th></th></tr></thead><tbody>' +
-    months.map(x =>
-      '<tr><td>' + dgEsc(x.company) + '</td><td>' + dgEsc(x.monthNo === null ? DG_DASH : String(x.monthNo)) + '</td>' +
-      '<td>' + dgEsc(dgShow(x.delivered) + ' of ' + dgShow(x.promised)) + '</td>' +
-      '<td>' + dgEsc(dgNiceDate(x.endsOn) || DG_DASH) + '</td>' +
-      '<td class="dg-amount">' + dgEsc(x.refundDue === null ? DG_DASH : dgUsd(x.refundDue)) + '</td>' +
-      '<td>' + dgEsc(x.refundDue ? x.multiplierWords : DG_DASH) + '</td>' +
-      '<td>' + dgLink('Lock month ' + (x.monthNo === null ? '' : x.monthNo), "dgLockMonth('" + dgEsc(String(x.monthId || '')) + "')", true) + '</td></tr>').join('') +
-    '</tbody></table>' +
-    '<p class="dg-total">' + dgEsc(d.totalRefund === null || d.totalRefund === undefined ? 'The total refund is not known yet.' : 'Locking all of these would refund ' + dgUsd(d.totalRefund) + '.') + '</p>' +
+  const held = Array.isArray(d.held) ? d.held : [];
+  /* What closes a month, said once, on the screen that closes them. The owner
+     should not have to guess whether anything is watching. */
+  const how = d.engine
+    ? 'Aviance closes these by itself, every hour. A month that has ended, has every call marked and was paid for locks on its own, raises its refund and puts it on your list. The ones below are what the clock will not decide for you.'
+    : 'Nothing closes a month on its own yet — the month-end schedule is in a database update that has not been applied. Until it is, every month on this screen waits for the button beside it.';
+  if (!months.length && !held.length) {
+    return '<div class="dg-screen"><p class="dg-none">No month has ended and is waiting to be locked.</p>' +
+      '<p class="dg-note-foot">' + dgEsc(how) + '</p>' + dgMissingLine(d.missing) + '</div>';
+  }
+  return '<div class="dg-screen">' +
+    '<p class="dg-note-foot">' + dgEsc(how) + '</p>' +
+    (months.length
+      ? '<div class="dg-head"><h3>Ready to close</h3>' +
+        '<span class="dg-sub">' + dgEsc('Locking a month is final. A short month raises its refund at the multiplier the finance side set: double in month one, that month in full after.') + '</span></div>' +
+        dgCloseTable(months, true) +
+        '<p class="dg-total">' + dgEsc(d.totalRefund === null || d.totalRefund === undefined
+          ? 'The total refund is not known yet.'
+          : 'Locking all of these would refund ' + dgUsd(d.totalRefund) + '.') + '</p>'
+      : '<p class="dg-none">Nothing is ready to close by itself.</p>') +
+    (held.length
+      ? '<div class="dg-head"><h3>' + dgEsc('Ended, but not closing by itself') + '</h3>' +
+        '<span class="dg-sub">' + dgEsc('These are over and still open. Aviance will not lock them on a guess — a month locked on the wrong number cannot be un-locked, and its refund cannot be raised twice. Clear what each one is waiting on and it closes within the hour.') + '</span></div>' +
+        dgCloseTable(held, false) +
+        '<p class="dg-total">' + dgEsc(d.heldRefund === null || d.heldRefund === undefined
+          ? 'What these would refund is not known yet.'
+          : 'As they stand these would refund ' + dgUsd(d.heldRefund) + '.') + '</p>'
+      : '') +
     dgMissingLine(d.missing) + '</div>';
 }
 
@@ -901,8 +1129,23 @@ function dgGo(what){
   if (dgHas('toast')) toast('That screen is not in Aviance OS yet.');
   return false;
 }
+/* CLOSING a month is four steps — lock the verdict, raise the refund, open the
+   next month, invoice it — and fnCloseMonth (finance.js) is the one place that
+   does all four, with the two refusals a clock cannot make for itself: not at a
+   3-month term boundary, and not for a client who has left. Use it when it is
+   there, and fall back to locking alone when it is not, so this button keeps
+   working on a build without it. Either way this screen writes no sequence of
+   its own: the money side owns the order. */
 async function dgLockMonth(monthId){
   if (!monthId) return;
+  if (dgHas('fnCloseMonth')) {
+    const c = await dgAsk('fnCloseMonth', monthId);
+    /* fnCloseMonth refuses in a sentence the owner can act on — show it as it
+       came, and do not then try to lock the month behind its back. */
+    if (dgHas('toast')) toast(c.ok ? 'Month closed. Any refund it owes is raised, and the next month is opened and invoiced.' : c.error);
+    dgMount('monthEnd');
+    return;
+  }
   if (!dgHas('fnLockMonth')) { if (dgHas('toast')) toast('The money side is not loaded, so nothing was locked.'); return; }
   const r = await dgAsk('fnLockMonth', monthId);
   if (dgHas('toast')) toast(r.ok ? 'Month locked. Any refund it owes is now raised.' : r.error);

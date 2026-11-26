@@ -336,3 +336,11 @@ test('the keyboard can skip the eleven places and land on the screen', () => {
   run('skipToContent({preventDefault(){}})');
   assert.deepEqual(focusLog, ['content'], 'with nothing in it yet, the screen itself takes the focus');
 });
+
+test('the white ring on red buttons is drawn INSIDE the button, whatever the screen says', () => {
+  /* Per-screen rules like `.chv button:focus-visible{…outline-offset:1px}` are more
+     specific than the shared rule, so without !important on the offset the white ring
+     was pushed outside the red button onto a white page — white on white, 1:1. Found
+     by measuring in a browser, not by reading. */
+  assert.match(brand, /outline:2px solid #fff!important;outline-offset:-4px!important\}/);
+});

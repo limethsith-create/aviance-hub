@@ -92,7 +92,7 @@ test('every function returns {ok,data,error} and never throws', async () => {
     .filter((k) => /^fn[A-Z]/.test(k) && typeof F(k) === 'function');
   assert.ok(names.length > 15, 'expected the finance functions to be on the shell');
 
-  for (const n of ['fnMoney', 'fnExposure', 'fnPlans', 'fnClients', 'fnStanding', 'fnBehind', 'fnCalls', 'fnInvoices', 'fnRefunds', 'fnInvoiceWork']) {
+  for (const n of ['fnMoney', 'fnExposure', 'fnPlans', 'fnClients', 'fnStanding', 'fnCalls', 'fnInvoices', 'fnRefunds', 'fnInvoiceWork']) {
     reset();
     const r = await F(n)();
     assert.deepEqual(Object.keys(r).sort(), ['data', 'error', 'ok'], n + ' shape');
@@ -114,7 +114,7 @@ test('a database error comes back as a plain sentence, not a throw', async () =>
 test('nothing in the database reads as empty, not as a crash', async () => {
   reset();
   for (const k of Object.keys(tables)) tables[k] = [];
-  for (const n of ['fnMoney', 'fnExposure', 'fnPlans', 'fnClients', 'fnBehind', 'fnInvoices', 'fnRefunds', 'fnInvoiceWork']) {
+  for (const n of ['fnMoney', 'fnExposure', 'fnPlans', 'fnClients', 'fnInvoices', 'fnRefunds', 'fnInvoiceWork']) {
     const r = await F(n)();
     assert.equal(r.ok, true, n + ': ' + r.error);
     assert.ok(r.data !== undefined, n + ' gave undefined');
@@ -395,4 +395,15 @@ test('a failed recount never turns a write that worked into an error', async () 
   const r = await F('fnCallHappened')('q1', '2026-12-01T15:30:00Z');
   assert.equal(r.ok, true, 'the call was written, so the answer is yes');
   assert.equal(r.data.id, 'q1');
+});
+
+/* fnStanding reads every client-month. Past one page PostgREST answers short and says
+   nothing, so months silently go missing from every total. It must page, and it must
+   refuse out loud rather than pass a part off as the whole. */
+test('fnStanding source pages its read and fails loudly at the ceiling', () => {
+  const src = fs.readFileSync(new URL('../finance.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('async function fnStanding'), src.indexOf('async function fnStanding') + 1600);
+  assert.match(body, /\.range\(/, 'reads a page at a time');
+  assert.match(body, /rows\.length < FN_STANDING_PAGE/, 'stops on a short page');
+  assert.match(body, /not showing a part of them as the whole/, 'refuses in words at the ceiling');
 });

@@ -40,9 +40,8 @@ const CB_RELOAD_MS = 60000;
 /* What the screens are holding right now. Nothing is loaded until a view asks. */
 const cb = {
   clients: null, at: 0, err: '', tried: false,
-  standing: [], exposure: null, owners: {}, history: {}, requests: [], profiles: {},
+  standing: [], owners: {}, history: {}, requests: [], profiles: {},
   one: {}, oneErr: {},          /* one[clientId] = {client, profile, months, events, history} */
-  needs: null, needsErr: '',
   agreements: {}, firstInv: {},  /* newest agreement, and the first invoice, by client id */
   seats: {}, seatsErr: {},       /* portal_seat_state() by client id — who can sign in */
   cal: {}, calErr: {},           /* their connected calendars, by client id */
@@ -50,8 +49,8 @@ const cb = {
 };
 function cbForget(){
   cb.clients = null; cb.at = 0; cb.err = ''; cb.tried = false;
-  cb.standing = []; cb.exposure = null; cb.owners = {}; cb.history = {}; cb.requests = []; cb.profiles = {};
-  cb.one = {}; cb.oneErr = {}; cb.needs = null; cb.needsErr = ''; cb.busy = {};
+  cb.standing = []; cb.owners = {}; cb.history = {}; cb.requests = []; cb.profiles = {};
+  cb.one = {}; cb.oneErr = {}; cb.busy = {};
   cb.agreements = {}; cb.firstInv = {};
   cb.seats = {}; cb.seatsErr = {}; cb.cal = {}; cb.calErr = {};
 }
@@ -115,10 +114,6 @@ function cbList(items){
 }
 function cbPossessive(n){ const s = cbTrim(n); return s ? s + (/s$/i.test(s) ? "'" : "'s") : 'Their' }
 
-/* The plan_prices rows a new client may be put on: the three plans on offer
-   (finance.js), whatever else the table still holds. */
-function cbOffered(list){ return (Array.isArray(list) ? list : []).filter(p => p && fnPlanOffered(cbTrim(p.plan))) }
-
 /* "growth" → "Growth": a plan's name, as the owner reads it. A plan code that is no
    longer on offer reads "Retired plan" (finance.js), so an old client still shows. */
 function cbPlanWord(p){
@@ -144,9 +139,9 @@ function cbStageBefore(key){ const i = cbStageIndex(key); return i > 0 ? CB_STAG
 
 /* ===================== 3. READS ===================== */
 
-async function cbPlans(){
-  return cbRun(() => sb.from('plan_prices').select('*').order('monthly_fee'), []);
-}
+/* The plans a new client may be put on. finance.js reads plan_prices and leaves
+   out every code that is no longer on offer, so there is one filter, not two. */
+async function cbPlans(){ return fnPlans() }
 async function cbClients(stage){
   return cbRun(() => {
     let q = sb.from('clients').select('*');
@@ -236,10 +231,6 @@ async function cbStanding(opts){
     if (o.openOnly) q = q.eq('verdict', 'open');
     return q.order('ends_on');
   }, []);
-}
-/* What we would owe if every open month ended today and missed. */
-async function cbExposure(){
-  return cbRun(() => sb.from('v_exposure').select('*').maybeSingle(), null);
 }
 /* Who on the team looks after whom: {profileId: name}. */
 async function cbOwners(){
@@ -370,7 +361,7 @@ async function cbAddClient(fields){
   if (!plans.ok) return plans;
   /* a plan code from before the three plans: refused in words, never mapped to another */
   if (fnPlanRetired(cbTrim(f.plan))) return cbErr(FN_RETIRED_SAYS);
-  const list = cbOffered(plans.data);
+  const list = plans.data;
   const p = list.find(x => x && x.plan === cbTrim(f.plan));
   if (!p) return cbErr(list.length
     ? 'Pick a plan: ' + cbList(list.map(x => cbTrim(x.label) || cbTrim(x.plan))) + '.'
@@ -1296,7 +1287,7 @@ async function cbDoMove(clientId, toStage){
 /* Add a client by hand. The plans come from plan_prices, so the prices are never typed. */
 async function cbOpenAdd(bookingId){
   const plans = await cbPlans();
-  const list = cbOffered(plans.ok ? plans.data : []);
+  const list = plans.ok ? plans.data : [];
   const opts = list.map(p => '<option value="' + cbE(p.plan) + '">' +
     cbE((cbTrim(p.label) || cbTrim(p.plan)) + ' — ' + cbInt(p.calls_promised) + ' calls a month, ' + cbUsd(p.monthly_fee) + ' a month') + '</option>').join('');
   const html = '<div class="cb-add"><h3>Add a client</h3>' +
@@ -1521,6 +1512,14 @@ function cbRenderSeats(clientId, s, meta){
     cbSeatFig(s) +
     '<p class="cb-dim">' + cbE(cbSeatLine(s)) + '</p>' +
     (s.at_limit ? cbNote(cbSeatWhyFull(s), 'amber') : '') +
+    /* The only place in the browser that can make a portal invite is the
+       'Their people' screen (portal.js viewClientPeople -> portal_invite_create).
+       Nothing linked to it, so a Growth client's logins 2, 3 and 4 needed the SQL
+       editor. This is where the owner is already looking when he wonders who can
+       sign in. */
+    '<p style="margin:12px 0 0"><button class="btn' + (s.at_limit ? ' ghost' : '') +
+      '" onclick="openClientPeople(' + cbAttr(clientId) + ')">' +
+      cbE(s.at_limit ? 'Manage their logins' : 'Give someone a login') + '</button></p>' +
     (holders.length ? '<ul style="list-style:none;margin:10px 0 0;padding:0">' + rows + '</ul>'
       : '<p class="cb-dim">' + cbE('Nobody from ' + (cbTrim(s.company) || 'this client') + ' can sign in yet. The welcome email sends the first login when their first invoice is marked paid.') + '</p>') +
     (pend ? '<p style="' + CB_EYEBROW + ';margin-top:22px">' + cbE('Invited, not opened yet') + '</p>' +

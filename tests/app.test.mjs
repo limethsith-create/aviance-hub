@@ -139,7 +139,7 @@ test('index.html loads no file twice, none for a removed screen, and npm run che
 test('the sidebar: eleven plain places for the owner, each with its own icon, most used first', () => {
   const { run } = shell('admin');
   const items = plain(run('navItems()'));
-  assert.deepEqual(items.map((i) => i.label), ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Prospects', 'Employees', 'Onboarding', 'Invoices', 'Documents', 'Settings']);
+  assert.deepEqual(items.map((i) => i.label), ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Prospects', 'Employees', 'Onboarding', 'Money', 'Documents', 'Settings']);
   assert.equal(new Set(items.map((i) => i.icon)).size, items.length, 'no two places share an icon');
   for (const i of items) { assert.ok(i.icon.startsWith('<svg'), i.label + ' has an icon'); assert.match(i.label, /^[A-Z][a-z]+$/); }
   // every screen that is not a place sits under one, with a way back
@@ -153,7 +153,7 @@ test('the sidebar: eleven plain places for the owner, each with its own icon, mo
 test('a team member who is not the owner is offered no owner-only place, in the sidebar or in ⌘K', () => {
   const { run } = shell('employee');
   const labels = plain(run('navItems().map(i=>i.label)'));
-  assert.deepEqual(labels, ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Prospects', 'Onboarding', 'Invoices']);
+  assert.deepEqual(labels, ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Prospects', 'Onboarding', 'Money']);
   const found = plain(run("cmdkEntities().filter(x=>x.type==='Screens').map(x=>x.label)"));
   for (const l of ['Employees', 'Documents', 'Settings']) assert.ok(!found.includes(l), l);
   assert.ok(found.includes('Calendar') && found.includes('Team'));
@@ -173,7 +173,7 @@ test('badges say what they count, in the singular and the plural', () => {
   assert.equal(by.Employees.badge, ''); assert.equal(by.Employees.badgeTitle, '');
   assert.equal(by.Onboarding.badgeTitle, '3 steps are running late');
   assert.equal(by.Channels.badgeTitle, '9+ unread');
-  assert.equal(by.Invoices.badge, '', 'no count is invented where no screen gives one');
+  assert.equal(by.Money.badge, '', 'no count is invented where no screen gives one');
 });
 
 test('the phone tab bar never holds more than five: four places and More, which opens the rest', () => {
@@ -193,7 +193,7 @@ test('the phone tab bar never holds more than five: four places and More, which 
     run('openMore()');
     const sheet = el('modal').innerHTML;
     const rows = [...sheet.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]);
-    assert.deepEqual(rows, [...(role === 'admin' ? ['Channels', 'Prospects', 'Employees', 'Onboarding', 'Invoices', 'Documents', 'Settings'] : ['Channels', 'Prospects', 'Onboarding', 'Invoices']),
+    assert.deepEqual(rows, [...(role === 'admin' ? ['Channels', 'Prospects', 'Employees', 'Onboarding', 'Money', 'Documents', 'Settings'] : ['Channels', 'Prospects', 'Onboarding', 'Money']),
       'Find a client or a screen', 'Switch light / dark', 'Sign out']);
     assert.ok(sheet.includes(`onclick="closeModal();render('journey')" aria-current="page"`));
     assert.ok(sheet.includes('onclick="closeModal();logout()"'), 'a phone can sign out');

@@ -198,6 +198,7 @@ function pctMonthNorm(m, j, now){
     have: false, state: 'before', monthNo: x ? Math.round(pctNum(x.month_no)) || 1 : 1,
     promised, delivered, left: Math.max(0, promised - delivered),
     daysLeft: null, total: 0, elapsed: 0, expected: 0, share: 0, pace: 0,
+    band: 'none', rate: null,
     starts: starts ? pctKey(starts) : '', ends: ends ? pctKey(ends) : '',
     launch: jn.launch, toLaunch: jn.days, live: jn.live, label: x ? String(x.plan_label || '') : '',
   };
@@ -216,7 +217,23 @@ function pctMonthNorm(m, j, now){
      last day still counts, so the month is only closed once the day is past. */
   const over = today > ends;
   out.daysLeft = Math.max(0, Math.round((ends - today) / PCT_DAY_MS));
-  out.expected = promised * (out.elapsed / out.total);
+  /* THE ONE SUM. corePace in core.js does this arithmetic for both sides of the
+     business: this line, which the client reads about their own month, and the
+     owner's commitment board (guarantee.js), which reads the same months across
+     every client. They used to each have their own test and the two did not
+     agree — the owner's was "short, and ten days or less to go", this one was
+     "behind the straight line" — so a client could be told "Behind" here while
+     the owner's screen left them off the list of clients who are behind.
+     Checked live on 2026-11-26: that is exactly what one $9,000 Scale month was
+     doing. One sum now, read twice.
+     `onLine` is the gentle test and it is what decides what the CLIENT is told,
+     unchanged. `band` is the harsher one and is for the owner; it is carried
+     here so the client's screen and the owner's screen are provably reading the
+     same numbers, and because corePace guarantees band 'ontrack' only when
+     onLine is true — the owner is never more optimistic than the client. */
+  out.rate = corePace(promised, delivered, out.elapsed, out.total, out.daysLeft);
+  out.band = out.rate.band;
+  out.expected = out.rate.expected;
   out.share = Math.max(0, Math.min(1, delivered / promised));
   /* how often a call has to land from here to finish the month on the number */
   out.pace = out.left > 0 && out.daysLeft > 0 ? out.daysLeft / out.left : 0;
@@ -226,7 +243,7 @@ function pctMonthNorm(m, j, now){
   else if (over) out.state = 'short';
   /* "behind" only once a whole call behind the straight line: a client should
      never be told they are behind on a rounding error. */
-  else if (delivered < Math.floor(out.expected)) out.state = 'behind';
+  else if (!out.rate.onLine) out.state = 'behind';
   else out.state = 'ontrack';
   return out;
 }
@@ -319,7 +336,12 @@ function pctCampaignNorm(data, clientId){
   const angles = campaigns.slice().sort((a, b) => b.booked - a.booked || b.positive - a.positive || b.sent - a.sent);
   const live = campaigns.filter(c => /active|running|live/i.test(c.status)).length;
   const started = campaigns.map(c => c.started).filter(Boolean).sort()[0] || '';
-  return { campaigns, angles, days, totals, live, started,
+  /* when the sending platform was last read successfully, across this client's
+     campaigns. '' when we were not told — never a guess. */
+  const synced = pctMine(d.campaigns, clientId)
+    .map(c => { const t = Date.parse(c && c.last_synced_at); return isFinite(t) ? t : 0; })
+    .reduce((a, b) => Math.max(a, b), 0);
+  return { campaigns, angles, days, totals, live, started, synced: synced ? new Date(synced).toISOString() : '',
     any: totals.sent > 0 || days.length > 0 || campaigns.length > 0 };
 }
 
@@ -452,6 +474,26 @@ function pctCampaignEmptyHtml(month, opts){
   '</section>';
 }
 
+/* "As of". The numbers on this tab are copied from a third party a few times a day,
+   and a third party can be down for three days. Without a date on them a client
+   reads Tuesday's figures on Friday as today's, on the tab the guarantee is argued
+   over. So the tab says when it was last read — and says so more plainly once that
+   is more than a day ago. When we were not told, it claims nothing about freshness.
+   Pure: `now` is passed in. */
+function pctAsOf(syncedIso, now){
+  const t = Date.parse(syncedIso || '');
+  if (!isFinite(t)) return 'Every figure here comes from the sending platform itself.';
+  const mins = Math.max(0, Math.round(((now instanceof Date ? now.getTime() : Date.now()) - t) / 60000));
+  const when = mins < 90 ? 'within the last hour or so'
+    : mins < 60 * 20 ? 'about ' + Math.round(mins / 60) + ' hours ago'
+    : mins < 60 * 36 ? 'yesterday'
+    : Math.round(mins / 1440) + ' days ago';
+  const base = 'Every figure here comes from the sending platform itself, last read ' + when + '.';
+  return mins >= 60 * 36
+    ? base + ' That is longer than usual, so these numbers may be behind. We are looking at it.'
+    : base;
+}
+
 /* The Campaign tab. Pure. data = portal_campaign's answer (already scoped). */
 function pctCampaignHtml(data, month, opts){
   const o = opts || {};
@@ -461,7 +503,7 @@ function pctCampaignHtml(data, month, opts){
     '<header class="pctp-head"><p class="pc-tag">Campaign' + (c.started ? ' · since ' + pctEsc(pctDate(c.started)) : '') + '</p>' +
       '<p class="pctp-rule" aria-hidden="true"></p>' +
       '<h2 class="pctp-h">' + pctEsc(c.live === 1 ? 'One angle sending' : c.live > 1 ? c.live + ' angles sending' : 'Sending is paused') + '</h2>' +
-      '<p class="pctp-lede">' + pctEsc('Every figure here comes from the sending platform itself, read fresh a few times a day.') + '</p>' +
+      '<p class="pctp-lede">' + pctEsc(pctAsOf(c.synced, o.now)) + '</p>' +
     '</header>' +
     pctFunnelHtml(c.totals) +
     '<p class="pctp-foot">' + pctEsc('“Calls” here is what the sending platform recorded. The number your guarantee is measured on is the one at the top of this page: it counts only calls that matched the profile you approved. Every one of them is on the Calls tab.') + '</p>' +
@@ -928,10 +970,15 @@ async function pctLoadCampaign(ctx, clientId){
        still reports it — Promise.all passes the first rejection straight on. */
     const [campaigns, daily] = await Promise.all([
       pctRows(sb, 'outreach_campaigns',
-        'id,client_id,name,status,started_on,sent,opened,replied,positive,booked', clientId),
+        'id,client_id,name,status,started_on,sent,opened,replied,positive,booked,last_synced_at', clientId),
       pctRows(sb, 'outreach_daily',
         'client_id,on_day,sent,opened,replied,positive,booked', clientId,
-        (q) => q.order('on_day', { ascending: true })),
+        /* newest first. This used to ask for the oldest rows first, so once a client
+           had more days than the row ceiling the chart silently stopped at a date in
+           the past and the recent days — the ones they came to see — were the ones
+           dropped. pctCampaignNorm sorts by day itself, so the order here only
+           decides which rows survive the limit. */
+        (q) => q.order('on_day', { ascending: false })),
     ]);
     return { client_id: clientId, campaigns, daily };
   });

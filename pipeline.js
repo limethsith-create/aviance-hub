@@ -53,6 +53,14 @@ const PL_LOSS_WORDS = {
 const PL_NEVER_HELD = ['no_show', 'ghosted'];
 /* How long a brief may be "running" before we stop calling it that. */
 const PL_RUNNING_MS = 30 * 60000;
+/* How long after its start a call may sit with nothing recorded about it before
+   the hub starts asking. ONE copy of this number: meetings.js's MT_GRACE_MIN is
+   an alias of it (pipeline.js loads first). It used to be written down twice,
+   as 20 here and 20 there, and the two answer the same question — "has this
+   call been and gone long enough to need an outcome?" — for the booking panel
+   and for the Calendar's badge. Drifting apart means a call the badge counts
+   and the panel does not, or the other way round. */
+const PL_GRACE_MIN = 20;
 const PL_BRIEF_DEPTH = 3;
 
 /* The plans a sale may be put on: the three on offer (FN_PLANS, finance.js). A plan
@@ -102,6 +110,39 @@ function plSafeUrl(u) {
   try { const p = new URL(s); return p.protocol === 'http:' || p.protocol === 'https:' ? p.href : ''; } catch (e) { return ''; }
 }
 
+/* ---- reading every row, not just the first page --------------------
+   A query with no range in it is answered out of ONE page, and that page has a
+   ceiling this code cannot see. Today there are five bookings, so every count
+   below is right. At a thousand it would quietly stop being right: the funnel
+   would report fewer enquiries than came in, the show rate and the win rate
+   worked out from them would both be wrong, and nothing on the screen would
+   hint at it. A number that is wrong and looks right is worse than no number.
+
+   So the reads that COUNT ask page by page until a short page comes back.
+   `build(from, to)` is handed the page's bounds and returns the query; it must
+   order by something unique, or a row can be read twice or skipped. */
+const PL_PAGE = 1000;
+const PL_MAX_PAGES = 50;        /* 50,000 rows. Past that a screen is the wrong tool, not a bigger page. */
+async function plPages(build) {
+  const all = [];
+  for (let page = 0; page < PL_MAX_PAGES; page++) {
+    const from = page * PL_PAGE;
+    const got = await plRun(() => build(from, from + PL_PAGE - 1), []);
+    if (!got.ok) return got;
+    const rows = Array.isArray(got.data) ? got.data : [];
+    for (const row of rows) all.push(row);
+    if (rows.length < PL_PAGE) return plOk(all);
+  }
+  return plOk(all);
+}
+/* How many ids go into one `in(...)`. A uuid is 36 characters and each one is
+   comma-separated inside the URL, so a thousand of them is a 40 KB request line
+   and the server answers 414 rather than the list. */
+const PL_IN_CHUNK = 150;
+/* The five columns the funnel counts. `discovery_bookings` has over thirty, and
+   the funnel needs none of the rest to add up. */
+const PL_FUNNEL_COLS = 'id,status,lost_reason,call_at,created_at';
+
 /* ---- the bookings ------------------------------------------------- */
 
 /* The bookings: soonest call first, each with its score and whether a brief exists.
@@ -109,23 +150,32 @@ function plSafeUrl(u) {
    {from, to} keeps only the calls starting in that span — what the Calendar asks for. */
 async function plBookings(opts) {
   const o = opts || {};
-  const got = await plRun(() => {
+  const got = await plPages((from, to) => {
     let q = sb.from('discovery_bookings').select('*');
     if (o.status && o.status !== 'all' && o.status !== 'open') q = q.eq('status', o.status);
     if (o.from) q = q.gte('call_at', o.from);
     if (o.to) q = q.lt('call_at', o.to);
-    return q.order('call_at', { ascending: true });
-  }, []);
+    /* ordered by id, which is unique, so paging cannot read a row twice or miss
+       one. The list is sorted by call time below, where it is wanted. */
+    return q.order('id', { ascending: true }).range(from, to);
+  });
   if (!got.ok) return got;
   let rows = Array.isArray(got.data) ? got.data.filter((r) => r && r.id != null) : [];
   if (o.status === 'open') rows = rows.filter(plIsOpen);
   if (!rows.length) return plOk([]);
 
-  /* which of them the research engine has already written a brief for */
-  const briefs = await plRun(() => sb.from('research_briefs').select('booking_id')
-    .in('booking_id', rows.map((r) => r.id)), []);
+  /* which of them the research engine has already written a brief for. Asked a
+     chunk of ids at a time: one `in(...)` of every booking's id is a request
+     line long enough for the server to refuse the whole thing. A chunk that
+     fails leaves its bookings reading "no brief yet", which is what they read
+     before this lookup existed. */
   const have = {};
-  if (briefs.ok) (briefs.data || []).forEach((r) => { if (r && r.booking_id != null) have[String(r.booking_id)] = true; });
+  for (let i = 0; i < rows.length; i += PL_IN_CHUNK) {
+    const ids = rows.slice(i, i + PL_IN_CHUNK).map((r) => r.id);
+    const briefs = await plRun(() => sb.from('research_briefs').select('booking_id')
+      .in('booking_id', ids), []);
+    if (briefs.ok) (briefs.data || []).forEach((r) => { if (r && r.booking_id != null) have[String(r.booking_id)] = true; });
+  }
 
   return plOk(rows.map((r) => Object.assign({}, r, {
     score: plScore(r),
@@ -387,12 +437,12 @@ async function plNoShow(bookingId) {
 /* Counted from the rows themselves, every time. Nothing here reads a stored total. */
 async function plFunnel(range) {
   const r = range || {};
-  const got = await plRun(() => {
-    let q = sb.from('discovery_bookings').select('*');
+  const got = await plPages((from, to) => {
+    let q = sb.from('discovery_bookings').select(PL_FUNNEL_COLS);
     if (r.from) q = q.gte('created_at', r.from);
     if (r.to) q = q.lte('created_at', r.to);
-    return q;
-  }, []);
+    return q.order('id', { ascending: true }).range(from, to);
+  });
   if (!got.ok) return got;
   const rows = (Array.isArray(got.data) ? got.data : []).filter(Boolean);
 
@@ -442,7 +492,7 @@ function plNeedsOutcome(b, now) {
   const t = plMs(b && b.call_at); if (!t || !plIsOpen(b)) return false;
   const s = String(b.status);
   if (PL_HELD.includes(s) || s === 'no_show') return false;
-  return (now || new Date()).getTime() - t > 20 * 60000;
+  return (now || new Date()).getTime() - t > PL_GRACE_MIN * 60000;
 }
 
 /* ---- one booking, laid out (the Calendar's panel draws this) ------ */

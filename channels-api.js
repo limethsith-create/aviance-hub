@@ -38,6 +38,16 @@
     if (code === 'PGRST301' || /jwt|not authenticated|session/i.test(msg)) return 'Your sign-in has run out. Please sign in again.';
     if (code === '42501' || /row-level security|permission denied|not authorized|unauthorized/i.test(msg)) return "You don't have access to do that.";
     if (code === 'P0001' && msg) return msg;   // our own database messages are already plain
+    /* A function or table this database has not been given yet. coreFamily
+       (core.js) is the one place that decides what KIND of failure something
+       is, and this was the one kind the chat did not ask it about: against a
+       database where my_channels() or drafts_pending() has not been applied,
+       every screen in the hub said "that part isn't switched on yet" and the
+       chat alone said "Couldn't load your channels." That reads as a fault and
+       sends the owner hunting for one that is not there. */
+    if (typeof coreFamily === 'function' && coreFamily(msg, code) === 'not-ready') {
+      return typeof CORE_NOT_READY === 'string' ? CORE_NOT_READY : fallback;
+    }
     return fallback;
   }
   function done(data) { return { ok: true, data: data === undefined ? null : data, error: null }; }
@@ -288,11 +298,25 @@
     if (n.length > 80) throw Fail('Keep the channel name under 80 characters.');
     var s = need(client()), uid = await myId();
     var row = check(await s.from('channels').insert({ name: n, kind: 'team', created_by: uid }).select('id,name,kind,client_id,archived_at,created_at').single(), "Couldn't create that channel.");
-    var ids = [uid];
-    (memberIds || []).forEach(function (m) { if (m && ids.indexOf(m) < 0) ids.push(m); });
     var made = { id: row.id, name: row.name, kind: row.kind, clientId: row.client_id || null, archived: false, lastMessageAt: null, unread: 0 };
-    var mres = await s.from('channel_members').insert(ids.map(function (m) { return m === uid ? { channel_id: row.id, user_id: m, member_role: 'owner' } : { channel_id: row.id, user_id: m }; }));
-    if (mres && mres.error) { var e = Fail("The channel was created, but some people couldn't be added. Add them from the channel's people list."); e.partial = made; return Promise.reject(e); }
+    /* Three writes, not one, and in this order on purpose. Creating a channel is
+       not one statement: the row goes in, then the people. If the people go in
+       as a single insert and that insert fails, the channel exists with NOBODY
+       in it — and my_channels() lists a channel by membership, so it is in
+       nobody's list, cannot be opened, cannot be renamed or archived, and its
+       name is taken. The old message said "add them from the channel's people
+       list"; there was no channel to open to get to that list.
+       So the creator's own seat goes in first and on its own. After that the
+       channel is always one he can see, and a failure adding the others is
+       something he can finish by hand. */
+    var mine = await s.from('channel_members').insert({ channel_id: row.id, user_id: uid, member_role: 'owner' });
+    if (mine && mine.error) throw Fail("The channel was made but could not be opened, so nothing was added to it. Try again, or ask for it to be cleared up.");
+    var others = [];
+    (memberIds || []).forEach(function (m) { if (m && m !== uid && others.indexOf(m) < 0) others.push(m); });
+    if (others.length) {
+      var mres = await s.from('channel_members').insert(others.map(function (m) { return { channel_id: row.id, user_id: m }; }));
+      if (mres && mres.error) { var e = Fail("The channel was created and is yours, but some people couldn't be added. Add them from the channel's Members list."); e.partial = made; return Promise.reject(e); }
+    }
     return made;
   });
 

@@ -797,6 +797,14 @@ test('the add form offers the real plans and their real prices, and saves what w
   assert.ok(!/pilot|Old plan|\$300/i.test(stale), 'the withdrawn plan is not offered, named or priced');
   tables['plan_prices.select'] = () => ({data:PLANS, error:null});
   assert.ok(!/99|hard/.test(form.replace(/\$[\d,]+/g,'')), 'no price typed into the markup');
+  /* and there is ONE filter, not two: cbPlans is finance.js's fnPlans, so the
+     only place a plan code is checked against what is on offer is finance.js.
+     Two copies of this filter is how a withdrawn plan comes back on one screen. */
+  tables['plan_prices.select'] = () => ({data:PLANS.concat([{plan:'pilot', label:'Old plan', calls_promised:2, monthly_fee:300}]), error:null});
+  const only = await cbPlans();
+  assert.deepEqual(only.data.map(p => p.plan), ['starter','growth','scale'], 'cbPlans hands on the offered plans only');
+  assert.equal(cbPlans.toString().replace(/\s+/g,' '), 'async function cbPlans(){ return fnPlans() }');
+  tables['plan_prices.select'] = () => ({data:PLANS, error:null});
 
   Object.assign(fields, {cbAddCo:'Harbor Co', cbAddName:'Pat Lee', cbAddEmail:'pat@harbor.test', cbAddSite:'harbor.test', cbAddPlan:'growth', cbAddTerm:'3month'});
   const r = await cbSaveAdd();
@@ -818,11 +826,11 @@ test('the add form offers the real plans and their real prices, and saves what w
 
 test('every data function answers {ok,data,error} and never throws', async () => {
   const boom = () => { throw new Error('the database fell over') };
-  ['clients.select','client_events.insert','client_events.select','plan_prices.select','v_month_standing.select','client_profiles.select','client_stage_history.select','v_exposure.select','profiles.select','client_requests.select']
+  ['clients.select','client_events.insert','client_events.select','plan_prices.select','v_month_standing.select','client_profiles.select','client_stage_history.select','profiles.select','client_requests.select']
     .forEach(k => { tables[k] = boom });
   for (const fn of [
     () => cbClients(), () => cbClient('c1'), () => cbProfile('c1'), () => cbStageHistory('c1'),
-    () => cbEvents('c1'), () => cbStanding({}), () => cbExposure(), () => cbPlans(),
+    () => cbEvents('c1'), () => cbStanding({}), () => cbPlans(),
     () => cbOwners(), () => cbOpenRequests('c1'), () => cbEvent('c1','a','b'),
     () => cbMoveStage('c1','live'), () => cbAddClient({company:'X', contactName:'A B', contactEmail:'a@b.test', plan:'growth'}),
   ]) {
@@ -1206,4 +1214,15 @@ test('a settled month says its refund once, not twice', () => {
   const h = cbRenderMonths(r, [month({month_no:2, verdict:'missed', calls_delivered:3, calls_promised:5, refund_due:1500})]);
   assert.equal((text(h).match(/\$1,500 refunded/g) || []).length, 1, 'the same money, said once');
   assert.match(text(h), /Month 2: missed — 3 of 5\. \$1,500 refunded\./);
+});
+
+/* The 'Who can sign in' card must lead to the one screen that can make a portal
+   invite. Before this, nothing in the hub linked to it, so a client's second, third
+   and fourth logins could only be made in the SQL editor. */
+test('the seats card links to the screen that makes a portal invite', () => {
+  const src = fs.readFileSync(path.join(root, 'clientbook.js'), 'utf8');
+  const body = src.slice(src.indexOf('function cbRenderSeats'), src.indexOf('function cbRenderSeats') + 4000);
+  assert.match(body, /onclick="openClientPeople\('/, 'the card calls openClientPeople');
+  assert.match(body, /Give someone a login/);
+  assert.match(body, /Manage their logins/, 'at the limit it still leads there, to free a login');
 });

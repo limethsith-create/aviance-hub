@@ -49,11 +49,10 @@
 /* ===================== 0. CONSTANTS + STATE ===================== */
 
 /* Only used when calendar_settings has no row. Never used to override it. */
-const MT_FALLBACK = {
-  open_time:'07:00', close_time:'21:00', days:[1,2,3,4,5], slot_minutes:30,
-  min_notice_h:12, days_ahead:30,
-  us_zone:'America/New_York', owner_zone:'Asia/Colombo', meeting_link:null
-};
+/* The working-hours defaults live once, in core.js. This file used to keep its own
+   copy and it had drifted: 30 days ahead here against 21 in Settings and in the
+   database's own row. Inert while the live row exists, wrong the day it does not. */
+const MT_FALLBACK = CORE_HOURS_FALLBACK;
 /* The kinds of call we book. `qualified` is the one that touches the money. */
 const MT_KINDS = {
   discovery:  'Discovery call',
@@ -109,7 +108,12 @@ const MT_VIEW_KEY = 'avianceCalView';  /* localStorage: the view last chosen */
 const MT_TAKEN = 'There is already a call at that time.';
 const MT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const MT_CHIP_MAX = 3;          /* calls shown in a month cell before "+N more" */
-const MT_GRACE_MIN = 20;        /* how long after its start a call may sit unmarked */
+/* How long after its start a call may sit unmarked. One number, defined in
+   pipeline.js (PL_GRACE_MIN), which loads before this file: plNeedsOutcome asks
+   it about a website booking and mtMeetingNeedsOutcome asks it about a meeting,
+   and they are the same question. Two copies of it meant the Calendar's badge
+   and a booking's panel could disagree about which calls are waiting. */
+const MT_GRACE_MIN = typeof PL_GRACE_MIN === 'number' ? PL_GRACE_MIN : 20;
 
 const mt = {settings:null, view:'week', viewRead:false, day:null, cal:null, needOnly:false, legend:false, open:null, want:null, seq:0,
             one:null, noshows:null, err:'', now:null, busy:false, bound:false};

@@ -51,7 +51,8 @@ async function stSaveMe(fields){
 /* ---- The calendar ---- */
 /* One row, id = 1. Every screen that offers a time reads it, so this is the only
    place the working day is set. */
-const ST_CAL_FALLBACK={id:1,open_time:'07:00',close_time:'21:00',days:[1,2,3,4,5],slot_minutes:30,min_notice_h:12,days_ahead:21,us_zone:'America/New_York',owner_zone:'Asia/Colombo',meeting_link:null};
+/* one set of working-hours defaults, in core.js — see CORE_HOURS_FALLBACK */
+const ST_CAL_FALLBACK=CORE_HOURS_FALLBACK;
 
 async function stCalendar(){
   const r=await stRun(()=>sb.from('calendar_settings').select('*').eq('id',1).maybeSingle(),null);
@@ -98,10 +99,6 @@ async function stOutreachAccounts(){
 }
 async function stOutreachClients(){
   return stRun(()=>sb.from('clients').select('id,company').order('company'),[]);
-}
-function stProviders(){
-  const names=(typeof oaList==='function')?oaList():[];
-  return names.length?names:ST_OUT_PROVIDERS.map(p=>p[0]);
 }
 /* The exact Supabase secret name for this account. Must match oxEnvName in
    supabase/functions/outreach-sync/map.mjs — the sync looks the key up by this name. */
@@ -160,7 +157,7 @@ const ST_BIZ_FIELDS=[
   ['legal_name','Company legal name','text','The name on the agreement and the invoice'],
   ['address','Company address','text','Printed on every invoice'],
   ['email','Billing email','email','Where a client writes about an invoice'],
-  ['kickoff_link','Kickoff booking link','url','Only used if a client cannot book inside their portal'],
+  ['kickoff_link','Kickoff booking link','url','Sent in the welcome email so a new client can book their kickoff'],
   ['signer_name','Who signs for Aviance','text','Your full name. Shown as the Aviance signature on every agreement and the welcome email'],
   ['phone','Business phone','text','Optional. Printed on invoices']
 ];

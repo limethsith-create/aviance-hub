@@ -243,6 +243,25 @@ function jyPill(s, opts){
     '<span class="jy-sr">' + jyE(word) + '</span>' +
   '</li>';
 }
+/* THE OTHER GUARANTEE.
+   The agreement says: not live within 14 days of kickoff and their next month
+   is free. Day 14 is the launch step's planned day, so this board already
+   knows the day the promise is broken — and said only "Launch 2 days overdue",
+   which reads as a slipped task and not as a month of fee. Nothing in the
+   database marks a month free (a month's fee comes from clients.monthly_fee,
+   and there is no per-month fee or free flag), so Aviance cannot apply it by
+   itself; the least it can do is say what the slip costs, on the screen where
+   the owner is looking at the slip. */
+function jyOwesFreeMonth(n){
+  return !!(n && !n.live && n.days_to_launch != null && n.days_to_launch < 0);
+}
+function jyFreeMonthWords(n){
+  if (!jyOwesFreeMonth(n)) return '';
+  const d = Math.abs(jyInt(n.days_to_launch));
+  return 'Past day 14 by ' + d + (d === 1 ? ' day' : ' days') +
+    ': the agreement makes their next month free. Nothing applies that on its own — raise it on their next invoice.';
+}
+
 function jyLaunchBadge(n){
   const tone = n.live ? 'live' : n.days_to_launch != null && n.days_to_launch < 0 ? 'late' : n.days_to_launch != null && n.days_to_launch <= 3 ? 'soon' : '';
   return '<span class="jy-launch ' + tone + '">' +
@@ -265,6 +284,7 @@ function jyRenderBoardRow(j, today){
       (n.steps.length ? n.steps.map(s => jyPill(s, {next: nx && s.step === nx.step})).join('') : '<li class="jy-none">Not started</li>') +
     '</ol>' +
     jyLaunchBadge(n) +
+    (jyOwesFreeMonth(n) ? '<p class="jy-sub" role="alert"><b class="jy-late-t">' + jyE(jyFreeMonthWords(n)) + '</b></p>' : '') +
     '<div class="jy-row-foot">' +
       '<div class="jy-row-next">' +
         (nx ? '<span class="jy-next-l">Next</span><span class="jy-next-t">' + jyE(nx.title) + '</span>' +

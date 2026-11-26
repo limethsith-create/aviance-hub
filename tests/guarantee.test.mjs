@@ -309,8 +309,19 @@ test('no screen decides a verdict, and no screen writes a refund amount', () => 
   const fin = read('finance.js');
   const refundWrites = [...fin.matchAll(/from\('refunds'\)\s*\n?\s*\.(\w+)\(/g)].map((m) => m[1]);
   assert.deepEqual([...new Set(refundWrites)].sort(), ['select', 'update']);
-  assert.match(fin, /update\(\{status:'paid', paid_at:new Date\(\)\.toISOString\(\), paid_via:\(via\|\|''\)\.slice\(0,60\)\}\)/,
-    'and that write touches only how and when it was paid, never the amount');
+  /* What the browser may write on a refunds row: that it was paid, when, how, and
+     what was actually sent back. What it may NEVER write is the figure the
+     guarantee raised — `amount`, `multiplier` and `reason` are lock_month's, and
+     a browser that could change them could change the promise. The amount the
+     owner actually transferred (`paid_amount`) is a different number: it is a
+     fact about a bank transfer, it is checked against `amount` and refused if it
+     is bigger, and the real write goes through refund_pay() in the database. */
+  const refundUpdate = /from\('refunds'\)\.update\(\{([\s\S]*?)\}\)/.exec(fin.replace(/\s*\n\s*/g, ''));
+  assert.ok(refundUpdate, 'the refunds update is still one object literal');
+  for (const banned of ['amount:', 'multiplier:', 'reason:', 'month_id:', 'client_id:']) {
+    assert.ok(refundUpdate[1].indexOf(banned) < 0, 'the browser must not write refunds.' + banned.replace(':', ''));
+  }
+  assert.match(fin, /sb\.rpc\('refund_pay'/, 'paying a refund goes to the database rule first');
 });
 
 /* ================================================================
@@ -599,7 +610,8 @@ test('every database rule the money screens call is written down in a migration'
   // A screen that calls an rpc nobody wrote shows a Postgres error to the owner.
   const sql = ['20261124_close_to_onboarded_core.sql', '20261124_rehearsal_fixes.sql',
     '20261129_no_pilot_and_agreement_v3.sql', '20261130_server_fixes.sql',
-    '20261207_showup.sql', '20261207_seats.sql', '20261208_guarantee_maths_fixes.sql']
+    '20261207_showup.sql', '20261207_seats.sql', '20261208_guarantee_maths_fixes.sql',
+    '20261209_refunds_paid.sql']
     .map((f) => read('supabase/migrations/' + f)).join('\n');
   const js = ['finance.js', 'wrapup.js', 'onboarding.js'].map(read).join('\n');
   const called = [...js.matchAll(/sb\.rpc\('(\w+)'/g)].map((m) => m[1]);

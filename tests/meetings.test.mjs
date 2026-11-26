@@ -76,6 +76,8 @@ function builder(table) {
     lte(k, v) { c.filters.push(['lte', k, v]); return b; },
     order(k, o) { c.order = [k, !o || o.ascending !== false]; return b; },
     limit() { return b; },
+    /* a real range, so the paging in pipeline.js is actually walked here */
+    range(a, z) { c.range = [Number(a), Number(z)]; return b; },
     single() { c.one = 'single'; return b; },
     maybeSingle() { c.one = 'maybe'; return b; },
     then(res, rej) { return Promise.resolve(run(c)).then(res, rej); },
@@ -99,6 +101,7 @@ function run(c) {
     out = keep(rows, c.filters).slice();
   }
   if (c.order) { const [k, asc] = c.order; out.sort((x, y) => (String(x[k]) < String(y[k]) ? -1 : String(x[k]) > String(y[k]) ? 1 : 0) * (asc ? 1 : -1)); }
+  if (c.range) out = out.slice(c.range[0], c.range[1] + 1);
   if (c.one === 'single') return out.length ? { data: out[0], error: null } : { data: null, error: { message: 'no rows' } };
   if (c.one === 'maybe') return { data: out.length ? out[0] : null, error: null };
   return { data: out, error: null };
@@ -181,6 +184,92 @@ test('the rules are read from calendar_settings, never hard-coded; a missing row
   assert.equal(s.data.slot_minutes, 30);
   assert.equal(s.data.us_zone, 'America/New_York'); assert.equal(s.data.owner_zone, 'Asia/Colombo');
   assert.equal(s.data.fallback, true, 'it says it is the fallback');
+});
+
+/* One grace period, not two. The Calendar's badge asks mtMeetingNeedsOutcome
+   about a meeting and plNeedsOutcome about a website booking, and both answer
+   "has this been and gone long enough to need an outcome?". Written down twice,
+   they can drift, and then the badge counts a call the panel does not show as
+   waiting — or the other way round. */
+test('the grace period is one number: MT_GRACE_MIN IS PL_GRACE_MIN', () => {
+  assert.equal(typeof PL_GRACE_MIN, 'number');
+  assert.equal(MT_GRACE_MIN, PL_GRACE_MIN, 'one number, by identity');
+  const when = '2026-11-23T12:00:00.000Z';
+  const justAfter = new Date(Date.parse(when) + (PL_GRACE_MIN - 1) * 60000);
+  const wellAfter = new Date(Date.parse(when) + (PL_GRACE_MIN + 1) * 60000);
+  const mtg = { starts_at: when, status: 'booked' };
+  const bkg = { call_at: when, status: 'booked' };
+  assert.equal(mtMeetingNeedsOutcome(mtg, justAfter), false);
+  assert.equal(plNeedsOutcome(bkg, justAfter), false);
+  assert.equal(mtMeetingNeedsOutcome(mtg, wellAfter), true);
+  assert.equal(plNeedsOutcome(bkg, wellAfter), true, 'both flip on the same minute');
+  /* and the number is written down once in the source */
+  const mtSrc = fs.readFileSync(path.join(root, 'meetings.js'), 'utf8');
+  const plSrc = fs.readFileSync(path.join(root, 'pipeline.js'), 'utf8');
+  assert.equal(/20 \* 60000/.test(plSrc.replace(/\/\*[\s\S]*?\*\//g, '')), false, 'no second copy of the number in pipeline.js');
+  assert.match(mtSrc, /MT_GRACE_MIN = typeof PL_GRACE_MIN/);
+});
+
+/* ───────────── the two days a year the US clock jumps ─────────────
+   8 March 2026 the US clock goes 1:59 am -> 3:00 am: 2:30 am does not exist.
+   1 November 2026 it goes 1:59 am -> 1:00 am: 1:30 am happens twice. Both
+   those days are a SUNDAY, which is not a calling day, so the real calendar
+   never offers a slot on either of them. These tests pin both halves of that:
+   nothing is offered on the transition day as the rules stand, and the slot
+   maker is right anyway if the days or the hours ever change. */
+test('the two 2026 daylight-saving days are Sundays, so nothing is offered on them', async () => {
+  settingsRow(); at('2026-03-01T05:00:00Z');
+  assert.deepEqual((await mtSlots('2026-03-08')).data, [], 'spring forward is a Sunday');
+  mtForget(); settingsRow(); at('2026-10-26T05:00:00Z');
+  assert.deepEqual((await mtSlots('2026-11-01')).data, [], 'fall back is a Sunday');
+});
+test('a call day either side of a clock change is a full day of slots at the right wall-clock times', async () => {
+  for (const [ref, day] of [['2026-03-01T05:00:00Z', '2026-03-09'], ['2026-10-26T05:00:00Z', '2026-11-02'],
+                            ['2026-03-01T05:00:00Z', '2026-03-06'], ['2026-10-26T05:00:00Z', '2026-10-30']]) {
+    mtForget(); settingsRow(); at(ref);
+    const r = await mtSlots(day);
+    assert.equal(r.data.length, 28, day + ': 07:00–21:00 is 28 half hours whichever side of the change it is');
+    assert.equal(r.data[0].us, '7:00 am', day + ': the day still opens at 7 am Eastern');
+    assert.equal(r.data[27].us, '8:30 pm', day + ': and still closes at 9 pm Eastern');
+    /* the hour it is in Colombo moves, because Sri Lanka does not change its
+       clock and the US does — that is the point of reading both from Intl */
+    assert.ok(/^\d/.test(r.data[0].lk), day + ': the owner is told their own time too');
+  }
+  /* 9 March is EDT and 6 March is EST, so the same 7 am Eastern is a different instant */
+  mtForget(); settingsRow(); at('2026-03-01T05:00:00Z');
+  const before = (await mtSlots('2026-03-06')).data[0].startsAt;
+  mtForget(); settingsRow(); at('2026-03-01T05:00:00Z');
+  const after = (await mtSlots('2026-03-09')).data[0].startsAt;
+  assert.equal(before, '2026-03-06T12:00:00.000Z', '7 am EST is 12:00 UTC');
+  assert.equal(after, '2026-03-09T11:00:00.000Z', '7 am EDT is 11:00 UTC');
+});
+test('if the calling days or hours ever reached across 2 am, the slot maker still only offers real half hours', async () => {
+  /* The guard is the HOURS, not the code: 07:00 is well clear of the 2 am jump.
+     This is what would happen if that stopped being true. */
+  settingsRow({ days: [0, 1, 2, 3, 4, 5, 6], open_time: '00:00', close_time: '06:00', days_ahead: 400 });
+  at('2026-03-01T05:00:00Z');
+  const spring = await mtSlots('2026-03-08');
+  /* 00:00–06:00 wall clock is only five hours of real time on this day */
+  assert.equal(spring.data.length, 10, 'ten half hours, not twelve: an hour of the day does not exist');
+  assert.equal(spring.data.map((x) => x.us).includes('2:00 am'), false, '2:00 am never happened');
+  assert.equal(spring.data.map((x) => x.us).includes('2:30 am'), false, '2:30 am never happened');
+  assert.deepEqual(spring.data.map((x) => x.us),
+    ['12:00 am', '12:30 am', '1:00 am', '1:30 am', '3:00 am', '3:30 am', '4:00 am', '4:30 am', '5:00 am', '5:30 am']);
+
+  mtForget(); settingsRow({ days: [0, 1, 2, 3, 4, 5, 6], open_time: '00:00', close_time: '06:00', days_ahead: 400 });
+  at('2026-10-26T05:00:00Z');
+  const fall = await mtSlots('2026-11-01');
+  assert.equal(fall.data.length, 14, 'fourteen half hours: this day is an hour longer');
+  /* every slot is a different instant, and each is really half an hour long */
+  const starts = fall.data.map((x) => x.startsAt);
+  assert.equal(new Set(starts).size, starts.length, 'no two slots are the same moment');
+  for (let i = 1; i < starts.length; i++)
+    assert.equal(Date.parse(starts[i]) - Date.parse(starts[i - 1]), 30 * 60000, 'every step is a real half hour');
+  /* 1:00 am and 1:30 am each happen twice, and both are offered — they ARE two
+     different half hours. The owner would read the same words twice on that
+     one day a year; the times behind them are right. */
+  const ones = fall.data.filter((x) => x.us === '1:00 am' || x.us === '1:30 am');
+  assert.equal(ones.length, 4, 'both 1 am half hours, both times round');
 });
 
 /* ───────────── slots ───────────── */

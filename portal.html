@@ -27,7 +27,6 @@
 (function(){
   const root = document.getElementById('pcRoot');
   let home = null, rows = [], drawn = '', stopLive = null, timer = null, loading = false, sendBusy = false;
-  let kick = null, kickUi = { day: '', pick: '', busy: false, error: '' };
 
   /* The three tabs. Chat is what has always been here; Campaign and Calls are
      drawn by portal-tracker.js into #pcCampaign and #pcCalls. PC.tab tells it
@@ -98,7 +97,6 @@
       <div class="pc-panels">
         <section class="pc-panel" id="pcPanel-chat" role="tabpanel" aria-labelledby="pcTab-chat"${tab === 'chat' ? '' : ' hidden'}>
           <div id="pcTracker" class="pc-tracker-box"></div>
-          <div id="pcKick" class="pc-kick-box"></div>
           <div class="pc-scroll" id="pcScroll" tabindex="0" aria-label="Messages">
             <div class="pc-thread" id="pcThread" role="log" aria-live="polite" aria-relevant="additions"><p class="pc-tag" style="margin:auto">Loading</p></div>
           </div>
@@ -121,7 +119,7 @@
       </div>
     </div>`;
     drawn = ''; rows = [];
-    /* the kickoff is now offered in the chat (portal-schedule.js); the old self-booking card stays off */
+    /* the kickoff is offered in the chat, by portal-schedule.js */
     runMounts();
     refresh(true);
     stopLive = pcSubscribe(home.channel.id, function(){ refresh(false); });
@@ -150,42 +148,6 @@
     if (stopLive) { stopLive(); stopLive = null; }
     if (timer) { clearInterval(timer); timer = null; }
     home = null; rows = []; drawn = '';
-    kick = null; kickUi = { day: '', pick: '', busy: false, error: '' };
-  }
-
-  /* ---- the kickoff card (until the kickoff has happened) ---- */
-  function drawKick(){
-    const box = document.getElementById('pcKick');
-    if (box) box.innerHTML = kick ? pcKickoffHtml(kick, kickUi) : '';
-  }
-  async function loadKick(){
-    const r = await pcKickoff(10);
-    if (!home) return;
-    kick = r.ok ? r.data : null;
-    drawKick();
-  }
-  async function book(iso){
-    if (kickUi.busy || !kick) return;
-    kickUi.busy = true; kickUi.error = ''; drawKick();
-    let r;
-    /* A booking is never retried on its own — a second attempt is a second call
-       in the diary. The flag is still cleared, or they could never book at all. */
-    try { r = await pcBookKickoff(iso); }
-    catch (e) { r = pcErr(e); }
-    finally { kickUi.busy = false; }
-    if (!home) return;
-    if (!r.ok) {
-      kickUi.pick = ''; kickUi.error = r.error;
-      const again = await pcKickoff(10);
-      if (again.ok) kick = again.data;
-      drawKick();
-      return;
-    }
-    kick = { zone: kick.zone, booked: Object.assign({ status: 'booked', minutes: 45 }, r.data), slots: [] };
-    kickUi = { day: '', pick: '', busy: false, error: '' };
-    drawKick();
-    const done = document.querySelector('#pcKick .pc-kick-when');
-    if (done) { done.setAttribute('tabindex', '-1'); done.focus(); }
   }
 
   function draw(toBottom){
@@ -261,14 +223,6 @@
   root.addEventListener('click', async function(e){
     const tb = e.target && e.target.closest ? e.target.closest('[data-pc-tab]') : null;
     if (tb) { showTab(tb.getAttribute('data-pc-tab')); return; }
-    const k = e.target && e.target.closest ? e.target.closest('[data-pc-day],[data-pc-slot],[data-pc-unpick],[data-pc-book]') : null;
-    if (k) {
-      if (k.hasAttribute('data-pc-day')) { kickUi.day = k.getAttribute('data-pc-day'); kickUi.pick = ''; kickUi.error = ''; drawKick(); }
-      else if (k.hasAttribute('data-pc-slot')) { kickUi.pick = k.getAttribute('data-pc-slot'); kickUi.error = ''; drawKick(); const b = document.querySelector('#pcKick [data-pc-book]'); if (b) b.focus(); }
-      else if (k.hasAttribute('data-pc-unpick')) { kickUi.pick = ''; drawKick(); }
-      else book(k.getAttribute('data-pc-book'));
-      return;
-    }
     const act = e.target && e.target.closest ? e.target.closest('[data-pc-act]') : null;
     if (act && home) { const f = PC.actions && PC.actions[act.getAttribute('data-pc-act')]; if (typeof f === 'function') { e.preventDefault(); try { await f(act, ctx()); } catch (x) {} } return; }
     const t = e.target && e.target.closest ? e.target.closest('#pcOut,[data-pc-retry]') : null;

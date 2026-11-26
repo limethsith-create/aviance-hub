@@ -95,10 +95,22 @@ test('chListChannels: a client channel made by close_won (no messages yet) is li
   assert.equal(r.data.length, 1); assert.equal(r.data[0].kind, 'client'); assert.equal(r.data[0].clientId, 'cl-1'); assert.equal(r.data[0].company, 'Blue Sky');
 });
 test('chListChannels: a database error comes back as plain words', async () => {
+  /* A table or function this database has not been given yet is a different
+     thing from a fault, and the whole hub says so in one sentence (core.js).
+     The chat used to be the only screen that called it "Couldn't load your
+     channels", which reads as something broken. Either way the database's own
+     words never reach a person. */
   rpcs.my_channels = () => ({ data: null, error: { code: '42P01', message: 'relation "channels" does not exist' } });
   const r = await chListChannels();
-  assert.equal(r.ok, false); assert.equal(r.data, null); assert.equal(r.error, "Couldn't load your channels.");
+  assert.equal(r.ok, false); assert.equal(r.data, null);
+  assert.match(r.error, /isn't switched on yet/);
   assert.ok(!/relation/.test(r.error));
+
+  /* a real fault still gets the chat's own sentence for that screen */
+  rpcs.my_channels = () => ({ data: null, error: { code: '23514', message: 'violates check constraint "x"' } });
+  const bad = await chListChannels();
+  assert.equal(bad.error, "Couldn't load your channels.");
+  assert.ok(!/constraint|violates/.test(bad.error));
 });
 test('chUnreadTotal adds up unread but skips archived channels', async () => {
   rpcs.my_channels = () => ({ data: [{ id: 'a', name: 'A', kind: 'client', unread: 2 }, { id: 'b', name: 'B', kind: 'team', unread: 5 }, { id: 'c', name: 'C', kind: 'team', unread: 9, archived_at: 'x' }], error: null });
@@ -279,23 +291,46 @@ test('chTyping shares the open channel with chSubscribe instead of opening a sec
 });
 
 /* ───────────── channels and people ───────────── */
-test('chCreateChannel makes a team channel and adds you plus the chosen people once', async () => {
+test('chCreateChannel makes a team channel and adds you first, then the chosen people once', async () => {
   tables['channels.insert'] = (c) => ({ data: [{ id: 'new', name: c.payload.name, kind: 'team', client_id: null, archived_at: null }], error: null });
   const r = await chCreateChannel('  Planning  ', ['u-2', 'u-me', 'u-2', 'u-3']);
   assert.equal(r.ok, true); assert.equal(r.data.id, 'new'); assert.equal(r.data.name, 'Planning'); assert.equal(r.data.kind, 'team');
   assert.deepEqual(calls.find((c) => c.table === 'channels').payload, { name: 'Planning', kind: 'team', created_by: 'u-me' });
-  const mem = calls.find((c) => c.table === 'channel_members').payload;
-  assert.deepEqual(mem.map((m) => m.user_id), ['u-me', 'u-2', 'u-3']); assert.equal(mem[0].member_role, 'owner'); assert.equal(mem[1].member_role, undefined);
+  /* Two writes, in this order: my own seat on its own, THEN everybody else.
+     my_channels() lists a channel by membership, so until my seat is in there
+     is no channel anybody can open. */
+  const mems = calls.filter((c) => c.table === 'channel_members' && c.op === 'insert');
+  assert.equal(mems.length, 2, 'my own seat goes in on its own, first');
+  assert.deepEqual(mems[0].payload, { channel_id: 'new', user_id: 'u-me', member_role: 'owner' });
+  assert.deepEqual(mems[1].payload.map((m) => m.user_id), ['u-2', 'u-3']);
+  assert.equal(mems[1].payload[0].member_role, undefined);
   assert.match((await chCreateChannel('   ', [])).error, /Give the channel a name/);
   assert.match((await chCreateChannel('x'.repeat(81), [])).error, /under 80/);
 });
-test('chCreateChannel: if people could not be added you still get the new channel back with a plain warning', async () => {
+test('chCreateChannel: if the OTHERS could not be added you still get the new channel back, and it is yours', async () => {
+  tables['channels.insert'] = () => ({ data: [{ id: 'new', name: 'P', kind: 'team', client_id: null }], error: null });
+  let n = 0;
+  /* the first insert is my own seat and it works; the second is everybody else */
+  tables['channel_members.insert'] = () => (++n === 1 ? { data: [{}], error: null } : { data: null, error: { code: '42501', message: 'rls' } });
+  const r = await chCreateChannel('P', ['u-2']);
+  assert.equal(r.ok, false); assert.match(r.error, /created and is yours, but some people couldn't be added/); assert.equal(r.data.id, 'new');
+  assert.match(r.error, /Members list/, 'it points at a list the owner can actually reach');
+});
+test('chCreateChannel: a channel nobody can see is never left behind — if my own seat fails it says so and asks for nothing of the owner', async () => {
   tables['channels.insert'] = () => ({ data: [{ id: 'new', name: 'P', kind: 'team', client_id: null }], error: null });
   tables['channel_members.insert'] = () => ({ data: null, error: { code: '42501', message: 'rls' } });
   const r = await chCreateChannel('P', ['u-2']);
-  assert.equal(r.ok, false); assert.match(r.error, /created, but some people couldn't be added/); assert.equal(r.data.id, 'new');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /could not be opened/);
+  /* no "add them from the people list": there is no list to open. */
+  assert.equal(/some people couldn't be added/.test(r.error), false);
+  assert.equal(calls.filter((c) => c.table === 'channel_members' && c.op === 'insert').length, 1,
+    'nothing else is attempted once the channel is unreachable');
+});
+test('chCreateChannel: the channel itself being refused is said in plain words and nothing follows it', async () => {
   tables['channels.insert'] = () => ({ data: null, error: { code: '42501', message: 'rls' } });
   const d = await chCreateChannel('P', []); assert.equal(d.ok, false); assert.equal(d.data, null); assert.equal(d.error, "You don't have access to do that.");
+  assert.equal(calls.some((c) => c.table === 'channel_members'), false);
 });
 test('chRename and chArchive (and un-archive)', async () => {
   tables['channels.update'] = (c) => ({ data: [{ id: 'ch1', name: c.payload.name || 'Old', archived_at: c.payload.archived_at || null }], error: null });

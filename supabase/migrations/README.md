@@ -36,3 +36,15 @@ Pull the SQL with `supabase db pull` — Supabase holds the applied versions.
 
 Whole US dollars, stored as `integer`. Reads need an approved profile; writes
 to `invoices` and `refunds` need `is_admin()`.
+
+## Round 2, not applied — three files waiting on the owner (2026-11-26)
+
+These three were written against the live database but **not applied**: this
+session could not apply SQL. Each file explains itself at the top. In order of
+how much they cost while they are not applied:
+
+| Migration | What it fixes | Urgency |
+| --- | --- | --- |
+| `20261209_lost_booking_releases_its_slot_for_real.sql` | `discovery_bookings_one_per_slot` still excludes only `'cancelled'`, so a **lost** booking's half hour is offered on the website and then refused with a raw duplicate-key error. Proven live, inside a rolled-back transaction. | **Apply this one.** It is costing real bookings now. |
+| `20261209_recount_never_moves_a_locked_month.sql` | `recount_month` reads `locked_at` at the top and writes the count at the bottom with no guard, so a verdict landing as a month is locked can leave a locked month whose count contradicts its own refund. One extra `and locked_at is null`. | Apply before the first month is locked with real money in it. |
+| `20261209_chat_search_index_OPTIONAL.sql` | The Channels search is a sequential scan of every message (measured: 63 rows, 1.4 ms today). A trigram index when that number is in the tens of thousands. | Not yet. Measure first. |

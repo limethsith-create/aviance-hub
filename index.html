@@ -17,7 +17,9 @@
 <link rel="stylesheet" href="documents.css">
 <link rel="stylesheet" href="team.css">
 <link rel="stylesheet" href="onboarding.css">
+<link rel="stylesheet" href="money.css">
 <link rel="stylesheet" href="digest.css">
+<link rel="stylesheet" href="guarantee.css">
 <link rel="stylesheet" href="wrapup.css">
 <link rel="stylesheet" href="settings.css">
 <!-- Installable app (Add to Home Screen) -->
@@ -282,8 +284,29 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
 <link rel="stylesheet" href="polish.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<!-- The brand faces arrive after first paint (they swap in, as display=swap already had them do); the page never waits on another site for its first paint. -->
+<!-- The brand faces arrive after first paint (they swap in, as display=swap already had them do); the page never waits on another site for its first paint.
+     JETBRAINS MONO IS NOT SELF-HOSTED, AND THAT IS A CHOICE, NOT AN OVERSIGHT.
+     Inter is served from /fonts (see theme.css) because the body text of a page
+     that charges money should not depend on another company being up. The
+     figures are monospace for a different reason — tabular digits, so a column
+     of money lines up — and ui-monospace/SFMono/Menlo give that on every device
+     the owner and his clients actually use. So the mono face is a nicety loaded
+     from Google, and the fallback stack in theme.css and brand.css is a real
+     stack that works on its own, not an accident.
+     KNOWN AND NOT FIXED HERE: this link exists on index.html and team.html and
+     NOT on portal.html, doc.html or join.html, and portal-client.css's
+     --pc-mono falls back to Courier New rather than ui-monospace. So the client
+     reads their guarantee figures in Courier New while the owner reads the same
+     figures in JetBrains Mono. Fixing it properly is six files, three of them
+     stylesheets this change does not own, plus a redistributed woff2 and its
+     OFL licence file. Written up for the owner instead of half-done. -->
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<!-- media="print" only becomes "all" when that onload fires, so if it never
+     does the faces are simply never applied and the fallback stack carries the
+     page — which is the whole reason that stack has to be a deliberate one.
+     No <noscript> twin here: tests/app.test.mjs forbids a blocking font
+     stylesheet, rightly, and this hub is all script anyway — with script off
+     there is no screen for a font to be missing from. -->
 <link rel="stylesheet" href="brand.css">
 </head>
 <body>
@@ -517,7 +540,12 @@ document.getElementById('modalWrap').addEventListener('click',e=>{if(e.target.id
    inside one of them and carries a Back button (back). owner: only the owner
    is offered it. ---- */
 const views={
-  home:{fn:()=>V('viewHome'),title:'Today',sub:'Where everything stands'},
+  /* Today leads with the commitment board (guarantee.js): what the whole book
+     owes this month and what it costs if nothing changes. It is first because
+     it is the only screen that looks across every client at once, and the
+     thing it warns about cannot be fixed after the month ends. Both halves
+     hand back their own host and fill it in, so this stays synchronous. */
+  home:{fn:()=>V('guBoardHost')+V('viewHome'),title:'Today',sub:'Where everything stands'},
   friday:{fn:()=>V('viewFriday'),title:'Friday update',sub:'This week\u2019s note to every client',back:()=>render('home')},
   requests:{fn:()=>V('viewRequests'),title:'Requests',sub:'What clients have asked for',back:()=>render('home')},
   work:{fn:()=>V('viewWork'),title:'Work',sub:'Every job, by department',back:()=>render('home')},
@@ -538,9 +566,10 @@ const views={
   channels:{fn:()=>V('viewChannels'),title:'Channels',sub:'Talk with your team and your clients',wide:true},
   employees:{fn:()=>V('viewEmployees'),title:'Employees',sub:'Your staff, how they get in, and your chat with each one',wide:true,owner:true},
   journey:{fn:()=>V('viewJourneyBoard'),title:'Onboarding',sub:'Every new client, from payment to launch',wide:true},
-  billing:{fn:()=>V('viewBilling'),title:'Invoices',sub:'To raise, to send, to chase'},
-  monthEnd:{fn:()=>V('viewMonthEnd'),title:'Month end',sub:'Close the months and settle what is owed',back:()=>render('billing')},
-  ending:{fn:()=>V('viewEnding'),title:'Ending',sub:'Clients on their way out, and the final figure',back:()=>render('billing')},
+  billing:{fn:()=>V('viewBilling'),title:'Invoices',sub:'To raise, to send, to chase',back:()=>render('money')},
+  money:{fn:()=>V('viewMoney'),title:'Money',sub:'Who owes us, what we owe them, and whether it adds up'},
+  monthEnd:{fn:()=>V('viewMonthEnd'),title:'Month end',sub:'Close the months and settle what is owed',back:()=>render('money')},
+  ending:{fn:()=>V('viewEnding'),title:'Ending',sub:'Clients on their way out, and the final figure',back:()=>render('money')},
   dataDeletion:{fn:()=>V('viewDataDeletion'),title:'Data deletion',sub:'What goes, and what we keep',back:()=>render('ending')},
   documents:{fn:()=>V('viewDocuments'),title:'Documents',sub:'Everything a client receives, live',owner:true},
   settings:{fn:()=>V('viewSettings'),title:'Settings',sub:'You, the calendar, and how you are paid',owner:true},
@@ -625,7 +654,7 @@ function parseDeepLink(h){
   if(h==='alerts'||h==='settings'||/^settings\//.test(h))return {view:'settings'};
   if(h==='inquiries')return {view:'calendar'};
   if(['calendar','channels','drafts','employees','documents','prospects'].includes(h))return {view:h};
-  const m=h.match(/^(inquiry|calendar|channels|prospect)\/([^/?#&=]+)$/);if(!m)return null;
+  const m=h.match(/^(inquiry|calendar|channels|prospect|people)\/([^/?#&=]+)$/);if(!m)return null;
   let id='';try{id=decodeURIComponent(m[2]);}catch(e){return null;}
   return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:m[1],id}:null;
 }
@@ -637,6 +666,7 @@ function goDeepLink(d){
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same link can open it again
   closeModal();closeCmdk();
   if(d.view==='client')openClient(d.id);
+  else if(d.view==='people')openClientPeople(d.id);   // #people/{clientId}: who of theirs can sign in
   else if(d.view==='prospect')openProspect(d.id);
   else if(d.view==='enquiry'||d.view==='inquiry')openEnquiry(d.id);
   else if(d.view==='enquiries'||d.view==='inquiries')render('calendar');
@@ -655,7 +685,7 @@ function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.s
 function navItems(){
   const n=k=>{try{return typeof window[k]==='function'?(window[k]()||''):''}catch(e){return ''}};
   const say=(c,one,many)=>c?c+' '+(String(c)==='1'?one:many):'';
-  const needs=n('dgNavCount'),cal=n('mtNavCount'),dr=n('drCount'),ch=n('chvNavCount'),emp=n('empCount'),late=n('jyLateCount');
+  const needs=n('dgNavCount'),cal=n('mtNavCount'),dr=n('drCount'),ch=n('chvNavCount'),emp=n('empCount'),late=n('jyLateCount'),money=n('moNavCount');
   return [
     {view:'home',icon:I.activity,label:'Today',badge:needs,tone:'red',badgeTitle:say(needs,'thing needs you','things need you'),also:['friday','requests','work','team']},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:cal,tone:'amber',badgeTitle:say(cal,'call needs an outcome','calls need an outcome'),also:['meeting','noShows','funnel']},
@@ -665,7 +695,7 @@ function navItems(){
     {view:'prospects',icon:I.inquiry,label:'Prospects',badge:'',also:['prospect']},
     {view:'employees',icon:I.people,label:'Employees',badge:emp,tone:'red',badgeTitle:say(emp,'unread message from your staff','unread messages from your staff')},
     {view:'journey',icon:I.steps,label:'Onboarding',badge:late,tone:'amber',badgeTitle:say(late,'step is running late','steps are running late')},
-    {view:'billing',icon:I.money,label:'Invoices',badge:'',also:['monthEnd','ending','dataDeletion']},
+    {view:'money',icon:I.money,label:'Money',badge:money,tone:'red',badgeTitle:say(money,'payment or refund needs you','payments and refunds need you'),also:['billing','monthEnd','ending','dataDeletion']},
     {view:'documents',icon:I.doc,label:'Documents',badge:''},
     {view:'settings',icon:I.gear,label:'Settings',badge:''},
   ].filter(it=>hubAllowed(it.view));
@@ -849,7 +879,21 @@ const CMDK_SCREENS=[['home','Today','dashboard home'],['calendar','Calendar','ca
   ['billing','Invoices','billing money paid'],['documents','Documents','agreement welcome invoice'],['settings','Settings','preferences'],
   ['needsYou','Needs you','behind attention'],['funnel','Funnel','enquiries wins'],['noShows','No-shows','missed calls'],['requests','Requests','client asks questions'],
   ['friday','Friday update','weekly note'],['monthEnd','Month end','close months'],['ending','Ending','wrap up leaving cancel'],['dataDeletion','Data deletion','remove erase privacy'],
-  ['team','Team','accounts approve sign up access'],['work','Work','tasks jobs queue']];
+  ['team','Team','accounts approve sign up access'],['work','Work','tasks jobs queue'],
+  /* 'Their people' is the ONLY place in the browser that can make a portal
+     invite (portal_invite_create, portal.js). It had a route in `views` and a
+     function to open it and nothing anywhere called that function: it was not
+     in this list, not in parseDeepLink, and no screen linked to it. So the
+     welcome email made a client's first login and there was no way to give
+     them a second one without the SQL editor — which on a Growth plan (4
+     logins) or a Scale plan (unlimited) is the plan not working. Checked
+     2026-11-27: openClientPeople had no callers at all. */
+  ['clientPeople','Their people','invite portal login logins seats access give them a login']];
+/* Screens that are about ONE client and are meaningless without one. Offered in
+   the palette only while a client is open, because 'Their people' with nobody
+   chosen can only answer "you don't have access to do that", which reads as a
+   fault rather than as "pick a client first". */
+const CMDK_NEEDS_CLIENT=['clientPeople'];
 function cmdkEntities(){
   const out=[],seen={};
   const list=(typeof cb!=='undefined'&&cb&&Array.isArray(cb.clients)&&cb.clients.length)?cb.clients:hubClients;
@@ -857,6 +901,7 @@ function cmdkEntities(){
     out.push({type:'Clients',label:String(c.company||c.contact_name||'Client'),sub:[c.contact_name,c.stage].filter(Boolean).join(' · '),icon:I.people,
       kw:[c.company,c.contact_name,c.contact_email,'client'].filter(Boolean).join(' '),run:()=>{closeCmdk();openClient(c.id);}});});
   CMDK_SCREENS.forEach(([v,label,kw])=>{if(!views[v]||!hubAllowed(v))return;
+    if(CMDK_NEEDS_CLIENT.includes(v)&&!currentClientId)return;
     out.push({type:'Screens',label,sub:views[v].sub||'',icon:I.pulse,kw:label+' '+kw+' '+v,run:()=>{closeCmdk();render(v);}});});
   return out;
 }
@@ -946,7 +991,9 @@ boot();
 <script src="documents.js"></script>
 <script src="team.js"></script>
 <script src="onboarding.js"></script>
+<script src="money.js"></script>
 <script src="digest.js"></script>
+<script src="guarantee.js"></script>
 <script src="wrapup.js"></script>
 <script src="settings.js"></script>
 </body>

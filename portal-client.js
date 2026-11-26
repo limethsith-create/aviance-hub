@@ -14,9 +14,10 @@
      - A link token is read from the URL #fragment, kept in memory, and never
        written to storage or a query string.
 
-   Contract: rpc doc_get / doc_sign / invite_peek / portal_home /
-   portal_kickoff_slots / portal_book_kickoff, the
+   Contract: rpc doc_get / doc_sign / invite_peek / portal_home, the
    portal-accept edge function, and the channel_messages table.
+   The kickoff is offered in the chat by portal-schedule.js (portal_offer_pick);
+   this file does not book calls.
    ======================================================================= */
 
 const PC_URL = 'https://zjbxnkpktbghhudjbxhk.supabase.co';
@@ -247,38 +248,6 @@ function pcWhen(v, zone){
   const z = zone || pcViewerZone();
   const w = pcWhenParts(v, z);
   return w ? w.day + ' · ' + w.time + ' ' + pcZoneAbbr(z) : '';
-}
-
-/* 'Fri, Nov 27 · 8:30 PM' with no zone name, for 'your time'. */
-function pcLocalWhen(v, zone){
-  const w = pcWhenParts(v, zone || pcViewerZone());
-  return w ? w.day + ' · ' + w.time : '';
-}
-
-/* Free slots -> days in the viewer's own time, each slot with its ET time too.
-   [{key, label:'Fri, Nov 27', slots:[{iso, time:'3:30 PM', other:'10:00 AM ET'}]}] */
-function pcKickoffDays(slots, viewerZone, homeZone){
-  const vz = viewerZone || pcViewerZone();
-  const hz = homeZone || 'America/New_York';
-  const same = pcZoneAbbr(vz) === pcZoneAbbr(hz);
-  const days = [];
-  const seen = {};
-  (Array.isArray(slots) ? slots : [])
-    .map((s) => s && pcToDate(s.starts_at))
-    .filter(Boolean)
-    .sort((a, b) => a - b)
-    .forEach((d) => {
-      const iso = d.toISOString();
-      if (seen[iso]) return;
-      seen[iso] = true;
-      const w = pcWhenParts(d, vz);
-      if (!w) return;
-      let day = days[days.length - 1];
-      if (!day || day.key !== w.key) { day = { key: w.key, label: w.day, slots: [] }; days.push(day); }
-      const o = same ? null : pcWhenParts(d, hz);
-      day.slots.push({ iso, time: w.time, other: o ? o.time + ' ' + pcZoneAbbr(hz) : '' });
-    });
-  return days;
 }
 
 /* Escape. The agreement's [bracketed] defaults are real terms (e.g. [5 business days]), so the client reads them as
@@ -667,52 +636,6 @@ function pcInvoiceHtml(doc){
   </main>`;
 }
 
-/* The portal's top card: book the kickoff, or what was booked.
-   k is what portal_kickoff_slots returned; ui = {viewerZone, day, pick, busy, error}. */
-function pcKickoffHtml(k, ui){
-  const s = k || {};
-  const o = ui || {};
-  const home = s.zone || 'America/New_York';
-  const vz = o.viewerZone || pcViewerZone();
-  if (s.booked && s.booked.starts_at) {
-    const b = s.booked;
-    const start = pcToDate(b.starts_at);
-    const end = start ? new Date(start.getTime() + (Number(b.minutes) || 45) * 60000) : null;
-    if (b.status === 'held' || (end && end < (pcToDate(o.now) || new Date()))) return '';
-    const link = pcSafeUrl(b.meet_link);
-    const local = pcZoneAbbr(vz) === pcZoneAbbr(home) ? '' : pcLocalWhen(b.starts_at, vz) + ' your time';
-    return `<section class="pc-kick pc-kick-done" aria-label="Your kickoff">
-      <div><p class="pc-tag pc-red">Kickoff booked</p>
-      <p class="pc-kick-when">Kickoff: ${pcEsc(pcWhen(b.starts_at, home))}</p>
-      ${local ? `<p class="pc-small">${pcEsc(local)}</p>` : ''}</div>
-      ${link ? `<a class="pc-btn" href="${pcEsc(link)}" target="_blank" rel="noopener noreferrer">Join the call</a>` : ''}
-    </section>`;
-  }
-  const days = pcKickoffDays(s.slots, vz, home);
-  if (!days.length) {
-    return `<section class="pc-kick" aria-labelledby="pcKickH"><h2 class="pc-kick-h" id="pcKickH">Book your kickoff</h2>
-      <p class="pc-small">There are no free times in the next few days. Message us below and we’ll find one.</p></section>`;
-  }
-  const day = days.find((x) => x.key === o.day) || days[0];
-  const pick = o.pick ? days.reduce((all, x) => all.concat(x.slots), []).find((x) => x.iso === o.pick) : null;
-  const tabs = days.map((x) => `<button type="button" class="pc-day-btn" data-pc-day="${pcEsc(x.key)}" aria-pressed="${x.key === day.key ? 'true' : 'false'}">${pcEsc(x.label)}</button>`).join('');
-  const times = day.slots.map((x) => `<button type="button" class="pc-slot" data-pc-slot="${pcEsc(x.iso)}" aria-pressed="${pick && pick.iso === x.iso ? 'true' : 'false'}">${pcEsc(x.time)}${x.other ? `<span>${pcEsc(x.other)}</span>` : ''}</button>`).join('');
-  const sameZone = pcZoneAbbr(vz) === pcZoneAbbr(home);
-  const confirm = pick ? `<div class="pc-kick-confirm" role="group" aria-label="Confirm your kickoff">
-      <p><strong>Book ${pcEsc(pcWhen(pick.iso, home))}?</strong>${sameZone ? '' : ` <span class="pc-small">(${pcEsc(pcLocalWhen(pick.iso, vz))} your time)</span>`}</p>
-      <button type="button" class="pc-btn" data-pc-book="${pcEsc(pick.iso)}"${o.busy ? ' disabled' : ''}>${o.busy ? 'Booking…' : 'Book it'}</button>
-      <button type="button" class="pc-btn pc-btn-quiet" data-pc-unpick>Change</button>
-    </div>` : '';
-  return `<section class="pc-kick" aria-labelledby="pcKickH">
-    <h2 class="pc-kick-h" id="pcKickH">Book your kickoff</h2>
-    <p class="pc-small">45 minutes with the Aviance team to agree your ideal customer profile. Times are in your time${sameZone ? '' : ', with ' + pcEsc(pcZoneAbbr(home)) + ' beside them'}.</p>
-    <div class="pc-days" role="group" aria-label="Day">${tabs}</div>
-    <div class="pc-slots" role="group" aria-label="Time on ${pcEsc(day.label)}">${times}</div>
-    ${confirm}
-    <p class="pc-err" role="alert" aria-live="assertive">${pcEsc(o.error || '')}</p>
-  </section>`;
-}
-
 function pcThreadHtml(days){
   const list = Array.isArray(days) ? days : [];
   if (!list.length) return '<p class="pc-empty">This is your direct line to the Aviance team. Say hello.</p>';
@@ -797,8 +720,8 @@ function pcErr(e){
    request that hung left the whole page on "Loading" for ever with no way back
    but a reload.
 
-   Reads only. Nothing that writes goes through this: a `pcSend` or a
-   `pcBookKickoff` that is given up on may still have landed, and the answer to
+   Reads only. Nothing that writes goes through this: a `pcSend` or a booking
+   that is given up on may still have landed, and the answer to
    "did my message go?" is never "send it again". Past the limit this reads as
    offline, which is what the client's own screens already know how to say, and
    the 20-second poll asks again by itself.
@@ -863,21 +786,6 @@ async function pcDocSign(token, name, agent){
   if (bad) return pcErr(bad);
   const r = await pcRpc('anon', 'doc_sign', { p_token: token, p_name: clean, p_agent: String(agent || '').slice(0, 400) });
   if (r.ok && !(r.data && r.data.kind === 'agreement')) return pcErr('We could not confirm the signature. Refresh the page to check.');
-  return r;
-}
-
-/* ---- data: the kickoff ---------------------------------------------- */
-
-async function pcKickoff(days){
-  const r = await pcRpc('portal', 'portal_kickoff_slots', { p_days: Number(days) > 0 ? Math.min(Number(days), 21) : 10 });
-  if (r.ok && !(r.data && typeof r.data === 'object' && (Array.isArray(r.data.slots) || r.data.booked))) return pcErr('We could not load the free times. Please try again.');
-  return r;
-}
-async function pcBookKickoff(iso){
-  const d = pcToDate(iso);
-  if (!d) return pcErr('Pick a time first.');
-  const r = await pcRpc('portal', 'portal_book_kickoff', { p_start: d.toISOString() });
-  if (r.ok && !(r.data && r.data.starts_at)) return pcErr('We could not confirm the booking. Refresh the page to check.');
   return r;
 }
 
@@ -1018,3 +926,114 @@ function pcSubscribe(channelId, onChange){
     return function(){ try { sb.removeChannel(ch); } catch (e) { /* already gone */ } };
   } catch (e) { return function(){}; }
 }
+
+/* ---- data + screen: money coming back to them ----------------------
+   THE GAP THIS CLOSES. When a month ends short, lock_month() writes one
+   `refunds` row at status 'owed'. The portal's standing line (portal-tracker.js)
+   then tells the client "your refund is being worked out and we will write to
+   you about it" — and that was the end of it. No amount, no date, and no way for
+   the client to ever see that the money had actually been sent. A client owed
+   several thousand dollars had to email somebody to find out where it was, which
+   is the one thing a guarantee must not make them do.
+
+   The `refunds` table is staff-only under row level security and stays that way:
+   this reads the `portal_refunds()` rule, which hands back that client's own
+   refunds and nothing else. That rule is in a migration the owner has not run
+   yet (supabase/migrations/20261209_refunds_paid.sql), so a database
+   without it must say NOTHING rather than something wrong — "no refunds" to a
+   client who is owed money is the worst sentence on this page. pcRefunds()
+   reports 'not-ready' and the block is simply not drawn. */
+
+/* Everything the client may be told about one refund. Pure. */
+function pcRefundWhen(v){ const d = pcDate(v); return d || '' }
+function pcRefundOne(r){
+  const x = r || {};
+  const cur = x.currency || 'USD';
+  const promised = Number(x.amount);
+  const state = String(x.status || 'owed').toLowerCase();
+  const month = x.month_no == null ? '' : 'Month ' + Math.round(Number(x.month_no) || 0);
+  if (state === 'waived') return null;           /* nothing to promise them */
+  if (state === 'paid') {
+    const sent = x.paid_amount == null ? promised : Number(x.paid_amount);
+    const rest = Math.max(0, promised - (Number.isFinite(sent) ? sent : promised));
+    return {
+      state: 'paid', month,
+      head: pcMoney(sent, cur) + ' refunded',
+      detail: [pcRefundWhen(x.paid_at) ? 'Sent ' + pcRefundWhen(x.paid_at) : '',
+               x.paid_via ? 'by ' + String(x.paid_via) : '',
+               x.paid_reference ? 'reference ' + String(x.paid_reference) : ''].filter(Boolean).join(' · '),
+      note: rest > 0 ? pcMoney(rest, cur) + ' of it is still to come.' : '',
+    };
+  }
+  return {
+    state: 'owed', month,
+    head: 'We owe you ' + pcMoney(promised, cur),
+    detail: pcRefundWhen(x.raised_at) ? 'Raised ' + pcRefundWhen(x.raised_at) : '',
+    note: 'It is on its way. You do not have to ask for it.',
+  };
+}
+/* The whole block. '' when there is nothing honest to show. */
+function pcRefundsHtml(rows){
+  const list = (Array.isArray(rows) ? rows : []).map(pcRefundOne).filter(Boolean);
+  if (!list.length) return '';
+  const owed = list.filter((x) => x.state === 'owed');
+  return '<section class="pc-back" aria-labelledby="pcBackH">' +
+    '<h2 class="pc-back-h" id="pcBackH">' + (owed.length ? 'Money coming back to you' : 'Money we have sent back') + '</h2>' +
+    '<ul class="pc-back-list">' + list.map((x) =>
+      '<li class="pc-back-one pc-back-' + x.state + '">' +
+        '<p class="pc-back-top"><b>' + pcEsc(x.head) + '</b>' +
+          (x.month ? '<span class="pc-tag">' + pcEsc(x.month) + '</span>' : '') + '</p>' +
+        (x.detail ? '<p class="pc-small">' + pcEsc(x.detail) + '</p>' : '') +
+        (x.note ? '<p class="pc-small">' + pcEsc(x.note) + '</p>' : '') +
+      '</li>').join('') + '</ul></section>';
+}
+
+/* Their own refunds, or a failure that says which kind it is. Never throws. */
+async function pcRefunds(){
+  const r = await pcRpc('portal', 'portal_refunds', {});
+  if (!r.ok) return r;
+  return pcOk(Array.isArray(r.data) ? r.data : []);
+}
+
+/* Drawn under the standing line, which is where a client looks for this. The
+   container is made here rather than in portal.html so doc.html and join.html,
+   which load this same file and have no portal, are untouched. */
+function pcRefundsBox(){
+  if (typeof document === 'undefined' || !document.getElementById) return null;
+  let box = document.getElementById('pcMoneyBack');
+  if (box) return box;
+  const after = document.getElementById('pcStanding');
+  if (!after || !after.parentNode) return null;
+  box = document.createElement('div');
+  box.id = 'pcMoneyBack';
+  box.className = 'pc-back-box';
+  after.parentNode.insertBefore(box, after.nextSibling);
+  return box;
+}
+/* Three tries, then stop. A database without the rule yet refuses every time and
+   there is no point asking on every poll for the rest of the afternoon; a dropped
+   connection is worth asking again, and the chat polls every twenty seconds. */
+const PC_BACK_TRIES = 3;
+const pcBack = {drawn: '', failed: 0, busy: false};
+async function pcDrawRefunds(){
+  if (pcBack.failed >= PC_BACK_TRIES || pcBack.busy) return;
+  pcBack.busy = true;
+  let r;
+  try { r = await pcRead(pcRefunds); } catch (e) { r = pcErr(e); }
+  finally { pcBack.busy = false; }
+  if (!r.ok) {
+    /* Say NOTHING rather than something wrong. "No refunds" shown to a client
+       who is owed money is the worst sentence on this page, so a read that did
+       not answer draws nothing at all and leaves the standing line to speak. */
+    if (!r.offline) pcBack.failed += 1;
+    return;
+  }
+  pcBack.failed = 0;
+  const html = pcRefundsHtml(r.data);
+  if (html === pcBack.drawn) return;
+  const box = pcRefundsBox();
+  if (!box) return;
+  box.innerHTML = html;
+  pcBack.drawn = html;
+}
+if (PC && Array.isArray(PC.mounts)) PC.mounts.push(function(){ pcDrawRefunds(); });
