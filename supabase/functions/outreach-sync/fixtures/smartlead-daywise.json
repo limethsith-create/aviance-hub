@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "data": {
+    "day_wise_stats": [
+      { "date": "2026-11-24", "sent": "96", "opened": "41", "replied": "3", "bounced": "1" },
+      { "date": "2026-11-25", "sent": "88", "opened": "37", "replied": "2", "bounced": "0" },
+      { "date": "2026-11-26", "sent": "31", "opened": "9", "replied": "1", "bounced": "2" }
+    ]
+  }
+}

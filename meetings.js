@@ -1307,14 +1307,42 @@ function mtRenderMeeting(data){
   if(title) kv.unshift(['Title', esc(title)]);
   if(mail) kv.splice(title?2:1, 0, ['Email', MT_EMAIL_RE.test(mail) ? '<a href="mailto:'+esc(mail)+'">'+esc(mail)+'</a>' : esc(mail)]);
   if(m.notes) kv.push(['Notes','<span class="mt-note">'+esc(m.notes)+'</span>']);
-  if(String(m.kind)==='qualified') kv.push(['The money side', data.call
-    ? (data.call.happened ? 'Counted as delivered for the month.' : 'Not counted for the month.')
-    : 'No booked sales call matched this time.']);
+  if(String(m.kind)==='qualified'){
+    const call = data.call;
+    /* The hint and the truth, never mixed up: the RSVP is drawn as a hint, and
+       the money line says plainly when nobody has answered yet. */
+    kv.push(['Their invitation', call && call.rsvp
+      ? '<span class="pill '+esc((mtRsvpOf(call.rsvp)||{}).pill||'grey')+'">'+esc((mtRsvpOf(call.rsvp)||{}).word||String(call.rsvp))+'</span>'
+        + ' <small class="mt-hint">'+esc(mtRsvpLine(call.rsvp))+'</small>'
+      : esc('Nothing came back from the calendar for this one.')]);
+    kv.push(['Did they show up?', !call
+      ? esc('No booked sales call matched this time.')
+      : !call.verdict_at
+        ? '<span class="pill red">'+esc('Nobody has answered yet')+'</span> <small class="mt-hint">'
+          + esc('Until somebody says, this call does not count towards the month.')+'</small>'
+        : call.happened
+          ? '<span class="pill green">'+esc('They turned up')+'</span>'
+          : '<span class="pill red">'+esc('No-show')+'</span>']);
+    kv.push(['The money side', !call
+      ? 'No booked sales call matched this time.'
+      : call.counts === true ? 'Counted as delivered for the month.'
+      : !call.verdict_at ? 'Not counted, because nobody has answered yet.'
+      : call.happened && call.matched_icp === false ? 'Not counted: it did not match their profile.'
+      : 'Not counted for the month.']);
+  }
   const acts = [];
   let move = '';
   if(status==='booked' || status==='requested'){
-    acts.push('<button type="button" class="btn" onclick="mtHeldClick('+mtJsArg(m.id)+')">Call done</button>');
-    acts.push('<button type="button" class="btn ghost" onclick="mtNoShowClick('+mtJsArg(m.id)+')">No-show</button>');
+    /* A booked sales call is the money, so it goes through call_verdict: one
+       rule, which also recounts the month. Any other kind of call keeps its own
+       simpler path. */
+    if(String(m.kind)==='qualified'){
+      acts.push('<button type="button" class="btn" onclick="mtVerdictClick('+mtJsArg(m.id)+",''"+',true)">They showed</button>');
+      acts.push('<button type="button" class="btn ghost" onclick="mtVerdictClick('+mtJsArg(m.id)+",''"+',false)">No-show</button>');
+    } else {
+      acts.push('<button type="button" class="btn" onclick="mtHeldClick('+mtJsArg(m.id)+')">Call done</button>');
+      acts.push('<button type="button" class="btn ghost" onclick="mtNoShowClick('+mtJsArg(m.id)+')">No-show</button>');
+    }
     acts.push('<button type="button" class="btn ghost" onclick="mtCancelClick('+mtJsArg(m.id)+')">Cancel</button>');
     move = '<div class="mt-move"><div class="field"><label for="mtMoveTo">Move it to ('+esc(mtZoneName(st.owner_zone))+' time)</label>'
          + '<input id="mtMoveTo" type="datetime-local"></div>'
@@ -1695,7 +1723,13 @@ function viewCalendar(){
   if(!mt.viewRead){ mt.viewRead = true; mt.view = mtSavedView(); }
   if(mt.want){ const w = mt.want; mt.want = null; mtGoTo(w); }
   else mtLoadCal();
-  return mtHost('mtCalHost', mt.cal ? mtRenderCal(mt.cal) : mtLoading('Loading your calendar…'));
+  /* Above the calendar, and above everything else on it: the booked sales calls
+     nobody has answered "did they show up?" for. It draws nothing when there is
+     nothing outstanding, and it is the first thing on the screen when there is,
+     because the guarantee is worked out from those answers. */
+  mtLoadAwaiting();
+  return mtHost('mtDueHost', mtDueBandHTML())
+       + mtHost('mtCalHost', mt.cal ? mtRenderCal(mt.cal) : mtLoading('Loading your calendar…'));
 }
 /* Give whichever grid is drawn — the week or the month — exactly the height the
    window has left, so the whole working day, or the whole month, shows with no
@@ -1919,9 +1953,16 @@ async function mtLoadMeeting(id){
   const m = r.data;
   let call = null, client = null;
   if(String(m.kind)==='qualified' && m.client_id!=null){
-    const q = await mtRun(() => sb.from('qualified_calls').select('*')
-      .eq('client_id', m.client_id).eq('booked_for', m.starts_at).maybeSingle(), null);
-    if(q.ok) call = q.data;
+    /* By meeting_id once 20261207_showup.sql has linked them up; by client and
+       time for anything it has not reached yet. */
+    const byId = await mtRun(() => sb.from('qualified_calls').select('*')
+      .eq('meeting_id', m.id).maybeSingle(), null);
+    if(byId.ok && byId.data) call = byId.data;
+    if(!call){
+      const q = await mtRun(() => sb.from('qualified_calls').select('*')
+        .eq('client_id', m.client_id).eq('booked_for', m.starts_at).maybeSingle(), null);
+      if(q.ok) call = q.data;
+    }
   }
   if(m.client_id!=null){
     const c = await mtRun(() => sb.from('clients').select('*').eq('id', m.client_id).maybeSingle(), null);
@@ -2263,6 +2304,196 @@ async function mtOnNewBooking(){
 function mtForget(){
   mtStopTimer(); mt.bell = []; mt.bellAt = 0; mt.bellBusy = null;
   mt.settings = null; mt.view = mtSavedView(); mt.viewRead = true; mt.day = null; mt.cal = null; mt.needOnly = false; mt.legend = false;
-  mt.open = null; mt.want = null; mt.seq++; mt.one = null;
+  mt.open = null; mt.want = null; mt.seq++; mt.one = null; mt.due = null;
   mt.noshows = null; mt.err = ''; mt.now = null; mt.busy = false;
+}
+
+/* ===================== 14. DID THEY SHOW UP? ===================== */
+/* This decides whether a booked sales call counts towards the guarantee, and
+   therefore whether Aviance refunds double. It is the most expensive question
+   on this screen, so it is built so that nobody can forget it.
+
+   Two things, working together:
+
+   THE HINT. The prospect's RSVP on the calendar invitation
+   (qualified_calls.rsvp, written by call_rsvp_set from the Google Calendar
+   event). An 'accepted' is not attendance and a 'no_reply' is not absence, so
+   the hint is only ever drawn as a hint, in words that say so. It never moves
+   the money.
+
+   THE TRUTH. One tap: "They showed" or "No-show". It goes to the database rule
+   call_verdict_by_meeting(), which sets qualified_calls.happened, moves the
+   meeting's status with it, and recounts every month the call touches —
+   client_months.calls_delivered, the shortfall and anything hanging off it. It
+   always overrides the hint. A month that is already locked is never quietly
+   changed; the answer says so out loud, because a refund already hangs off it.
+
+   OUTSTANDING. qualified_calls.verdict_at is null until a person answers.
+   `happened = false` could never mean "nobody has said yet", because that is
+   also what a real no-show looks like. v_calls_awaiting_verdict lists every
+   past booked sales call with no verdict, and that band sits above the calendar
+   until it is empty. */
+
+/* meetings.css draws the calendar; this band is new markup, so the handful of
+   rules it needs sit here with it. The eyebrow and the 24px red rule are the
+   design system's, and that rule is the ONE red thing on this band. */
+const MT_DUE_EYEBROW = 'font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted,#63636A);margin:0';
+const MT_DUE_RULE = 'width:24px;height:2px;background:var(--red,#C42408);margin:8px 0 0';
+const MT_DUE_ROW = 'display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 0;border-top:1px solid var(--line,#DCDCE0)';
+const MT_DUE_MAIN = 'flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:4px';
+const MT_DUE_META = 'font-family:var(--mono);font-size:12px;line-height:1.5;color:var(--muted,#63636A)';
+const MT_VERDICT_NOT_READY = 'The show-up update is not applied to the database yet, so the month has not been recounted. Apply 20261207_showup.sql and mark it again.';
+/* What an RSVP on the invitation means, and what it does NOT mean. */
+const MT_RSVP = {
+  accepted:  {word:'Accepted the invitation', pill:'green',
+              hint:'They accepted the invitation. That is not the same as turning up — you still have to say.'},
+  declined:  {word:'Declined the invitation', pill:'red',
+              hint:'They declined the invitation. They may still have turned up — you still have to say.'},
+  tentative: {word:'Said maybe',              pill:'amber',
+              hint:'They answered "maybe" on the invitation. You still have to say whether they turned up.'},
+  no_reply:  {word:'Never replied',           pill:'grey',
+              hint:'They never replied to the invitation. That is not a no-show on its own — you still have to say.'}
+};
+function mtRsvpOf(r){ return MT_RSVP[String(r||'')] || null }
+function mtRsvpLine(r){
+  const w = mtRsvpOf(r);
+  if(!w) return 'No reply came back from the calendar for this one.';
+  return w.hint;
+}
+/* A database rule that is not there yet reads as "not switched on". */
+function mtNotReady(error){
+  const m = String(error==null?'':error).toLowerCase();
+  return m.indexOf('does not exist') >= 0 || m.indexOf('could not find the function') >= 0 ||
+         m.indexOf('schema cache') >= 0 || m.indexOf('not find the table') >= 0;
+}
+
+/* ---- the truth ---- */
+/* One tap. The database does the counting; this only reports what it said.
+   Until 20261207_showup.sql is applied it falls back to the old write and says,
+   plainly, that the month has not been recounted — it never pretends. */
+async function mtVerdict(meetingId, showed, note){
+  if(meetingId==null || meetingId==='') return mtErr('Which call is this about?');
+  if(typeof showed !== 'boolean') return mtErr('Say either that they showed up or that they did not.');
+  const r = await mtRun(() => sb.rpc('call_verdict_by_meeting', {
+    p_meeting: meetingId, p_showed: showed, p_note: mtText(note) || null}), null);
+  if(r.ok){
+    const d = r.data || {};
+    if(d.ok === false) return mtOk({fell_back:false, said: mtText(d.error), counted:false, data:d});
+    return mtOk({fell_back:false, said: mtText(d.said), counted: d.counts === true, data:d});
+  }
+  if(!mtNotReady(r.error)) return r;
+  const old = showed ? await mtHeld(meetingId) : await mtNoShow(meetingId);
+  if(!old.ok) return old;
+  return mtOk({fell_back:true, said: MT_VERDICT_NOT_READY, counted:false, data: old.data});
+}
+
+/* ---- what still needs an answer ---- */
+/* Reads the view, which is security_invoker, so it obeys RLS exactly as
+   qualified_calls does: a client gets nothing from it. */
+async function mtAwaiting(){
+  const r = await mtRun(() => sb.from('v_calls_awaiting_verdict').select('*')
+    .order('booked_for', {ascending:true}).limit(50), []);
+  if(!r.ok && mtNotReady(r.error)) return mtOk({rows:[], notReady:true});
+  if(!r.ok) return r;
+  return mtOk({rows: Array.isArray(r.data) ? r.data : [], notReady:false});
+}
+/* How late an answer is, in words a person would use. */
+function mtOverdueWords(hours){
+  const h = Math.max(0, Math.floor(Number(hours) || 0));
+  if(h < 1) return 'just finished';
+  if(h < 24) return h + (h === 1 ? ' hour ago' : ' hours ago');
+  const d = Math.floor(h / 24);
+  return d + (d === 1 ? ' day ago' : ' days ago');
+}
+/* The band above the calendar. Pure. Empty when there is nothing outstanding —
+   this is the one list that must never be quietly hidden. */
+function mtRenderAwaiting(data){
+  const d = data || {rows:[], notReady:false};
+  const rows = Array.isArray(d.rows) ? d.rows : [];
+  if(d.notReady) return '';
+  if(!rows.length) return '';
+  const n = rows.length;
+  return '<div class="card mt-card mt-due" role="region" aria-label="Booked sales calls waiting for an answer">'
+    + '<p style="'+MT_DUE_EYEBROW+'">'+esc('Waiting for an answer')+'</p>'
+    + '<div style="'+MT_DUE_RULE+'"></div>'
+    + '<h3 style="margin:10px 0 0">'+esc(n===1 ? 'One booked sales call is waiting for an answer' : n+' booked sales calls are waiting for an answer')+'</h3>'
+    + '<p class="mt-sum" style="max-width:62ch">'+esc('Until somebody says whether the prospect turned up, these do not count towards the month \u2014 and the guarantee is worked out from the month. One tap each.')+'</p>'
+    + '<ul style="list-style:none;margin:16px 0 0;padding:0">'
+    + rows.map(r=>{
+        const who = mtText(r.prospect_name) || mtText(r.guest_name) || mtText(r.prospect_email) || 'A prospect';
+        const co  = mtText(r.prospect_company);
+        const rs  = mtRsvpOf(r.rsvp);
+        /* Who the prospect is, and — just as important — which client's month
+           this call belongs to. */
+        return '<li style="'+MT_DUE_ROW+'">'
+          + '<span style="'+MT_DUE_MAIN+'">'
+            + '<b>'+esc(who)+(co?esc(', '+co):'')+'</b>'
+            + '<span style="'+MT_DUE_META+'">'+esc(
+                (mtText(r.company) ? 'For ' + mtText(r.company) + ' \u00b7 ' : '') +
+                'booked call '+mtOverdueWords(r.hours_overdue))+'</span>'
+            + '<span style="'+MT_DUE_META+'">'
+              + (rs ? esc('Their invitation: ')+'<span class="pill '+esc(rs.pill)+'">'+esc(rs.word)+'</span> '+esc('\u2014 a hint, not an answer')
+                    : esc('No reply came back from the calendar.'))
+            + '</span>'
+            + (r.month_locked_at ? '<span style="'+MT_DUE_META+'">'+esc('Its month is already locked, so answering will not move that month\u2019s number.')+'</span>' : '')
+          + '</span>'
+          + '<span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+            /* Neither answer is the "right" one, so neither is the red button:
+               a red "They showed" would quietly push the delivered count up. */
+            + '<button type="button" class="btn ghost" onclick="mtVerdictClick('+mtJsArg(r.meeting_id || '')+','+mtJsArg(r.call_id)+',true)">They showed</button>'
+            + '<button type="button" class="btn ghost" onclick="mtVerdictClick('+mtJsArg(r.meeting_id || '')+','+mtJsArg(r.call_id)+',false)">No-show</button>'
+            + (r.meeting_id ? '<button type="button" class="mt-textbtn" onclick="mtOpenMeeting('+mtJsArg(r.meeting_id)+')">Open the call</button>' : '')
+          + '</span>'
+        + '</li>';
+      }).join('')
+    + '</ul></div>';
+}
+
+/* ---- loading it ---- */
+/* There is no separate screen for this on purpose: index.html's route table
+   belongs to another agent, and the one place every call already lives is the
+   Calendar. The band is drawn at the top of it (viewCalendar) and the sidebar
+   badge counts it (mtDueCount), so it cannot be walked past. */
+async function mtLoadAwaiting(){
+  const r = await mtAwaiting();
+  mt.due = r.ok ? r.data : null;
+  mtPaint('mtDueHost', r.ok
+    ? (mtRenderAwaiting(r.data) || mtAwaitingClearHTML())
+    : mtErrorHTML(r.error, 'mtLoadAwaiting()'));
+  try{ if(typeof renderNav==='function') renderNav() }catch(e){}
+  return r;
+}
+function mtAwaitingClearHTML(){
+  const notReady = mt.due && mt.due.notReady;
+  return '<div class="card mt-card"><p class="mt-none">'+esc(notReady
+    ? 'The show-up list is not switched on yet. Once 20261207_showup.sql is applied, every booked sales call with no answer will show here.'
+    : 'Every booked sales call that has been and gone has an answer. Nothing is waiting.')+'</p></div>';
+}
+/* The band for the top of the calendar: nothing at all when nothing is due. */
+function mtDueBandHTML(){ return mt.due ? mtRenderAwaiting(mt.due) : '' }
+
+/* ---- the buttons ---- */
+async function mtVerdictClick(meetingId, callId, showed){
+  const done = showed ? 'Marked: they turned up' : "Marked: they didn't turn up";
+  const r = await mtDo(async () => {
+    if(meetingId) return mtVerdict(meetingId, !!showed);
+    /* A booked sales call with no meeting behind it: answer the call itself. */
+    const direct = await mtRun(() => sb.rpc('call_verdict', {
+      p_call: callId, p_showed: !!showed, p_note: null}), null);
+    if(!direct.ok && mtNotReady(direct.error)) return mtErr(MT_VERDICT_NOT_READY);
+    if(!direct.ok) return direct;
+    const d = direct.data || {};
+    return mtOk({fell_back:false, said: mtText(d.said), counted: d.counts === true, data:d});
+  }, done);
+  if(r.ok && r.data && r.data.said && typeof toast === 'function') toast(r.data.said);
+  await mtLoadAwaiting();
+  if(r.ok && meetingId) await mtAfterMeeting(meetingId);
+  else if(r.ok && mt.cal) await mtLoadCal(true);
+  return r;
+}
+/* The sidebar badge for the show-up list, off what is already loaded. */
+function mtDueCount(){
+  const d = mt.due;
+  if(!d || !Array.isArray(d.rows)) return '';
+  return d.rows.length > 0 ? d.rows.length : '';
 }

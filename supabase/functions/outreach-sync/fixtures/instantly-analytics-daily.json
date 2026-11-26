@@ -1,0 +1,5 @@
+[
+  { "date": "2026-11-24", "sent": 118, "contacted": 112, "new_leads_contacted": 40, "opened": 61, "unique_opened": 29, "replies": 4, "unique_replies": 3, "replies_automatic": 1, "unique_replies_automatic": 1, "clicks": 2, "unique_clicks": 2, "opportunities": 1, "unique_opportunities": 1 },
+  { "date": "2026-11-25", "sent": 120, "contacted": 118, "new_leads_contacted": 44, "opened": 70, "unique_opened": 33, "replies": 2, "unique_replies": 2, "replies_automatic": 0, "unique_replies_automatic": 0, "clicks": 1, "unique_clicks": 1, "opportunities": 0, "unique_opportunities": 0 },
+  { "date": "2026-11-26", "sent": 44, "contacted": 44, "new_leads_contacted": 20, "opened": 12, "unique_opened": 8, "replies": 1, "unique_replies": 1, "replies_automatic": 0, "unique_replies_automatic": 0, "clicks": 0, "unique_clicks": 0, "opportunities": 1, "unique_opportunities": 1 }
+]

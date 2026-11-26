@@ -71,6 +71,12 @@ Deno.serve(async (req) => {
     if (created) await sb.auth.admin.deleteUser(userId).catch(() => {});
     // Only our own plain sentences go back to the browser, never a raw database error.
     const said = String(used.error.message ?? "");
+    // ZS001 is the seat rule in 20261207_seats.sql: the client's plan has no
+    // free portal login left. The sentence is written in the database, with the
+    // company and the number in it, so it is passed through as it is. The
+    // invite is NOT burnt — portal_invite_consume raises, which rolls the whole
+    // transaction back, so the same link works once a login is freed.
+    if (String((used.error as { code?: string }).code ?? "") === "ZS001") return no(req, said, 409);
     const known = ["That email belongs to the Aviance team.", "This link has already been used or has expired."];
     return no(req, known.includes(said) ? said : "This link has already been used or has expired.", 410);
   }

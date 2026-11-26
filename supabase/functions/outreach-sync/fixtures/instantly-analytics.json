@@ -1,0 +1,42 @@
+[
+  {
+    "campaign_name": "US founders — Q4",
+    "campaign_id": "01a18395-0ad6-7e17-beab-fae7b41bc39e",
+    "campaign_status": 1,
+    "campaign_is_evergreen": false,
+    "leads_count": 1500,
+    "contacted_count": 1200,
+    "emails_sent_count": 4812,
+    "new_leads_contacted_count": 180,
+    "open_count": 2210,
+    "open_count_unique": 1044,
+    "open_count_unique_by_step": 1180,
+    "reply_count": 96,
+    "reply_count_unique": 81,
+    "reply_count_unique_by_step": 88,
+    "reply_count_automatic": 14,
+    "reply_count_automatic_unique": 12,
+    "link_click_count": 61,
+    "link_click_count_unique": 44,
+    "bounced_count": 37,
+    "unsubscribed_count": 9,
+    "completed_count": 1010,
+    "total_opportunities": 12,
+    "total_opportunity_value": 36000
+  },
+  {
+    "campaign_name": "Agency owners — paused",
+    "campaign_id": "01a18395-0ad6-7e17-beab-fae7b41bc3aa",
+    "campaign_status": 2,
+    "leads_count": 300,
+    "contacted_count": 300,
+    "emails_sent_count": 640,
+    "open_count": 210,
+    "open_count_unique": 142,
+    "reply_count": 11,
+    "reply_count_unique": 9,
+    "bounced_count": 4,
+    "unsubscribed_count": 1,
+    "total_opportunities": 1
+  }
+]

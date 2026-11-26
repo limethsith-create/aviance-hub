@@ -44,6 +44,8 @@ const cb = {
   one: {}, oneErr: {},          /* one[clientId] = {client, profile, months, events, history} */
   needs: null, needsErr: '',
   agreements: {}, firstInv: {},  /* newest agreement, and the first invoice, by client id */
+  seats: {}, seatsErr: {},       /* portal_seat_state() by client id — who can sign in */
+  cal: {}, calErr: {},           /* their connected calendars, by client id */
   busy: {},
 };
 function cbForget(){
@@ -51,6 +53,7 @@ function cbForget(){
   cb.standing = []; cb.exposure = null; cb.owners = {}; cb.history = {}; cb.requests = []; cb.profiles = {};
   cb.one = {}; cb.oneErr = {}; cb.needs = null; cb.needsErr = ''; cb.busy = {};
   cb.agreements = {}; cb.firstInv = {};
+  cb.seats = {}; cb.seatsErr = {}; cb.cal = {}; cb.calErr = {};
 }
 
 /* ===================== 1. PLUMBING (copied from finance.js) ===================== */
@@ -891,8 +894,11 @@ function cbRenderClient(r, months, events, extra){
     /* invoices: listed here for an admin, with Paid on the ones we are waiting for.
        Refunds are still finance.js's own screen. */
     cbRenderInvoices(r, x.invoices, {admin: !!x.admin, error: x.invoicesErr, events: events}) +
-    // TODO: their people — client_people and portal_invites, and their open requests.
-    '<section class="card cb-slot" id="cbPeople" data-cb-client="' + cbE(r.id) + '"></section>' +
+    /* their people: who holds a portal login, and a way to free one.
+       The seat rule itself is the database's (20261207_seats.sql); this only draws it. */
+    cbRenderSeats(r.id, x.seats, {error: x.seatsErr}) +
+    /* their own calendar: Google, Outlook or Calendly, connected in one click */
+    cbRenderCalendar(r.id, x.cal, {error: x.calErr}) +
     // TODO: handover — what we send them when they leave (handovers).
     '<section class="card cb-slot" id="cbHandover" data-cb-client="' + cbE(r.id) + '"></section>' +
 
@@ -969,12 +975,20 @@ async function cbLoadOne(clientId, force){
   if (cb.busy[key]) return cb.busy[key];
   if (!force && cb.one[clientId]) return cbOk(cb.one[clientId]);
   cb.busy[key] = (async () => {
-    const [client, profile, months, events, hist, reqs, owners, invs, ags, person, channel] = await Promise.all([
+    const [client, profile, months, events, hist, reqs, owners, invs, ags, person, channel, seats, cal] = await Promise.all([
       cbClient(clientId), cbProfile(clientId), cbStanding({clientId}), cbEvents(clientId),
       cbStageHistory(clientId), cbOpenRequests(clientId),
       Object.keys(cb.owners || {}).length ? Promise.resolve(cbOk(cb.owners)) : cbOwners(),
-      cbInvoices(clientId), cbAgreements(clientId), cbPerson(clientId), cbChannel(clientId)
+      cbInvoices(clientId), cbAgreements(clientId), cbPerson(clientId), cbChannel(clientId),
+      cbSeats(clientId), cbCalendars(clientId)
     ]);
+    /* Seats and the calendar are drawn from their own slots in cb, so a part
+       that is not switched on yet says so where it belongs instead of taking
+       the whole page down with it. */
+    cb.seats[clientId]   = seats.ok ? seats.data : null;
+    cb.seatsErr[clientId] = seats.ok ? '' : seats.error;
+    cb.cal[clientId]     = cal.ok ? (cal.data || []) : [];
+    cb.calErr[clientId]  = cal.ok ? '' : cal.error;
     const firstRow = (res) => res && res.ok && Array.isArray(res.data) && res.data.length ? res.data[0] : null;
     if (!client.ok) { cb.oneErr[clientId] = client.error; return client; }
     cb.one[clientId] = {
@@ -1056,7 +1070,9 @@ function viewClient(clientId){
   cbMountJourney(id);
   return (got.err ? cbErrNote(got.err) : '') + cbRenderClient(got.client ? r : null, got.months, got.events,
     {admin: cbIsAdmin(), invoices: got.invoices, invoicesErr: got.invoicesErr,
-     agreement: got.agreement, person: got.person, channel: got.channel});
+     agreement: got.agreement, person: got.person, channel: got.channel,
+     seats: cb.seats[id], seatsErr: cb.seatsErr[id],
+     cal: cb.cal[id], calErr: cb.calErr[id]});
 }
 
 /* Once the page is on screen, journey.js draws its tracker into #cbJourney. */
@@ -1245,6 +1261,296 @@ async function cbSaveAdd(){
   cbSay((cbTrim(r.data && r.data.company) || 'They') + ' is in the book');
   cb.clients = null; cb.tried = false;
   await cbLoadAll(true);
+  cbPaint();
+  return r;
+}
+
+/* ===================== 10. PORTAL SEATS AND THEIR CALENDAR ===================== */
+/* Seats: a seat is one person of this client who can sign in to the portal.
+   Starter 2, Growth 4, Scale unlimited — and those numbers are NOT written
+   here. They live in plan_prices.portal_seats and come back from
+   portal_seat_state(); this file only draws what it is told, so changing a plan
+   changes the screen. The limit itself is enforced in the database, twice (when
+   an invite is issued and again when it is accepted), behind a lock, so nothing
+   on this screen can be the thing that lets a third person in.
+
+   Calendar: the client's own Google, Outlook or Calendly, so booked calls land
+   on their calendar and we can see their free time. The handshake happens in
+   the `calendar-connect` edge function, which is the only thing that ever sees
+   an OAuth credential; this screen asks it for a URL and sends the browser
+   there. 20261207_calendar_connect.sql names the secrets it reads.
+
+   Both panels say "not switched on yet", in plain English, when their migration
+   has not been applied. Nothing here throws. */
+
+const CB_SEATS_NOT_READY = 'Portal logins are not switched on yet. Once the database update is applied, who can sign in will show here.';
+const CB_CAL_NOT_READY = 'Calendar connecting is not switched on yet. Once the database update and the calendar-connect function are live, they can connect theirs here.';
+const CB_CAL_PROVIDERS = [
+  ['google',    'Google Calendar',  'One click, and we read their free time and put booked calls on it.'],
+  ['microsoft', 'Outlook',          'The same, through their Microsoft work or personal account.'],
+  ['calendly',  'Calendly',         'They paste a personal access token from Calendly; we read their busy times from it.'],
+];
+/* The edge function that holds the OAuth side. Same origin as the database. */
+function cbFnBase(){
+  try {
+    const u = (typeof sb !== 'undefined' && sb && (sb.supabaseUrl || (sb.rest && sb.rest.url))) || '';
+    const s = cbTrim(u).replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '');
+    return s ? s + '/functions/v1' : '';
+  } catch (e) { return '' }
+}
+/* A database rule that is not there yet reads as "not switched on", never as a
+   crash and never as a Postgres code. */
+function cbMissing(error){
+  const m = cbTrim(error).toLowerCase();
+  return m.indexOf('does not exist') >= 0 || m.indexOf('could not find the function') >= 0 ||
+         m.indexOf('schema cache') >= 0 || m.indexOf('not find the table') >= 0 || m.indexOf('pgrst202') >= 0;
+}
+
+/* ---- reads ---- */
+
+/* Who holds a seat, how many are left, and the sentence to show when none are. */
+async function cbSeats(clientId){
+  if (!clientId) return cbErr('Which client is this about?');
+  const r = await cbRun(() => sb.rpc('portal_seat_state', {p_client: clientId}), null);
+  if (!r.ok && cbMissing(r.error)) return cbErr(CB_SEATS_NOT_READY);
+  return r;
+}
+/* Take a person's login away. The database revokes any pending invite to the
+   same inbox at the same time, so the seat does not hand itself straight back. */
+async function cbSeatFree(personId, reason){
+  if (!personId) return cbErr('Which person is this about?');
+  const r = await cbRun(() => sb.rpc('portal_seat_free', {p_person: personId, p_reason: cbTrim(reason) || null}), null);
+  if (!r.ok && cbMissing(r.error)) return cbErr(CB_SEATS_NOT_READY);
+  return r;
+}
+async function cbCalendars(clientId){
+  if (!clientId) return cbErr('Which client is this about?');
+  const r = await cbRun(() => sb.rpc('calendar_connections_for', {p_client: clientId}), []);
+  if (!r.ok && cbMissing(r.error)) return cbErr(CB_CAL_NOT_READY);
+  return r;
+}
+async function cbCalDisconnect(connectionId){
+  if (!connectionId) return cbErr('Which calendar is this about?');
+  const r = await cbRun(() => sb.rpc('calendar_disconnect', {p_connection: connectionId}), null);
+  if (!r.ok && cbMissing(r.error)) return cbErr(CB_CAL_NOT_READY);
+  return r;
+}
+/* Ask the edge function where to send them. It mints the state, reads the
+   OAuth client id from a Supabase secret and hands back one URL. We never see a
+   credential, and there is none in this repo to see. */
+async function cbCalStartUrl(clientId, provider){
+  const base = cbFnBase();
+  if (!base) return cbErr(CB_CAL_NOT_READY);
+  if (CB_CAL_PROVIDERS.findIndex(p => p[0] === cbTrim(provider)) < 0) return cbErr('Pick Google, Outlook or Calendly.');
+  try {
+    const ses = await sb.auth.getSession();
+    const tok = ses && ses.data && ses.data.session ? ses.data.session.access_token : '';
+    if (!tok) return cbErr('Sign in again and then connect their calendar.');
+    const res = await fetch(base + '/calendar-connect/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + tok},
+      body: JSON.stringify({client_id: clientId, provider: provider,
+                            return_to: typeof location !== 'undefined' ? String(location.href) : ''})
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body || body.ok !== true || !body.url) {
+      return cbErr((body && body.error) || CB_CAL_NOT_READY);
+    }
+    return cbOk(body);
+  } catch (e) { return cbErr(CB_CAL_NOT_READY) }
+}
+
+/* ---- the seat screen (pure) ---- */
+
+/* "2 of 2 used" / "unlimited". The one place the wording lives. */
+function cbSeatLine(s){
+  if (!s) return '';
+  if (s.unlimited) return 'Unlimited logins on ' + (cbTrim(s.plan_label) || cbPlanWord(s.plan)) + '.';
+  const held = cbInt(s.held), pend = cbInt(s.pending), seats = cbInt(s.seats);
+  return (cbTrim(s.plan_label) || cbPlanWord(s.plan)) + ' comes with ' + seats +
+    (seats === 1 ? ' login' : ' logins') + '. ' + held + ' in use' +
+    (pend ? ', ' + pend + ' invited and not opened yet' : '') + '.';
+}
+/* One row of a list of people or calendars: the name on the left, what to do
+   about it on the right, and never the two on top of each other. clientbook.css
+   belongs to the clients list, so the few rules these rows need are inline. */
+const CB_EYEBROW = 'font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted,#63636A);margin:0';
+const CB_ROW = 'display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 0;border-top:1px solid var(--line,#DCDCE0)';
+const CB_ROW_MAIN = 'flex:1 1 300px;min-width:0';
+const CB_META = 'display:block;font-family:var(--mono);font-size:12px;line-height:1.5;color:var(--muted,#63636A);margin-top:5px;word-break:break-word';
+/* "sam@stone.test · Owner · signed in since 2 Oct" — nothing empty, nothing run together. */
+function cbMeta(parts){
+  const a = (parts || []).map(cbTrim).filter(Boolean);
+  return a.length ? '<span style="' + CB_META + '">' + cbE(a.join(' · ')) + '</span>' : '';
+}
+/* The figure block from the design system: a mono caption above one big mono
+   number. The number is the whole answer to "how many logins are in use". */
+function cbSeatFig(s){
+  if (!s) return '';
+  const txt = s.unlimited ? cbInt(s.held) + ' / ∞' : cbInt(s.held) + ' / ' + cbInt(s.seats);
+  return '<div style="margin:14px 0 10px">' +
+    '<p style="' + CB_EYEBROW + '">' + cbE('Portal logins in use') + '</p>' +
+    '<p style="font-family:var(--mono);font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1;margin:6px 0 0">' +
+      cbE(txt) + '</p></div>';
+}
+/* Who can sign in, and a way to free one. Pure: data in, HTML out. */
+function cbRenderSeats(clientId, s, meta){
+  const m = meta || {};
+  const head = '<h3>' + cbE('Who can sign in') + '</h3>';
+  if (!s) {
+    return '<section class="card cb-slot" id="cbPeople" data-cb-client="' + cbE(clientId) + '">' + head +
+      (m.error ? cbErrNote(m.error) : '<p class="cb-dim">' + cbE('Loading their logins…') + '</p>') + '</section>';
+  }
+  const holders = Array.isArray(s.holders) ? s.holders : [];
+  const invites = Array.isArray(s.invites) ? s.invites : [];
+  const waiting = Array.isArray(s.waiting) ? s.waiting : [];
+  const rows = holders.map(h =>
+    '<li style="' + CB_ROW + '">' +
+      '<span style="' + CB_ROW_MAIN + '">' +
+        '<b>' + cbE(cbTrim(h.name) || cbTrim(h.email) || 'Someone') + '</b>' +
+        (h.is_primary ? ' ' + cbPill('Main contact', 'blue') : '') +
+        cbMeta([h.email, h.role, h.since ? 'signed in since ' + cbDate(h.since) : '']) +
+      '</span>' +
+      '<button class="btn ghost" onclick="cbAskFreeSeat(' + cbAttr(clientId) + ',' + cbAttr(h.person_id) + ')">' +
+        cbE('Free this login') + '</button>' +
+    '</li>').join('');
+
+  const pend = invites.map(v =>
+    '<li style="' + CB_ROW + '">' +
+      '<span style="' + CB_ROW_MAIN + '">' +
+        '<b>' + cbE(cbTrim(v.email)) + '</b> ' + cbPill('Invited', 'amber') +
+        cbMeta(['holds a login until ' + cbDate(v.expires_at) + ', or until they open it']) +
+      '</span>' +
+    '</li>').join('');
+
+  return '<section class="card cb-slot" id="cbPeople" data-cb-client="' + cbE(clientId) + '">' + head +
+    (m.error ? cbErrNote(m.error) : '') +
+    cbSeatFig(s) +
+    '<p class="cb-dim">' + cbE(cbSeatLine(s)) + '</p>' +
+    (s.at_limit ? cbNote(cbTrim(s.full_message) ||
+        'Every login on their plan is in use. Free one here, or move them to a bigger plan, before inviting anyone else.', 'amber') : '') +
+    (holders.length ? '<ul style="list-style:none;margin:10px 0 0;padding:0">' + rows + '</ul>'
+      : '<p class="cb-dim">' + cbE('Nobody from ' + (cbTrim(s.company) || 'this client') + ' can sign in yet. The welcome email sends the first login when their first invoice is marked paid.') + '</p>') +
+    (pend ? '<p style="' + CB_EYEBROW + ';margin-top:22px">' + cbE('Invited, not opened yet') + '</p>' +
+            '<ul style="list-style:none;margin:0;padding:0">' + pend + '</ul>' : '') +
+    (waiting.length ? '<p class="cb-dim" style="margin-top:14px">' + cbE(
+        cbList(waiting.map(w => cbTrim(w.name) || cbTrim(w.email))) +
+        (waiting.length === 1 ? ' is on their people list without a login.' : ' are on their people list without a login.')) + '</p>' : '') +
+  '</section>';
+}
+
+/* ---- their calendar (pure) ---- */
+
+const CB_CAL_WORDS = {google:'Google Calendar', microsoft:'Outlook', calendly:'Calendly'};
+function cbCalWord(p){ return CB_CAL_WORDS[cbTrim(p)] || (cbTrim(p) || 'A calendar') }
+function cbCalStatusWords(c){
+  const st = cbTrim(c && c.status);
+  if (st === 'connected') return ['Connected', 'green'];
+  if (st === 'needs_reconnect') return ['Needs reconnecting', 'amber'];
+  if (st === 'error') return ['Something went wrong', 'red'];
+  return [st || 'Not connected', 'grey'];
+}
+function cbRenderCalendar(clientId, list, meta){
+  const m = meta || {};
+  const head = '<h3>' + cbE('Their calendar') + '</h3>';
+  const rows = (Array.isArray(list) ? list : []).filter(Boolean);
+  const byProvider = {};
+  rows.forEach(c => { byProvider[cbTrim(c.provider)] = c });
+
+  /* One red thing per screenful (DESIGN.md): the first calendar they have not
+     connected is the red button, the rest are quiet. Two red buttons side by
+     side would mean neither reads as the thing to do. */
+  let redUsed = false;
+  const cards = CB_CAL_PROVIDERS.map(([key, label, why]) => {
+    const got = byProvider[key];
+    if (got) {
+      const [word, tone] = cbCalStatusWords(got);
+      return '<li style="' + CB_ROW + '">' +
+        '<span style="' + CB_ROW_MAIN + '">' +
+          '<b>' + cbE(label) + '</b> ' + cbPill(word, tone) +
+          cbMeta([got.account_email, got.last_synced_at
+            ? 'free time last read ' + cbDate(got.last_synced_at)
+            : 'free time not read yet']) +
+          (cbTrim(got.last_error) ? cbErrNote(got.last_error) : '') +
+        '</span>' +
+        '<button class="btn ghost" onclick="cbAskDisconnectCal(' + cbAttr(clientId) + ',' + cbAttr(got.id) + ',' + cbAttr(key) + ')">' +
+          cbE('Disconnect') + '</button>' +
+      '</li>';
+    }
+    const red = !redUsed;
+    redUsed = true;
+    return '<li style="' + CB_ROW + '">' +
+      '<span style="' + CB_ROW_MAIN + '">' +
+        '<b>' + cbE(label) + '</b>' +
+        '<span style="display:block;font-size:14px;line-height:1.5;color:var(--muted,#63636A);margin-top:5px">' + cbE(why) + '</span>' +
+      '</span>' +
+      '<button class="btn' + (red ? '' : ' ghost') + '" onclick="cbConnectCal(' + cbAttr(clientId) + ',' + cbAttr(key) + ')">' +
+        cbE('Connect ' + label) + '</button>' +
+    '</li>';
+  }).join('');
+
+  return '<section class="card cb-slot" id="cbCalendar" data-cb-client="' + cbE(clientId) + '">' + head +
+    (m.error ? cbErrNote(m.error) : '') +
+    '<p class="cb-dim">' + cbE('Connect their calendar once and booked calls land on it, and we stop offering times they cannot do.') + '</p>' +
+    (m.error ? '' : '<ul style="list-style:none;margin:10px 0 0;padding:0">' + cards + '</ul>') +
+  '</section>';
+}
+
+/* ---- what the buttons do ---- */
+
+function cbAskFreeSeat(clientId, personId){
+  const s = cb.seats[clientId];
+  const who = s && (s.holders || []).find(h => h && String(h.person_id) === String(personId));
+  const name = cbTrim(who && who.name) || cbTrim(who && who.email) || 'This person';
+  const html = '<div class="cb-add"><h3>' + cbE('Free ' + cbPossessive(name) + ' login?') + '</h3>' +
+    '<p class="cb-dim">' + cbE(name + ' will not be able to sign in to the portal any more. Their messages, their name and their place in the channel all stay, and the login can be given back by inviting them again.') + '</p>' +
+    '<label class="cb-lab" for="cbSeatWhy">Why (only we see this)</label>' +
+    '<input id="cbSeatWhy" class="cb-in" type="text" maxlength="200" placeholder="They have left the company">' +
+    '<div class="cb-err" id="cbSeatErr" role="alert"></div>' +
+    '<div class="cb-mover-btns"><button class="btn" onclick="cbFreeSeatGo(' + cbAttr(clientId) + ',' + cbAttr(personId) + ')">' +
+      cbE('Free the login') + '</button>' +
+    '<button class="btn ghost" onclick="closeModal()">Keep it</button></div></div>';
+  if (typeof openModal === 'function') openModal(html);
+  return html;
+}
+async function cbFreeSeatGo(clientId, personId){
+  cbShowErr('cbSeatErr', '');
+  const r = await cbSeatFree(personId, cbField('cbSeatWhy'));
+  if (!r.ok) { cbShowErr('cbSeatErr', r.error); return r; }
+  if (typeof closeModal === 'function') closeModal();
+  cb.seats[clientId] = r.data || null;
+  cb.seatsErr[clientId] = '';
+  const s = r.data || {};
+  cbSay(s.unlimited ? 'That login is freed'
+    : 'That login is freed — ' + cbInt(s.free) + ' of ' + cbInt(s.seats) + ' free now');
+  cbPaint();
+  return r;
+}
+async function cbConnectCal(clientId, provider){
+  const r = await cbCalStartUrl(clientId, provider);
+  if (!r.ok) { cbSay(r.error); return r; }
+  if (typeof window !== 'undefined' && window.location && r.data && r.data.url) window.location.href = r.data.url;
+  return r;
+}
+function cbAskDisconnectCal(clientId, connectionId, provider){
+  const html = '<div class="cb-add"><h3>' + cbE('Disconnect ' + cbCalWord(provider) + '?') + '</h3>' +
+    '<p class="cb-dim">' + cbE('We will stop putting booked calls on it and stop reading their free time, so the hub may start offering times they cannot do. Their calendar itself is not changed, and calls already on it stay.') + '</p>' +
+    '<div class="cb-err" id="cbCalErr" role="alert"></div>' +
+    '<div class="cb-mover-btns"><button class="btn" onclick="cbDisconnectCalGo(' + cbAttr(clientId) + ',' + cbAttr(connectionId) + ')">' +
+      cbE('Disconnect it') + '</button>' +
+    '<button class="btn ghost" onclick="closeModal()">Leave it connected</button></div></div>';
+  if (typeof openModal === 'function') openModal(html);
+  return html;
+}
+async function cbDisconnectCalGo(clientId, connectionId){
+  cbShowErr('cbCalErr', '');
+  const r = await cbCalDisconnect(connectionId);
+  if (!r.ok) { cbShowErr('cbCalErr', r.error); return r; }
+  if (typeof closeModal === 'function') closeModal();
+  const got = await cbCalendars(clientId);
+  cb.cal[clientId] = got.ok ? (got.data || []) : [];
+  cb.calErr[clientId] = got.ok ? '' : got.error;
+  cbSay(cbTrim(r.data && r.data.said) || 'Disconnected');
   cbPaint();
   return r;
 }

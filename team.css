@@ -91,3 +91,21 @@
   .tm-field select{min-width:0;width:100%}
   .tm-filters{flex-direction:column;align-items:stretch}
 }
+
+/* ---- who can see which prospects (the prospect grants) ---- */
+.tm-grantcard{display:grid;gap:var(--s2)}
+.tm-grow{flex-wrap:wrap}
+.tm-grants{display:flex;flex-wrap:wrap;gap:var(--s2);margin-left:auto}
+.tm-grant{display:inline-flex;align-items:center;gap:var(--s1);padding:2px 4px 2px 8px;
+  border:1px solid var(--border-strong);border-radius:var(--r-xs);font-size:var(--fs-min)}
+.tm-grant-x{border:none;background:none;cursor:pointer;color:var(--muted);font:inherit;
+  font-size:var(--fs-base);line-height:1;padding:0 4px}
+.tm-grant-x:hover{color:var(--brand)}
+.tm-grant-x:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.tm-grant-add{display:flex;flex-wrap:wrap;gap:var(--s3);align-items:end;
+  margin-top:var(--s2);padding-top:var(--s3);border-top:2px solid var(--text)}
+.tm-grant-add label{display:grid;gap:var(--s1)}
+.tm-grant-add label>span{font-family:var(--mono);font-size:var(--fs-min);text-transform:uppercase;
+  letter-spacing:.12em;color:var(--muted)}
+.tm-grant-add select{font:inherit;font-size:var(--fs-base);color:var(--text);background:var(--surface);
+  border:1px solid var(--border-strong);border-radius:var(--r-xs);padding:7px 9px;min-height:36px}

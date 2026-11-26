@@ -1,7 +1,8 @@
 /* Settings — you, the calendar, which tool is doing the sending, and (for the
    owner only) the business details that go on agreements, invoices and emails.
-   There are no API keys in the hub. The outreach tool is reached through
-   outreach-adapter.js, and a key, when there is one, lives outside this repo.
+   There are no API keys in the hub. The outreach tool is reached by the
+   outreach-sync edge function, and its key lives in Supabase secrets, named by
+   the account's key_ref. This screen shows that name and never the key itself.
 
    Payments and documents: read with the `biz_get` database rule and saved with
    `biz_set`, both admin only. A value that still starts with "[" is the
@@ -75,15 +76,70 @@ async function stSaveCalendar(fields){
   return stRun(()=>sb.from('calendar_settings').upsert(row,{onConflict:'id'}).select().maybeSingle(),null);
 }
 
-/* ---- The outreach tool behind the hub ---- */
+/* ---- The outreach tool behind the hub ----
+   An account here is "this client's Instantly/Smartlead login, under this label". The key itself
+   is NOT here and never will be: it lives in Supabase > Edge Functions > Secrets, and the row only
+   holds key_ref, which is the NAME of that secret. stKeyRef works the name out so the owner can
+   copy it straight into the dashboard, and the screen shows the name, never a value. */
+const ST_OUT_PROVIDERS=[['instantly','Instantly'],['smartlead','Smartlead']];
+
 async function stOutreachAccounts(){
   return stRun(()=>sb.from('outreach_accounts')
-    .select('id,client_id,provider,label,status,last_synced_at,last_error,clients(company)')
+    .select('id,client_id,provider,label,external_id,key_ref,status,last_synced_at,last_error,clients(company)')
     .order('created_at',{ascending:false}),[]);
+}
+async function stOutreachClients(){
+  return stRun(()=>sb.from('clients').select('id,company').order('company'),[]);
 }
 function stProviders(){
   const names=(typeof oaList==='function')?oaList():[];
-  return names.length?names:['demo'];
+  return names.length?names:ST_OUT_PROVIDERS.map(p=>p[0]);
+}
+/* The exact Supabase secret name for this account. Must match oxEnvName in
+   supabase/functions/outreach-sync/map.mjs — the sync looks the key up by this name. */
+function stKeyRef(provider,label){
+  const up=s=>String(s==null?'':s).toUpperCase().replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  const p=up(provider), l=up(label);
+  return 'OUTREACH_'+p+(l?'_'+l:'');
+}
+function stOutProviderName(p){ const hit=ST_OUT_PROVIDERS.find(x=>x[0]===String(p)); return hit?hit[1]:String(p||'') }
+/* 'needs_key' is not a fault, it is a thing the owner has not done yet, so it reads as a to-do. */
+function stOutState(a){
+  const s=String((a&&a.status)||'');
+  if(s==='ok')return {word:'Reading',cls:''};
+  if(s==='needs_key')return {word:'Waiting for its key',cls:'st-ro'};
+  if(s==='paused')return {word:'Paused',cls:'st-ro'};
+  if(s==='error')return {word:'Could not read',cls:'st-err'};
+  return {word:s||'—',cls:'st-ro'};
+}
+function stWhen(v){ return v?String(v).slice(0,16).replace('T',' ')+' UTC':'never' }
+
+function stValidOutreach(f){
+  const g=f||{};
+  if(!String(g.client_id||'').trim())return 'Pick which client this account belongs to.';
+  if(!ST_OUT_PROVIDERS.some(p=>p[0]===String(g.provider)))return 'Pick Instantly or Smartlead.';
+  const label=String(g.label||'').trim();
+  if(label.length<2)return 'Give the account a short label, like "Main" or the sending domain.';
+  if(label.length>60)return 'Keep the label under 60 characters.';
+  return '';
+}
+/* Connects an account. It starts as needs_key on purpose: until the secret named below is set in
+   Supabase, the sync skips this account, says so in last_error, and leaves the others alone. */
+async function stConnectOutreach(fields){
+  const bad=stValidOutreach(fields||{});
+  if(bad)return stErr(bad);
+  const label=String(fields.label||'').trim();
+  const row={client_id:String(fields.client_id).trim(),provider:String(fields.provider),label,
+    external_id:String(fields.external_id||'').trim()||null,
+    key_ref:stKeyRef(fields.provider,label),status:'needs_key',
+    last_error:'No API key yet. Set the Supabase secret '+stKeyRef(fields.provider,label)+' and this account syncs on the next tick.'};
+  return stRun(()=>sb.from('outreach_accounts').upsert(row,{onConflict:'client_id,provider,label'}).select().maybeSingle(),null);
+}
+/* Pause stops the sync touching this account at all; it does not delete anything already read. */
+async function stPauseOutreach(id,paused){
+  if(!String(id||'').trim())return stErr('No account to change.');
+  return stRun(()=>sb.from('outreach_accounts').update({status:paused?'paused':'needs_key',
+    last_error:paused?'Paused by the owner in Settings.':null}).eq('id',id).select().maybeSingle(),null);
 }
 
 /* ---- Payments and documents (admin only) ---- */
@@ -439,20 +495,47 @@ async function stSubmitCal(){
   if(r.ok&&typeof toast==='function')toast('The calendar is saved.');
 }
 
+/* Pure render. Everything escaped, and the only thing said about the key is its NAME. */
+function stRenderOut(rows,clients){
+  const list=Array.isArray(rows)?rows:[];
+  const cl=Array.isArray(clients)?clients:[];
+  const table=!list.length
+    ? `<div class="empty"><h3>Nothing connected yet</h3><p>Connect a client's Instantly or Smartlead account below. Until one is connected their campaign screens have nothing to show.</p></div>`
+    : `<table class="st-tab"><thead><tr><th>Client</th><th>Tool</th><th>Label</th><th>Their id</th><th>Key secret</th><th>State</th><th>Last read</th></tr></thead><tbody>`
+      +list.map(a=>{ const st=stOutState(a); return `<tr><td>${esc((a.clients&&a.clients.company)||'—')}</td>
+        <td>${esc(stOutProviderName(a.provider))}</td><td>${esc(a.label||'')}</td>
+        <td>${esc(a.external_id||'—')}</td>
+        <td><code>${esc(a.key_ref||stKeyRef(a.provider,a.label))}</code></td>
+        <td><span class="${esc(st.cls)}">${esc(st.word)}</span>${a.last_error?`<small class="st-err">${esc(a.last_error)}</small>`:''}</td>
+        <td>${esc(stWhen(a.last_synced_at))}
+          <div class="st-act"><button class="btn" onclick="stTogglePause('${esc(a.id)}',${a.status==='paused'?'false':'true'})">${a.status==='paused'?'Resume':'Pause'}</button></div></td></tr>` }).join('')
+      +`</tbody></table>`;
+  const form=stRow('Client',`<select id="stOutClient">${cl.length?cl.map(c=>`<option value="${esc(c.id)}">${esc(c.company||c.id)}</option>`).join(''):'<option value="">No clients yet</option>'}</select>`)
+    +stRow('Tool',`<select id="stOutProvider">${ST_OUT_PROVIDERS.map(p=>`<option value="${esc(p[0])}">${esc(p[1])}</option>`).join('')}</select>`)
+    +stRow('Label',`<input id="stOutLabel" placeholder="Main">`,'Short. It becomes part of the secret name, so keep it the same once it is set.')
+    +stRow('Their account id',`<input id="stOutExt" placeholder="optional">`,'The id the tool itself shows for this workspace, if it shows one. Not required.')
+    +`<div class="st-act"><button class="btn" onclick="stSubmitOut()">Connect</button><span id="stOutMsg" class="st-msg"></span></div>`;
+  return table
+    +`<h4>Connect an account</h4>${form}
+      <p class="st-note">The API key is <b>not</b> entered here and is not stored in Aviance OS. Connect the account, then put the key into
+      <b>Supabase &rsaquo; Edge Functions &rsaquo; Secrets</b> under the name shown in the <b>Key secret</b> column above. The sync reads it from there,
+      every fifteen minutes. Until the secret exists the account sits at “Waiting for its key” and no other client's sync is affected.</p>`;
+}
 async function stLoadOut(){
   const el=document.getElementById('stOut'); if(!el)return;
-  const r=await stOutreachAccounts();
+  const [r,c]=await Promise.all([stOutreachAccounts(),stOutreachClients()]);
   if(!r.ok){ el.innerHTML=`<p class="st-err">${esc(r.error)}</p>`; return }
-  const rows=r.data||[];
-  const known=stProviders().join(', ');
-  if(!rows.length){
-    el.innerHTML=`<div class="empty"><h3>Nothing connected</h3>
-      <p>Every client is on the demo data until a real tool is plugged in. Adapters ready to take a key: ${esc(known)}.</p></div>`;
-    return;
-  }
-  el.innerHTML=`<table class="st-tab"><thead><tr><th>Client</th><th>Tool</th><th>Label</th><th>State</th><th>Last read</th></tr></thead><tbody>`
-    +rows.map(a=>`<tr><td>${esc((a.clients&&a.clients.company)||'—')}</td><td>${esc(a.provider)}</td><td>${esc(a.label||'')}</td>
-      <td>${esc(a.status)}${a.last_error?`<small class="st-err">${esc(a.last_error)}</small>`:''}</td>
-      <td>${a.last_synced_at?esc(String(a.last_synced_at).slice(0,16).replace('T',' ')):'never'}</td></tr>`).join('')
-    +`</tbody></table><p class="st-note">Adapters available: ${esc(known)}. A tool with no key reads as <b>needs_key</b> and its screens stay on the demo data.</p>`;
+  el.innerHTML=stRenderOut(r.data||[],c.ok?(c.data||[]):[]);
+}
+async function stSubmitOut(){
+  const msg=document.getElementById('stOutMsg'); if(msg)msg.textContent='Connecting…';
+  const r=await stConnectOutreach({client_id:val('stOutClient'),provider:val('stOutProvider'),
+    label:val('stOutLabel'),external_id:val('stOutExt')});
+  if(msg)msg.textContent=r.ok?('Connected. Now set the secret '+stKeyRef(val('stOutProvider'),val('stOutLabel'))+' in Supabase.'):r.error;
+  if(r.ok){ if(typeof toast==='function')toast('Account connected. Set its key in Supabase.'); stLoadOut() }
+}
+async function stTogglePause(id,paused){
+  const r=await stPauseOutreach(id,paused===true||paused==='true');
+  if(!r.ok&&typeof toast==='function')toast(r.error);
+  stLoadOut();
 }

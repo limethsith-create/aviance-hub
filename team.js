@@ -47,6 +47,7 @@ const TM_PRIORITY_LABEL = {1:'Lowest', 2:'Low', 3:'Normal', 4:'High', 5:'Urgent'
 /* What each screen is holding right now. null means "not loaded yet". */
 const tmS = {
   people:null, tasks:null, mine:null, clients:null,
+  grants:null, grantErr:'', grantBusy:false,
   err:'', dept:'', who:'', busy:false, workSeq:0
 };
 
@@ -146,6 +147,133 @@ async function tmSetPersonStatus(id, status){
   const text = String(status == null ? '' : status).trim().slice(0,140);
   return tmRun(() => sb.from('profiles').update({status: text || null})
     .eq('id', id).select().single(), null);
+}
+
+
+/* ================= PROSPECT ACCESS ================================
+   The owner can appoint a named person to one client's prospect window, and to
+   nothing else: no money, no invoice, no agreement, no setting, no other
+   client. The grant is the whole appointment — one row in `prospect_grants`
+   naming the person and the client. Nothing about the person's role changes,
+   because is_approved() (every other table's policy) does not look at this
+   table; it is read-only, additive, and only the owner may write it.
+
+   It is enforced in the database, not here: reading any outreach row asks
+   can_see_prospects(client_id), so a person with no grant gets an empty list
+   out of the same query the owner runs. This screen only shows what has been
+   given, and gives or takes one away.
+   =================================================================== */
+
+/* Every live grant, newest first. The database returns the owner all of them
+   and anybody else only their own. */
+async function tmGrants(){
+  return tmRun(() => sb.from('prospect_grants')
+    .select('id,user_id,client_id,granted_by,note,created_at')
+    .is('revoked_at', null)
+    .order('created_at', {ascending:false}), []);
+}
+
+/* Appoint somebody. The person must already have an account here (a profiles
+   row) — this hands out a view of one client, it does not create a login. */
+async function tmGrantAdd(userId, clientId, note){
+  if (!userId) return tmErr('Choose who this is for.');
+  if (!clientId) return tmErr('Choose which client they may see.');
+  if (!tmMeIsAdmin()) return tmErr('Only the owner can give somebody a client\u2019s prospects.');
+  const row = {user_id:String(userId), client_id:String(clientId), granted_by:tmMeId() || null};
+  const text = String(note == null ? '' : note).trim().slice(0,200);
+  if (text) row.note = text;
+  const r = await tmRun(() => sb.from('prospect_grants').insert(row).select().single(), null);
+  if (!r.ok && /duplicate|unique/i.test(r.error)) return tmErr('They already have that client.');
+  return r;
+}
+
+/* Take it away. The row stays, marked revoked, so there is a record of what was
+   given and when it was taken back. */
+async function tmGrantRevoke(id){
+  if (!id) return tmErr('Pick the access to take away first.');
+  if (!tmMeIsAdmin()) return tmErr('Only the owner can take a client\u2019s prospects back.');
+  return tmRun(() => sb.from('prospect_grants')
+    .update({revoked_at:new Date().toISOString()})
+    .eq('id', id).is('revoked_at', null).select().single(), null);
+}
+
+/* Who holds what, as the screen reads it: one entry per person, with the
+   clients they have been given. */
+function tmGrantsByPerson(){
+  const people = tmS.people || [];
+  const byId = {};
+  people.forEach(p => { byId[String(p.id)] = p });
+  const out = [];
+  (tmS.grants || []).forEach(g => {
+    const key = String(g.user_id);
+    let row = out.filter(x => x.key === key)[0];
+    if (!row) { row = {key, person:byId[key] || null, clients:[]}; out.push(row) }
+    row.clients.push({id:g.id, client_id:g.client_id, name:tmClientName(g.client_id) || 'A client', created_at:g.created_at});
+  });
+  out.sort((a,b) => tmPersonName(a.person).localeCompare(tmPersonName(b.person)));
+  return out;
+}
+
+function tmRenderGrants(){
+  if (!tmMeIsAdmin()) return '';
+  if (tmS.grants === null) return tmLoading('who can see which prospects');
+  const held = tmGrantsByPerson();
+  const people = (tmS.people || []).filter(p => String(p.id) !== tmMeId());
+  const clients = Object.keys(tmS.clients || {}).map(id => ({id, company:tmS.clients[id] || 'A client'}))
+    .sort((a,b) => String(a.company).localeCompare(String(b.company)));
+  const err = tmS.grantErr ? tmErrorCard(tmS.grantErr, 'tmLoadGrants()') : '';
+
+  const rows = held.length ? held.map(h => `<div class="tm-prow tm-grow">
+      <span class="tm-av">${tmX(tmInitials(h.person))}</span>
+      <span class="tm-who"><b>${tmX(tmPersonName(h.person))}</b><small>${tmX((h.person && h.person.email) || '')}</small></span>
+      <span class="tm-grants">${h.clients.map(c => `<span class="tm-grant">${tmX(c.name)}
+        <button class="tm-grant-x" type="button" title="Take this back"
+          aria-label="Take ${tmX(c.name)} back from ${tmX(tmPersonName(h.person))}"
+          onclick="tmDoRevoke('${tmX(c.id)}')">\u00d7</button></span>`).join('')}</span>
+    </div>`).join('')
+    : '<p class="tm-muted tm-small">Nobody has been given a client\u2019s prospects yet.</p>';
+
+  const form = (people.length && clients.length) ? `<div class="tm-grant-add">
+      <label class="tm-small"><span>Person</span>
+        <select id="tmGrantWho">${people.map(p => `<option value="${tmX(p.id)}">${tmX(tmPersonName(p))}</option>`).join('')}</select></label>
+      <label class="tm-small"><span>Client</span>
+        <select id="tmGrantClient">${clients.map(c => `<option value="${tmX(c.id)}">${tmX(c.company)}</option>`).join('')}</select></label>
+      <button class="btn" type="button" onclick="tmDoGrant()"${tmS.grantBusy ? ' disabled' : ''}>Give them this client</button>
+    </div>`
+    : `<p class="tm-muted tm-small">${clients.length ? 'Nobody else has an account here yet.' : 'There are no clients to give out yet.'}</p>`;
+
+  return `<div class="tm-head"><h3>Who can see which prospects</h3><span class="tm-count">${held.length}</span></div>
+    <div class="card tm-pad tm-grantcard">
+      <p class="tm-muted tm-small">A person here sees that client\u2019s prospect window \u2014 the businesses, the mails, the replies \u2014 and nothing else in Aviance OS: no money, no invoices, no agreements, no settings and no other client.</p>
+      ${rows}
+      ${form}
+    </div>` + err;
+}
+
+async function tmLoadGrants(){
+  if (!tmMeIsAdmin()) { tmS.grants = []; return }
+  if (tmS.clients === null) await tmLoadClients();
+  if (tmS.people === null) { const p = await tmPeople(); tmS.people = p.ok ? p.data : [] }
+  const r = await tmGrants();
+  tmS.grantErr = r.ok ? '' : r.error;
+  tmS.grants = r.ok ? r.data : [];
+  tmPaint('tmGrantHost', tmRenderGrants());
+}
+
+async function tmDoGrant(){
+  const pick = (id) => { const el = typeof document !== 'undefined' && document.getElementById ? document.getElementById(id) : null; return el ? el.value : '' };
+  tmS.grantBusy = true;
+  const r = await tmGrantAdd(pick('tmGrantWho'), pick('tmGrantClient'));
+  tmS.grantBusy = false;
+  if (typeof toast === 'function') toast(r.ok ? 'They can see that client\u2019s prospects now.' : r.error);
+  if (r.ok) { tmS.grants = null; await tmLoadGrants() }
+  return r;
+}
+async function tmDoRevoke(id){
+  const r = await tmGrantRevoke(id);
+  if (typeof toast === 'function') toast(r.ok ? 'Taken back.' : r.error);
+  if (r.ok) { tmS.grants = null; await tmLoadGrants() }
+  return r;
 }
 
 /* ================= WORK QUEUE ===================================== */
@@ -350,6 +478,7 @@ async function tmLoadTeam(){
     tmS.tasks  = tasks.ok  ? tasks.data  : [];
   } finally { tmS.busy = false }
   tmPaint('tmTeamHost', tmRenderTeam());
+  tmLoadGrants();
 }
 
 /* Everyone: name, title, role, status, open tasks, with the approve action
@@ -395,7 +524,8 @@ function tmRenderTeam(today){
     ? tmEmpty(tmIc('people'), 'Nobody here yet',
         'When somebody makes an account on the sign-in page they appear here, waiting for you to approve them.')
     : '';
-  return pending + err + list + nobody;
+  const grants = tmMeIsAdmin() ? `<div id="tmGrantHost">${tmRenderGrants()}</div>` : '';
+  return pending + err + list + nobody + grants;
 }
 
 function viewTeam(){
@@ -540,5 +670,6 @@ function viewMyWork(){
 
 /* Forget everything on sign-out. */
 function tmForget(){
-  Object.assign(tmS, {people:null, tasks:null, mine:null, clients:null, err:'', dept:'', who:'', busy:false, workSeq:tmS.workSeq + 1});
+  Object.assign(tmS, {people:null, tasks:null, mine:null, clients:null, grants:null, grantErr:'',
+    grantBusy:false, err:'', dept:'', who:'', busy:false, workSeq:tmS.workSeq + 1});
 }

@@ -295,12 +295,11 @@ async function dgHome(now){
   const at = dgNow(now);
   const week = dgWeek(at);
   const today = dgDateOnly(at);
-  const dayStartIso = dgDayStart(at).toISOString();
 
-  /* Twelve separate reads, none waiting on another: ask for them all at once, so Today
+  /* Eleven separate reads, none waiting on another: ask for them all at once, so Today
      opens in the time of the slowest one instead of the sum of them. */
   const [money, exposure, clients, standing, invoices,
-         callsRes, deliveredRes, requestsRes, tasksRes, dialsRes, siteRes, profilesRes] = await Promise.all([
+         callsRes, deliveredRes, requestsRes, tasksRes, siteRes, profilesRes] = await Promise.all([
     dgAsk('fnMoney'),
     dgAsk('fnExposure'),
     dgAsk('fnClients'),
@@ -314,8 +313,6 @@ async function dgHome(now){
       q => q.select('*').in('status', DG_REQUEST_OPEN), []),
     dgQuery('tasks',
       q => q.select('*').in('status', DG_TASK_OPEN).lt('due_on', today), []),
-    dgQuery('call_log',
-      q => q.select('*').gte('called_at', dayStartIso), []),
     /* discovery calls booked from the website for this week — not the preview ones, not the cancelled */
     dgQuery('discovery_bookings',
       q => q.select('*').gte('call_at', week.fromIso).lt('call_at', week.toIso), []),
@@ -412,7 +409,6 @@ async function dgHome(now){
     refundsExposed,
     openRequests: dgGot(requestsRes) ? dgRows(requestsRes).length : null,
     overdueTasks: dgGot(tasksRes) ? dgRows(tasksRes).length : null,
-    dialsToday: dgGot(dialsRes) ? dgRows(dialsRes).length : null,
     requests: dgRows(requestsRes).slice(0, 8),
     tasks: dgRows(tasksRes).slice(0, 8),
     missing: [
@@ -421,8 +417,7 @@ async function dgHome(now){
       dgGot(standing) ? null : 'the month standings',
       dgGot(clientsQ) ? null : 'the client list',
       dgGot(requestsRes) ? null : 'client requests',
-      dgGot(tasksRes) ? null : 'the work queue',
-      dgGot(dialsRes) ? null : 'the call log'
+      dgGot(tasksRes) ? null : 'the work queue'
     ].filter(Boolean)
   });
 }
@@ -711,8 +706,7 @@ function dgRenderHome(data){
     dgTile('Owed to us', dgUsd(m.owed)),
     dgTile('Refunds exposed', dgUsd(d.refundsExposed), 'if every open month missed today'),
     dgTile('Open requests', dgShow(d.openRequests)),
-    dgTile('Overdue tasks', dgShow(d.overdueTasks)),
-    dgTile('Dials today', dgShow(d.dialsToday))
+    dgTile('Overdue tasks', dgShow(d.overdueTasks))
   ].join('');
 
   const short = Array.isArray(d.shortMonths) ? d.shortMonths : [];
