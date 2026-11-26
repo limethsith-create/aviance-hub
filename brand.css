@@ -129,7 +129,7 @@ h1,h2,h3,h4{font-family:var(--font);font-weight:700;letter-spacing:-.03em;line-h
    file so there is one list to keep. */
 .btn:focus-visible,.nav-item:focus-visible,.pt-btn.primary:focus-visible,
 .chv-btn.primary:focus-visible,.chv-send:focus-visible,.tmc-btn:focus-visible,
-.tmc-msg-mine :focus-visible{outline:2px solid #fff!important;outline-offset:-4px}
+.tmc-msg-mine :focus-visible{outline:2px solid #fff!important;outline-offset:-4px!important}
 /* the outline buttons sit on paper: ink, not the white the filled ones take */
 .btn.ghost:focus-visible,.tb-btn:focus-visible{outline:2px solid var(--text)!important;outline-offset:2px}
 /* Anything in the sidebar sits on the near-black ground in BOTH themes, so the base
