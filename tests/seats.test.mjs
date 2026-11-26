@@ -349,3 +349,45 @@ test('asking who can sign in asks the database and reads no table itself', async
   assert.equal(calls.length, 0, 'no direct read of client_people or portal_invites');
   assert.equal((await cbSeats('')).ok, false);
 });
+
+/* ───────── at the limit with nobody signed in: three statements that agreed ─────────
+   Found live on a Growth client with four invitations and nobody accepted: the
+   page showed the figure "0 / 4", the line "Nobody from them can sign in yet",
+   and an amber note telling the owner to "Free one under 'Who can sign in'" —
+   where there was nobody to free. A pending invite does hold a login, so the
+   figure counts it, and the note says what is actually true. */
+
+test('four unopened invites and nobody signed in: the figure, the line and the note agree', () => {
+  const invites = [1, 2, 3, 4].map((n) => ({ id: 'v' + n, email: 'p' + n + '@stone.test', expires_at: '2026-12-20T00:00:00Z' }));
+  const full = 'Stone Roofing is on Growth, which comes with 4 portal logins, and they are all taken. Free one under "Who can sign in" on their page, or move them to a bigger plan, then send this invite again.';
+  const t = text(cbRenderSeats('c1', state({
+    plan: 'growth', plan_label: 'Growth', seats: 4, held: 0, pending: 4, free: 0,
+    at_limit: true, full_message: full, holders: [], invites,
+  }), {}));
+
+  assert.match(t, /4 \/ 4/, 'four invitations hold four logins, so the figure is 4 of 4, never 0 of 4');
+  assert.ok(!/0 \/ 4/.test(t), 'the old figure said nobody held a login while every login was taken');
+  assert.match(t, /Portal logins taken/, 'not "in use": nobody is using one yet');
+  assert.match(t, /held by invitations nobody has opened yet/);
+  assert.match(t, /each frees itself on its expiry date/);
+  assert.ok(!/Free one under/.test(t), 'there is nobody to free, so it must not say to free one');
+  assert.match(t, /Nobody from Stone Roofing can sign in yet/, 'still true, and no longer contradicted');
+  assert.match(t, /Invited, not opened yet/);
+  assert.ok(!/undefined|NaN|\[object/.test(t));
+});
+
+test('one unopened invite reads as one, and a login in use still gets the database’s own sentence', () => {
+  const one = text(cbRenderSeats('c1', state({
+    seats: 2, held: 0, pending: 2, free: 0, at_limit: true, holders: [],
+    invites: [{ id: 'v1', email: 'kim@stone.test', expires_at: '2026-12-20T00:00:00Z' }],
+  }), {}));
+  assert.match(one, /2 \/ 2/);
+  assert.match(one, /held by invitations nobody has opened yet/);
+
+  /* somebody IS signed in: the refusal sentence the database wrote is the right
+     one, word for word, because freeing a login is a thing the owner can do */
+  const full = 'Stone Roofing is on Starter, which comes with 2 portal logins, and they are all taken. Free one under "Who can sign in" on their page, or move them to a bigger plan, then send this invite again.';
+  const mix = text(cbRenderSeats('c1', state({ held: 1, pending: 1, free: 0, at_limit: true, full_message: full }), {}));
+  assert.match(mix, /Free one under "Who can sign in" on their page/);
+  assert.match(mix, /2 \/ 2/, 'one in use plus one invited is both logins taken');
+});
