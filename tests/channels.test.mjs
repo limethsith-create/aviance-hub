@@ -568,3 +568,82 @@ test('New channel: a double click makes one channel, and a failed staff lookup i
     assert.deepEqual((await chvLoadStaffList()).map((p) => p.name), ['Sam']);
   } finally { fakeSb.from = realFrom; }
 });
+
+/* A message is ONE insert, and an insert can be committed while the answer home
+   is lost (a dropped connection, or a re-read the rule would not allow). The
+   screen was then told "it didn't send" about a message the client can already
+   read, and the words went back in the box — so pressing Send said it twice.
+   When the very same words come back as mine, that is proof it did send. */
+test('send: a failure that turns out to have landed clears the warning and the box', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  be.fail.chSend = 'You are offline. Try again.';
+  el('chvInput').value = 'the server kept this one';
+  await chvSend(); await tick();
+  assert.equal(el('chvInput').value, 'the server kept this one', 'the words are kept, as before');
+  assert.equal(el('chvCErr').textContent, 'You are offline. Try again.');
+
+  /* the live line (or the 20-second catch-up) delivers the row the server did keep */
+  be.subs.c1.onMessage(M('kept1', 'u1', 'Owner', 'the server kept this one', new Date().toISOString()));
+  await tick();
+  assert.match(el('chvThread').innerHTML, /the server kept this one/, 'it is in the thread');
+  assert.equal(el('chvInput').value, '', 'and no longer waiting in the box to be said twice');
+  assert.equal(chv.drafts.c1, '');
+  assert.match(el('chvCErr').textContent, /did send after all/);
+  assert.equal(el('chvSend').disabled, false);
+});
+test('send: a different message arriving does not clear a real failure', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  be.fail.chSend = 'You are offline. Try again.';
+  el('chvInput').value = 'this one really did not go';
+  await chvSend(); await tick();
+  be.subs.c1.onMessage(M('other1', 'u2', 'Sam', 'something else entirely', new Date().toISOString()));
+  await tick();
+  assert.equal(el('chvInput').value, 'this one really did not go', 'the words stay');
+  assert.equal(el('chvCErr').textContent, 'You are offline. Try again.', 'and so does the warning');
+});
+test('send: a send that worked leaves nothing behind to second-guess', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  el('chvInput').value = 'this one went';
+  await chvSend(); await tick();
+  assert.deepEqual(Object.keys(chv.unsure), [], 'nothing is being doubted');
+});
+
+/* The same signature again, twice more: a read whose failure and whose empty
+   answer both leave an empty list on screen. */
+test("bot drafts: a read that was refused says so, instead of an empty strip", async () => {
+  reset(); asOwner();
+  const st = botStubs([{ id: 'd1', channelId: 'c1', kind: 'reply', body: 'a draft that is really waiting' }]);
+  st.fail.load = true;
+  await show({ c1: C1() }); await tick(30);
+  const bot = el('chvBot').innerHTML;
+  assert.ok(chv.botErr, 'the failure is held');
+  assert.match(bot, /nope|didn't load/, 'and the owner is told, rather than shown nothing');
+  assert.equal(chv.bot.length, 0);
+  /* and it clears once the read works */
+  st.fail.load = false;
+  await chvBotLoad(); await tick();
+  assert.equal(chv.botErr, '');
+  assert.match(el('chvBot').innerHTML, /a draft that is really waiting/);
+  noBot();
+});
+test('the team list: a read that was refused is not "No one else on the team yet"', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  chv.staff = null; chv.loadStaff = null; chv.staffErr = '';
+  const realFrom = fakeSb.from;
+  fakeSb.from = () => ({ select: async () => ({ data: null, error: { message: 'down' } }) });
+  try {
+    assert.deepEqual(await chvLoadStaffList(), []);
+    assert.ok(chv.staffErr, 'the failure is held');
+    await chvNewChannel();
+    const modal = el('modal').innerHTML;
+    assert.doesNotMatch(modal, /No one else on the team yet/, 'never a confident zero');
+    assert.ok(modal.includes(globalThis.esc(chv.staffErr)), 'the reason is in the modal');
+  } finally { fakeSb.from = realFrom; }
+  /* a team that really is one person still reads as one person */
+  chv.staff = null; chv.staffErr = '';
+  chv.loadStaff = async () => [{ id: 'u1', name: 'Owner' }];
+  assert.deepEqual((await chvLoadStaffList()).map((p) => p.name), ['Owner']);
+  assert.equal(chv.staffErr, '');
+  await chvNewChannel();
+  assert.match(el('modal').innerHTML, /No one else on the team yet/);
+});

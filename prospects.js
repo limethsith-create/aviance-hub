@@ -50,7 +50,7 @@ const prS = {
   campaigns:null,          /* [{id, name, status, client_id}] */
   rows:null, total:0, page:0,
   f:{client:'', campaign:'', sentiment:'', booked:'any', q:''},
-  err:'', seq:0, busy:false,
+  err:'', clientsErr:'', campaignsErr:'', seq:0, busy:false,
   thread:null, threadId:'', threadErr:''
 };
 
@@ -70,6 +70,13 @@ async function prRun(fn, whenEmpty){
 
 /* The one escape, from core.js: strict, five characters, the single quote among them. */
 const prX = coreEsc;
+/* A value safe to drop inside onclick="…" as a JavaScript string, from core.js:
+   JSON first, so a quote inside it cannot end the string, then escaped so it
+   cannot end the attribute. prX alone is NOT enough here — it turns ' into
+   &#39;, the browser hands the attribute back to JavaScript decoded, and the
+   quote lands back inside the string. A prospect id carrying one then either
+   kills the button silently or runs whatever follows it. */
+const prA = coreAttr;
 function prIc(name){ return (typeof I !== 'undefined' && I && I[name]) || '' }
 function prEmpty(icon, title, sub, btn, action){
   if (typeof emptyState === 'function') return emptyState(icon, title, sub, btn, action);
@@ -227,16 +234,22 @@ function prSequence(messages){
 
 async function prLoadList(){
   const mine = ++prS.seq;
+  /* Three reads, and only one of them used to be able to say it failed. A read
+     that did not answer and a read that answered with nothing both arrived here
+     as [], and the line below then wiped prS.err with the rows' own result — so
+     the names and the filter could quietly disappear while the table loaded
+     fine. The two side reads keep their own failure and the screen says so. */
   if (prS.clients === null) {
     const c = await prClients();
     if (prS.seq !== mine) return;
     prS.clients = c.ok ? c.data : [];
-    if (!c.ok) prS.err = c.error;
+    prS.clientsErr = c.ok ? '' : c.error;
   }
   if (prS.campaigns === null) {
     const g = await prCampaigns('');
     if (prS.seq !== mine) return;
     prS.campaigns = g.ok ? g.data : [];
+    prS.campaignsErr = g.ok ? '' : g.error;
   }
   const r = await prThreads({page:prS.page, client:prS.f.client, campaign:prS.f.campaign,
                              sentiment:prS.f.sentiment, booked:prS.f.booked, q:prS.f.q});
@@ -254,15 +267,20 @@ function prRenderFilters(){
   const clients = prS.clients || [];
   const camps = (prS.campaigns || []).filter(c => !prS.f.client || String(c.client_id) === String(prS.f.client));
   const opt = (v, label, on) => `<option value="${prX(v)}"${on ? ' selected' : ''}>${prX(label)}</option>`;
+  /* The client names come out of their own read. When that read failed there is
+     no filter to show and no name to put beside a row, so say it rather than
+     let the column quietly read "—" for everybody. */
   const client = clients.length > 1 ? `<label class="pr-field"><span>Client</span>
     <select onchange="prSetClient(this.value)">${opt('', 'Every client', !prS.f.client)}
-      ${clients.map(c => opt(c.id, c.company, String(prS.f.client) === String(c.id))).join('')}</select></label>` : '';
+      ${clients.map(c => opt(c.id, c.company, String(prS.f.client) === String(c.id))).join('')}</select></label>`
+    : (prS.clientsErr ? `<p class="pr-field pr-err" role="status">${prX(prS.clientsErr)} Client names and the client filter are missing.</p>` : '');
   return `<div class="card pr-filters">
     <div class="pr-filter-row">
       <label class="pr-field pr-search"><span>Search</span>
         <input type="search" value="${prX(prS.f.q)}" placeholder="Company, person or email"
                oninput="prSetSearch(this.value)" aria-label="Search prospects"></label>
       ${client}
+      ${!camps.length && prS.campaignsErr ? `<p class="pr-field pr-err" role="status">${prX(prS.campaignsErr)} The campaign filter is missing.</p>` : ''}
       <label class="pr-field"><span>Campaign</span>
         <select onchange="prSetCampaign(this.value)">${opt('', 'Every campaign', !prS.f.campaign)}
           ${camps.map(c => opt(c.id, c.name, String(prS.f.campaign) === String(c.id))).join('')}</select></label>
@@ -312,8 +330,8 @@ function prRow(t, now){
   const who = [t.lead_name, t.lead_title].filter(Boolean).join(' · ');
   const client = prClientName(t.client_id);
   const camp = prCampaignName(t.campaign_id);
-  return `<tr tabindex="0" class="pr-row" onclick="openProspect('${prX(t.id)}')"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProspect('${prX(t.id)}')}">
+  return `<tr tabindex="0" class="pr-row" onclick="openProspect(${prA(t.id)})"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProspect(${prA(t.id)})}">
     <td><span class="pr-co"><b>${prX(company)}</b>${who ? `<small>${prX(who)}</small>` : ''}</span></td>
     ${prS.f.client ? '' : `<td class="pr-dim">${client ? prX(client) : '—'}</td>`}
     <td class="pr-dim">${camp ? prX(camp) : '—'}</td>
@@ -332,6 +350,12 @@ function prRenderList(now){
      this screen is worked rather than admired. The filter bar leads. */
   const head = '';
   if (!rows.length) {
+    /* A read that did not answer is NOT an empty table. The screen used to put
+       "No prospects yet" (or, worse, "Nothing has been shared with you" —
+       a diagnosis nobody made) directly under the red card, so a page that had
+       failed to load read as a page with nothing on it. When the last read
+       failed, the error is the whole screen and there is no empty state. */
+    if (prS.err) return head + prRenderFilters() + err;
     const none = prFiltered()
       ? `<div class="card pr-pad pr-none"><p>Nothing matches that. <button class="btn ghost" type="button" onclick="prClearFilters()">Clear the filters</button></p></div>`
       : ((prS.clients || []).length || prIsOwner()
@@ -431,7 +455,7 @@ function prMessage(m){
 }
 
 function prRenderOne(){
-  if (prS.threadErr) return prErrorCard(prS.threadErr, `prLoadOne('${prX(prS.threadId)}')`);
+  if (prS.threadErr) return prErrorCard(prS.threadErr, `prLoadOne(${prA(prS.threadId)})`);
   if (!prS.thread) return prLoading('this prospect');
   const d = prS.thread, t = d.thread || {}, seq = prSequence(d.messages);
   const company = t.lead_company || t.lead_name || 'A business';
@@ -506,6 +530,7 @@ function viewProspect(id){
 function prForget(){
   prS.clients = null; prS.campaigns = null; prS.rows = null; prS.total = 0; prS.page = 0;
   prS.f = {client:'', campaign:'', sentiment:'', booked:'any', q:''};
-  prS.err = ''; prS.thread = null; prS.threadId = ''; prS.threadErr = '';
+  prS.err = ''; prS.clientsErr = ''; prS.campaignsErr = '';
+  prS.thread = null; prS.threadId = ''; prS.threadErr = '';
   prS.seq = prS.seq + 1;
 }

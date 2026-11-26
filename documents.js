@@ -37,7 +37,11 @@ async function dcFetch(){
       const m=String(r.error.message||'');
       return {ok:false,data:null,error:/failed to fetch|network/i.test(m)?"Can't reach Aviance right now. Check your connection and try again.":(r.error.code==='P0001'&&m?m:"The documents didn't load. Try again.")};
     }
-    return {ok:true,data:Array.isArray(r&&r.data)?r.data:[],error:null};
+    /* An answer that is not a list is not an empty preview. Turning null into []
+       made a failed build read as "0 things a client receives", which is the one
+       number this screen can never truthfully show. */
+    if(!Array.isArray(r&&r.data))return {ok:false,data:null,error:"The documents didn't load. Try again."};
+    return {ok:true,data:r.data,error:null};
   }catch(e){return {ok:false,data:null,error:"Can't reach Aviance right now. Check your connection and try again."};}
 }
 /* Sort + tidy what the database sent: the per-plan booking confirmation repeats the "Discovery call" one, so it goes. */

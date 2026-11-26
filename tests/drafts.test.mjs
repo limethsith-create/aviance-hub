@@ -326,3 +326,30 @@ test('a data call that throws clears dr.loading, so the drafts keep arriving', a
   assert.ok(rpcCalls.length > n);
   assert.equal(dr.loaded, true);
 });
+
+/* THE CONFIDENT ZERO. "Nothing to approve" is a promise that nothing is waiting
+   on the owner. The first load answering empty and a later refresh failing left
+   dr.loaded true with an empty list, and drBodyHTML returned the empty state
+   before it ever reached the line that shows dr.err — so a read that was
+   refused read as a clear desk while drafts sat unread. */
+test('a refresh that fails after an empty load says so, instead of "Nothing to approve"', async () => {
+  setup();
+  rpcs.drafts_pending = () => ({ data: [], error: null });
+  await drLoad(true);
+  assert.match(drBodyHTML(), /Nothing to approve/, 'an answered, empty list really is a clear desk');
+
+  rpcs.drafts_pending = () => ({ data: null, error: { message: 'permission denied for function drafts_pending', code: '42501' } });
+  await drLoad(true);
+  const h = drBodyHTML();
+  assert.ok(dr.err, 'the failure is held');
+  assert.doesNotMatch(h, /Nothing to approve/, 'never a clear desk when the read was refused');
+  assert.match(h, /The drafts didn't load/);
+  assert.ok(h.includes(globalThis.esc(dr.err)), 'and the reason is on screen');
+  assert.match(h, /Try again/, 'with a way to ask again');
+  assert.doesNotMatch(h, /permission denied|42501|PGRST/i, 'in plain words, not the database’s');
+
+  /* and it comes back once the read works */
+  rpcs.drafts_pending = () => ({ data: [], error: null });
+  await drLoad(true);
+  assert.match(drBodyHTML(), /Nothing to approve/);
+});

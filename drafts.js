@@ -100,8 +100,15 @@ function viewDrafts(){
   return `<div class="dr" id="drRoot">${html}</div>`;
 }
 function drBodyHTML(){
-  if(!dr.loaded&&dr.err)return `<div class="card dr-empty" role="alert"><h3>The drafts didn't load</h3><p>${esc(dr.err)}</p><button type="button" class="btn" onclick="drLoad(true)">Try again</button></div>`;
+  const cantLoad=`<div class="card dr-empty" role="alert"><h3>The drafts didn't load</h3><p>${esc(dr.err||'')}</p><button type="button" class="btn" onclick="drLoad(true)">Try again</button></div>`;
+  if(!dr.loaded&&dr.err)return cantLoad;
   if(!dr.loaded)return `<div class="card dr-empty" role="status">Loading the drafts…</div>`;
+  /* "Nothing to approve" is a promise that nothing is waiting on him. It must
+     never stand for "I could not read the drafts". The first load answering
+     empty and a later refresh failing left dr.loaded true with an empty list,
+     and the error below was never reached — the owner was told there was
+     nothing to approve while drafts sat unread. */
+  if(!dr.list.length&&dr.err)return cantLoad;
   if(!dr.list.length)return `<div class="card dr-empty"><h3>Nothing to approve</h3><p>When a client writes, the bot drafts a reply here. Nothing goes out until you send it.</p></div>`;
   return (dr.err?`<div class="dr-err" role="alert">${esc(dr.err)}</div>`:'')+
     `<p class="dr-hint">${dr.list.length} waiting · edit any draft, then Send (Ctrl+Enter) or Discard.</p>`+
