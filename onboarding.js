@@ -24,16 +24,11 @@
 
 /* ---- plumbing (same shape as finance.js) ------------------------- */
 
-function obOk(data){ return {ok:true, data, error:''} }
-function obErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
-}
-function obWrap(res, whenEmpty){
-  if (!res) return obErr('No answer from the database.');
-  if (res.error) return obErr(res.error);
-  return obOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const obOk = coreOk;
+const obErr = coreErr;
+const obWrap = coreWrap;
 async function obRun(fn, whenEmpty){
   try { return obWrap(await fn(), whenEmpty); }
   catch (e) { return obErr(e); }
@@ -69,10 +64,27 @@ const OB_STAGES = ['won', 'onboarding'];
 /* ---- small readers ------------------------------------------------ */
 
 function obText(v){ return String(v == null ? '' : v).trim() }
-function obEsc(s){ return typeof esc === 'function' ? esc(s) : obText(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') }
-function obArg(v){ return obEsc(JSON.stringify(obText(v))) }
+/* The one escape, from core.js: strict, five characters, the single quote among them. */
+const obEsc = coreEsc;
+/* coreAttr, but on the trimmed value: this file trims everything a person typed. */
+function obArg(v){ return coreAttr(obText(v)) }
 function obToday(){ return new Date().toISOString().slice(0,10) }
-function obMoney(n){ return typeof fnUsd === 'function' ? fnUsd(n) : '$' + (Math.round(Number(n)||0)).toLocaleString('en-US') }
+/* Day one, in the zone the months are counted in.
+   day1_on anchors every month boundary for that client, and recount_month puts a
+   call in a month by its day in calendar_settings.us_zone. obToday() is the UTC
+   day, so a client started after 7pm Eastern would get a day1_on one day late and
+   every boundary after it would sit a day out — enough to move a call on the last
+   evening of a month into the next one, and a refund with it. */
+const OB_MONTH_ZONE = 'America/New_York';
+function obTodayUs(){
+  try {
+    const d = new Intl.DateTimeFormat('en-CA',
+      {timeZone: OB_MONTH_ZONE, year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date());
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : obToday();
+  } catch (e) { return obToday(); }
+}
+/* Whole dollars, grouped, with a dollar sign — from core.js. */
+const obMoney = coreUsd;
 
 /* jsonb that people type into: a string, a list of lines, or {text:'…'}. */
 function obJsonText(v){
@@ -126,14 +138,22 @@ function obMeetingHeld(m){ return Boolean(m && (m.held_at || obText(m.status).to
 
 /* ---- reading one client's real rows ------------------------------- */
 
+/* Only the columns this file reads off a client. `clients` has 21; asking for
+   the nine used here keeps the notes and the rest off the wire. If you read a
+   new field from a client row in this file, add it here or it will be
+   undefined — the tests check the ones that are used. */
 async function obClient(clientId){
-  return obRun(() => sb.from('clients').select('*').eq('id', clientId).maybeSingle(), null);
+  return obRun(() => sb.from('clients')
+    .select('id,company,contact_name,contact_email,booking_id,plan,term,stage,inputs_complete_on')
+    .eq('id', clientId).maybeSingle(), null);
 }
 
 /* The agreements table has no client_id: it is matched on the booking it came
-   from, and failing that on the email the agreement was made out to. */
-async function obAgreement(clientId){
-  const c = await obClient(clientId);
+   from, and failing that on the email the agreement was made out to.
+   A caller that has already read the client row passes it in as `known`, so
+   the same row is not read twice in one screen. */
+async function obAgreement(clientId, known){
+  const c = known ? obOk(known) : await obClient(clientId);
   if (!c.ok) return c;
   if (!c.data) return obErr('That client is not on file.');
   const cl = c.data;
@@ -157,10 +177,13 @@ async function obProfile(clientId){
   return obRun(() => sb.from('client_profiles').select('*').eq('client_id', clientId).maybeSingle(), null);
 }
 async function obPeople(clientId){
-  return obRun(() => sb.from('client_people').select('*').eq('client_id', clientId).order('created_at'), []);
+  return obRun(() => sb.from('client_people').select('id,client_id,full_name,email,is_primary,created_at')
+    .eq('client_id', clientId).order('created_at'), []);
 }
+/* Only what "was the strategy call held?" needs. `meetings` has 21 columns. */
 async function obStrategyMeetings(clientId){
-  return obRun(() => sb.from('meetings').select('*').eq('client_id', clientId)
+  return obRun(() => sb.from('meetings').select('id,client_id,kind,starts_at,status,held_at')
+    .eq('client_id', clientId)
     .eq('kind', 'strategy').order('starts_at', {ascending:false}), []);
 }
 
@@ -174,12 +197,22 @@ async function obChecklist(clientId){
   if (!c.data) return obErr('That client is not on file.');
   const client = c.data;
 
-  const ag = await obAgreement(clientId);          if (!ag.ok) return ag;
+  /* None of these five depends on another, so they go together instead of one
+     after the next: one screen's wait instead of five. The client row is
+     handed to obAgreement so it is not read a second time. They are still
+     checked in the same order, so the same failure is still the one reported. */
+  const [ag, pr, pe, me, inv] = await Promise.all([
+    obAgreement(clientId, client),
+    obProfile(clientId),
+    obPeople(clientId),
+    obStrategyMeetings(clientId),
+    typeof fnInvoices === 'function' ? fnInvoices(clientId) : obOk([]),
+  ]);
+  if (!ag.ok) return ag;
   const agree = ag.data || {row:null, state:'none'};
-  const pr = await obProfile(clientId);            if (!pr.ok) return pr;
-  const pe = await obPeople(clientId);             if (!pe.ok) return pe;
-  const me = await obStrategyMeetings(clientId);   if (!me.ok) return me;
-  const inv = typeof fnInvoices === 'function' ? await fnInvoices(clientId) : obOk([]);
+  if (!pr.ok) return pr;
+  if (!pe.ok) return pe;
+  if (!me.ok) return me;
   if (!inv.ok) return obErr(inv.error);
 
   const profile  = pr.data || null;
@@ -240,7 +273,7 @@ async function obStart(clientId){
     const more = left.length > 1 ? ' ' + (left.length - 1) + ' other thing' + (left.length === 2 ? '' : 's') + ' still to do.' : '';
     return obErr('Not ready to start: ' + left[0].why + more);
   }
-  const day1 = obToday();
+  const day1 = obTodayUs();
   const marked = await obRun(() => sb.from('clients')
     .update({inputs_complete_on: ck.data.client.inputs_complete_on || day1})
     .eq('id', clientId).select().single(), null);
@@ -377,11 +410,14 @@ async function obLoadList(){
   const cs = typeof fnClients === 'function' ? await fnClients() : obOk([]);
   if (!cs.ok) { ob.listErr = cs.error; ob.list = []; return obErr(cs.error); }
   const mine = (cs.data || []).filter(c => c && OB_STAGES.includes(obText(c.stage)));
-  const out = [];
-  for (const c of mine) {
-    const ck = await obChecklist(c.id);
-    out.push(ck.ok ? ck.data : {clientId:c.id, client:c, items:[], ready:false, missing:[], blocking:ck.error, blockingLabel:''});
-  }
+  /* One checklist per client, all at once. Read one after the other this was
+     a dozen clients' worth of waiting stacked end to end; the order of the
+     list is still the order of `mine`. */
+  const checks = await Promise.all(mine.map(c => obChecklist(c.id)));
+  const out = mine.map((c, i) => {
+    const ck = checks[i];
+    return ck.ok ? ck.data : {clientId:c.id, client:c, items:[], ready:false, missing:[], blocking:ck.error, blockingLabel:''};
+  });
   ob.list = out;
   return obOk(out);
 }
@@ -389,8 +425,9 @@ async function obLoadOne(clientId){
   ob.oneErr = ''; ob.clientId = clientId;
   const ck = await obChecklist(clientId);
   if (!ck.ok) { ob.oneErr = ck.error; ob.one = null; return ck; }
-  const inp = await obInputs(clientId);
-  const ag  = await obAgreement(clientId);
+  /* The checklist already read the profile and the agreement, so these two
+     come out of it rather than off the wire again. */
+  const [inp, ag] = await Promise.all([obInputs(clientId), obAgreement(clientId, ck.data.client)]);
   ob.one = {check: ck.data, inputs: inp.ok ? inp.data : null, agreement: ag.ok ? ag.data : null};
   return obOk(ob.one);
 }

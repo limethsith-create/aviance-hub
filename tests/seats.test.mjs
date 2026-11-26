@@ -251,6 +251,7 @@ globalThis.emptyState = (i, t, s) => `<div class="card"><h3>${t}</h3><p>${s}</p>
 globalThis.toast = (m) => { toasts.push(m) };
 globalThis.openModal = (h) => { fields.modal = h };
 globalThis.closeModal = () => { fields.modal = null };
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'finance.js'), 'utf8'), { filename: 'finance.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'clientbook.js'), 'utf8'), { filename: 'clientbook.js' });
 

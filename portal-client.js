@@ -34,12 +34,8 @@ const PC_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday
 
 /* ---- pure helpers -------------------------------------------------- */
 
-/* The one escape. Use it on everything that did not come from this file. */
-function pcEsc(s){
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+/* The one escape, from core.js. Use it on everything that did not come from this file. */
+const pcEsc = coreEsc;
 
 /* '#abc123' -> 'abc123'. Anything that cannot be a token -> ''. */
 function pcTokenFromHash(hash){
@@ -59,7 +55,11 @@ function pcSafeUrl(u){
   return s;
 }
 
-/* Whole dollars in, '$3,000.00' out. A negative amount reads '−$300.00'. */
+/* Whole dollars in, '$3,000.00' out. A negative amount reads '−$300.00'.
+   NOT coreUsd, and not a copy of it that drifted: the two differ on purpose.
+   coreUsd is for the owner's screens, which show whole dollars in one currency
+   because that reads faster. This is a figure on an invoice a client is being
+   asked to pay, so it shows the cents and the invoice's own currency. Keep both. */
 function pcMoney(amount, currency){
   const n = Number(amount);
   if (amount == null || amount === '' || !isFinite(n)) return '';
@@ -71,29 +71,18 @@ function pcMoney(amount, currency){
   return (n < 0 ? '−' : '') + (sym ? sym + num : num + ' ' + cur);
 }
 
-/* A date-only value ('2026-11-24') is a calendar day and must not slide with
-   the viewer's time zone; a timestamp is shown in the viewer's own zone. */
-function pcToDate(v){
-  if (v == null || v === '') return null;
-  if (v instanceof Date) return isNaN(v) ? null : v;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v));
-  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(v);
-  return isNaN(d) ? null : d;
-}
+/* A value -> a Date, from core.js. A date-only value is a calendar day and does
+   not slide with the reader's zone; a timestamp is a moment. */
+const pcToDate = coreToDate;
 function pcDate(v){
   const d = pcToDate(v);
   return d ? PC_MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear() : '';
 }
-function pcTime(v){
-  const d = pcToDate(v);
-  if (!d) return '';
-  try { return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
-  catch (e) { return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
-}
-function pcDayKey(v){
-  const d = pcToDate(v);
-  return d ? d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2) : '';
-}
+/* A clock reading in the reader's own style, from core.js. */
+const pcTime = coreTime;
+/* A day key, from core.js: 'YYYY-MM-DD' zero-padded in the reader's own calendar.
+   One implementation, because a day key one day out is a refund. */
+const pcDayKey = coreDayKey;
 function pcDayLabel(v, now){
   const d = pcToDate(v);
   if (!d) return '';
@@ -742,13 +731,37 @@ function pcCardHtml(m){
 
 /* ---- plumbing ------------------------------------------------------- */
 
-function pcOk(data){ return { ok: true, data, error: '' }; }
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const pcOk = coreOk;
+
+/* What went wrong, in words a CLIENT can read and act on. This is the strictest
+   edge in the system: the person on the other side of it is paying us, so they
+   must never be shown a Postgres message, a table or column name, an error code,
+   a stack, or the bare word "undefined". Our own database messages (a plpgsql
+   `raise exception`, code P0001) are written for them and pass through; so do the
+   sentences this file writes itself. Everything else becomes a sentence that says
+   what failed and what to do next. */
+const PC_WAIT = 'Something went wrong at our end. Nothing you have done has been lost. Please try again in a moment, or tell us in Chat.';
+const PC_SIGNED_OUT = 'Your sign-in has run out. Please sign in again.';
+function pcPlain(m, code){
+  const s = String(m == null ? '' : m), c = String(code == null ? '' : code);
+  if (!s.trim() || /^(undefined|null|\[object object\]|error)$/i.test(s.trim())) return PC_WAIT;
+  if (/failed to fetch|networkerror|load failed|network request failed|fetch failed|timeout|timed out/i.test(s)) return PC_OFFLINE;
+  if (c === 'PGRST301' || /jwt|not authenticated|invalid.*session|session.*expired|refresh token/i.test(s)) return PC_SIGNED_OUT;
+  if (c === '42501' || /permission denied|row-level security|not authorized|unauthorized/i.test(s)) return PC_SIGNED_OUT;
+  if (c === 'P0001') return s;                   /* written for the client already */
+  /* anything that smells of the machine room: a code, a relation, a constraint, a
+     stack, a bare HTTP status, or a sentence too long to be ours */
+  if (/^\s*\d{3}\s*$|\bPGRST\d+|\b\d{5}\b|relation |column |constraint|duplicate key|violates|schema cache|does not exist|could not find the function|syntax error|pg_|select |insert |update |delete from|\n\s+at |function public\./i.test(s)) return PC_WAIT;
+  if (s.length > 180) return PC_WAIT;
+  return s;
+}
 function pcErr(e){
-  let m = (e && (e.message || e.error_description || e.msg || e.error)) || (typeof e === 'string' ? e : '');
-  m = String(m || 'Something went wrong. Please try again.');
-  const offline = /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(m);
-  if (offline) m = PC_OFFLINE;
-  return { ok: false, data: null, error: m, offline };
+  const m = (e && (e.message || e.error_description || e.msg || e.error)) || (typeof e === 'string' ? e : '');
+  const raw = String(m == null ? '' : m);
+  const offline = /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(raw);
+  return { ok: false, data: null, error: offline ? PC_OFFLINE : pcPlain(raw, e && e.code), offline };
 }
 
 /* Two clients, on purpose. 'anon' is for the link pages: it never looks at or

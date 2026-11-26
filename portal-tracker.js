@@ -64,18 +64,18 @@ const pct = {
   month: null, monthAt: 0, monthBusy: false,
   campaign: null, campaignAt: 0, campaignBusy: false, campaignFailed: false,
   calls: null, callsAt: 0, callsBusy: false, callsFailed: false,
-  gone: {},
+  gone: {}, readMs: 0,          /* a test may shorten the limit on a read */
 };
 
-function pctEsc(s){
-  if (typeof pcEsc === 'function') return pcEsc(s);
-  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+/* The one escape, from core.js: strict, five characters, the single quote among them. */
+const pctEsc = coreEsc;
 function pctDay(v){
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v == null ? '' : v));
   return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
 }
-function pctKey(d){ return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2) }
+/* A day key, from core.js: 'YYYY-MM-DD' zero-padded in the reader's own calendar.
+   One implementation, because a day key one day out is a refund. */
+const pctKey = coreDayKey;
 /* "Nov 26", in the reader's own style where the browser knows it. */
 function pctDate(v){
   const d = pctDay(v);
@@ -390,6 +390,24 @@ function pctStepsHtml(items){
     '<li><span class="pcte-no" aria-hidden="true">' + ('0' + (i + 1)).slice(-2) + '</span><span>' + pctEsc(t) + '</span></li>').join('') + '</ol>';
 }
 
+/* We asked, and the answer did not come. This is NOT the empty state: telling a
+   client "nothing has been sent yet" when we simply could not read their figures
+   is the one lie they would remember, and a 0 beside their guarantee reads as
+   bad news about their campaign rather than about our page. So it says plainly
+   that this is our end, that their numbers are safe, and how to get them back.
+   Same motifs as every other panel: eyebrow, red rule, headline, lede. Pure. */
+function pctFailHtml(what){
+  const thing = String(what || 'this');
+  return '<section class="pcte" aria-label="Could not load ' + pctEsc(thing) + '" role="status">' +
+    '<p class="pc-tag">' + pctEsc(thing === 'your booked calls' ? 'Booked calls' : 'Campaign') + '</p>' +
+    '<p class="pcte-rule" aria-hidden="true"></p>' +
+    '<h2 class="pcte-h">' + pctEsc('We could not load ' + thing + ' just now.') + '</h2>' +
+    '<p class="pcte-lede">' + pctEsc('This is our page, not your campaign — nothing has been lost and no figure has changed. '
+      + 'We try again every half minute, so this usually fixes itself. If it does not, reload the page or tell us in Chat.') + '</p>' +
+    '<p class="pcte-steps pctf"><button type="button" class="pctf-btn" data-pc-act="trackerRetry">Try again</button></p>' +
+  '</section>';
+}
+
 /* Day one, and no data at all. This is when a client is most anxious, so it
    says what is happening, in what order, and when the first numbers land. */
 function pctCampaignEmptyHtml(month, opts){
@@ -652,6 +670,9 @@ const PCT_CSS = `
 .pcte-lede{margin:14px 0 0;font-size:17px;line-height:1.55;color:var(--pc-grey,#63636A)}
 .pcte-steps{list-style:none;margin:28px 0 0;padding:16px 0 0;border-top:2px solid #0A0A0C}
 .pcte-steps li{display:grid;grid-template-columns:40px minmax(0,1fr);gap:0 10px;padding:13px 0;border-bottom:1px solid var(--pc-line,#DCDCE0);font-size:15px;line-height:1.5}
+.pcte-steps.pctf{padding:20px 0 0;border-bottom:0}
+.pctf-btn{min-height:44px;padding:0 18px;border:2px solid #0A0A0C;border-radius:0;background:#fff;color:#0A0A0C;font:400 11px var(--pc-mono,monospace);letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
+.pctf-btn:hover{background:#0A0A0C;color:#fff}
 .pcte-no{font-family:var(--pc-mono,monospace);font-size:13px;font-weight:700;letter-spacing:.04em;color:#0A0A0C}
 .pcte-guar{margin:30px 0 0;padding:18px 20px;background:var(--pc-sand,#F4EFE9);border-left:3px solid var(--pc-red-text,#C42408);font-size:17px;line-height:1.55}
 
@@ -745,42 +766,107 @@ function pctPaintAll(){
   if (standing !== pct.standing) pct.standing = pctPut('pcStanding', standing, pct.standing);
   /* A tab is drawn only once it has been asked AND answered. Before that it
      waits: telling a client "no calls yet" while their calls are still loading
-     would be a lie, and the one they would remember. */
-  const campaign = pct.campaignAt ? pctCampaignHtml(pct.campaign, m) : (pct.tab === 'campaign' ? pctWaitHtml() : '');
+     would be a lie, and the one they would remember. And an ask that failed
+     says so — it never falls through to the empty state, which would put a 0
+     next to their guarantee and read as bad news about their campaign. */
+  const campaign = pct.campaignFailed ? pctFailHtml('your campaign numbers')
+    : pct.campaignAt ? pctCampaignHtml(pct.campaign, m) : (pct.tab === 'campaign' ? pctWaitHtml() : '');
   if (campaign !== pct.campaignDrawn) pct.campaignDrawn = pctPut('pcCampaign', campaign, pct.campaignDrawn);
-  const calls = pct.callsAt ? pctCallsHtml(pct.calls, m) : (pct.tab === 'calls' ? pctWaitHtml() : '');
+  const calls = pct.callsFailed ? pctFailHtml('your booked calls')
+    : pct.callsAt ? pctCallsHtml(pct.calls, m) : (pct.tab === 'calls' ? pctWaitHtml() : '');
   if (calls !== pct.callsDrawn) pct.callsDrawn = pctPut('pcCalls', calls, pct.callsDrawn);
 }
 
 /* ---- asking ---------------------------------------------------------- */
+
+/* "We asked and the asking itself failed." Returned instead of null so that a
+   caller can tell it apart from "we asked and there is genuinely nothing yet" —
+   the two look identical to a client and mean opposite things. */
+const PCT_FAIL = { pctFail: true };
+function pctFailed(v){ return v === PCT_FAIL }
+
+/* ONE retry, and only here. Everything this file asks for is a read — a SELECT
+   or a read-only RPC — so asking twice cannot book, send, charge or mark
+   anything. A client on hotel wifi should not be told their campaign numbers
+   are gone because one request dropped. Nothing that writes is retried
+   anywhere: the client's own Send and Book go once and once only, because a
+   repeated write is a second message or a second call in the diary. */
+const PCT_RETRY_MS = 300;
+function pctPause(ms){
+  if (typeof setTimeout !== 'function') return Promise.resolve();
+  return new Promise(r => setTimeout(r, ms));
+}
+/* Worth a second ask: it dropped, timed out, or came back as nothing at all.
+   "Permission denied" and "no such function" are answers, not blips, and are
+   never asked twice. */
+function pctBlip(r, threw){
+  if (threw) return true;
+  if (!r || typeof r !== 'object') return true;
+  if (r.ok) return false;
+  return /failed to fetch|networkerror|network request|load failed|fetch failed|timeout|timed out|aborted|socket|502|503|504/i.test(String(r.error || ''));
+}
+/* A request that never answers is the worst of the lot: no error is thrown, no
+   promise settles, and the tab reads "Loading" until the client gives up and
+   closes the page. Every read here is given a limit — past it, it counts as a
+   drop, which means one retry and then an honest failure panel. */
+const PCT_READ_MS = 10000;
+async function pctOnce(fn){
+  const limit = Number(pct.readMs) > 0 ? Number(pct.readMs) : PCT_READ_MS;
+  let timer = null;
+  try {
+    const run = Promise.resolve().then(fn);
+    if (typeof setTimeout !== 'function') return { r: await run, threw: false };
+    const capped = new Promise((_, no) => { timer = setTimeout(() => no(new Error('That took too long.')), limit); });
+    return { r: await Promise.race([run, capped]), threw: false };
+  }
+  catch (e) { return { r: null, threw: true } }
+  finally { if (timer && typeof clearTimeout === 'function') clearTimeout(timer) }
+}
+/* -> {r, threw}: the answer, and whether the asking itself blew up both times. */
+async function pctReadTwice(fn, isBlip){
+  const blip = typeof isBlip === 'function' ? isBlip : pctBlip;
+  let out = await pctOnce(fn);
+  if (!blip(out.r, out.threw)) return out;
+  await pctPause(PCT_RETRY_MS);
+  return await pctOnce(fn);
+}
 
 /* One RPC, with a fallback for the day it does not exist yet. A missing
    function is remembered so it is asked for only once a session; a real error
    (offline, not allowed) is NOT papered over with a guess. */
 async function pctAsk(ctx, name, args, fallback){
   if (!pct.gone[name] && ctx && typeof ctx.rpc === 'function') {
-    let r;
-    try { r = await ctx.rpc(name, args || {}); } catch (e) { r = null; }
+    const r = (await pctReadTwice(() => ctx.rpc(name, args || {}))).r;
     if (r && r.ok) return r.data == null ? null : r.data;
     const msg = String((r && r.error) || '');
-    if (!/could not find the function|does not exist|schema cache|not found/i.test(msg)) return null;
+    if (!/could not find the function|does not exist|schema cache|not found/i.test(msg)) return PCT_FAIL;
     pct.gone[name] = true;
   }
-  if (typeof fallback !== 'function') return null;
-  try { return await fallback(); } catch (e) { return null; }
+  if (typeof fallback !== 'function') return PCT_FAIL;
+  /* the fallback reads tables and throws on a real error; a null answer from it
+     means "nothing there yet", which is not a failure */
+  const out = await pctReadTwice(fallback, (r, threw) => threw);
+  return out.threw ? PCT_FAIL : out.r;
 }
 
 /* Rows from one table, this client's only. Whatever row level security does
-   not allow simply comes back empty, and the tab shows its empty state. */
+   not allow simply comes back empty, and the tab shows its empty state — but a
+   database that answers with an error, or does not answer at all, is a failure
+   and throws, so pctAsk() reports it instead of passing an empty list on as if
+   the client had no campaign. */
 async function pctRows(sb, table, cols, clientId, shape){
-  if (!sb || typeof sb.from !== 'function' || !clientId) return [];
-  try {
-    let q = sb.from(table).select(cols).eq('client_id', clientId);
-    if (typeof shape === 'function') q = shape(q) || q;
-    const res = await q.limit(PCT_MAX_ROWS);
-    if (!res || res.error || !Array.isArray(res.data)) return [];
-    return res.data;
-  } catch (e) { return []; }
+  /* No client id means portal_journey did not answer, so we do not know WHOSE rows to
+     ask for. Returning [] here was the worst kind of wrong: every fallback read came
+     back empty without a query ever going out, and the tabs drew "nothing yet" — a
+     client whose month was running read "Not started" beside the guarantee it is
+     settled on. An unknown client is a failure to report, never an empty answer. */
+  if (!clientId) throw new Error('We do not know which account to look up yet.');
+  if (!sb || typeof sb.from !== 'function') return [];
+  let q = sb.from(table).select(cols).eq('client_id', clientId);
+  if (typeof shape === 'function') q = shape(q) || q;
+  const res = await q.limit(PCT_MAX_ROWS);
+  if (!res || res.error || !Array.isArray(res.data)) throw new Error('That table could not be read.');
+  return res.data;
 }
 
 function pctClientId(){
@@ -804,11 +890,16 @@ async function pctLoadMonth(ctx, clientId){
 async function pctLoadCampaign(ctx, clientId){
   return pctAsk(ctx, 'portal_campaign', {}, async () => {
     const sb = ctx && ctx.sb;
-    const campaigns = await pctRows(sb, 'outreach_campaigns',
-      'id,client_id,name,status,started_on,sent,opened,replied,positive,booked', clientId);
-    const daily = await pctRows(sb, 'outreach_daily',
-      'client_id,on_day,sent,opened,replied,positive,booked', clientId,
-      (q) => q.order('on_day', { ascending: true }));
+    /* The campaigns and the day-by-day numbers do not depend on each other, so
+       the client waits for one read rather than two. If either throws, pctAsk
+       still reports it — Promise.all passes the first rejection straight on. */
+    const [campaigns, daily] = await Promise.all([
+      pctRows(sb, 'outreach_campaigns',
+        'id,client_id,name,status,started_on,sent,opened,replied,positive,booked', clientId),
+      pctRows(sb, 'outreach_daily',
+        'client_id,on_day,sent,opened,replied,positive,booked', clientId,
+        (q) => q.order('on_day', { ascending: true })),
+    ]);
     return { client_id: clientId, campaigns, daily };
   });
 }
@@ -816,11 +907,15 @@ async function pctLoadCampaign(ctx, clientId){
 async function pctLoadCalls(ctx, clientId){
   return pctAsk(ctx, 'portal_calls', {}, async () => {
     const sb = ctx && ctx.sb;
-    const calls = await pctRows(sb, 'qualified_calls',
-      'id,client_id,prospect_name,prospect_company,booked_for,happened,happened_at,matched_icp,counts', clientId,
-      (q) => q.order('booked_for', { ascending: false }));
-    /* a prospect's title, where the thread that booked the call carries one */
-    const threads = await pctRows(sb, 'outreach_threads', 'client_id,lead_name,lead_company,lead_title', clientId);
+    /* The calls and the titles that go beside them are two reads of two
+       different tables; neither waits on the other. */
+    const [calls, threads] = await Promise.all([
+      pctRows(sb, 'qualified_calls',
+        'id,client_id,prospect_name,prospect_company,booked_for,happened,happened_at,matched_icp,counts', clientId,
+        (q) => q.order('booked_for', { ascending: false })),
+      /* a prospect's title, where the thread that booked the call carries one */
+      pctRows(sb, 'outreach_threads', 'client_id,lead_name,lead_company,lead_title', clientId),
+    ]);
     const title = {};
     pctMine(threads, clientId).forEach(t => {
       const k = String(t.lead_name || '').trim().toLowerCase();
@@ -861,8 +956,10 @@ async function pctMount(ctx){
   if (!pct.busy && !(pct.at && now - pct.at < PCT_ASK_MS)) {
     pct.busy = true;
     let r;
-    try { r = await ctx.rpc('portal_journey', {}); } catch (e) { r = { ok: false }; }
-    pct.busy = false;
+    /* a read like any other: one retry on a drop, and a limit so it cannot hang */
+    try { r = (await pctReadTwice(() => ctx.rpc('portal_journey', {}))).r; }
+    catch (e) { r = { ok: false }; }
+    finally { pct.busy = false }
     if (who !== pct.who) return;          /* someone else signed in while this was on its way */
     pct.at = Date.now();
     if (r && r.ok) pct.data = r.data || null;
@@ -871,29 +968,37 @@ async function pctMount(ctx){
   const clientId = pctClientId();
   if (!pct.monthBusy && !(pct.monthAt && Date.now() - pct.monthAt < PCT_ASK_MS)) {
     pct.monthBusy = true;
-    const m = await pctLoadMonth(ctx, clientId);
-    pct.monthBusy = false;
+    let m;
+    try { m = await pctLoadMonth(ctx, clientId); }
+    finally { pct.monthBusy = false }   /* a flag left true never asks again, and the page never recovers */
     if (who !== pct.who) return;
+    /* The stamp is set either way, so a database that is down is asked again in
+       half a minute rather than on every single refresh. */
     pct.monthAt = Date.now();
+    if (pctFailed(m)) m = null;
     pct.month = m || null;
     pctPaintAll();
   }
   if (pct.tab === 'campaign' && !pct.campaignBusy && !(pct.campaignAt && Date.now() - pct.campaignAt < PCT_ASK_MS)) {
     pct.campaignBusy = true;
-    const c = await pctLoadCampaign(ctx, clientId);
-    pct.campaignBusy = false;
+    let c;
+    try { c = await pctLoadCampaign(ctx, clientId); }
+    finally { pct.campaignBusy = false }
     if (who !== pct.who) return;
     pct.campaignAt = Date.now();
-    pct.campaign = c ? pctCampaignNorm(c, clientId) : null;
+    pct.campaignFailed = pctFailed(c);
+    pct.campaign = c && !pct.campaignFailed ? pctCampaignNorm(c, clientId) : null;
     pctPaintAll();
   }
   if (pct.tab === 'calls' && !pct.callsBusy && !(pct.callsAt && Date.now() - pct.callsAt < PCT_ASK_MS)) {
     pct.callsBusy = true;
-    const c = await pctLoadCalls(ctx, clientId);
-    pct.callsBusy = false;
+    let c;
+    try { c = await pctLoadCalls(ctx, clientId); }
+    finally { pct.callsBusy = false }
     if (who !== pct.who) return;
     pct.callsAt = Date.now();
-    pct.calls = c ? pctCallsNorm(c, clientId) : null;
+    pct.callsFailed = pctFailed(c);
+    pct.calls = c && !pct.callsFailed ? pctCallsNorm(c, clientId) : null;
     pctPaintAll();
   }
 }
@@ -908,5 +1013,13 @@ if (typeof window !== 'undefined') {
     pctPaint(box);
     const b = box && box.querySelector ? box.querySelector('.pct-toggle') : null;
     if (b && b.focus) b.focus();
+  };
+  /* "Try again" on a panel that could not load: forget the back-off and ask now,
+     so a client who is looking at the failure has a way out other than reloading. */
+  P.actions.trackerRetry = function(el, ctx){
+    pct.campaignAt = 0; pct.callsAt = 0; pct.monthAt = 0;
+    pct.campaignFailed = false; pct.callsFailed = false;
+    pctPaintAll();
+    return pctMount(ctx);
   };
 }

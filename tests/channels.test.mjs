@@ -46,6 +46,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="finance.js">'));
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'channels.js'), 'utf8'), { filename: 'channels.js' });
 const chv = vm.runInThisContext('chv');
@@ -307,7 +308,8 @@ test('older messages load when you scroll to the top', async () => {
   const many = Array.from({ length: 60 }, (_, i) => M('o' + String(i).padStart(2, '0'), 'u2', 'Sam', 'msg ' + i, new Date(Date.now() - (70 - i) * 3600e3).toISOString()));
   await show({ c1: many });
   assert.equal(chv.msgs.length, 50); assert.equal(chv.hasMore, true);
-  assert.match(el('chvThread').innerHTML, /Scroll up for earlier messages/);
+  /* the earlier batch has a real button, so the thread can be paged from the keyboard */
+  assert.match(el('chvThread').innerHTML, /<button type="button" class="chv-link" onclick="chvLoadOlder\(\)">Load earlier messages<\/button>/);
   el('chvThread').scrollTop = 10; chvScroll(el('chvThread')); await tick();
   assert.equal(calls('chMessages')[1][2].before, many[10].createdAt);
   assert.equal(chv.msgs.length, 60); assert.equal(chv.hasMore, false);
@@ -529,8 +531,13 @@ test('a live message that arrives before the send answers is not shown twice', a
 });
 test('a dropped live line: the next refresh fetches what was missed, once', async () => {
   reset(); asOwner(); await show({ c1: C1() });
-  // a message lands in the open channel but the live line never delivers it
-  const late = M('m9', 'u2', 'Sam', 'did you see this?', new Date(Date.now() + 1000).toISOString());
+  // a message lands in the open channel but the live line never delivers it.
+  // It must be NEWER than the newest fixture message (m5, today 12:31), because the
+  // refresh only asks for what came after the last one it knows about. This used to
+  // be Date.now() + 1s, which is older than 12:31 for the whole morning — so the test
+  // failed every day between midnight and lunchtime, local time, and passed in a UTC
+  // afternoon. Pin it to the fixture's own clock instead of the wall clock.
+  const late = M('m9', 'u2', 'Sam', 'did you see this?', iso(0, 12, 32));
   be.messages.c1.push(late);
   be.channels[0].lastMessageAt = late.createdAt; be.channels[0].unread = 1;
   const before = calls('chMessages').length;

@@ -11,6 +11,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const root = path.join(import.meta.dirname, '..');
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'portal-client.js'), 'utf8'), { filename: 'portal-client.js' });
 const P = (n) => vm.runInThisContext(n);
 
@@ -378,7 +379,10 @@ test('pcMessages reads only this channel, oldest first', async () => {
   assert.equal((await P('pcMessages')('')).ok, false);
   tableAnswer = () => ({ data: null, error: { message: 'permission denied' } });
   const e = await P('pcMessages')('c1');
-  assert.equal(e.ok, false); assert.equal(e.error, 'permission denied');
+  /* a client never reads the database's own words: "permission denied" told them
+     nothing they could act on and named our plumbing */
+  assert.equal(e.ok, false);
+  assert.equal(e.error, 'Your sign-in has run out. Please sign in again.');
 });
 test('pcSend writes as the client person, never as a team user, and never an empty message', async () => {
   reset();
@@ -399,9 +403,14 @@ for (const page of ['doc.html', 'join.html', 'portal.html']) {
   test(`${page} loads only the client files and obeys the site's content policy`, () => {
     const html = fs.readFileSync(path.join(root, page), 'utf8');
     const scripts = [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]);
-    // the portal also loads its three journey files (client files only, never the hub's)
-    const want = page === 'portal.html' ? ['portal-client.js', 'portal-tracker.js', 'portal-schedule.js', 'portal-steps.js'] : ['portal-client.js'];
+    /* core.js is the shared leaf helpers (the escape, the result shape, the day key) and
+       loads first on every page of the site. It reads no hub global, asks the database
+       nothing and knows nothing about a client, so it is not a hub module: it is here so
+       that the client's pages escape and date exactly as the owner's do, from one copy.
+       After it, the portal loads its own journey files — client files only, never the hub's. */
+    const want = page === 'portal.html' ? ['core.js', 'portal-client.js', 'portal-tracker.js', 'portal-schedule.js', 'portal-steps.js'] : ['core.js', 'portal-client.js'];
     assert.equal(scripts.length, 1 + want.length);
+    assert.equal(want[0], 'core.js', 'core.js loads before anything that uses it');
     assert.ok(scripts[0].startsWith('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@'));
     assert.deepEqual(scripts.slice(1), want);
     assert.deepEqual([...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map((m) => m[1]), ['portal-client.css']);
@@ -983,4 +992,53 @@ test('the two pages wear the same letterhead as the documents', () => {
   /* the unfilled-placeholder highlight is still the one in portal-client.js */
   assert.ok(P('pcFillHtml')('[YOUR NAME] signs').includes('<mark class="pc-fill">[YOUR NAME]</mark>'));
   assert.equal(P('pcFillHtml')('<b>[5 business days]</b>'), '&lt;b&gt;5 business days&lt;/b&gt;');
+});
+
+/* ───────────── what a CLIENT is allowed to read in an error ─────────────
+   The person on the other side of this file is paying us. They may be told what
+   failed and what to do about it. They may never be shown a Postgres message, a
+   table or column name, an error code, a stack, a bare HTTP status, or the word
+   "undefined" — none of which they can act on, all of which say we are careless
+   with their account. */
+
+test('no client is ever shown the database\'s own words', () => {
+  const err = P('pcErr'), plain = P('pcPlain');
+  const leaks = /relation |column |constraint|duplicate key|violates|row-level|permission denied|schema cache|PGRST|42501|42P01|23505|pg_|SQLSTATE|outreach_|client_months|channel_messages|\bselect\b|\binsert\b|undefined|\[object/i;
+  const cases = [
+    {message: 'permission denied for table outreach_campaigns', code: '42501'},
+    {message: 'relation "client_months" does not exist', code: '42P01'},
+    {message: 'duplicate key value violates unique constraint "invoices_number_key"', code: '23505'},
+    {message: 'new row violates row-level security policy for table "channel_messages"'},
+    {message: 'Could not find the function public.portal_campaign in the schema cache', code: 'PGRST202'},
+    {message: 'JWT expired', code: 'PGRST301'},
+    {message: '500'},
+    {message: 'TypeError: Cannot read properties of undefined (reading \'id\')\n    at pcSend (portal-client.js:1)'},
+    undefined, null, {}, '', 'undefined', 'null', '[object Object]',
+  ];
+  for (const c of cases) {
+    const r = err(c);
+    assert.equal(r.ok, false);
+    assert.ok(r.error && r.error.length > 10, 'there is a real sentence: ' + JSON.stringify(r.error));
+    assert.doesNotMatch(r.error, leaks, 'leaked for ' + JSON.stringify(c) + ': ' + r.error);
+    /* it ends like a sentence, and tells them something to do */
+    assert.match(r.error, /[.!]$/, 'reads as a sentence: ' + r.error);
+  }
+  /* the four sentences it does use are the ones a person can act on */
+  assert.match(plain('permission denied'), /sign in again/i);
+  assert.match(plain('JWT expired'), /sign in again/i);
+  assert.match(plain('Failed to fetch'), /connection/i);
+  assert.match(plain('relation "x" does not exist'), /try again|tell us/i);
+});
+
+test('our own sentences, and our own database messages, pass through untouched', () => {
+  const err = P('pcErr'), plain = P('pcPlain');
+  /* a plpgsql `raise exception` (P0001) is written for the client already */
+  assert.equal(plain('That time has just been taken. Pick another.', 'P0001'),
+    'That time has just been taken. Pick another.');
+  /* and so is anything this file writes itself */
+  assert.equal(err('This link is not valid any more. Reply to our email and we will send a new one.').error,
+    'This link is not valid any more. Reply to our email and we will send a new one.');
+  /* offline is still flagged, so a screen can say "check your connection" its own way */
+  assert.equal(err({message: 'Failed to fetch'}).offline, true);
+  assert.equal(err({message: 'permission denied'}).offline, false);
 });

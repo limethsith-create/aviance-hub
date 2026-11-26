@@ -56,16 +56,11 @@ const prS = {
 
 /* ---- plumbing (the same shape as finance.js) ----------------------- */
 
-function prOk(data){ return {ok:true, data, error:''} }
-function prErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
-}
-function prWrap(res, whenEmpty){
-  if (!res) return prErr('No answer from the database.');
-  if (res.error) return prErr(res.error);
-  return prOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const prOk = coreOk;
+const prErr = coreErr;
+const prWrap = coreWrap;
 async function prRun(fn, whenEmpty){
   try { return prWrap(await fn(), whenEmpty); }
   catch (e) { return prErr(e); }
@@ -73,7 +68,8 @@ async function prRun(fn, whenEmpty){
 
 /* ---- small helpers ------------------------------------------------- */
 
-function prX(s){ return typeof esc === 'function' ? esc(s) : String(s == null ? '' : s) }
+/* The one escape, from core.js: strict, five characters, the single quote among them. */
+const prX = coreEsc;
 function prIc(name){ return (typeof I !== 'undefined' && I && I[name]) || '' }
 function prEmpty(icon, title, sub, btn, action){
   if (typeof emptyState === 'function') return emptyState(icon, title, sub, btn, action);

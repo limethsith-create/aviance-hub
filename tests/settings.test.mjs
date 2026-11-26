@@ -34,6 +34,7 @@ const fakeSb = {
   },
 };
 globalThis.sb = fakeSb;
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'settings.js'), 'utf8'), { filename: 'settings.js' });
 
 beforeEach(() => {

@@ -92,6 +92,7 @@ const sandbox = {
 };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), sandbox, { filename: 'core.js' });
 const SRC = fs.readFileSync(path.join(root, 'employees.js'), 'utf8');
 vm.runInContext(SRC + `
 ;globalThis.api={emp,empRpc,empMissing,empPlain,empRow,empMsgRow,empFetchList,
@@ -902,4 +903,67 @@ test('signing out forgets a half-filled Add form too', async () => {
   A.employeesForget();
   assert.equal(A.emp.addName, ''); assert.equal(A.emp.addEmail, '');
   assert.equal(A.emp.link, null);
+});
+
+/* ───────────── guard flags clear on failure ─────────────
+   Every load and every button here sets a flag ("already doing that") and
+   clears it when the answer comes back. If the answer never comes — the data
+   function is built not to throw, but a browser can still throw at an await —
+   the flag stays true: the list freezes, or a button stays disabled for the rest
+   of the session, and the only way out is reloading the whole app.
+   These tests make the awaited call throw and check the flag comes back. */
+
+const run = (code) => vm.runInContext(code, sandbox);
+
+test('a load that throws clears emp.loading, so the list keeps refreshing', async () => {
+  reset();
+  run('empFetchList = async () => { throw new Error("The database did not answer.") }');
+  await run('empLoad(true)');
+  assert.equal(A.emp.loading, false, 'cleared, so empLoad can ask again');
+  assert.ok(A.emp.err, 'and the reason is said out loud');
+  assert.doesNotMatch(String(A.emp.err), /permission denied|relation |PGRST|42501|undefined/i, 'in plain words');
+  /* it really does ask again rather than sitting on the flag */
+  let asked = 0;
+  run('empFetchList = async () => { globalThis.__asked = (globalThis.__asked||0) + 1; return {ok:true, data:[], error:null, missing:false} }');
+  await run('empLoad(true)');
+  asked = run('globalThis.__asked');
+  assert.equal(asked, 1, 'the next load reached the data function');
+  assert.equal(A.emp.loaded, true);
+});
+
+test('a write that throws gives the button back — and is attempted once, never twice', async () => {
+  reset();
+  /* adding a person */
+  run('globalThis.__n = 0; empAdd = async () => { globalThis.__n++; throw new Error("The database did not answer.") }');
+  el('empAddName').value = 'Nadia Perera';
+  el('empAddEmail').value = 'nadia@aviance.test';
+  await run('empAddSave()');
+  assert.equal(A.emp.addBusy, false, 'the Add button comes back');
+  assert.ok(A.emp.addErr, 'and says why');
+  assert.equal(run('globalThis.__n'), 1, 'a write is attempted once: a retry would add her twice');
+
+  /* sending her a message */
+  reset();
+  run('emp.list = [{id:"s1", name:"Nadia", channelId:"ch1", status:"active", unread:0}]; emp.open = "s1";');
+  el('empDraft').value = 'Morning';
+  run('globalThis.__n = 0; empSendMessage = async () => { globalThis.__n++; throw new Error("The database did not answer.") }');
+  await run('empSendClick()');
+  assert.equal(A.emp.sending, false, 'the Send box comes back, or she can never be written to again');
+  assert.equal(run('globalThis.__n'), 1, 'a message is sent once, never twice');
+
+  /* making her access code */
+  reset();
+  run('emp.list = [{id:"s1", name:"Nadia", channelId:"ch1", status:"invited", unread:0}];');
+  run('globalThis.__n = 0; empCode = async () => { globalThis.__n++; throw new Error("The database did not answer.") }');
+  await run('empCodeGo("s1")');
+  assert.equal(run('emp.busy.s1'), undefined, 'the per-person flag is cleared');
+  assert.equal(run('globalThis.__n'), 1);
+
+  /* changing whether she can sign in */
+  reset();
+  run('emp.list = [{id:"s1", name:"Nadia", channelId:"ch1", status:"active", unread:0}];');
+  run('globalThis.__n = 0; empSetStatus = async () => { globalThis.__n++; throw new Error("The database did not answer.") }');
+  await run('empRevokeGo("s1", "revoked")');
+  assert.equal(run('emp.busy.s1'), undefined);
+  assert.equal(run('globalThis.__n'), 1, 'never applied twice');
 });

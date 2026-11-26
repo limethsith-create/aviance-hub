@@ -24,6 +24,7 @@ globalThis.document = {
   createElement(){ return {} },
 };
 
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'portal-client.js'), 'utf8'), {filename:'portal-client.js'});
 vm.runInThisContext(fs.readFileSync(path.join(root, 'portal-tracker.js'), 'utf8'), {filename:'portal-tracker.js'});
 
@@ -446,4 +447,342 @@ test('portal.html is three tabs with the standing line above them', () => {
   /* and the tracker is told which tab is open, so a closed tab is never asked for */
   assert.ok(html.includes('PC.tab'));
   assert.ok(html.includes('ArrowRight') && html.includes('aria-selected'));
+});
+
+/* ───────────── when the asking fails: what a paying client sees ─────────────
+   The worst outcome on this page is not an error. It is a confident zero: a
+   "nothing has been sent yet" or an empty calls list drawn because we could not
+   READ their figures, sitting next to the guarantee those figures are measured
+   against. These tests make the reading fail on purpose and check that the page
+   says so instead. */
+
+test('a campaign read that fails says so — it never falls through to "nothing has been sent yet"', async () => {
+  PC.tab = 'campaign'; pct.tab = 'campaign';
+  /* the rpc is there and refuses: not a missing function, so no guessing from tables */
+  await pctMount({rpc: async (n) => n === 'portal_journey'
+    ? {ok:true, data:journey(), error:''}
+    : {ok:false, data:null, error:'permission denied for table outreach_campaigns'}});
+  const h = boxes.pcCampaign.innerHTML;
+  assert.match(text(h), /could not load your campaign numbers/i);
+  assert.doesNotMatch(text(h), /Nothing has been sent yet/i, 'a lie a client would remember');
+  assert.doesNotMatch(text(h), /goes live on|being built/i);
+  assert.equal(pct.campaignFailed, true);
+  assert.equal(pct.campaign, null);
+  /* and it leaks none of the machine room */
+  assert.doesNotMatch(h, /permission denied|outreach_campaigns|42501|PGRST/i);
+  /* it is honest about whose fault it is, and says what to do */
+  assert.match(text(h), /not your campaign/i);
+  assert.match(h, /data-pc-act="trackerRetry"/);
+});
+
+test('a calls read that fails never shows an empty calls list', async () => {
+  PC.tab = 'calls'; pct.tab = 'calls';
+  await pctMount({rpc: async (n) => n === 'portal_journey'
+    ? {ok:true, data:journey(), error:''}
+    : {ok:false, data:null, error:'offline'}});
+  const h = boxes.pcCalls.innerHTML;
+  assert.match(text(h), /could not load your booked calls/i);
+  assert.doesNotMatch(text(h), /No calls booked yet|first call has not been booked/i);
+  assert.equal(pct.callsFailed, true);
+});
+
+test('a thrown error, a timeout and a denied table read all read the same way', async () => {
+  PC.tab = 'campaign'; pct.tab = 'campaign';
+  const cases = [
+    ['a rejected promise', {rpc: (n) => n === 'portal_journey'
+      ? Promise.resolve({ok:true, data:journey(), error:''}) : Promise.reject(new Error('boom'))}],
+    ['a thrown error', {rpc: (n) => { if (n === 'portal_journey') return {ok:true, data:journey(), error:''}; throw new Error('boom') }}],
+    /* the rpc is not deployed, so it falls back to the tables — and the table refuses */
+    ['a denied table read', {
+      sb: {from(){ const q = {select(){ return q }, eq(){ return q }, order(){ return q },
+        limit(){ return Promise.resolve({data:null, error:{code:'42501', message:'permission denied for table outreach_daily'}}) }}; return q }},
+      rpc: async (n) => n === 'portal_journey' ? {ok:true, data:journey(), error:''}
+        : {ok:false, data:null, error:'Could not find the function public.' + n + ' in the schema cache'}}],
+    ['a table that never answers', {
+      sb: {from(){ const q = {select(){ return q }, eq(){ return q }, order(){ return q },
+        limit(){ return Promise.resolve(null) }}; return q }},
+      rpc: async (n) => n === 'portal_journey' ? {ok:true, data:journey(), error:''}
+        : {ok:false, data:null, error:'Could not find the function public.' + n + ' in the schema cache'}}],
+  ];
+  for (const [what, ctx] of cases) {
+    pct.who = '|'; pct.at = 0; pct.gone = {};
+    pct.campaign = null; pct.campaignAt = 0; pct.campaignBusy = false;
+    pct.campaignFailed = false; pct.campaignDrawn = '';
+    await pctMount(ctx);
+    assert.match(text(boxes.pcCampaign.innerHTML), /could not load your campaign numbers/i, what);
+    assert.doesNotMatch(text(boxes.pcCampaign.innerHTML), /Nothing has been sent yet/i, what);
+    assert.equal(pct.campaignBusy, false, what + ': the guard flag is clear, so the page can ask again');
+  }
+});
+
+test('a guard flag is never left true by a failure — the page can always ask again', async () => {
+  PC.tab = 'campaign'; pct.tab = 'campaign';
+  const dead = {rpc: () => Promise.reject(new Error('boom'))};
+  await pctMount(dead);
+  assert.equal(pct.busy, false, 'the journey ask');
+  assert.equal(pct.monthBusy, false, 'the month ask');
+  assert.equal(pct.campaignBusy, false, 'the campaign ask');
+  PC.tab = 'calls'; pct.tab = 'calls'; pct.callsAt = 0;
+  await pctMount(dead);
+  assert.equal(pct.callsBusy, false, 'the calls ask');
+  /* and because none of them is stuck, a second mount really does ask again */
+  let asked = 0;
+  pct.at = 0; pct.monthAt = 0; pct.callsAt = 0;
+  await pctMount({rpc: async (n) => { asked++; return {ok:true, data: n === 'portal_journey' ? journey() : null, error:''} }});
+  assert.ok(asked >= 2, 'it asked again rather than sitting on a flag');
+});
+
+test('"Try again" on a failed panel forgets the back-off and asks at once', async () => {
+  PC.tab = 'campaign'; pct.tab = 'campaign';
+  await pctMount({rpc: async (n) => n === 'portal_journey'
+    ? {ok:true, data:journey(), error:''} : {ok:false, data:null, error:'offline'}});
+  assert.equal(pct.campaignFailed, true);
+  /* within the 30 seconds, so without the retry nothing would be asked */
+  let asked = [];
+  await PC.actions.trackerRetry({}, {rpc: async (n) => { asked.push(n);
+    return {ok:true, error:'', data: n === 'portal_journey' ? journey() : n === 'portal_campaign' ? camp('c1') : null} }});
+  assert.ok(asked.includes('portal_campaign'), 'it asked again: ' + asked.join(','));
+  assert.equal(pct.campaignFailed, false);
+  assert.doesNotMatch(text(boxes.pcCampaign.innerHTML), /could not load/i);
+});
+
+test('an empty answer is still the empty state — a failure state is not shown for "nothing yet"', async () => {
+  PC.tab = 'campaign'; pct.tab = 'campaign';
+  /* the rpc answers, and the answer is genuinely "no campaign rows yet" */
+  await pctMount({rpc: async (n) => ({ok:true, error:'', data: n === 'portal_journey' ? journey()
+    : n === 'portal_campaign' ? {client_id:'c1', campaigns:[], daily:[]} : null})});
+  assert.equal(pct.campaignFailed, false);
+  assert.doesNotMatch(text(boxes.pcCampaign.innerHTML), /could not load/i);
+  assert.match(text(boxes.pcCampaign.innerHTML), /Nothing has been sent yet|goes live on|being built/i);
+});
+
+test('the failure panel is built from the same motifs as every other panel, and escapes what it is given', () => {
+  const h = pctFailHtml('<img src=x onerror=alert(1)>');
+  assert.ok(!/<img/.test(h));
+  assert.match(h, /&lt;img/);
+  /* eyebrow, red rule, headline, lede — DESIGN.md, not a dump of red text */
+  assert.match(h, /class="pc-tag"/);
+  assert.match(h, /class="pcte-rule"/);
+  assert.match(h, /class="pcte-h"/);
+  assert.match(h, /class="pcte-lede"/);
+  assert.match(h, /role="status"/);
+  /* and it is spoken, not just coloured */
+  assert.match(h, /aria-label="Could not load/);
+});
+
+/* ───────────── one retry, on reads only ─────────────
+   Everything this file asks for is a read, so a dropped request is worth asking
+   twice. Nothing a client can press — Send, Book, Approve — is ever asked twice,
+   because a repeated write is a second message or a second call in the diary. */
+
+test('a dropped read is asked once more, and then it works', async () => {
+  PC.tab = 'campaign'; pct.tab = 'campaign';
+  let n = 0;
+  await pctMount({rpc: async (name) => {
+    if (name === 'portal_journey') return {ok:true, data:journey(), error:''};
+    if (name === 'portal_campaign') {
+      n++;
+      if (n === 1) throw new TypeError('Failed to fetch');     /* the blip */
+      return {ok:true, data:camp('c1'), error:''};
+    }
+    return {ok:true, data:null, error:''};
+  }});
+  assert.equal(n, 2, 'it asked a second time');
+  assert.equal(pct.campaignFailed, false, 'so the client never saw the failure at all');
+  assert.doesNotMatch(text(boxes.pcCampaign.innerHTML), /could not load/i);
+});
+
+test('an answer is never asked twice — only a blip is', async () => {
+  for (const [why, error] of [['permission denied', 'permission denied for table outreach_campaigns'],
+                              ['a refusal', 'not allowed']]) {
+    PC.tab = 'campaign'; pct.tab = 'campaign';
+    pct.who = '|'; pct.at = 0; pct.gone = {}; pct.campaignAt = 0; pct.campaignFailed = false; pct.campaignDrawn = '';
+    let n = 0;
+    await pctMount({rpc: async (name) => {
+      if (name === 'portal_journey') return {ok:true, data:journey(), error:''};
+      if (name === 'portal_campaign') { n++; return {ok:false, data:null, error}; }
+      return {ok:true, data:null, error:''};
+    }});
+    assert.equal(n, 1, why + ' is an answer, not a blip: asked once');
+    assert.equal(pct.campaignFailed, true);
+  }
+});
+
+test('two drops in a row is a failure said out loud, not a third try', async () => {
+  PC.tab = 'calls'; pct.tab = 'calls';
+  let n = 0;
+  await pctMount({rpc: async (name) => {
+    if (name === 'portal_journey') return {ok:true, data:journey(), error:''};
+    if (name === 'portal_calls') { n++; throw new TypeError('Failed to fetch'); }
+    return {ok:true, data:null, error:''};
+  }});
+  assert.equal(n, 2, 'one retry, not a loop');
+  assert.equal(pct.callsFailed, true);
+  assert.match(text(boxes.pcCalls.innerHTML), /could not load your booked calls/i);
+});
+
+test('a read that genuinely finds nothing is not retried and not a failure', async () => {
+  PC.tab = 'chat'; pct.tab = 'chat';
+  let n = 0;
+  await pctMount({rpc: async (name) => {
+    if (name === 'portal_journey') return {ok:true, data:journey(), error:''};
+    n++; return {ok:true, data:null, error:''};     /* no month yet: a real answer */
+  }});
+  assert.equal(n, 1, '"nothing yet" is an answer');
+  assert.equal(pct.month, null);
+});
+
+test('nothing a client presses is ever retried for them', () => {
+  const send = fs.readFileSync(path.join(root, 'portal.html'), 'utf8');
+  const steps = fs.readFileSync(path.join(root, 'portal-steps.js'), 'utf8');
+  const sched = fs.readFileSync(path.join(root, 'portal-schedule.js'), 'utf8');
+  /* every write a client can trigger is awaited from exactly one place: there is
+     no second attempt anywhere, so a dropped Send cannot become two messages */
+  for (const [what, src, call] of [['Send', send, 'await pcSend('], ['Book', send, 'await pcBookKickoff('],
+                                   ['Approve', steps, 'await pstDecide('], ['Send answers', steps, 'await pstSubmitForm('],
+                                   ['Pick a time', sched, "await ctx.rpc('portal_offer_pick'"]]) {
+    assert.equal((src.split(call).length - 1), 1, what + ' is attempted from exactly one place');
+  }
+  /* and the retry helper exists only in this file, which only ever reads */
+  const tracker = fs.readFileSync(path.join(root, 'portal-tracker.js'), 'utf8');
+  assert.match(tracker, /pctReadTwice/);
+  for (const src of [send, steps, sched]) assert.doesNotMatch(src, /ReadTwice/);
+  /* the reads it retries are selects and read-only rpcs, nothing else */
+  for (const name of ['portal_journey', 'portal_month', 'portal_campaign', 'portal_calls']) {
+    assert.ok(tracker.includes(name), name + ' is one of the reads');
+  }
+  assert.doesNotMatch(tracker, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/, 'this file never writes');
+});
+
+/* ───────────── how much a portal tab costs ─────────────
+   When the database has no portal_campaign / portal_calls function the tabs
+   fall back to reading the tables. Each tab needs two tables, and neither
+   needs the other, so the client should wait for one read and not two. */
+
+function countingSb(rows) {
+  const log = [];
+  let open = 0, mostAtOnce = 0;
+  return {
+    log, most: () => mostAtOnce,
+    sb: {
+      from(table) {
+        const q = {
+          select(cols) { q._cols = cols; return q },
+          eq() { return q }, order() { return q },
+          limit(n) {
+            log.push({ table, cols: q._cols, limit: n });
+            open++; mostAtOnce = Math.max(mostAtOnce, open);
+            /* answers on a later turn, so two reads really can overlap */
+            return new Promise((res) => setTimeout(() => { open--; res({ data: rows[table] || [], error: null }) }, 1));
+          },
+        };
+        return q;
+      },
+    },
+  };
+}
+const noRpc = async (n) => ({ ok: false, data: null, error: 'Could not find the function public.' + n + ' in the schema cache' });
+
+test('the Campaign tab reads its two tables together, each with a row limit and named columns', async () => {
+  const c = countingSb({ outreach_campaigns: [{ id: 'cp1', client_id: 'c1', name: 'Autumn', status: 'running', sent: 10, replied: 2 }], outreach_daily: [] });
+  const got = await pctLoadCampaign({ sb: c.sb, rpc: noRpc }, 'c1');
+  assert.equal(got.client_id, 'c1');
+  assert.equal(got.campaigns.length, 1);
+  assert.deepEqual(c.log.map((r) => r.table).sort(), ['outreach_campaigns', 'outreach_daily']);
+  assert.equal(c.log.length, 2, 'two reads, no more');
+  assert.equal(c.most(), 2, 'and both in flight at once, not one after the other');
+  for (const r of c.log) {
+    assert.ok(r.limit > 0, r.table + ' is read with a row limit, so one client cannot ask for everything');
+    assert.notEqual(r.cols, '*', r.table + ' is read by column');
+  }
+});
+
+test('the Calls tab reads its two tables together, each with a row limit and named columns', async () => {
+  const c = countingSb({
+    qualified_calls: [{ id: 'q1', client_id: 'c1', prospect_name: 'Nina', prospect_company: 'Nina Roofing', booked_for: '2026-11-20T14:00:00Z', happened: true, counts: true }],
+    outreach_threads: [{ client_id: 'c1', lead_name: 'Nina', lead_company: 'Nina Roofing', lead_title: 'Owner' }],
+  });
+  const got = await pctLoadCalls({ sb: c.sb, rpc: noRpc }, 'c1');
+  assert.equal(got.calls.length, 1);
+  assert.equal(got.calls[0].who, 'Nina');
+  assert.equal(got.calls[0].title, 'Owner', 'the title from the thread is still joined on');
+  assert.deepEqual(c.log.map((r) => r.table).sort(), ['outreach_threads', 'qualified_calls']);
+  assert.equal(c.most(), 2, 'both in flight at once');
+  for (const r of c.log) {
+    assert.ok(r.limit > 0, r.table + ' is read with a row limit');
+    assert.notEqual(r.cols, '*', r.table + ' is read by column');
+  }
+});
+
+test('one of a tab’s two tables refusing is still reported, not shown as an empty tab', async () => {
+  const half = {
+    sb: {
+      from(table) {
+        const q = { select() { return q }, eq() { return q }, order() { return q },
+          limit() { return Promise.resolve(table === 'outreach_daily' ? { data: null, error: { message: 'permission denied' } } : { data: [], error: null }) } };
+        return q;
+      },
+    },
+    rpc: noRpc,
+  };
+  const got = await pctLoadCampaign(half, 'c1');
+  assert.equal(pctFailed(got), true, 'a table that refused is a failure, not an empty campaign');
+});
+
+test('a request that never answers is given up on, not waited on for ever', async () => {
+  PC.tab = 'campaign'; pct.tab = 'campaign';
+  pct.readMs = 20;                      /* the real limit is ten seconds */
+  let n = 0;
+  try {
+    await pctMount({rpc: (name) => {
+      if (name === 'portal_journey') return Promise.resolve({ok:true, data:journey(), error:''});
+      if (name === 'portal_campaign') { n++; return new Promise(() => {}); }   /* never settles */
+      return Promise.resolve({ok:true, data:null, error:''});
+    }});
+  } finally { pct.readMs = 0; }
+  assert.equal(n, 2, 'it timed out, tried once more, and timed out again');
+  assert.equal(pct.campaignBusy, false, 'and did not leave the guard flag set');
+  assert.equal(pct.campaignFailed, true);
+  assert.match(text(boxes.pcCampaign.innerHTML), /could not load your campaign numbers/i);
+  assert.doesNotMatch(text(boxes.pcCampaign.innerHTML), /^Loading$/i);
+});
+
+test('a slow answer that does arrive is still used', async () => {
+  PC.tab = 'calls'; pct.tab = 'calls';
+  pct.readMs = 400;
+  try {
+    await pctMount({rpc: (name) => new Promise(r => setTimeout(() => r(
+      {ok:true, error:'', data: name === 'portal_journey' ? journey() : name === 'portal_calls' ? callRows('c1') : null}), 30))});
+  } finally { pct.readMs = 0; }
+  assert.equal(pct.callsFailed, false);
+  assert.match(boxes.pcCalls.innerHTML, /Marcus Hale/);
+});
+
+/* ------------------------------------------------------------------
+   An unknown client is a failure, never an empty answer.
+
+   portal_journey is where the client id comes from. When it does not answer,
+   the fallback reads used to return [] without a query going out, so every tab
+   drew its empty state: "Nothing has been sent yet", "Not started", a zeroed
+   funnel — sitting next to the guarantee those figures settle. The client was
+   told a confident, specific lie about their own campaign.
+   ------------------------------------------------------------------ */
+test('with no client id, a fallback read reports a failure instead of an empty answer', async () => {
+  let queried = 0;
+  const sb = { from(){ queried++; return { select(){ return this }, eq(){ return this }, order(){ return this }, limit: async () => ({ data: [], error: null }) }; } };
+
+  await assert.rejects(
+    () => pctRows(sb, 'client_months', 'client_id', '', null),
+    /which account/i,
+    'an unknown client must throw, so pctAsk turns it into the failure panel');
+
+  assert.equal(queried, 0, 'it must not pretend to have asked the database');
+});
+
+test('a known client still reads normally', async () => {
+  let asked = null;
+  const sb = { from(t){ asked = t; return { select(){ return this }, eq(){ return this }, order(){ return this }, limit: async () => ({ data: [{ client_id: 'c1', month_no: 1 }], error: null }) }; } };
+  const rows = await pctRows(sb, 'client_months', 'client_id,month_no', 'c1', null);
+  assert.equal(asked, 'client_months');
+  assert.equal(rows.length, 1);
 });

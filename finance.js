@@ -18,17 +18,12 @@
 
 /* ---- plumbing ---------------------------------------------------- */
 
-function fnOk(data){ return {ok:true, data, error:''} }
-function fnErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const fnOk = coreOk;
+const fnErr = coreErr;
+const fnWrap = coreWrap;
 /* A supabase result -> {ok,data,error}. Never throws. */
-function fnWrap(res, whenEmpty){
-  if (!res) return fnErr('No answer from the database.');
-  if (res.error) return fnErr(res.error);
-  return fnOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
 async function fnRun(fn, whenEmpty){
   try { return fnWrap(await fn(), whenEmpty); }
   catch (e) { return fnErr(e); }
@@ -252,7 +247,8 @@ async function fnStartSending(clientId, day1){
 
 /* ---- money, in words ---------------------------------------------- */
 
-const fnUsd = n => '$' + Math.round(Number(n) || 0).toLocaleString('en-US');
+/* Whole dollars, grouped, with a dollar sign — from core.js. */
+const fnUsd = coreUsd;
 
 /* One plain sentence for a month, the same words on your screen and theirs.
    A number the view did not send is read as 0, and a missing day count says so

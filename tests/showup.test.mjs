@@ -158,6 +158,7 @@ globalThis.errEl = () => false;
 globalThis.toast = (m) => { toasts.push(m) };
 globalThis.emptyState = (i, t, s) => `<div>${t} ${s}</div>`;
 globalThis.openModal = () => {}; globalThis.closeModal = () => {};
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'finance.js'), 'utf8'), { filename: 'finance.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'pipeline.js'), 'utf8'), { filename: 'pipeline.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'meetings.js'), 'utf8'), { filename: 'meetings.js' });

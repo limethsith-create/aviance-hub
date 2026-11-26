@@ -86,6 +86,7 @@ function shell(role = 'admin') {
   };
   ctx.window = ctx; ctx.addEventListener = () => {};
   vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), ctx, { filename: 'core.js' });
   vm.runInContext(shellSrc, ctx, { filename: 'index.html (inline script)' });
   const run = (code) => vm.runInContext(code, ctx);
   if (role) run(`authUser={uid:'u1',name:'Owner',role:${JSON.stringify(role)},email:'o@example.com'}`);

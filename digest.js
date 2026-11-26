@@ -31,16 +31,11 @@ const DG_LIVE_STAGES = ['live', 'at_risk'];
 
 /* ---- plumbing (copied from finance.js) ---------------------------- */
 
-function dgOk(data){ return {ok:true, data, error:''} }
-function dgErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
-}
-function dgWrap(res, whenEmpty){
-  if (!res) return dgErr('No answer from the database.');
-  if (res.error) return dgErr(res.error);
-  return dgOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const dgOk = coreOk;
+const dgErr = coreErr;
+const dgWrap = coreWrap;
 async function dgRun(fn, whenEmpty){
   try { return dgWrap(await fn(), whenEmpty); }
   catch (e) { return dgErr(e); }
@@ -82,15 +77,11 @@ function dgInt(v){ return Math.round(dgNum(v)); }
 function dgFmt(v){ return dgInt(v).toLocaleString('en-US'); }
 /* A number we have, or a dash when the source could not answer. */
 function dgShow(v){ return v === null || v === undefined ? DG_DASH : dgFmt(v); }
-function dgUsd(v){
-  if (v === null || v === undefined) return DG_DASH;
-  if (dgHas('fnUsd')) { try { return fnUsd(v); } catch (e) { /* fall through */ } }
-  return '$' + dgFmt(v);
-}
-function dgEsc(s){
-  if (dgHas('esc')) { try { return esc(s); } catch (e) { /* fall through */ } }
-  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+/* coreUsd, except that a figure the source could not answer reads as a dash
+   rather than '$0' — this screen must never state a number it does not have. */
+function dgUsd(v){ return v === null || v === undefined ? DG_DASH : coreUsd(v) }
+/* The one escape, from core.js: strict, five characters, the single quote among them. */
+const dgEsc = coreEsc;
 /* The first key a row actually has. The views are owned by finance; this file
    reads whichever spelling it finds and says "we do not know" rather than guess. */
 function dgPick(row, names){
@@ -426,19 +417,31 @@ async function dgHome(now){
 /* ---- dgClientWeek: one client's week ----------------------------- */
 /* =================================================================== */
 
-async function dgClientWeek(clientId, now){
+/* `pre` lets a caller that has already read these four things for a whole list
+   of clients hand them in — see dgFridayAll, which reads them once for
+   everybody instead of four times per client. Each entry is a whole
+   {ok,data,error}, so a source that could not answer still shows as a dash
+   here and not as a zero. */
+async function dgClientWeek(clientId, now, pre){
   if (!clientId) return dgErr('Which client? No client was given.');
   const at = dgNow(now);
   const week = dgWeek(at);
+  const have = pre && typeof pre === 'object' ? pre : null;
 
-  const clientRes = await dgQuery('clients', q => q.select('*').eq('id', clientId).maybeSingle(), null);
-  const standing = await dgStanding(clientId);
+  /* Four things, none of which needs any of the others, so they are asked for
+     together: one wait instead of four. */
+  const [clientRes, standing, callsRes, sum] = have
+    ? [have.client, have.standing, have.calls, have.summary]
+    : await Promise.all([
+      dgQuery('clients', q => q.select('id,company').eq('id', clientId).maybeSingle(), null),
+      dgStanding(clientId),
+      dgHas('fnCalls')
+        ? dgAsk('fnCalls', clientId)
+        : dgQuery('qualified_calls', q => q.select('*').eq('client_id', clientId), []),
+      dgQuery('v_outreach_summary', q => q.select('*').eq('client_id', clientId).maybeSingle(), null),
+    ]);
   const month = dgCurrentMonth(dgRows(standing), at);
   const monthId = month ? dgPick(month, ['id', 'month_id']) : null;
-
-  const callsRes = dgHas('fnCalls')
-    ? await dgAsk('fnCalls', clientId)
-    : await dgQuery('qualified_calls', q => q.select('*').eq('client_id', clientId), []);
   const calls = dgRows(callsRes);
 
   const inWindow = (v, from, to) => {
@@ -474,8 +477,7 @@ async function dgClientWeek(clientId, now){
 
   /* replies belong to the outreach area. Missing is a dash, not a zero. */
   let replies = null;
-  const sum = await dgQuery('v_outreach_summary', q => q.select('*').eq('client_id', clientId).maybeSingle(), null);
-  if (sum.ok && sum.data) replies = dgPickNum(sum.data, ['replied', 'replies']);
+  if (sum && sum.ok && sum.data) replies = dgPickNum(sum.data, ['replied', 'replies']);
 
   const verdict = dgVerdict(month, delivered, at);
   const left = dgDaysLeft(month, at);
@@ -512,8 +514,8 @@ async function dgClientWeek(clientId, now){
 
 /* Built from rows only. If the month is short it says so, and says what happens
    next, because the guarantee means a short month costs money. */
-async function dgFridayUpdate(clientId, now){
-  const wk = await dgClientWeek(clientId, now);
+async function dgFridayUpdate(clientId, now, pre){
+  const wk = await dgClientWeek(clientId, now, pre);
   if (!wk.ok) return wk;
   const d = wk.data;
   const at = dgNow(now);
@@ -610,14 +612,40 @@ async function dgFridayAll(now){
     return DG_LIVE_STAGES.indexOf(stage) >= 0 || !!dgPick(c, ['day1_on']);
   });
 
-  const drafts = [];
-  for (let i = 0; i < live.length; i++) {
-    const c = live[i];
-    const r = await dgFridayUpdate(c.id, now);
-    drafts.push(r.ok
+  /* One draft per client used to cost four round trips of its own, run one
+     client after the next: twenty-five clients was a hundred waits in a row.
+     The four things every draft needs are read once here for the whole list
+     and handed to each draft, so the figures are still worked out in one
+     place — dgClientWeek — and the screen costs four reads, not a hundred. */
+  const ids = live.map(c => c.id);
+  const byId = (res, key) => {
+    const m = {};
+    dgRows(res).forEach(r => { const k = r && dgPick(r, [key || 'client_id']); if (k != null) (m[k] = m[k] || []).push(r); });
+    return m;
+  };
+  const [allStanding, allCalls, allSummary] = ids.length ? await Promise.all([
+    dgStanding(null),
+    /* fnCalls only answers about one client, so the whole list is read here. */
+    dgQuery('qualified_calls', q => q.select('*').in('client_id', ids), []),
+    dgQuery('v_outreach_summary', q => q.select('*').in('client_id', ids), []),
+  ]) : [dgOk([]), dgOk([]), dgOk([])];
+  const standingBy = byId(allStanding), callsBy = byId(allCalls), sumBy = byId(allSummary);
+  /* A source that did not answer stays "did not answer" for every client, so a
+     database that is down still shows a dash and never a made-up zero. */
+  const slice = (res, map, id) => (res.ok ? dgOk(map[id] || []) : res);
+
+  const made = await Promise.all(live.map(c => dgFridayUpdate(c.id, now, {
+    client: dgOk(c),
+    standing: slice(allStanding, standingBy, c.id),
+    calls: slice(allCalls, callsBy, c.id),
+    summary: allSummary.ok ? dgOk((sumBy[c.id] || [])[0] || null) : allSummary,
+  })));
+  const drafts = live.map((c, i) => {
+    const r = made[i];
+    return r.ok
       ? {clientId: c.id, company: dgName(c), ok: true, text: r.data.text, html: r.data.html, facts: r.data.facts, error: ''}
-      : {clientId: c.id, company: dgName(c), ok: false, text: '', html: '', facts: null, error: r.error});
-  }
+      : {clientId: c.id, company: dgName(c), ok: false, text: '', html: '', facts: null, error: r.error};
+  });
   return dgOk({drafts, missing: []});
 }
 

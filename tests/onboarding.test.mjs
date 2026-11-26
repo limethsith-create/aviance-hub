@@ -13,12 +13,12 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 
 /* ───────────── fake Supabase ───────────── */
-let db, writes, rpcs, toasts, painted;
+let db, writes, reads, rpcs, toasts, painted;
 let nextId = 1;
 
 function matches(row, filters) { return filters.every(([k, v]) => String(row[k]) === String(v)); }
 function builder(table) {
-  const q = { table, op: 'select', payload: null, opts: null, filters: [], single: false, maybe: false, lim: null };
+  const q = { table, op: 'select', cols: '*', payload: null, opts: null, filters: [], single: false, maybe: false, lim: null };
   const settle = () => {
     const rows = (db[table] || []).filter((r) => matches(r, q.filters));
     if (q.op === 'insert') {
@@ -42,13 +42,14 @@ function builder(table) {
       else { row = Object.assign({ id: 'new-' + nextId++ }, q.payload); list.push(row); }
       return { data: q.single ? row : [row], error: null };
     }
+    reads.push({ table, cols: q.cols, filters: q.filters.slice() });
     const out = q.lim ? rows.slice(0, q.lim) : rows;
     if (q.single) return out.length ? { data: out[0], error: null } : { data: null, error: { message: 'no rows' } };
     if (q.maybe) return { data: out.length ? out[0] : null, error: null };
     return { data: out, error: null };
   };
   const b = {
-    select() { return b; },
+    select(c) { if (c !== undefined) q.cols = c; return b; },
     insert(p) { q.op = 'insert'; q.payload = p; return b; },
     update(p) { q.op = 'update'; q.payload = p; return b; },
     upsert(p, o) { q.op = 'upsert'; q.payload = p; q.opts = o; return b; },
@@ -78,6 +79,7 @@ const sandbox = {
   sb: fakeSb,
 };
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), sandbox, { filename: 'core.js' });
 vm.runInContext(src('finance.js'), sandbox, { filename: 'finance.js' });
 vm.runInContext(src('onboarding.js') + `\n;globalThis.api={obChecklist,obReady,obStart,obInputs,obSaveInputs,obSignOff,obAgreement,obDraftAgreement,viewOnboarding,viewOnboardingClient,viewBilling,obRenderBilling,obRenderOnboarding,obRenderOnboardingClient,obLoadBilling,obLoadList,obLoadOne,ob};`, sandbox, { filename: 'onboarding.js' });
 const A = sandbox.api;
@@ -109,7 +111,7 @@ function fullDb() {
   };
 }
 beforeEach(() => {
-  db = fullDb(); writes = []; toasts = []; painted = []; nextId = 1;
+  db = fullDb(); writes = []; reads = []; toasts = []; painted = []; nextId = 1;
   rpcs = { open_next_month: () => ({ data: 'm-1', error: null }), raise_invoice: () => ({ data: 'i-9', error: null }) };
   sandbox.sb = fakeSb; A.ob.list = null; A.ob.one = null; A.ob.billing = null; A.ob.clientId = null;
   A.ob.listErr = ''; A.ob.oneErr = ''; A.ob.billErr = '';
@@ -395,4 +397,81 @@ test('house rules: no machine, no hard-coded price, finance owns the money, ever
   assert.ok(fs.existsSync(path.join(root, 'onboarding.css')));
   const css = fs.readFileSync(path.join(root, 'onboarding.css'), 'utf8');
   assert.equal(/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/.test(css), false, 'no new colours: theme.css tokens only');
+});
+
+/* ───────────── how much the onboarding screens cost ─────────────
+   About round trips and columns, not about what is shown. */
+
+const readsOf = (table) => reads.filter((r) => r.table === table);
+
+test('the checklist reads the client row once, not twice', async () => {
+  const r = await A.obChecklist(ID);
+  assert.equal(r.ok, true);
+  assert.equal(readsOf('clients').length, 1,
+    'obAgreement is handed the client row the checklist already read');
+});
+
+test('the client row is asked for by column, and includes every field this file reads off it', async () => {
+  await A.obChecklist(ID);
+  const read = readsOf('clients')[0];
+  assert.notEqual(read.cols, '*', '`clients` has 21 columns; this screen reads nine');
+  const got = read.cols.split(',');
+  /* Each of these is read somewhere in onboarding.js. inputs_complete_on is
+     the one that is easy to miss: obStart writes it back, and if it is not
+     asked for it comes back undefined and the day is silently overwritten. */
+  for (const c of ['id', 'company', 'contact_name', 'contact_email', 'booking_id', 'plan', 'term', 'stage', 'inputs_complete_on'])
+    assert.ok(got.includes(c), 'the client read must include ' + c);
+});
+
+test('obStart keeps the day already on the row, which needs inputs_complete_on to have been read', async () => {
+  db.clients[0].inputs_complete_on = '2026-10-01';
+  const r = await A.obStart(ID);
+  assert.equal(r.ok, true, r.error);
+  const up = writes.find((w) => w.table === 'clients' && w.op === 'update' && w.payload.inputs_complete_on !== undefined);
+  assert.equal(up.payload.inputs_complete_on, '2026-10-01',
+    'the day already there is kept, not replaced with today');
+});
+
+test('the onboarding list costs the same number of reads per client however many there are', async () => {
+  const one = async (n) => {
+    db = fullDb();
+    for (let i = 2; i <= n; i++) {
+      db.clients.push(Object.assign({}, db.clients[0], { id: 'c-' + i, booking_id: 'b-' + i, company: 'Co ' + i }));
+      db.client_profiles.push(Object.assign({}, db.client_profiles[0], { client_id: 'c-' + i }));
+      db.client_people.push(Object.assign({}, db.client_people[0], { id: 'p-' + i, client_id: 'c-' + i }));
+      db.meetings.push(Object.assign({}, db.meetings[0], { id: 'mt-' + i, client_id: 'c-' + i }));
+      db.invoices.push(Object.assign({}, db.invoices[0], { id: 'i-' + i, client_id: 'c-' + i }));
+      db.agreements.push(Object.assign({}, db.agreements[0], { id: 'a-' + i, booking_id: 'b-' + i }));
+    }
+    reads = []; writes = [];
+    A.ob.list = null;
+    const r = await A.obLoadList();
+    assert.equal(r.ok, true);
+    assert.equal(r.data.length, n, n + ' clients on the list');
+    return reads.length;
+  };
+  const forOne = await one(1);
+  const forFour = await one(4);
+  const perClient = (forFour - forOne) / 3;
+  assert.ok(perClient <= 6, 'at most six reads per client on the list, got ' + perClient);
+  /* The client row is read once per client, not twice — the regression that
+     doubled this screen's cost. */
+  assert.equal(readsOf('clients').length, 5, 'one list read plus one row per client');
+});
+
+test('the strategy-call read asks for the four columns that answer "was it held?"', async () => {
+  await A.obChecklist(ID);
+  const read = readsOf('meetings')[0];
+  assert.notEqual(read.cols, '*', '`meetings` has 21 columns');
+  for (const c of ['status', 'held_at', 'starts_at', 'kind'])
+    assert.ok(read.cols.split(',').includes(c), 'needs ' + c);
+});
+
+test('one client, whole: the agreement is not read a second time for the same client', async () => {
+  const r = await A.obLoadOne(ID);
+  assert.equal(r.ok, true);
+  assert.equal(readsOf('clients').length, 1,
+    'the checklist read the client; the inputs and the agreement reuse it');
+  assert.ok(r.data.agreement, 'and the agreement is still there');
+  assert.ok(r.data.inputs, 'and so are the inputs');
 });

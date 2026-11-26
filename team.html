@@ -20,6 +20,7 @@
 <link rel="stylesheet" href="brand.css">
 <!-- Pinned to one exact version with an integrity hash, as everywhere else in the hub. -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script src="core.js"></script>
 <script src="team-page.js"></script>
 </head>
 <body>
@@ -123,8 +124,12 @@
   async function refresh(toBottom){
     if (!me || loading) return;
     loading = true;
-    const r = await tmcMe();
-    loading = false;
+    let r;
+    /* `loading` left true means refresh() refuses for ever: her chat would
+       quietly stop arriving and look like nobody had written. */
+    try { r = await tmcMe(); }
+    catch (e) { r = tmcErr(e); }
+    finally { loading = false; }
     if (!me) return;
     if (r.ok && r.data) {
       me = r.data;
@@ -185,7 +190,9 @@
     let attachment = '';
     if (pending) {
       btn.textContent = 'Sending…';
-      const up = await tmcUpload(me.channel.id, pending);
+      let up;
+      try { up = await tmcUpload(me.channel.id, pending); }
+      catch (e) { up = tmcErr(e); }
       if (!up.ok) {
         sendBusy = false; btn.disabled = false; btn.textContent = 'Send';
         err.textContent = up.error;
@@ -193,8 +200,12 @@
       }
       attachment = up.data;
     }
-    const r = await tmcSend(text, attachment);
-    sendBusy = false; btn.disabled = false; btn.textContent = 'Send';
+    let r;
+    /* Never retried — a second attempt is a second message. The button always
+       comes back, or she could not write again without reloading. */
+    try { r = await tmcSend(text, attachment); }
+    catch (e) { r = tmcErr(e); }
+    finally { sendBusy = false; btn.disabled = false; btn.textContent = 'Send'; }
     if (!r.ok) { err.textContent = r.error; el.focus(); return; }
     el.value = tmcLeftover(raw, el.value); grow(el); count(el);   /* keep what she typed while it was sending */
     pending = null; drawPending();

@@ -20,6 +20,7 @@ function load(answer) {
     sb: { async rpc(name, args) { calls.push({ name, args }); if (answer instanceof Error) throw answer; return answer; } },
     setTimeout: () => 0,
   });
+  vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), ctx, { filename: 'core.js' });
   vm.runInContext(src, ctx, { filename: 'documents.js' });
   return { D: (n) => vm.runInContext(n, ctx), calls };
 }
@@ -159,4 +160,24 @@ test('a receipt is never nagged about how to pay, and the note sits above the pr
   assert.ok(html.indexOf('cannot tell a client how to pay') < html.indexOf('<iframe'));
   const ok = D('dcPreviewHTML')({ type: 'invoice', title: 'x', doc: { kind: 'invoice', status: 'paid', pay: FAKE_PAY } });
   assert.ok(!ok.includes('cannot tell a client') && ok.includes('<iframe'));
+});
+
+/* ───────────── the guard flag ─────────────
+   dc.loading means "already asking". It gates dcLoad() and it disables the
+   Refresh button. Left true after a failure the screen never asks again and
+   Refresh never comes back: the owner has to reload the whole app. */
+test('a data call that throws clears dc.loading, so the screen can be asked again', async () => {
+  const t = load(new Error('The database did not answer.'));
+  await t.D('dcLoad(false)');
+  assert.equal(t.D('dc.loading'), false, 'the flag cleared, so Refresh works and dcLoad can ask again');
+  /* and the screen says what happened, with the way out on it */
+  const h = t.D('dcBodyHTML()');
+  assert.match(h, /role="alert"/);
+  assert.match(h, /didn't load/);
+  assert.match(h, /dcLoad\(true\)/);
+  assert.doesNotMatch(h, /disabled/, 'Refresh is not stuck disabled');
+  /* really asking again: the next call reaches the database */
+  const n = t.calls.length;
+  await t.D('dcLoad(false)');
+  assert.ok(t.calls.length > n, 'it asked again rather than sitting on the flag');
 });

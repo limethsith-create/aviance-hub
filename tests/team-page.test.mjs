@@ -77,6 +77,7 @@ function world(opts) {
     sandbox.history = { replaceState(a, b, url) { calls.push({ replaced: url }); sandbox.location.hash = ''; } };
   }
   vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), sandbox, { filename: 'core.js' });
   vm.runInContext(SRC + `;globalThis.api={tmcLinkToken,tmcForgetLinkToken,tmcLinkProblem,tmcClaimLink,tmcLeftover,tmcUseClient,
     tmcSignInHtml,TMC_LINK_BAD,TMC_LINK_SAY,TMC_OFFLINE,TMC_OWNER};`, sandbox, { filename: 'team-page.js' });
   sandbox.api.tmcUseClient(sb);

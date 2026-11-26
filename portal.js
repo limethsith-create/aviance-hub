@@ -17,16 +17,11 @@
 
 /* ---- plumbing (finance.js) --------------------------------------- */
 
-function ptOk(data){ return {ok:true, data, error:''} }
-function ptErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
-}
-function ptWrap(res, whenEmpty){
-  if (!res) return ptErr('No answer from the database.');
-  if (res.error) return ptErr(res.error);
-  return ptOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const ptOk = coreOk;
+const ptErr = coreErr;
+const ptWrap = coreWrap;
 async function ptRun(fn, whenEmpty){
   try { return ptWrap(await fn(), whenEmpty); }
   catch (e) { return ptErr(e); }
@@ -47,10 +42,8 @@ function ptSb(){
 function ptUser(){
   try { return (typeof authUser !== 'undefined' && authUser) || null; } catch (e) { return null; }
 }
-function ptEsc(s){
-  if (typeof esc === 'function') return esc(s);
-  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+/* The one escape, from core.js: strict, five characters, the single quote among them. */
+const ptEsc = coreEsc;
 function ptText(v, max){
   const s = String(v == null ? '' : v).trim();
   return s.slice(0, max || 200);

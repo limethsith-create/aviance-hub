@@ -102,4 +102,4 @@ h1,h2,h3,h4{letter-spacing:-.011em;color:var(--text)}
 /* ---- dark: the shadows above are tuned through tokens; only the pill edge needs a lighter hand ---- */
 body.dark .pill,:root[data-theme="dark"] .pill{box-shadow:none}
 
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
