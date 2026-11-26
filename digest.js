@@ -351,9 +351,16 @@ async function dgHome(now){
   const m = money.ok ? money.data : null;
   const invRows = dgGot(invoices) ? dgRows(invoices) : null;
   const sumInv = pick => invRows === null ? null : invRows.reduce((t, r) => t + (pick(r) ? dgNum(dgPick(r, ['amount', 'gross_amount'])) : 0), 0);
+  /* v_money's own names, checked against the live view on 2026-11-26:
+     unpaid_invoiced, paid_this_month, paid_all_time, refunds_owed, refunds_paid.
+     'unpaid_invoiced' and 'paid_all_time' were not in these lists either, so
+     both tiles were quietly being added up in the browser off the invoice rows
+     instead of being read from the view. They agreed, this time. The view has no
+     column for everything ever invoiced, so that one is still a browser sum —
+     labelled as such in the note above. */
   const invoiced = dgPickNum(m, ['invoiced', 'invoiced_total', 'billed', 'gross_invoiced']);
-  const owed     = dgPickNum(m, ['invoiced_unpaid', 'unpaid', 'owed', 'outstanding', 'awaiting_payment']);
-  const paidEver = dgPickNum(m, ['paid_ever', 'paid', 'paid_total', 'received_ever']);
+  const owed     = dgPickNum(m, ['unpaid_invoiced', 'invoiced_unpaid', 'unpaid', 'owed', 'outstanding', 'awaiting_payment']);
+  const paidEver = dgPickNum(m, ['paid_all_time', 'paid_ever', 'paid', 'paid_total', 'received_ever']);
   const paidMonth= dgPickNum(m, ['paid_this_month', 'paid_month', 'received_this_month']);
   const refundsOwed = dgPickNum(m, ['refunds_owed', 'refunds_unpaid', 'owed_refunds']);
   /* A view that answered with no rows means zero, not "we do not know". A view
@@ -369,9 +376,17 @@ async function dgHome(now){
     refundsOwed: first(refundsOwed, null)
   };
 
+  /* v_exposure's columns are open_months, at_risk_total and at_risk_month_one.
+     This list did not have at_risk_total in it, so dgPick found nothing, and the
+     line below turned that into a confident 0: on 2026-11-26 the Today screen
+     said "$0 refunds exposed" while the view itself said $69,300. The real name
+     goes first; the old guesses stay behind it in case the view is ever renamed.
+     A view that answered with NO ROW AT ALL still means zero — there are no open
+     months — but a view that answered without the column we wanted does not, and
+     that case is now a dash. */
   const exp = exposure.ok ? exposure.data : null;
-  let refundsExposed = dgPickNum(exp, ['at_risk', 'exposure', 'refund_at_risk', 'would_owe', 'amount', 'total']);
-  if (refundsExposed === null && exposure.ok) refundsExposed = 0;
+  let refundsExposed = dgPickNum(exp, ['at_risk_total', 'at_risk', 'exposure', 'refund_at_risk', 'would_owe', 'amount', 'total']);
+  if (refundsExposed === null && exposure.ok && exp === null) refundsExposed = 0;
 
   const salesBooked = dgGot(callsRes) ? dgRows(callsRes).length : null;
   const siteBooked = dgGot(siteRes) ? dgRows(siteRes).filter(dgRealBooking).length : null;
@@ -732,7 +747,7 @@ function dgRenderHome(data){
     dgTile('Clients live', dgShow(d.clientsLive)),
     dgTile('Invoiced', dgUsd(m.invoiced)),
     dgTile('Owed to us', dgUsd(m.owed)),
-    dgTile('Refunds exposed', dgUsd(d.refundsExposed), 'if every open month missed today'),
+    dgTile('Refunds exposed', dgUsd(d.refundsExposed), 'every open month, started or not'),
     dgTile('Open requests', dgShow(d.openRequests)),
     dgTile('Overdue tasks', dgShow(d.overdueTasks))
   ].join('');
