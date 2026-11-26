@@ -781,6 +781,37 @@ function pcErr(e){
   return { ok: false, data: null, error: offline ? PC_OFFLINE : pcPlain(raw, e && e.code), offline };
 }
 
+/* A READ with a limit on it. The worst failure of the lot is the one that never
+   fails: no error, no rejection, and the screen reads "Loading" until the client
+   closes the tab. portal-tracker.js gives every read on the Campaign and Calls
+   tabs a limit for exactly this reason; the two reads that gate the FIRST paint
+   of the portal — the session, and the first page of messages — had none, so a
+   request that hung left the whole page on "Loading" for ever with no way back
+   but a reload.
+
+   Reads only. Nothing that writes goes through this: a `pcSend` or a
+   `pcBookKickoff` that is given up on may still have landed, and the answer to
+   "did my message go?" is never "send it again". Past the limit this reads as
+   offline, which is what the client's own screens already know how to say, and
+   the 20-second poll asks again by itself.
+
+   Never throws, whatever `fn` does. */
+const PC_READ_MS = 12000;
+async function pcRead(fn, ms){
+  const limit = Number(ms) > 0 ? Number(ms) : PC_READ_MS;
+  if (typeof fn !== 'function') return pcErr(PC_OFFLINE);
+  let timer = null;
+  try {
+    const run = Promise.resolve().then(fn);
+    if (typeof setTimeout !== 'function') return await run;
+    const capped = new Promise((_, no) => { timer = setTimeout(() => no(new Error('Failed to fetch')), limit); });
+    const r = await Promise.race([run, capped]);
+    return r && typeof r === 'object' && 'ok' in r ? r : pcOk(r);
+  }
+  catch (e) { return pcErr(e); }
+  finally { if (timer && typeof clearTimeout === 'function') clearTimeout(timer); }
+}
+
 /* Two clients, on purpose. 'anon' is for the link pages: it never looks at or
    keeps a login, so a link works the same for everyone. 'portal' keeps the
    client's login under its own storage key, apart from the team hub's. */

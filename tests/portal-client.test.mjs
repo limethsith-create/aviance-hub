@@ -1063,3 +1063,28 @@ test('the portal-seat sentence reaches the client whole, with its code and witho
   assert.match(plain('duplicate key value violates unique constraint "client_people_one_seat_per_user"', '23505'), /try again|tell us/i);
   assert.match(plain('relation "portal_invites" does not exist and here is a much longer sentence about it'), /try again|tell us/i);
 });
+
+test('a read that never answers is given up on, and a write never is', async () => {
+  const read = P('pcRead');
+  /* the failure that used to leave the portal on "Loading" for ever */
+  const hangs = () => new Promise(() => {});
+  const r = await read(hangs, 20);
+  assert.equal(r.ok, false);
+  assert.equal(r.offline, true);
+  assert.match(r.error, /connection|reach/i);
+  /* an answer inside the limit comes back untouched, {ok,data,error} or not */
+  assert.deepEqual(await read(() => ({ ok: true, data: [1, 2], error: '' }), 500), { ok: true, data: [1, 2], error: '' });
+  assert.deepEqual(await read(() => 'plain', 500), { ok: true, data: 'plain', error: '' });
+  /* it never throws, whatever it is handed */
+  assert.equal((await read(() => { throw new Error('boom'); }, 500)).ok, false);
+  assert.equal((await read(null)).ok, false);
+  assert.equal((await read(() => Promise.reject(new Error('Failed to fetch')), 500)).offline, true);
+  /* and the writes are not wrapped in it: a message or a booking that may already
+     have landed is never given up on and retried */
+  const src = read.toString();
+  assert.ok(!/pcSend|pcBookKickoff|pcAccept|pcDocSign/.test(src));
+  const page = fs.readFileSync(path.join(root, 'portal.html'), 'utf8');
+  assert.match(page, /pcRead\(\s*function\(\)\{\s*return pcMessages\(id\)/);
+  assert.match(page, /pcRead\(pcSession\)/);
+  assert.doesNotMatch(page, /pcRead\(\s*(function\(\)\s*\{\s*return\s*)?(pcSend|pcBookKickoff)/);
+});
