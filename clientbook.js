@@ -438,6 +438,22 @@ function cbStake(client, m){
   const fee = cbInt(client && client.monthly_fee);
   return cbInt(m.month_no) === 1 ? fee * 2 : fee;
 }
+/* EVERY month this client still has running, added up — the row's figure and the
+   "At stake" tile. `cbStake` answers for ONE month, and the tile used to add up
+   one month per client, so a client who had two months open at once (the normal
+   state the day a month ends before it has been locked) was counted once. The
+   database's own total, v_exposure.at_risk_total, sums every open month, so the
+   tile and the Today screen disagreed about the same business. This sums the
+   same months the same way, over the clients on screen: every number comes from
+   v_month_standing.at_risk, worked out in the database, never here.
+   A month already settled is not at stake — it is a refund, and it has its own
+   line on the client. */
+function cbStakeAll(client, rows){
+  const c = client || {};
+  return (Array.isArray(rows) ? rows : [])
+    .filter(m => m && m.client_id === c.id && String(m.verdict || 'open') === 'open')
+    .reduce((s, m) => s + cbStake(c, m), 0);
+}
 /* A month running short, late enough in the month to matter. */
 function cbMonthWarns(m){
   if (!m || String(m.verdict || 'open') !== 'open') return false;
@@ -465,7 +481,7 @@ function cbRow(client, bag){
     const short = cbShortBy(month);
     flags.push({code:'month', urgent:true, text:
       'Month ' + cbInt(month.month_no) + ' is ' + short + ' call' + (short === 1 ? '' : 's') +
-      ' short with ' + cbDays(month.days_left) + ' left. ' + cbUsd(cbStake(c, month)) + ' at stake.'});
+      ' short ' + cbWhenWords(month.days_left) + '. ' + cbUsd(cbStake(c, month)) + ' at stake.'});
   }
   if (['onboarding','live','at_risk'].includes(cbTrim(c.stage)) && !(prof && prof.signed_off_at)) {
     flags.push({code:'inputs', urgent: cbTrim(c.stage) !== 'onboarding', text:
@@ -493,7 +509,7 @@ function cbRow(client, bag){
     promised: month ? cbInt(month.calls_promised) : cbInt(c.calls_promised),
     delivered: month ? cbInt(month.calls_delivered) : 0,
     daysLeft: month ? cbInt(month.days_left) : null,
-    stake: cbStake(c, month),
+    stake: cbStakeAll(c, b.standing),
     owner: (b.owners || {})[c.owner_id] || '',
     profile: prof, sat: sat, since: sinceAt,
     flags: flags, needs: flags.length, urgent: flags.some(f => f.urgent),
@@ -576,6 +592,19 @@ function cbDaysCell(r){
   if (!r.month || r.daysLeft == null) return '<span class="cb-dim">—</span>';
   if (r.daysLeft < 0) return '<span class="cb-dim">' + cbE('ended ' + cbDays(-r.daysLeft) + ' ago') + '</span>';
   return '<span class="cb-left' + (r.daysLeft <= CB_WARN_DAYS ? ' near' : '') + '">' + cbE(cbDays(r.daysLeft) + ' left') + '</span>';
+}
+/* "with 6 days left" / "on its last day" / "and it ended 48 days ago".
+   cbDays() throws the sign away, so a month that is over used to be announced as
+   having that many days LEFT — seen live: a month that ended on 9 October read
+   "5 calls short with 48 days left" on 27 November. The one sentence on the
+   screen that is meant to make somebody act must not say the opposite of the
+   truth. The days cell beside it has always said "ended 48 days ago". */
+function cbWhenWords(n){
+  const d = n == null ? NaN : Number(n);
+  if (!Number.isFinite(d)) return 'and the month is still running';
+  if (d < 0)  return 'and it ended ' + cbDays(-d) + ' ago';
+  if (d === 0) return 'on its last day';
+  return 'with ' + cbDays(d) + ' left';
 }
 
 /* One client, as a row on the main screen. */
@@ -760,7 +789,12 @@ function cbRenderMonths(r, months){
       '<li class="' + cbE(tone(m)) + '">' + cbPill(cbTrim(m.verdict) || 'open', tone(m)) +
       '<span class="cb-month-say">' + cbE(say(m)) + '</span>' +
       '<span class="cb-month-when">' + cbE(cbDate(m.starts_on) + ' – ' + cbDate(m.ends_on)) + '</span>' +
-      (cbInt(m.refund_due) ? '<b class="cb-stake">' + cbE(cbUsd(m.refund_due) + ' refunded') + '</b>' : '') +
+      /* The refund is in the sentence above when finance.js wrote it ("missed —
+         3 of 5. $1,500 refunded."). Printing it again beside the dates said the
+         same money twice in one line; the figure only appears here when
+         finance.js is not loaded and the fallback sentence left it out. */
+      (cbInt(m.refund_due) && typeof fnMonthLine !== 'function'
+        ? '<b class="cb-stake">' + cbE(cbUsd(m.refund_due) + ' refunded') + '</b>' : '') +
       '</li>').join('') + '</ul>' +
   '</section>';
 }
@@ -1421,12 +1455,37 @@ function cbMeta(parts){
    number. The number is the whole answer to "how many logins are in use". */
 function cbSeatFig(s){
   if (!s) return '';
-  const txt = s.unlimited ? cbInt(s.held) + ' / ∞' : cbInt(s.held) + ' / ' + cbInt(s.seats);
+  /* A pending invite HOLDS a login: portal_invite_create counts it, which is why
+     the fifth invite on Growth is refused while four invitations sit unopened.
+     The figure showed `held` on its own, so a client with four unopened invites
+     read "0 / 4" directly above a note saying every login was taken. */
+  const taken = cbInt(s.held) + cbInt(s.pending);
+  const txt = s.unlimited ? taken + ' / ∞' : taken + ' / ' + cbInt(s.seats);
   return '<div style="margin:14px 0 10px">' +
-    '<p style="' + CB_EYEBROW + '">' + cbE('Portal logins in use') + '</p>' +
+    '<p style="' + CB_EYEBROW + '">' + cbE(cbInt(s.pending) ? 'Portal logins taken' : 'Portal logins in use') + '</p>' +
     '<p style="font-family:var(--mono);font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1;margin:6px 0 0">' +
       cbE(txt) + '</p></div>';
 }
+/* Why every login is taken, in words that match the rest of the screen.
+   The database's own sentence (`full_message`) is written for the moment an
+   invite is refused and tells the owner to free a login under "Who can sign in".
+   When nobody has signed in at all there is nobody to free: seen live on a
+   Growth client with four unopened invites, the page said "0 / 4", "Nobody from
+   them can sign in yet" AND "free one" — three statements contradicting each
+   other. With somebody signed in, the database's sentence is right and is used
+   exactly as it was written. */
+function cbSeatWhyFull(s){
+  const held = cbInt(s && s.held), pend = cbInt(s && s.pending), seats = cbInt(s && s.seats);
+  const said = cbTrim(s && s.full_message) ||
+    'Every login on their plan is in use. Free one here, or move them to a bigger plan, before inviting anyone else.';
+  if (held > 0 || pend < 1) return said;
+  return 'All ' + seats + (seats === 1 ? ' login' : ' logins') + ' on their plan are held by ' +
+    (pend === 1 ? 'an invitation' : 'invitations') + ' nobody has opened yet. ' +
+    (pend === 1 ? 'It is' : 'They are') + ' listed below and ' +
+    (pend === 1 ? 'frees' : 'each frees') + ' itself on its expiry date. ' +
+    'To invite somebody else sooner, move them to a bigger plan.';
+}
+
 /* Who can sign in, and a way to free one. Pure: data in, HTML out. */
 function cbRenderSeats(clientId, s, meta){
   const m = meta || {};
@@ -1461,8 +1520,7 @@ function cbRenderSeats(clientId, s, meta){
     (m.error ? cbErrNote(m.error) : '') +
     cbSeatFig(s) +
     '<p class="cb-dim">' + cbE(cbSeatLine(s)) + '</p>' +
-    (s.at_limit ? cbNote(cbTrim(s.full_message) ||
-        'Every login on their plan is in use. Free one here, or move them to a bigger plan, before inviting anyone else.', 'amber') : '') +
+    (s.at_limit ? cbNote(cbSeatWhyFull(s), 'amber') : '') +
     (holders.length ? '<ul style="list-style:none;margin:10px 0 0;padding:0">' + rows + '</ul>'
       : '<p class="cb-dim">' + cbE('Nobody from ' + (cbTrim(s.company) || 'this client') + ' can sign in yet. The welcome email sends the first login when their first invoice is marked paid.') + '</p>') +
     (pend ? '<p style="' + CB_EYEBROW + ';margin-top:22px">' + cbE('Invited, not opened yet') + '</p>' +

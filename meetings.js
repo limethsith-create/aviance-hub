@@ -70,6 +70,15 @@ const MT_STATUS = {
 };
 /* A cancelled meeting leaves its time open again. Everything else holds it. */
 const MT_FREES_TIME = ['cancelled'];
+/* A WEBSITE booking frees its slot when it is cancelled and also when it is
+   lost: a call that was never going to happen must not hold a half hour for
+   ever. This is the same list the database's free_slots() uses for
+   discovery_bookings (`d.status not in ('cancelled','lost')`), so the website
+   and the hub offer the same times. A `won` booking still holds its slot,
+   because that call really did take place. Meetings keep MT_FREES_TIME: a
+   meeting is only freed by being cancelled. Drawing is a separate question —
+   a lost booking is still DRAWN on the calendar, it just no longer blocks. */
+const MT_BOOKING_FREES_TIME = ['cancelled', 'lost'];
 const MT_DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const MT_ZONE_NAMES = {'Asia/Colombo':'Sri Lanka','America/New_York':'US Eastern','America/Chicago':'US Central','America/Denver':'US Mountain','America/Los_Angeles':'US Pacific','America/Phoenix':'Arizona'};
 const MT_NOSHOW_DAYS = 45;      /* how far back viewNoShows looks */
@@ -273,6 +282,8 @@ function mtMinutesOf(m, st){
   return Number.isFinite(n) && n>=5 && n<=480 ? n : (st||mtSettingsNow()).slot_minutes;
 }
 function mtHoldsTime(m){ return !!m && MT_FREES_TIME.indexOf(String(m.status||'booked')) < 0 }
+/* The same question for a website booking, where being lost frees the slot too. */
+function mtBookingHoldsTime(b){ return !!b && MT_BOOKING_FREES_TIME.indexOf(String(b.status||'booked')) < 0 }
 /* Everything already on the calendar that overlaps a window: meetings that hold
    their time, website bookings that hold theirs, and blocks. One query each.
    If the bookings cannot be read this fails — a time is never offered on a guess. */
@@ -298,7 +309,7 @@ async function mtBusy(fromIso, toIso){
     const d = mtParseDate(m.starts_at); if(!d) return;
     taken.push({from:d.getTime(), to:d.getTime()+mtMinutesOf(m,st)*60000, kind:'meeting', row:m});
   });
-  (bk.data||[]).filter(mtHoldsTime).forEach(b=>{
+  (bk.data||[]).filter(mtBookingHoldsTime).forEach(b=>{
     const d = mtParseDate(b.call_at); if(!d) return;
     taken.push({from:d.getTime(), to:d.getTime()+mtMinutesOf(b,st)*60000, kind:'booking', row:b});
   });
@@ -514,6 +525,7 @@ async function mtReschedule(id, startsAt){
   const cur = await mtMeeting(id); if(!cur.ok) return cur;
   const m = cur.data;
   if(String(m.status) === 'cancelled') return mtErr('That call was cancelled. Book a new one instead of moving it.');
+  const wasAt = m.starts_at;                 // the time it is leaving, before anything is written
 
   const d = mtParseDate(startsAt);
   if(!d) return mtErr('That new start time is not a time I can read.');
@@ -544,7 +556,31 @@ async function mtReschedule(id, startsAt){
     }).eq('id', id).select().single();
   }catch(e){ return mtErr(e) }
   if(res && res.error && mtIsDup(res.error)) return mtErr(MT_TAKEN);
-  return mtWrap(res, null);
+  const moved = mtWrap(res, null);
+  if(!moved.ok) return moved;
+
+  /* A booked sales call IS the month's money, so the qualified_calls row has to
+     move with the meeting. Left behind, its booked_for still said the old time:
+     a call moved from one month into the next went on counting in the old one,
+     and nothing could find it by time again. Both months are recounted — the one
+     it left and the one it has landed in. */
+  if(String(m.kind) === 'qualified' && m.client_id != null){
+    const when = new Date(startMs).toISOString();
+    const cal = await mtRun(() => sb.from('qualified_calls')
+      .update({booked_for: when}).eq('client_id', m.client_id).eq('meeting_id', id).select(), []);
+    if(!cal.ok) return mtErr('The call moved on the calendar, but the booked sales call kept the old time, so the month may count it in the wrong month. Move it back and try again.');
+    const call = Array.isArray(cal.data) ? (cal.data[0] || null) : cal.data;
+    if(call && call.happened && typeof fnCallHappened === 'function'){
+      /* it already counted: carry the time it happened across too, so it counts
+         in the month it has moved into and not the one it has left */
+      await fnCallHappened(call.id, when);
+    }
+    if(call && typeof fnRecountAround === 'function'){
+      await fnRecountAround(m.client_id, wasAt);
+      await fnRecountAround(m.client_id, when);
+    }
+  }
+  return moved;
 }
 
 /* Call off a meeting. A cancelled `qualified` call is also marked as not
@@ -662,16 +698,34 @@ async function mtMarkReminded(id, which){
    changes and the error says so. For "held" the meeting is marked first and the
    call second, because that order can only ever undercount, never over. */
 
-/* The qualified_calls row of a meeting: same client, same booked time. */
+/* The qualified_calls row of a meeting: same client, same meeting.
+   Matched on meeting_id, falling back to the booked time for a row written
+   before meeting_id existed. Matching on the time alone used to mean that a
+   call which had been MOVED could never be found again, so cancelling it left
+   it counted.
+   The write below does not move client_months by itself: nothing in the
+   database recounts on its own (see the note in finance.js), so it recounts
+   afterwards. Without that, calling off a call that was counted left the month
+   claiming a call it no longer had. */
 async function mtSetCallHappened(m, happened){
   if(!m || m.client_id==null) return mtOk(null);         // no client, no money row to keep honest
   const patch = happened
     ? {happened:true,  happened_at: m.starts_at}
     : {happened:false, happened_at: null};
-  const r = await mtRun(() => sb.from('qualified_calls').update(patch)
-    .eq('client_id', m.client_id).eq('booked_for', m.starts_at).select(), []);
+  const one = (by, v) => mtRun(() => sb.from('qualified_calls').update(patch)
+    .eq('client_id', m.client_id).eq(by, v).select(), []);
+  const pick = res => Array.isArray(res.data) ? (res.data[0] || null) : res.data;
+  let r = m.id==null ? {ok:true, data:[], error:''} : await one('meeting_id', m.id);
   if(!r.ok) return r;
-  return mtOk(Array.isArray(r.data) ? (r.data[0] || null) : r.data);
+  let call = pick(r);
+  if(!call){                                 // a row from before meeting_id existed
+    r = await one('booked_for', m.starts_at);
+    if(!r.ok) return r;
+    call = pick(r);
+  }
+  if(call && typeof fnRecountAround === 'function')
+    await fnRecountAround(call.client_id, call.happened_at || call.booked_for || m.starts_at);
+  return mtOk(call);
 }
 
 /* They turned up. */

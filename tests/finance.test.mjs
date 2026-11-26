@@ -31,6 +31,9 @@ function builder(tableName) {
     upsert(p) { q.op = 'upsert'; q.payload = p; return api; },
     eq(k, v) { q.filters.push([k, v]); return api; },
     in(k, v) { q.filters.push([k, v]); return api; },
+    is(k, v) { q.filters.push([k, v]); return api; },
+    lte(k, v) { q.filters.push([k, v]); return api; },
+    gte(k, v) { q.filters.push([k, v]); return api; },
     order() { return api; },
     limit() { return api; },
     async single() { const r = await settle(); return { data: Array.isArray(r.data) ? r.data[0] : r.data, error: r.error }; },
@@ -325,4 +328,71 @@ test('finance.js calls no other server', () => {
   for (const bad of ['machineFetch', 'MACHINE_URL', 'email-distributor', 'fetch(']) {
     assert.ok(!src.includes(bad), 'finance.js still contains ' + bad);
   }
+});
+
+/* ───────────── a direct write to a call must still move the month ─────────────
+   There is no trigger on qualified_calls, and `counts` is a generated column:
+   the call row goes right at once but client_months.calls_delivered does not
+   move unless something recounts. Checked live on the real database
+   (2026-11-26): after `update qualified_calls set happened = true` the call
+   counted and client_months.calls_delivered was still 0, and v_month_standing
+   showed the stale 0 to every screen. Each of these four writes now recounts. */
+
+test('every direct write to a call recounts the month it belongs to', async () => {
+  const row = { id: 'q1', client_id: 'c1', booked_for: '2026-12-01T15:00:00Z', happened_at: '2026-12-01T15:00:00Z', counts: true };
+  for (const [name, args] of [
+    ['fnCallHappened', ['q1', '2026-12-01T15:30:00Z']],
+    ['fnDisputeCall', ['q1', 'they never joined']],
+    ['fnSettleDispute', ['q1', 'upheld']],
+  ]) {
+    reset();
+    tables.qualified_calls = [row];
+    tables.client_months = [{ id: 'm1' }];
+    const r = await F(name)(...args);
+    assert.equal(r.ok, true, name + ': ' + r.error);
+    assert.ok(calls.some((c) => c.table === 'client_months' && c.op === null),
+      name + ' must look up the months the call touches');
+    assert.deepEqual(rpcs.filter((x) => x.name === 'recount_month'), [{ name: 'recount_month', args: { p_month: 'm1' } }],
+      name + ' must recount that month exactly once');
+  }
+});
+
+test('a logged call that already counts recounts; one that cannot count does not', async () => {
+  reset();
+  tables.qualified_calls = [{ id: 'q9', client_id: 'c1', booked_for: '2026-12-01T15:00:00Z', happened_at: '2026-12-01T15:00:00Z', counts: true }];
+  tables.client_months = [{ id: 'm1' }];
+  await F('fnLogCall')('c1', { bookedFor: '2026-12-01T15:00:00Z', happened: true });
+  assert.equal(rpcs.filter((x) => x.name === 'recount_month').length, 1, 'a call that counts moves the month');
+
+  reset();
+  tables.qualified_calls = [{ id: 'q9', client_id: 'c1', booked_for: '2026-12-01T15:00:00Z', counts: false }];
+  tables.client_months = [{ id: 'm1' }];
+  await F('fnLogCall')('c1', { bookedFor: '2026-12-01T15:00:00Z' });
+  assert.equal(rpcs.filter((x) => x.name === 'recount_month').length, 0, 'nothing counts yet, so no month moved');
+});
+
+test('the recount never touches a locked month, and asks for nothing it cannot place', async () => {
+  reset();
+  tables.client_months = [{ id: 'm1' }];
+  /* the query must exclude a locked month itself: the database refuses anyway,
+     but asking for it would hide a real month behind a wasted round trip */
+  await F('fnRecountAround')('c1', '2026-12-01T15:00:00Z');
+  const q = find('client_months');
+  assert.ok(q.filters.some((f) => f[0] === 'locked_at' && f[1] === null), 'only unlocked months');
+  assert.ok(q.filters.some((f) => f[0] === 'client_id' && f[1] === 'c1'), 'only this client');
+
+  reset();
+  assert.deepEqual(await F('fnRecountAround')(null, '2026-12-01T15:00:00Z'), { ok: true, data: 0, error: '' });
+  assert.deepEqual(await F('fnRecountAround')('c1', null), { ok: true, data: 0, error: '' });
+  assert.deepEqual(await F('fnRecountAround')('c1', 'not a time'), { ok: true, data: 0, error: '' });
+  assert.equal(calls.length, 0, 'nothing is asked when there is nothing to place');
+});
+
+test('a failed recount never turns a write that worked into an error', async () => {
+  reset();
+  tables.qualified_calls = [{ id: 'q1', client_id: 'c1', booked_for: '2026-12-01T15:00:00Z', happened_at: '2026-12-01T15:00:00Z' }];
+  delete tables.client_months;                      // the months cannot be read
+  const r = await F('fnCallHappened')('q1', '2026-12-01T15:30:00Z');
+  assert.equal(r.ok, true, 'the call was written, so the answer is yes');
+  assert.equal(r.data.id, 'q1');
 });

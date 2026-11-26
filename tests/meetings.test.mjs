@@ -878,13 +878,27 @@ test('a website booking holds its time: the hub never offers it, books over it o
   const m = await mtBook({ kind: 'strategy', startsAt: '2026-11-23T16:00:00.000Z' });
   const moved = await mtReschedule(m.data.id, '2026-11-23T14:00:00.000Z');
   assert.equal(moved.ok, false); assert.match(moved.error, /already taken/);
-  // every status but cancelled holds the time — won, lost, anything the research engine writes
-  for (const s of ['booked', 'held', 'no_show', 'won', 'lost', 'whatever_next']) {
+  /* A booking holds its time unless it was cancelled or lost. This is the same
+     list the database's free_slots() uses for discovery_bookings — the website
+     and the hub have to offer the same times, and a call that was never going
+     to happen must not hold a half hour for ever. `won` still holds its slot,
+     because that call really did take place. */
+  for (const s of ['booked', 'held', 'no_show', 'won', 'brief_sent', 'whatever_next']) {
     db.discovery_bookings[0].status = s;
     assert.ok(!(await mtSlots('2026-11-23')).data.map((x) => x.us).includes('9:00 am'), s + ' still holds 9 am');
   }
+  for (const s of ['cancelled', 'lost']) {
+    db.discovery_bookings[0].status = s;
+    assert.ok((await mtSlots('2026-11-23')).data.map((x) => x.us).includes('9:00 am'), 'a ' + s + ' booking frees its time');
+  }
+  /* a MEETING is freed only by being cancelled: being lost is not a thing it is */
+  assert.deepEqual(MT_FREES_TIME, ['cancelled']);
+  assert.deepEqual(MT_BOOKING_FREES_TIME, ['cancelled', 'lost']);
+  /* and a lost booking is still DRAWN on the calendar — it just no longer blocks */
+  db.discovery_bookings[0].status = 'lost';
+  assert.ok(mtEventOfBooking(db.discovery_bookings[0], mtSettingsNow()), 'a lost booking is still on the calendar');
   db.discovery_bookings[0].status = 'cancelled';
-  assert.ok((await mtSlots('2026-11-23')).data.map((x) => x.us).includes('9:00 am'), 'a cancelled booking frees its time');
+  assert.equal(mtEventOfBooking(db.discovery_bookings[0], mtSettingsNow()), null, 'a cancelled one is not drawn');
   // and if the bookings cannot be read, no time is offered on a guess
   fail['discovery_bookings'] = 'no answer';
   const blind = await mtSlots('2026-11-23');
@@ -1750,4 +1764,83 @@ test('a week of the calendar still draws the same thing with the reads run toget
   assert.ok(!BROKEN.test(drawn), drawn.slice(0, 300));
   assert.match(drawn, /Sam/);
   assert.match(drawn, /Dentist/);
+});
+
+/* ───────── a call that is written straight still moves the month ─────────
+   `qualified_calls.counts` is generated, so it is right at once, but
+   `client_months.calls_delivered` is not: there is no trigger on the calls
+   table, and only call_verdict(), lock_month() and recount_month() move the
+   month. Checked on the live database (2026-11-26): a direct update that made
+   a call count left the month saying 0 while the calls behind it said 1. The
+   Calendar writes straight to a call in three places — held, no-show and
+   cancel — so each of them has to recount afterwards. */
+
+test('cancelling a booked sales call recounts the month it was counted in', async () => {
+  rpcs.length = 0;
+  const when = '2026-11-24T15:00:00.000Z';
+  db.clients.push({ id: 'c1', company: 'Stone Roofing', plan: 'starter', calls_promised: 5, monthly_fee: 1500 });
+  db.meetings.push({ id: 'm1', client_id: 'c1', kind: 'qualified', starts_at: when, minutes: 30, status: 'booked' });
+  db.qualified_calls.push({ id: 'qc1', client_id: 'c1', meeting_id: 'm1', booked_for: when, happened: true, happened_at: when });
+  dbRows('client_months').push({ id: 'mo1', client_id: 'c1', month_no: 1, starts_on: '2026-11-01', ends_on: '2026-11-30', locked_at: null, calls_delivered: 1 });
+
+  const r = await mtCancel('m1', 'they went quiet');
+  assert.equal(r.ok, true, r.error);
+  assert.equal(db.qualified_calls[0].happened, false, 'the call no longer counts');
+  assert.deepEqual(rpcs.filter((x) => x.name === 'recount_month'), [{ name: 'recount_month', args: { p_month: 'mo1' } }],
+    'the month it was counted in is recounted, or it keeps a call it has not got');
+});
+
+test('a no-show and a held call each recount, and a locked month is left alone', async () => {
+  const when = '2026-11-24T15:00:00.000Z';
+  const seed = () => {
+    resetDb(); rpcs.length = 0;
+    db.clients.push({ id: 'c1', company: 'Stone Roofing', plan: 'starter', calls_promised: 5, monthly_fee: 1500 });
+    db.meetings.push({ id: 'm1', client_id: 'c1', kind: 'qualified', starts_at: when, minutes: 30, status: 'booked' });
+    db.qualified_calls.push({ id: 'qc1', client_id: 'c1', meeting_id: 'm1', booked_for: when, happened: false, happened_at: null });
+    dbRows('client_months').push({ id: 'mo1', client_id: 'c1', month_no: 1, starts_on: '2026-11-01', ends_on: '2026-11-30', locked_at: null });
+  };
+  seed(); await mtHeld('m1');
+  assert.equal(rpcs.filter((x) => x.name === 'recount_month').length, 1, 'held recounts');
+  seed(); await mtNoShow('m1');
+  assert.equal(rpcs.filter((x) => x.name === 'recount_month').length, 1, 'a no-show recounts');
+
+  /* a locked month is never asked for: the database would refuse it anyway, and
+     the owner is told about the lock by call_verdict, not by a wasted round trip */
+  seed(); dbRows('client_months')[0].locked_at = '2026-12-01T00:00:00Z';
+  await mtNoShow('m1');
+  assert.equal(rpcs.filter((x) => x.name === 'recount_month').length, 0, 'a locked month does not move');
+});
+
+test('moving a booked sales call moves the money with it', async () => {
+  rpcs.length = 0;
+  const when = '2026-11-24T15:00:00.000Z', to = '2026-12-02T15:00:00.000Z';
+  db.calendar_settings.push({ id: 1, open_time: '07:00', close_time: '21:00', days: [1, 2, 3, 4, 5], slot_minutes: 30, min_notice_h: 0, days_ahead: 120, us_zone: 'America/New_York', owner_zone: 'Asia/Colombo' });
+  db.clients.push({ id: 'c1', company: 'Stone Roofing', plan: 'starter', calls_promised: 5, monthly_fee: 1500 });
+  db.meetings.push({ id: 'm1', client_id: 'c1', kind: 'qualified', starts_at: when, minutes: 30, status: 'booked', time_zone: 'America/New_York' });
+  db.qualified_calls.push({ id: 'qc1', client_id: 'c1', meeting_id: 'm1', booked_for: when, happened: false, happened_at: null });
+  dbRows('client_months').push({ id: 'mo1', client_id: 'c1', month_no: 1, starts_on: '2026-11-01', ends_on: '2026-11-30', locked_at: null });
+  dbRows('client_months').push({ id: 'mo2', client_id: 'c1', month_no: 2, starts_on: '2026-12-01', ends_on: '2026-12-31', locked_at: null });
+
+  const r = await mtReschedule('m1', to);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(db.meetings[0].starts_at, to);
+  assert.equal(db.qualified_calls[0].booked_for, to,
+    'the call kept the old time, so it would count in the month it has left');
+  const asked = rpcs.filter((x) => x.name === 'recount_month').map((x) => x.args.p_month).sort();
+  assert.deepEqual(asked, ['mo1', 'mo2'], 'both the month it left and the month it joined are recounted');
+});
+
+test('a move whose money side fails says so, and names what is wrong', async () => {
+  rpcs.length = 0;
+  const when = '2026-11-24T15:00:00.000Z', to = '2026-12-02T15:00:00.000Z';
+  db.calendar_settings.push({ id: 1, open_time: '07:00', close_time: '21:00', days: [1, 2, 3, 4, 5], slot_minutes: 30, min_notice_h: 0, days_ahead: 120, us_zone: 'America/New_York', owner_zone: 'Asia/Colombo' });
+  db.clients.push({ id: 'c1', company: 'Stone Roofing', plan: 'starter', calls_promised: 5, monthly_fee: 1500 });
+  db.meetings.push({ id: 'm1', client_id: 'c1', kind: 'qualified', starts_at: when, minutes: 30, status: 'booked', time_zone: 'America/New_York' });
+  db.qualified_calls.push({ id: 'qc1', client_id: 'c1', meeting_id: 'm1', booked_for: when });
+  fail['qualified_calls.update'] = 'permission denied for table qualified_calls';
+
+  const r = await mtReschedule('m1', to);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /booked sales call kept the old time/);
+  assert.ok(!/permission denied/.test(r.error), 'never the database’s own words');
 });

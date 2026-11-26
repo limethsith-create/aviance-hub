@@ -1145,3 +1145,65 @@ test('no failure state is a dead end: every one says why and offers a way on', a
     assert.doesNotMatch(text(h), /Loading/, what + ' is not still pretending to load');
   }
 });
+
+/* ───────── "At stake" is every open month, the way the database adds it up ─────────
+   v_exposure.at_risk_total sums at_risk over EVERY open month. The clients
+   screen used to add up one month per client — the one ending soonest — so a
+   client with two months open at once (the normal state on the day a month ends
+   before anybody has locked it) was counted once, and the tile disagreed with
+   the Today screen about the same business. Seen live: RH3 Later Month Co had
+   months 1 and 3 open together. */
+
+test('a client with two months open puts both at stake, and a settled month is not at stake', () => {
+  const c = client();
+  const open1 = month({month_id:'ma', month_no:2, at_risk:3000});
+  const open2 = month({month_id:'mb', month_no:3, at_risk:1500});
+  assert.equal(cbStakeAll(c, [open1]), 3000, 'one month open');
+  assert.equal(cbStakeAll(c, [open1, open2]), 4500, 'both months, not just the nearest');
+  assert.equal(cbStakeAll(c, []), 0, 'nothing open, nothing at stake');
+  assert.equal(cbStakeAll(c, null), 0);
+  /* a settled month is money already owed, not money at risk: it has its own line */
+  assert.equal(cbStakeAll(c, [month({verdict:'missed', refund_due:6000, at_risk:6000})]), 0);
+  /* another client's months never land on this row */
+  assert.equal(cbStakeAll(c, [month({client_id:'c2', at_risk:9000})]), 0);
+});
+
+test('the row and the tile both show every open month', async () => {
+  tables['clients.select'] = () => ({data:[client()], error:null});
+  tables['v_month_standing.select'] = () => ({data:[
+    month({month_id:'ma', month_no:2, at_risk:3000}),
+    month({month_id:'mb', month_no:3, days_left:40, at_risk:1500}),
+  ], error:null});
+  tables['client_profiles.select'] = () => ({data:[], error:null});
+  tables['client_stage_history.select'] = () => ({data:[], error:null});
+  tables['client_requests.select'] = () => ({data:[], error:null});
+  tables['profiles.select'] = () => ({data:[], error:null});
+  await cbLoadAll(true);
+  assert.match(text(viewClients()), /At stake \$4,500/, 'both open months, added up in the database’s own numbers');
+});
+
+/* ───────── a month that is over is never announced as having days left ───────── */
+
+test('the flag on a month that has ended says it ended, not that there is time left', () => {
+  assert.equal(cbWhenWords(6), 'with 6 days left');
+  assert.equal(cbWhenWords(1), 'with 1 day left');
+  assert.equal(cbWhenWords(0), 'on its last day');
+  assert.equal(cbWhenWords(-48), 'and it ended 48 days ago');
+  assert.equal(cbWhenWords(-1), 'and it ended 1 day ago');
+  assert.equal(cbWhenWords(null), 'and the month is still running');
+  assert.equal(cbWhenWords('x'), 'and the month is still running');
+
+  /* seen live: RH3 Later Month Co, month one ended 9 October, read on 27 November */
+  const r = cbRow(client(), {standing:[month({month_no:1, calls_delivered:0, days_left:-48, warn_now:true, at_risk:6000})]});
+  const flag = r.flags.find(f => f.code === 'month');
+  assert.ok(flag, 'a month that is short and over still needs a person');
+  assert.match(flag.text, /10 calls short and it ended 48 days ago/);
+  assert.ok(!/days left/.test(flag.text), 'it must never claim time that has gone');
+});
+
+test('a settled month says its refund once, not twice', () => {
+  const r = cbRow(client(), {standing:[]});
+  const h = cbRenderMonths(r, [month({month_no:2, verdict:'missed', calls_delivered:3, calls_promised:5, refund_due:1500})]);
+  assert.equal((text(h).match(/\$1,500 refunded/g) || []).length, 1, 'the same money, said once');
+  assert.match(text(h), /Month 2: missed — 3 of 5\. \$1,500 refunded\./);
+});
