@@ -23,8 +23,37 @@ const PST_RELOAD_MS = 60000;        /* the cards' state is asked for again at mo
 const PST_MAX_NOTE = 4000;
 const PST_MAX_ANSWER = 2000;
 
-/* what the cards draw from: the database's answers and what the person has typed */
-const pstState = { approvals: {}, form: null, loaded: false, home: null, ui: {}, items: {}, busy: false, who: '', at: 0, seen: '' };
+/* what the cards draw from: the database's answers and what the person has typed.
+   `loaded` is "we have asked AND been answered"; `failed` is the sentence from an
+   ask that did not answer. The two are kept apart from "nothing there yet" on
+   purpose — see pstLook below. */
+const pstState = { approvals: {}, form: null, loaded: false, failed: '', home: null, ui: {}, items: {}, busy: false, who: '', at: 0, seen: '' };
+
+/* What a card is allowed to claim. A card is drawn from a message in the thread,
+   which arrives before the card's own state does, so for the first moment (and
+   for ever, if the ask fails) this file knows a card exists but not what has
+   happened to it. Presenting that as "waiting for you" is the same lie the
+   Campaign tab was taught not to tell: it offers a live Approve button on
+   something already approved, and a blank pre-call form to someone who filled it
+   in a week ago — and a second submit overwrites the answers they gave.
+   So: loaded -> draw it; failed -> say so, with a way to try again; neither ->
+   say we are still reading it.
+   The default is `loaded`, so a caller that hands in nothing (and every pure
+   render test) gets exactly today's behaviour. */
+function pstLook(load){
+  const l = load && typeof load === 'object' ? load : null;
+  if (!l) return { loaded: true, failed: '' };
+  return { loaded: l.loaded !== false, failed: String(l.failed || '') };
+}
+/* The honest line in place of a card's controls. `waiting` is the whole sentence
+   to show while the ask is still out; `failed` replaces it once the ask has come
+   back empty-handed. Pure. */
+function pstWaitHtml(waiting, failed){
+  if (!failed) return '<p class="pc-tag pst-wait" aria-busy="true">' + pcEsc(waiting) + '</p>';
+  return '<p class="pc-err" role="alert">' + pcEsc(failed) + '</p>' +
+    '<p class="pc-small">' + pcEsc('Nothing here has changed. We try again every minute.') + '</p>' +
+    '<div class="pst-row"><button type="button" class="pc-btn pc-btn-line" data-pc-act="pstRetry">Try again</button></div>';
+}
 
 /* Who the state belongs to. A different person signing in on the same browser must never be shown the
    last person's answers, approvals or half-typed notes, so everything is dropped when this changes. */
@@ -33,7 +62,7 @@ function pstWho(home){
   return String((h.person && h.person.id) || '') + '|' + String((h.channel && h.channel.id) || '');
 }
 function pstReset(){
-  pstState.approvals = {}; pstState.form = null; pstState.loaded = false; pstState.ui = {}; pstState.items = {};
+  pstState.approvals = {}; pstState.form = null; pstState.loaded = false; pstState.failed = ''; pstState.ui = {}; pstState.items = {};
   pstState.at = 0; pstState.seen = '';
 }
 function pstUse(home){
@@ -100,8 +129,10 @@ function pstNum(v){
 /* ---- cards (pure) ------------------------------------------------------------------------ */
 
 /* m: the message item from pcGroupMessages; rec: the row from portal_approvals (or undefined);
-   ui: {name, note, open, busy, error}; home: portal_home */
-function pstApprovalHtml(m, rec, ui, home){
+   ui: {name, note, open, busy, error}; home: portal_home;
+   load: {loaded, failed} from pstState — left out, the card behaves as it always
+   has and assumes the state is in. See pstLook. */
+function pstApprovalHtml(m, rec, ui, home, load){
   const meta = (m && m.meta) || {};
   const id = String(meta.approval_id || (rec && rec.id) || '');
   if (!id) return '';
@@ -114,8 +145,14 @@ function pstApprovalHtml(m, rec, ui, home){
   const head = `<p class="pc-tag pc-red">${pcEsc(PST_KINDS[kind] ? 'For your approval · ' + PST_KINDS[kind] : 'For your approval')}</p>
     <h3 class="pst-h">${pcEsc(title)}</h3>
     ${body ? `<div class="pst-pre">${pcEsc(body)}</div>` : ''}`;
+  const look = pstLook(load);
   let foot;
-  if (status === 'approved') {
+  /* We know a card is here but not what has happened to it. Never offer Approve
+     on that guess: the person may have approved it days ago, and the only thing
+     pressing it can do is come back with "This one has already been answered." */
+  if (!look.loaded && !rec) {
+    foot = pstWaitHtml('Checking where this is up to', look.failed);
+  } else if (status === 'approved') {
     foot = `<p class="pst-stamp pst-stamp-ok">Approved by ${pcEsc(r.decided_name || 'you')}${r.decided_at ? ' · ' + pcEsc(pstWhen(r.decided_at)) : ''}</p>`;
   } else if (status === 'changes') {
     foot = `<p class="pst-stamp">Changes asked by ${pcEsc(r.decided_name || 'you')}${r.decided_at ? ' · ' + pcEsc(pstWhen(r.decided_at)) : ''}</p>
@@ -138,11 +175,22 @@ function pstApprovalHtml(m, rec, ui, home){
   return `<section class="pst-card" data-pst-card="a:${pcEsc(id)}" aria-label="${pcEsc(title)}">${head}${foot}</section>`;
 }
 
-/* form: what portal_precall_get returned (null = not loaded yet); ui: {values, busy, error} */
-function pstFormHtml(m, form, ui){
+/* form: what portal_precall_get returned (null/undefined = not asked, or the ask
+   failed); ui: {values, busy, error}; load: {loaded, failed} from pstState. */
+function pstFormHtml(m, form, ui, load){
   const f = form || {};
   const u = ui || {};
+  const look = pstLook(load);
   const key = 'f:' + String((m && m.id) || 'precall').replace(/[^A-Za-z0-9-]/g, '');
+  /* No answers in hand yet. A blank form here is not neutral: portal_precall_submit
+     overwrites, so someone who answered last week and is shown four empty boxes
+     can wipe what they wrote. Say we are still reading it instead. */
+  if (!form && !look.loaded) {
+    return `<section class="pst-card" data-pst-card="${pcEsc(key)}" aria-label="Pre-call form">
+      <p class="pc-tag pc-red">Pre-call form</p>
+      ${pstWaitHtml('Checking your answers', look.failed)}
+    </section>`;
+  }
   if (f.submitted_at) {
     return `<section class="pst-card" data-pst-card="${pcEsc(key)}" aria-label="Pre-call form">
       <p class="pc-tag pc-red">Pre-call form</p>
@@ -230,8 +278,8 @@ async function pstSubmitForm(ctx, values){
 function pstCardFor(key){
   const m = pstState.items[key];
   if (!m) return '';
-  if (key.indexOf('a:') === 0) return pstApprovalHtml(m, pstState.approvals[key.slice(2)], pstState.ui[key], pstState.home);
-  if (key.indexOf('f:') === 0) return pstFormHtml(m, pstState.form, pstState.ui.f);
+  if (key.indexOf('a:') === 0) return pstApprovalHtml(m, pstState.approvals[key.slice(2)], pstState.ui[key], pstState.home, pstState);
+  if (key.indexOf('f:') === 0) return pstFormHtml(m, pstState.form, pstState.ui.f, pstState);
   return '';
 }
 /* redraw one card (or all of them) in place, keeping focus where it was when we can */
@@ -255,12 +303,12 @@ if (typeof PC !== 'undefined' && PC) {
     const id = m && m.meta && m.meta.approval_id;
     if (!id) return '';
     pstState.items['a:' + id] = m;
-    return pstApprovalHtml(m, pstState.approvals[id], pstState.ui['a:' + id], pstState.home);
+    return pstApprovalHtml(m, pstState.approvals[id], pstState.ui['a:' + id], pstState.home, pstState);
   };
   PC.cards.form = function(m){
     const key = 'f:' + String((m && m.id) || 'precall').replace(/[^A-Za-z0-9-]/g, '');
     pstState.items[key] = m;
-    return pstFormHtml(m, pstState.form, pstState.ui.f);
+    return pstFormHtml(m, pstState.form, pstState.ui.f, pstState);
   };
   PC.cards.update = function(m){ return pstUpdateHtml(m); };
 
@@ -291,6 +339,12 @@ if (typeof PC !== 'undefined' && PC) {
     if (t) t.focus();
   };
   PC.actions.pstCancel = function(el){ const key = 'a:' + idOf(el), u = pstUi(key); u.open = false; u.error = ''; pstRedraw(key); };
+  /* "Try again" on a card that could not be read: forget the back-off and ask
+     now, so someone looking at the failure has a way out other than reloading. */
+  PC.actions.pstRetry = function(el, ctx){
+    pstState.at = 0; pstState.seen = '';
+    return pstMount(ctx);
+  };
   PC.actions.pstPrecall = async function(el, ctx){
     const u = pstUi('f');
     if (u.busy) return;
@@ -307,7 +361,7 @@ if (typeof PC !== 'undefined' && PC) {
   };
 
   /* after every refresh: learn who is signed in, then load the state the cards on screen need */
-  PC.mounts.push(async function(ctx){
+  async function pstMount(ctx){
     pstUse(ctx && ctx.home);
     if (typeof document === 'undefined' || pstState.busy) return;
     const want = { approvals: !!document.querySelector('[data-pst-card^="a:"]'), form: !!document.querySelector('[data-pst-card^="f:"]') };
@@ -324,14 +378,23 @@ if (typeof PC !== 'undefined' && PC) {
     catch (e) { r = pstErr(e); }
     finally { pstState.busy = false }
     if (who !== pstState.who) return; /* someone else signed in while this was on its way */
-    if (!r.ok) return; /* the cards still work; the database refuses anything already decided */
+    /* An ask that did not answer is written down, not swallowed. The stamp is set
+       either way, so a database that is down is asked again in a minute rather
+       than on every refresh; and the cards say what happened instead of guessing
+       that nothing has been approved and no form has been filled in. */
     pstState.at = Date.now(); pstState.seen = seen;
-    const before = JSON.stringify([pstState.approvals, pstState.form]);
+    if (!r.ok) {
+      if (pstState.failed !== r.error) { pstState.failed = r.error; pstRedraw(); }
+      return;
+    }
+    const before = JSON.stringify([pstState.approvals, pstState.form, pstState.failed]);
+    pstState.failed = '';
     if (r.data.approvals) { const map = {}; r.data.approvals.forEach((a) => { if (a && a.id) map[a.id] = a; }); pstState.approvals = map; }
     if (r.data.form) pstState.form = r.data.form;
     pstState.loaded = true;
-    if (JSON.stringify([pstState.approvals, pstState.form]) !== before) pstRedraw();
-  });
+    if (JSON.stringify([pstState.approvals, pstState.form, pstState.failed]) !== before) pstRedraw();
+  }
+  PC.mounts.push(pstMount);
 
   /* keep what the person types, so a redraw of the thread never loses it */
   if (typeof document !== 'undefined' && document.addEventListener) {
@@ -360,6 +423,7 @@ if (typeof PC !== 'undefined' && PC) {
         '.pst-row{display:flex;flex-wrap:wrap;gap:10px}',
         '.pst-row .pc-btn{min-height:48px;padding:10px 20px;font-size:16px}',
         '.pst-card .pc-err:not(:empty){margin:0 0 12px}',
+        '.pst-wait{margin:4px 0 0}',
         '.pst-stamp{display:inline-block;margin:4px 0 8px;padding:8px 12px;border:2px solid #000;font:400 12px/1.4 var(--pc-mono);letter-spacing:.12em;text-transform:uppercase}',
         '.pst-stamp-ok{border-color:var(--pc-red);color:var(--pc-red)}',
         '.pst-note{white-space:pre-wrap;overflow-wrap:anywhere;border-left:3px solid #000;padding:4px 0 4px 12px;margin:0 0 8px}',
