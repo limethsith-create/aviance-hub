@@ -70,13 +70,43 @@ test('contrast: red as TEXT on a dark ground is the bright red, because #E0290F 
     assert.ok(block.includes(sel), sel + ' takes the bright red in the dark theme');
 });
 
-test('contrast: the focus ring is never red on red — the filled button and the lit place take white', () => {
+test('contrast: the focus ring is never red on red — every red-filled control takes white', () => {
   /* theme.css and polish.css both set the ring to --brand with !important, so
-     brand.css has to shout back or the ring vanishes on its own two red grounds. */
-  assert.match(brand, /\.btn:focus-visible,\.nav-item:focus-visible,\s*\n\.tmc-msg-mine :focus-visible\{outline:2px solid #fff!important/);
+     brand.css has to shout back or the ring vanishes on its own two red grounds.
+
+     This used to pin the exact selector line, which meant it passed while the bug was
+     still there: the BASE rule had no !important, so it lost to theme.css, and only
+     the few selectors listed with !important were ever really fixed. Four red buttons
+     outside that list took a red ring on a red button — 1.0:1 against the control it
+     was meant to mark. So this now pins the two things that actually matter. */
+
+  /* 1. the base rule must win, or every control not named below silently goes red */
+  assert.match(brand, /(^|\n):focus-visible\{outline:2px solid var\(--text\)!important/,
+    'the base :focus-visible must carry !important or theme.css overrides it back to red');
+
+  /* 2. every red-filled control is in the white-ring list. Add a red button to the
+        system and add it here, or it gets an invisible ring. */
+  const white = /([^\n]*(?:\n[^\n]*)*?):focus-visible\{outline:2px solid #fff!important/.exec(brand);
+  assert.ok(white, 'the white-ring rule still exists');
+  const list = brand.slice(0, brand.indexOf('{outline:2px solid #fff!important'));
+  for (const sel of ['.btn:focus-visible', '.nav-item:focus-visible', '.pt-btn.primary:focus-visible',
+                     '.chv-btn.primary:focus-visible', '.chv-send:focus-visible', '.tmc-btn:focus-visible'])
+    assert.ok(list.includes(sel), sel + ' is a red-filled control and must take the white ring');
+
   assert.match(brand, /\.btn\.ghost:focus-visible,\.tb-btn:focus-visible\{outline:2px solid var\(--text\)!important/);
   assert.ok(ratio(PAPER, RED_BRIGHT) >= 3, 'white on the red ground clears the 3:1 a ring needs');
   assert.ok(ratio(INK, PAPER) >= 3, 'ink on paper clears it for the outline buttons');
+});
+
+test('the message box on Channels can show a focus ring', () => {
+  /* It hides its own border and glow so it reads as part of the card around it, but it
+     was hiding its focus ring too — keyboard-only there was nothing at all to say the
+     caret was in the compose box. The :focus-visible case must not kill the outline. */
+  const chv = read('channels.css');
+  const line = chv.split('\n').find((l) => l.includes('.chv-cbox textarea:focus-visible'));
+  assert.ok(line, 'the compose box still has its own :focus-visible rule');
+  assert.ok(!/outline:\s*0/.test(line),
+    'the compose box must not switch its focus ring off: ' + line.trim());
 });
 
 test('contrast: nothing important is carried by colour alone on the guarantee band', () => {
