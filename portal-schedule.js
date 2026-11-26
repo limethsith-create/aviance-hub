@@ -107,6 +107,27 @@ function psSystemHtml(item, viewerZone, now){
 
 /* ---- the click ------------------------------------------------------ */
 
+/* A booking that never answers used to leave the tapped button showing "…" and
+   psUi[offer].busy true for ever: the client could not pick that time, could
+   not pick another, and was told nothing. Past this limit the ask counts as no
+   answer. It is deliberately long — this is a write, so waiting is better than
+   worrying them — and it is never retried, because a repeated booking is a
+   second call in the diary. A test may shorten it with psOpts.pickMs. */
+const PS_PICK_MS = 25000;
+const psOpts = { pickMs: 0 };
+const PS_NO_ANSWER = { psNoAnswer: true };
+function psCapped(work, ms){
+  const limit = Number(ms || psOpts.pickMs) > 0 ? Number(ms || psOpts.pickMs) : PS_PICK_MS;
+  if (typeof setTimeout !== 'function') return Promise.resolve(work);
+  return new Promise((done, no) => {
+    let over = false;
+    const end = (fn) => (v) => { if (!over) { over = true; clearTimeout(timer); fn(v); } };
+    const timer = setTimeout(end(done), limit, PS_NO_ANSWER);
+    try { Promise.resolve(work).then(end(done), end(no)); }
+    catch (e) { end(no)(e); }
+  });
+}
+
 function psCardEl(el){ return el && el.closest ? el.closest('.ps-card') : null; }
 function psMark(card, offer, label){
   if (!card || !card.querySelectorAll) return;
@@ -127,13 +148,21 @@ async function psPick(el, ctx){
   ui.busy = true; ui.error = '';
   const card = psCardEl(el);
   psMark(card, offer, { i: String(i), text: '…' });
-  let r;
-  try { r = await ctx.rpc('portal_offer_pick', { p_offer: offer, p_index: i }); }
+  let r, quiet = false;
+  try { r = await psCapped(ctx.rpc('portal_offer_pick', { p_offer: offer, p_index: i })); }
   catch (e) { r = { ok: false, data: null, error: 'Something went wrong. Please try again.' }; }
+  if (r === PS_NO_ANSWER) {
+    /* It may have booked and it may not. The one thing we must not do is guess,
+       and the one thing we must not do twice is send the booking again — that
+       is a second call in their diary. So the card says exactly what we know,
+       and the refresh below brings the answer back from the database. */
+    quiet = true;
+    r = { ok: false, data: null, error: 'We did not hear back from Aviance. Refresh the page to see whether it booked before you tap again.' };
+  }
   if (!r || typeof r !== 'object') r = { ok: false, data: null, error: 'No answer from Aviance.' };
   ui.busy = false;
   if (!r.ok) {
-    ui.error = 'That did not book. ' + (r.error || 'Please try again.');
+    ui.error = quiet ? r.error : 'That did not book. ' + (r.error || 'Please try again.');
     psMark(card, offer, { i: String(i), text: String(i) });
   } else {
     ui.picked = i;

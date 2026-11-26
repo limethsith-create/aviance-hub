@@ -29,6 +29,24 @@
 
   function show(html){ root.innerHTML = html; const h = root.querySelector('h1'); if (h) h.focus(); }
 
+  /* A request that never answers is the worst failure on this page: nothing is
+     thrown, nothing settles, and the first screen a paying client ever sees
+     says "Loading" until they give up. Both asks here are given a limit; past
+     it they count as "no answer", which has a screen of its own and a way to
+     try again. JOIN_WAIT_MS is longer because by then they have typed a
+     password and would rather wait than retype it. */
+  const PEEK_WAIT_MS = 12000;
+  const JOIN_WAIT_MS = 25000;
+  function capped(work, ms){
+    return new Promise(function(done){
+      let over = false;
+      const end = function(v){ if (!over) { over = true; clearTimeout(timer); done(v); } };
+      const timer = setTimeout(function(){ end(null); }, ms);
+      try { Promise.resolve(work).then(end, function(){ end(null); }); }
+      catch (e) { end(null); }
+    });
+  }
+
   function formHtml(v){
     const company = v.company || 'your company';
     return `<main class="pc-wrap pc-doc pc-join">
@@ -66,8 +84,8 @@
 
   async function load(){
     show(pcLoadingHtml());
-    const r = await pcInvitePeek(token);
-    if (!r.ok) { show(pcOfflineHtml()); return; }
+    const r = await capped(pcInvitePeek(token), PEEK_WAIT_MS);
+    if (!r || !r.ok) { show(pcOfflineHtml()); return; }
     if (r.data.ok && r.data.email) { invite = r.data; show(formHtml(invite)); return; }
     const reason = r.data.reason;
     if (reason === 'seats_full') {
@@ -97,14 +115,15 @@
     if (bad) { (pcPasswordProblem(pw.value) ? pw : pw2).focus(); return; }
     const password = pw.value;
     busy = true; btn.disabled = true; btn.textContent = 'Opening…';
-    const a = await pcAccept(token, password);
-    if (!a.ok) {
+    const a = await capped(pcAccept(token, password), JOIN_WAIT_MS);
+    if (!a || !a.ok) {
       busy = false; btn.disabled = false; btn.textContent = 'Open my channel';
-      err.textContent = a.error;
+      err.textContent = a ? a.error
+        : 'We did not hear back from Aviance. Check your connection and press the button again.';
       return;
     }
-    const s = await pcSignIn(a.data.email, password);
-    if (!s.ok) {
+    const s = await capped(pcSignIn(a.data.email, password), JOIN_WAIT_MS);
+    if (!s || !s.ok) {
       show(pcNoticeHtml('Your password is set.', 'Sign in with your email and new password to open your channel.', '<p><a class="pc-btn" href="/portal.html">Sign in</a></p>'));
       return;
     }
