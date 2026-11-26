@@ -254,6 +254,47 @@ test('obStart succeeds when ready: inputs_complete_on, day1_on, stage live, and 
   assert.equal(opened[0].args.p_client, ID);
   assert.equal(r.data.month, 'm-1');
 });
+/* Day one happens once. day1_on anchors every month boundary this client will
+   ever have, so starting twice moves all of them — and the checklist, which is
+   read from rows, stays green after day one, so the button alone is no guard. */
+test('obStart refuses a second day one, names the day already set, and moves nothing', async () => {
+  const first = await A.obStart(ID);
+  assert.equal(first.ok, true, first.error);
+  const anchored = db.clients[0].day1_on;
+  assert.ok(anchored, 'day1_on is set the first time');
+  writes.length = 0;
+  const again = shape(await A.obStart(ID));
+  assert.equal(again.ok, false, 'a second start must be refused');
+  assert.match(again.error, /already live/i);
+  assert.ok(again.error.includes(anchored), 'the refusal names the day the months are counted from');
+  assert.equal(db.clients[0].day1_on, anchored, 'the anchor has not moved');
+  assert.equal(writes.length, 0, 'nothing at all is written by the second start');
+});
+test('obStart refuses a client whose day1_on was set elsewhere, even on a different day', async () => {
+  db.clients[0].day1_on = '2026-09-01';
+  db.clients[0].stage = 'live';
+  const r = await A.obStart(ID);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /2026-09-01/);
+  assert.equal(db.clients[0].day1_on, '2026-09-01');
+});
+test('obStart writes the client twice, not three times: fnStartSending already sets stage live', async () => {
+  const r = await A.obStart(ID);
+  assert.equal(r.ok, true, r.error);
+  const ups = writes.filter((w) => w.table === 'clients' && w.op === 'update');
+  assert.equal(ups.length, 2, 'inputs_complete_on, then day1_on + stage together');
+  assert.equal(db.clients[0].stage, 'live');
+  /* the removed third write said stage live a second time; the gap between the
+     two was a window where a client was live with a month open and still read
+     "onboarding" on every screen */
+  assert.equal(ups.filter((w) => Object.keys(w.payload).length === 1 && w.payload.stage === 'live').length, 0);
+});
+test('the client read includes day1_on, or obStart cannot tell a second start from a first', async () => {
+  await A.obChecklist(ID);
+  const cols = readsOf('clients')[0].cols.split(',');
+  assert.ok(cols.includes('day1_on'), 'the client read must include day1_on');
+});
+
 test('obStart says which one thing is missing, and how many others', async () => {
   db.meetings = []; db.client_people = [];
   const r = await A.obStart(ID);

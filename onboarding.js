@@ -144,7 +144,7 @@ function obMeetingHeld(m){ return Boolean(m && (m.held_at || obText(m.status).to
    undefined — the tests check the ones that are used. */
 async function obClient(clientId){
   return obRun(() => sb.from('clients')
-    .select('id,company,contact_name,contact_email,booking_id,plan,term,stage,inputs_complete_on')
+    .select('id,company,contact_name,contact_email,booking_id,plan,term,stage,inputs_complete_on,day1_on')
     .eq('id', clientId).maybeSingle(), null);
 }
 
@@ -298,11 +298,19 @@ async function obChecklistMany(clients){
       .in('client_id', ids).order('created_at'), []),
     obRun(() => sb.from('meetings').select('id,client_id,kind,starts_at,status,held_at')
       .in('client_id', ids).eq('kind', 'strategy').order('starts_at', {ascending:false}), []),
+    /* KNOWN, NOT FIXED HERE. This reads EVERY invoice there has ever been and
+       then keeps the handful belonging to these clients. A read with no range
+       in it is answered out of one page, so past that page's ceiling the
+       oldest clients' invoices are simply not in the answer — and this screen
+       then tells the owner that a client who paid months ago "has not paid
+       yet", and holds up their day one. The fix is one line in finance.js:
+       fnInvoices should take a list of client ids and filter on it. The house
+       rule (tests/onboarding.test.mjs) is that this file never reads the
+       invoices table itself, so the fix does not belong here. */
     typeof fnInvoices === 'function' ? fnInvoices() : obOk([]),
   ]);
   /* The same order of reporting as obChecklist: the agreement first. */
-  for (const r of [agByBooking, agByEmail, prs, pes, mes]) if (!r.ok) return r;
-  if (!invs.ok) return obErr(invs.error);
+  for (const r of [agByBooking, agByEmail, prs, pes, mes, invs]) if (!r.ok) return r;
 
   const byBooking = {}, byEmail = {};
   (agByBooking.data || []).forEach(a => { const k = String(a.booking_id);
@@ -345,6 +353,19 @@ async function obReady(clientId){
 async function obStart(clientId){
   const ck = await obChecklist(clientId);
   if (!ck.ok) return ck;
+  const already = obText(ck.data.client && ck.data.client.day1_on);
+  /* DAY ONE HAPPENS ONCE. fnStartSending writes day1_on, and day1_on is the
+     anchor every month boundary of this client is counted from — month n runs
+     day1_on + (n-1) months to the day before day1_on + n months. So starting a
+     second time would move EVERY boundary to today: a call on the last evening
+     of a month would fall into the next one, and the day a refund becomes due
+     would move with it.
+
+     Nothing else stops that. The checklist is read from rows, and those rows do
+     not go away on day one, so it stays green and the button stays enabled; a
+     double click, a stale screen or an impatient second tap is enough. The
+     guard has to be here, in the data function, not on the button. */
+  if (already) return obErr('They are already live — day one was ' + already + ', and the months are counted from it. It is set once and cannot be moved from here.');
   if (!ck.data.ready) {
     const left = ck.data.missing;
     const more = left.length > 1 ? ' ' + (left.length - 1) + ' other thing' + (left.length === 2 ? '' : 's') + ' still to do.' : '';
@@ -356,16 +377,20 @@ async function obStart(clientId){
     .eq('id', clientId).select().single(), null);
   if (!marked.ok) return marked;
 
+  /* This one write sets day1_on AND stage 'live', and the database's own
+     clients_first_month trigger opens month one and ties the first invoice to
+     it — all in the one statement, so it either all happened or none of it did.
+     There used to be a third write here setting stage 'live' a second time. It
+     was a second way of saying what fnStartSending had already said, and the
+     gap between the two was a window where a dropped connection left a client
+     live, with a month open, still reading "onboarding" on every screen. */
   const started = typeof fnStartSending === 'function'
     ? await fnStartSending(clientId, day1)
     : obErr('The finance side is not loaded, so month one cannot be opened.');
   if (!started.ok) return obErr(started.error);
 
-  const live = await obRun(() => sb.from('clients')
-    .update({stage: 'live'}).eq('id', clientId).select().single(), null);
-  if (!live.ok) return live;
-
-  return obOk({client: live.data, month: started.data && started.data.month, day1On: day1});
+  return obOk({client: (started.data && started.data.client) || null,
+               month: started.data && started.data.month, day1On: day1});
 }
 
 /* ---- their inputs ------------------------------------------------- */
