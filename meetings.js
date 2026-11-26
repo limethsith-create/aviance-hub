@@ -109,7 +109,12 @@ const MT_VIEW_KEY = 'avianceCalView';  /* localStorage: the view last chosen */
 const MT_TAKEN = 'There is already a call at that time.';
 const MT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const MT_CHIP_MAX = 3;          /* calls shown in a month cell before "+N more" */
-const MT_GRACE_MIN = 20;        /* how long after its start a call may sit unmarked */
+/* How long after its start a call may sit unmarked. One number, defined in
+   pipeline.js (PL_GRACE_MIN), which loads before this file: plNeedsOutcome asks
+   it about a website booking and mtMeetingNeedsOutcome asks it about a meeting,
+   and they are the same question. Two copies of it meant the Calendar's badge
+   and a booking's panel could disagree about which calls are waiting. */
+const MT_GRACE_MIN = typeof PL_GRACE_MIN === 'number' ? PL_GRACE_MIN : 20;
 
 const mt = {settings:null, view:'week', viewRead:false, day:null, cal:null, needOnly:false, legend:false, open:null, want:null, seq:0,
             one:null, noshows:null, err:'', now:null, busy:false, bound:false};

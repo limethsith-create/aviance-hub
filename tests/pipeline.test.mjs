@@ -74,6 +74,7 @@ function run(q) {
     if (ascending === false) hit.reverse();
   }
   if (q.limit != null) hit = hit.slice(0, q.limit);
+  if (q.range) hit = hit.slice(q.range[0], q.range[1] + 1);
   return { data: hit, error: null };
 }
 function builder(table) {
@@ -89,6 +90,8 @@ function builder(table) {
     lt(col, val) { q.filters.push({ kind: 'lt', col, val }); return api; },
     order(col, opts) { q.order = { col, ascending: !opts || opts.ascending !== false }; return api; },
     limit(n) { q.limit = n; return api; },
+    /* a real range, so plPages really pages: a page is [from..to] inclusive */
+    range(from, to) { q.range = [Number(from), Number(to)]; return api; },
     async maybeSingle() { const r = run(q); return r.error ? r : { data: (r.data || [])[0] || null, error: null }; },
     async single() { const r = run(q); if (r.error) return r; const one = (r.data || [])[0]; return one ? { data: one, error: null } : { data: null, error: { message: 'Nothing came back.' } }; },
     then(res, rej) { return Promise.resolve(run(q)).then(res, rej); },
@@ -282,6 +285,70 @@ test('a brief whose shape is not what we expect still reads as a brief, and neve
   assert.ok(text(nope).includes('No brief yet') && nope.includes('plResearchNow('));
   assert.ok(text(renderPlBrief([], { state: 'running' }, 'b1')).includes('Research is running'));
   assert.ok(text(renderPlBrief([], { state: 'failed' }, 'b1')).includes('did not finish'));
+});
+
+/* ───────────── 4b. more rows than fit in one page ─────────────
+   A query with no range in it is answered out of ONE page. With five bookings
+   that is every booking; at a thousand it is not, and the funnel would report a
+   smaller number of enquiries than came in without saying so. Every rate on
+   that screen is worked out from those counts, so a silently short read is a
+   wrong show rate and a wrong win rate on the owner's own screen. */
+test('the funnel counts every booking, not just the first page', async () => {
+  fresh();
+  const N = 2300;                       // more than two pages of 1000
+  for (let i = 0; i < N; i++) {
+    db.discovery_bookings.push(booking({
+      id: 'p-' + String(i).padStart(5, '0'),
+      status: i % 10 === 0 ? 'won' : i % 10 === 1 ? 'lost' : 'held',
+      lost_reason: i % 10 === 1 ? 'price' : null,
+    }));
+  }
+  const f = await plFunnel({});
+  assert.equal(f.ok, true, f.error);
+  assert.equal(f.data.enquiries, N, 'every enquiry is counted');
+  assert.equal(f.data.won, 230);
+  assert.equal(f.data.lost, 230);
+  assert.equal(f.data.reasons.price, 230);
+  /* three reads: 1000, 1000, 300 — the short page is what ends the loop */
+  const reads = queries.filter((q) => q.table === 'discovery_bookings' && q.op === 'select');
+  assert.equal(reads.length, 3, 'three pages, not one read and not one read per row');
+});
+test('a page that fails is reported, not quietly turned into a smaller funnel', async () => {
+  fresh();
+  db.discovery_bookings.push(booking({}));
+  failTable = 'discovery_bookings';
+  const f = await plFunnel({});
+  assert.equal(f.ok, false);
+  assert.ok(f.error.length > 0 && !BROKEN.test(f.error));
+  failTable = null;
+});
+test('the funnel asks for the five columns it counts, not all thirty', async () => {
+  fresh();
+  db.discovery_bookings.push(booking({}));
+  await plFunnel({});
+  /* the funnel needs none of their answers to add up, and a booking row carries
+     the prospect's name, email, phone and everything they typed */
+  assert.match(SRC, /PL_FUNNEL_COLS = 'id,status,lost_reason,call_at,created_at'/);
+  assert.match(SRC, /select\(PL_FUNNEL_COLS\)/);
+});
+test('plBookings pages too, and asks for the briefs a chunk of ids at a time', async () => {
+  fresh();
+  const N = 1200;
+  for (let i = 0; i < N; i++) db.discovery_bookings.push(booking({ id: 'q-' + String(i).padStart(5, '0'), status: 'held' }));
+  const r = await plBookings({});
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.data.length, N, 'every booking comes back');
+  const pages = queries.filter((q) => q.table === 'discovery_bookings' && q.op === 'select');
+  assert.equal(pages.length, 2);
+  /* A uuid is 36 characters. One `in(...)` of 1200 of them is a 40 KB request
+     line and the server answers 414 instead of the list, so nothing at all
+     would be known about any brief. */
+  const brief = queries.filter((q) => q.table === 'research_briefs');
+  assert.equal(brief.length, 8, '1200 ids in chunks of 150');
+  for (const q of brief) {
+    const ids = (q.filters.find((f) => f.kind === 'in') || {}).val || [];
+    assert.ok(ids.length <= 150, 'no chunk is bigger than 150 ids');
+  }
 });
 
 /* ───────────── 5. won ───────────── */
