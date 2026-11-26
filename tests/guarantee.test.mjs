@@ -611,7 +611,7 @@ test('every database rule the money screens call is written down in a migration'
   const sql = ['20261124_close_to_onboarded_core.sql', '20261124_rehearsal_fixes.sql',
     '20261129_no_pilot_and_agreement_v3.sql', '20261130_server_fixes.sql',
     '20261207_showup.sql', '20261207_seats.sql', '20261208_guarantee_maths_fixes.sql',
-    '20261127_refunds_paid_NOT_APPLIED.sql']
+    '20261209_refunds_paid.sql']
     .map((f) => read('supabase/migrations/' + f)).join('\n');
   const js = ['finance.js', 'wrapup.js', 'onboarding.js'].map(read).join('\n');
   const called = [...js.matchAll(/sb\.rpc\('(\w+)'/g)].map((m) => m[1]);

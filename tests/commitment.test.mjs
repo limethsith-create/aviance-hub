@@ -520,3 +520,30 @@ test('no screen in the shell is orphaned: every route can be reached by a person
     assert.ok(reachable, 'nothing in the hub can reach the ' + v + ' screen');
   }
 });
+
+/* A line that says "close them on Month end" has to lead there. */
+test('ended-and-open months come with a way to the screen that closes them', () => {
+  const src = fs.readFileSync(new URL('../guarantee.js', import.meta.url), 'utf8');
+  assert.match(src, /d\.toClose\.length \? '<p class="gu-go"><button[^>]*onclick="render\(\\'monthEnd\\'\)"/);
+});
+
+/* Found by rendering the board against rows that lacked calls_short: it showed
+   "Still owed 0" beside 25 promised and 7 delivered, and "$0 if nothing changes".
+   A figure nobody computed is a dash, and a month whose shortfall is missing is
+   not a month that is on its number. */
+test('rows that do not carry a shortfall give a dash, never a zero', () => {
+  const rows = [month(), month()].map((m) => { const o = { ...m }; delete o.calls_short; return o; });
+  const b = guBoard(ok(rows), expo(), NOW);
+  assert.equal(b.owed.total, null, 'still owed is unknown, not 0');
+  assert.equal(b.cost.total, null, 'the cost is unknown, not $0');
+  const t = text(guBoardHtml(b));
+  assert.doesNotMatch(t, /Still owed 0\b/);
+  assert.doesNotMatch(t, /If nothing changes \$0\b/);
+  assert.match(t, /did not carry a figure/);
+});
+test('one row without a shortfall is said out loud beside the total of the rest', () => {
+  const a = month(); const bad = { ...month() }; delete bad.calls_short;
+  const b = guBoard(ok([a, bad]), expo(), NOW);
+  assert.equal(b.owed.unknown, 1);
+  assert.match(text(guBoardHtml(b)), /1 month did not carry a figure/);
+});

@@ -166,6 +166,9 @@ function guBoard(standing, exposure, now){
   const sum = (list, pick) => {
     let total = 0, unknown = 0;
     list.forEach(m => { const v = pick(m); if (v === null || v === undefined) unknown++; else total += v; });
+    /* If NO row carried the figure there is nothing to add up, and 0 would be a
+       number nobody computed. That is a dash, not a zero. */
+    if (list.length && unknown === list.length) return {total: null, unknown};
     return {total, unknown};
   };
   const promised = got ? sum(running, m => m.promised) : {total: null, unknown: 0};
@@ -174,7 +177,11 @@ function guBoard(standing, exposure, now){
   /* what it costs if nothing changes: the at_risk the database worked out, on
      the months that are running and short. A month already on its number is
      not at risk and its at_risk is 0 in the view anyway. */
-  const cost = got ? sum(running.filter(m => (m.short || 0) > 0), m => m.atRisk) : {total: null, unknown: 0};
+  /* A month whose shortfall did not arrive is NOT a month that is on its number: it
+     stays in the sum as an unknown, so the tile says a figure is missing instead of
+     quietly leaving that month's money out. */
+  const cost = got ? sum(running.filter(m => m.short === null || m.short === undefined || m.short > 0),
+    m => (m.short === null || m.short === undefined) ? null : m.atRisk) : {total: null, unknown: 0};
   const closeCost = got ? sum(toClose, m => m.atRisk) : {total: null, unknown: 0};
 
   /* the soonest end: how long the owner actually has before the first of these
@@ -286,8 +293,8 @@ function guBoardHtml(b){
     guTile('Calls promised', running.length ? guNumOr(d.promised.total) : '0',
       running.length === 1 ? 'across 1 running month' : 'across ' + running.length + ' running months') +
     guTile('Delivered', guNumOr(d.delivered.total), 'counted by the database, not by this page') +
-    guTile('Still owed', guNumOr(d.owed.total), d.soonest === null ? '' :
-      (d.soonest === 0 ? 'the first of these months ends today' : 'the first of these months ends in ' + d.soonest + ' days')) +
+    guTile('Still owed', guNumOr(d.owed.total), (d.soonest === null ? '' :
+      (d.soonest === 0 ? 'the first of these months ends today' : 'the first of these months ends in ' + d.soonest + ' days')) + partial(d.owed)) +
     guTile('If nothing changes', guUsdOr(d.cost.total),
       'refunds on the months running now' + partial(d.cost), costWarn);
 
@@ -318,7 +325,7 @@ function guBoardHtml(b){
   const extras = [];
   if (d.toClose.length) extras.push(d.toClose.length + (d.toClose.length === 1 ? ' month has' : ' months have') +
     ' ended and is still open' + (d.closeCost.total ? ', holding ' + guUsd(d.closeCost.total) + ' that is already spent' : '') +
-    '. That money cannot be saved, only settled — close them on Month end.');
+    '. That money cannot be saved, only settled.');
   if (d.before.length) extras.push(d.before.length + (d.before.length === 1 ? ' month has' : ' months have') +
     ' been bought and has not started. Not counted above: there is no pace to be behind yet.');
 
@@ -335,6 +342,12 @@ function guBoardHtml(b){
     '<div class="gu-tiles">' + tiles + '</div>' +
     body +
     (extras.length ? '<ul class="gu-extras">' + extras.map(x => '<li>' + guEsc(x) + '</li>').join('') + '</ul>' : '') +
+    /* The line above tells the owner money is waiting to be settled; this is the way
+       to the screen that settles it. A sentence that names a screen and does not lead
+       there is a dead end. Month end holds a month back while a call is unanswered or
+       the month is unpaid, and says why, so locking from here would skip that. */
+    (d.toClose.length ? '<p class="gu-go"><button type="button" class="btn ghost" onclick="render(\'monthEnd\')">' +
+      guEsc(d.toClose.length === 1 ? 'Close it on Month end' : 'Close them on Month end') + '</button></p>' : '') +
     recon +
   '</section>';
 }

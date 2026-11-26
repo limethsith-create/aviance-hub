@@ -479,7 +479,7 @@ test('every figure on the Money screen comes from a row, never from arithmetic h
 /* ═══════════════ 6. the migration that is not applied ═══════════════ */
 
 test('the SQL this screen needs is written down, and says it is not applied', () => {
-  const sql = fs.readFileSync(path.join(root, 'supabase/migrations/20261127_refunds_paid_NOT_APPLIED.sql'), 'utf8');
+  const sql = fs.readFileSync(path.join(root, 'supabase/migrations/20261209_refunds_paid.sql'), 'utf8');
   assert.match(sql, /NOT APPLIED/);
   for (const fn of ['refund_pay', 'refund_waive', 'portal_refunds']) {
     assert.match(sql, new RegExp('create or replace function\\s+public\\.' + fn + '\\s*\\('), fn);

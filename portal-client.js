@@ -939,7 +939,7 @@ function pcSubscribe(channelId, onChange){
    The `refunds` table is staff-only under row level security and stays that way:
    this reads the `portal_refunds()` rule, which hands back that client's own
    refunds and nothing else. That rule is in a migration the owner has not run
-   yet (supabase/migrations/20261127_refunds_paid_NOT_APPLIED.sql), so a database
+   yet (supabase/migrations/20261209_refunds_paid.sql), so a database
    without it must say NOTHING rather than something wrong — "no refunds" to a
    client who is owed money is the worst sentence on this page. pcRefunds()
    reports 'not-ready' and the block is simply not drawn. */

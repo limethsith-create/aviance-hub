@@ -396,3 +396,14 @@ test('a failed recount never turns a write that worked into an error', async () 
   assert.equal(r.ok, true, 'the call was written, so the answer is yes');
   assert.equal(r.data.id, 'q1');
 });
+
+/* fnStanding reads every client-month. Past one page PostgREST answers short and says
+   nothing, so months silently go missing from every total. It must page, and it must
+   refuse out loud rather than pass a part off as the whole. */
+test('fnStanding source pages its read and fails loudly at the ceiling', () => {
+  const src = fs.readFileSync(new URL('../finance.js', import.meta.url), 'utf8');
+  const body = src.slice(src.indexOf('async function fnStanding'), src.indexOf('async function fnStanding') + 1600);
+  assert.match(body, /\.range\(/, 'reads a page at a time');
+  assert.match(body, /rows\.length < FN_STANDING_PAGE/, 'stops on a short page');
+  assert.match(body, /not showing a part of them as the whole/, 'refuses in words at the ceiling');
+});

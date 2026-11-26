@@ -83,14 +83,33 @@ async function fnClients(stage){
 }
 
 /* Every month of every client: promised, delivered, days left, what is at risk. */
+/* One row per client-month, so this grows for ever. A read with no range is answered
+   out of one page (1,000 rows — about 83 clients at a year each) and says nothing
+   when it is short: months would simply stop arriving, and every total built on them
+   — the commitment board, the money screen — would quietly go down. So it is read a
+   page at a time until a short page, and if the book ever outgrows the ceiling it
+   FAILS with a sentence rather than returning part of the answer as the whole. */
+const FN_STANDING_PAGE = 1000;
+const FN_STANDING_MAX_PAGES = 20;
 async function fnStanding(opts){
   const o = opts || {};
-  return fnRun(() => {
-    let q = sb.from('v_month_standing').select('*');
-    if (o.clientId) q = q.eq('client_id', o.clientId);
-    if (o.openOnly) q = q.eq('verdict', 'open');
-    return q.order('ends_on');
-  }, []);
+  const all = [];
+  try {
+    for (let i = 0; i < FN_STANDING_MAX_PAGES; i++) {
+      let q = sb.from('v_month_standing').select('*');
+      if (o.clientId) q = q.eq('client_id', o.clientId);
+      if (o.openOnly) q = q.eq('verdict', 'open');
+      q = q.order('ends_on');
+      const canPage = q && typeof q.range === 'function';
+      if (canPage) q = q.range(i * FN_STANDING_PAGE, i * FN_STANDING_PAGE + FN_STANDING_PAGE - 1);
+      const r = fnWrap(await q, []);
+      if (!r.ok) return r;
+      const rows = Array.isArray(r.data) ? r.data : [];
+      for (const row of rows) all.push(row);
+      if (!canPage || rows.length < FN_STANDING_PAGE) return fnWrap({ data: all, error: null }, []);
+    }
+    return fnErr('There are more months on the books than this screen can read in one go, so it is not showing a part of them as the whole. Tell whoever looks after Aviance OS.');
+  } catch (e) { return fnErr(e); }
 }
 
 /* ---- the month clock --------------------------------------------- */
@@ -362,7 +381,7 @@ async function fnOwed(today){
    had raised could never be closed, and four live rows totalling $16,500 had
    sat at 'owed' since the day they were raised. The guarantee IS the product;
    the part where the client gets their money back cannot be a row nobody can
-   reach. See supabase/migrations/20261127_refunds_paid_NOT_APPLIED.sql.
+   reach. See supabase/migrations/20261209_refunds_paid.sql.
 
    No amount is worked out here. `refunds.amount` is written by lock_month(),
    and what the owner types is checked against it, never replaced by it. */
