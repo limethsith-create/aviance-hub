@@ -93,12 +93,6 @@ async function fnStanding(opts){
   }, []);
 }
 
-/* The clients who are behind with 10 days or less to go. The day-20 warning. */
-async function fnBehind(){
-  return fnRun(() => sb.from('v_month_standing').select('*')
-    .eq('warn_now', true).order('days_left'), []);
-}
-
 /* ---- the month clock --------------------------------------------- */
 
 /* Open the next month: the one after the last month this client has. NOT safe to call twice. */
@@ -254,7 +248,190 @@ function fnPaidWords(data){
     : 'Marked paid.';
 }
 
-/* ---- refunds ------------------------------------------------------ */
+/* ---- how late a payment is ---------------------------------------- */
+
+/* Nothing in the database ages an invoice. `invoices.status` has 'overdue' in
+   its CHECK constraint and NO code, trigger or job ever writes it: checked live
+   on 2026-11-27, every unpaid invoice is still 'draft' or 'sent'. So "how late
+   is this" is worked out here, from the due date, every time it is asked. That
+   is on purpose — a status word that has to be swept by a cron job goes stale
+   the moment the job misses a run, and a date never does. */
+
+/* An invoice nobody has settled yet. Void is owed by nobody; paid is done.
+   `paid_at` is believed as readily as the word, because mark_paid() sets both
+   and a row half-written by hand must not read as unpaid. */
+const FN_INVOICE_DEAD = ['void', 'cancelled', 'canceled'];
+function fnInvoicePaid(row){ const r = row || {}; return !!(r.paid_at || String(r.status || '') === 'paid') }
+function fnInvoiceDead(row){ return FN_INVOICE_DEAD.includes(String((row || {}).status || '')) }
+function fnInvoiceOwed(row){ return !!row && !fnInvoicePaid(row) && !fnInvoiceDead(row) }
+/* Raised but never sent. The client has not been ASKED for this money, so it is
+   not late — it is stuck on our side, which is worse and reads differently. */
+function fnInvoiceUnsent(row){
+  const r = row || {};
+  return fnInvoiceOwed(r) && !r.sent_at && String(r.status || '') === 'draft';
+}
+
+/* How many days past its due date, in the reader's own calendar. null when the
+   invoice has no due date — which is not 0 days late, and must never read as it. */
+function fnDaysLate(dueOn, today){
+  const due = coreToDate(dueOn);
+  if (!due) return null;
+  const now = coreToDate(today) || new Date();
+  const a = Date.parse(coreDayKey(due) + 'T00:00:00Z'), b = Date.parse(coreDayKey(now) + 'T00:00:00Z');
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.round((b - a) / 86400000);
+}
+
+/* The bands the owner reads the list in. One pass, worst first. */
+const FN_AGE_BANDS = [
+  {key:'over30', label:'Over 30 days late', from:31,  to:Infinity, tone:'red'},
+  {key:'late30', label:'8 to 30 days late', from:8,   to:30,       tone:'red'},
+  {key:'late7',  label:'Up to a week late', from:1,   to:7,        tone:'amber'},
+  {key:'duenow', label:'Due today',         from:0,   to:0,        tone:'amber'},
+  {key:'soon',   label:'Not due yet',       from:-Infinity, to:-1, tone:'grey'},
+];
+const FN_AGE_UNKNOWN = {key:'nodate', label:'No due date', tone:'amber'};
+function fnAgeBand(daysLate){
+  if (daysLate == null || !Number.isFinite(Number(daysLate))) return FN_AGE_UNKNOWN;
+  const d = Number(daysLate);
+  return FN_AGE_BANDS.find(b => d >= b.from && d <= b.to) || FN_AGE_UNKNOWN;
+}
+
+/* One invoice, in a sentence the owner can act on. */
+function fnOwedLine(row, today){
+  const r = row || {};
+  const who = String(r.company || r.client_name || 'A client');
+  const amt = fnUsd(r.amount);
+  if (fnInvoiceUnsent(r)) return `${who} — ${amt} raised and never sent. Nobody has asked them for it.`;
+  const late = fnDaysLate(r.due_on, today);
+  if (late == null) return `${who} — ${amt} owed, with no due date on the invoice.`;
+  if (late > 0)  return `${who} — ${amt}, ${late} day${late === 1 ? '' : 's'} late.`;
+  if (late === 0) return `${who} — ${amt}, due today.`;
+  return `${who} — ${amt}, due in ${-late} day${late === -1 ? '' : 's'}.`;
+}
+
+/* Every unpaid invoice, banded. Pure: hand it rows, get the owner's screen.
+   `rows` may be invoices, v_invoice_work rows, or the two merged. */
+function fnAgeInvoices(rows, today){
+  const list = (Array.isArray(rows) ? rows : []).filter(fnInvoiceOwed);
+  const seen = {};
+  const bands = FN_AGE_BANDS.concat([FN_AGE_UNKNOWN]).map(b => ({key:b.key, label:b.label, tone:b.tone, total:0, rows:[]}));
+  const byKey = {}; bands.forEach(b => { byKey[b.key] = b });
+  let total = 0, lateTotal = 0, lateCount = 0, unsentTotal = 0, oldest = 0;
+  list.forEach(r => {
+    const id = String(r.id == null ? '' : r.id);
+    if (id && seen[id]) return;          /* the same invoice from both reads */
+    if (id) seen[id] = true;
+    const late = fnDaysLate(r.due_on, today);
+    const band = byKey[fnAgeBand(late).key];
+    const amt = fnCount(r.amount);
+    const one = Object.assign({}, r, {daysLate: late, band: band.key, line: fnOwedLine(r, today), unsent: fnInvoiceUnsent(r)});
+    band.rows.push(one); band.total += amt; total += amt;
+    if (one.unsent) unsentTotal += amt;
+    if (late != null && late > 0) { lateTotal += amt; lateCount += 1; if (late > oldest) oldest = late; }
+  });
+  bands.forEach(b => b.rows.sort((a, c) => (c.daysLate == null ? -1e9 : c.daysLate) - (a.daysLate == null ? -1e9 : a.daysLate)));
+  return {bands: bands.filter(b => b.rows.length), total, lateTotal, lateCount, unsentTotal, oldest, count: Object.keys(seen).length};
+}
+
+/* Who owes us money, worst first. One read of the invoices and one of
+   v_invoice_work, because only the view carries the company name. */
+async function fnOwed(today){
+  const [inv, work] = await Promise.all([fnInvoices(), fnInvoiceWork()]);
+  if (!inv.ok && !work.ok) return inv;
+  const byId = {};
+  (work.ok ? work.data || [] : []).forEach(w => { if (w && w.id) byId[w.id] = w });
+  const rows = (inv.ok ? inv.data || [] : []).map(r => {
+    const w = byId[r.id];
+    return w ? Object.assign({}, r, {company: w.company}) : r;
+  });
+  /* The invoices themselves are the source. v_invoice_work is read only for the
+     company name, and its rows are used INSTEAD only when the invoices could not
+     be read at all — a view row carries no amount and no sent_at, so ageing it
+     as if it were an invoice invents a $0 line with no due date. An empty
+     invoices table is not a failure: it means nothing is owed. */
+  const aged = fnAgeInvoices(inv.ok ? rows : (work.ok ? work.data || [] : []).filter(w => w && w.id), today);
+  return fnOk(Object.assign(aged, {trouble: [inv.ok ? '' : inv.error, work.ok ? '' : work.error].filter(Boolean)}));
+}
+
+/* ---- refunds: owed, then actually paid ---------------------------- */
+
+/* THE GAP THIS CLOSES. lock_month() writes one `refunds` row with
+   status = 'owed' and stops. Until 2026-11-27 `fnMarkRefundPaid` below was
+   called by nothing at all — no screen, no button — so a refund the guarantee
+   had raised could never be closed, and four live rows totalling $16,500 had
+   sat at 'owed' since the day they were raised. The guarantee IS the product;
+   the part where the client gets their money back cannot be a row nobody can
+   reach. See supabase/migrations/20261127_refunds_paid_NOT_APPLIED.sql.
+
+   No amount is worked out here. `refunds.amount` is written by lock_month(),
+   and what the owner types is checked against it, never replaced by it. */
+
+const FN_REFUND_WORDS = {owed: 'Owed', paid: 'Paid', waived: 'Set aside'};
+const FN_REFUND_METHODS = ['bank transfer', 'Wise', 'Payoneer', 'PayPal', 'card refund'];
+const FN_REFUND_MAX_VIA = 60;
+const FN_REFUND_MAX_REF = 120;
+
+function fnRefundState(row){
+  const s = String((row || {}).status || 'owed').toLowerCase();
+  return FN_REFUND_WORDS[s] ? s : 'owed';
+}
+/* What is still owed on this row. A part payment leaves the rest owed: the
+   promise is `amount`, the fact is `paid_amount`, and the difference is money
+   the client has not had. A database without paid_amount reads a paid row as
+   paid in full, which is what it meant before the column existed. */
+function fnRefundStillOwed(row){
+  const r = row || {};
+  const owed = fnCount(r.amount);
+  if (fnRefundState(r) === 'waived') return 0;
+  if (fnRefundState(r) === 'owed') return owed;
+  const paid = r.paid_amount == null ? owed : fnCount(r.paid_amount);
+  return Math.max(0, owed - paid);
+}
+function fnRefundPartPaid(row){
+  return fnRefundState(row) === 'paid' && fnRefundStillOwed(row) > 0;
+}
+/* One refund, in a sentence. The owner's words; the client's are in
+   portal-client.js and say less. */
+function fnRefundLine(row){
+  const r = row || {};
+  const who = String(r.company || r.client_name || 'A client');
+  const month = r.month_no == null ? '' : ` month ${fnCount(r.month_no)}`;
+  const amt = fnUsd(r.amount);
+  const state = fnRefundState(r);
+  if (state === 'waived') return `${who} —${month || ''} ${amt} set aside.`;
+  if (state === 'paid') {
+    const how = String(r.paid_via || '').trim();
+    const when = r.paid_at ? coreDayKey(r.paid_at) : '';
+    const ref = String(r.paid_reference || '').trim();
+    const rest = fnRefundStillOwed(r);
+    return `${who} —${month ? month + ':' : ''} ${fnUsd(r.paid_amount == null ? r.amount : r.paid_amount)} sent`
+      + (how ? ` by ${how}` : '') + (when ? ` on ${when}` : '') + (ref ? ` (ref ${ref})` : '') + '.'
+      + (rest > 0 ? ` ${fnUsd(rest)} of it is still owed.` : '');
+  }
+  return `${who} — we owe them ${amt}${month ? ' for' + month : ''}. Not sent yet.`;
+}
+
+/* '' when the entry is fine, otherwise what to fix. Checked here as well as in
+   the database so the owner is told before a round trip, and the database still
+   refuses if this is ever bypassed. */
+function fnRefundProblem(row, entry){
+  const r = row || {}, e = entry || {};
+  if (!r.id) return 'Pick the refund first.';
+  if (fnRefundState(r) === 'paid') return 'That refund is already marked paid.';
+  if (fnRefundState(r) === 'waived') return 'That refund was set aside, so it cannot be paid.';
+  const owed = fnCount(r.amount);
+  const raw = e.amount === '' || e.amount == null ? owed : Number(e.amount);
+  if (!Number.isFinite(raw)) return 'Write the amount you sent as a number.';
+  const amount = Math.round(raw);
+  if (amount <= 0) return 'Say how much was sent back.';
+  if (amount > owed) return `That is more than we owe. We owe ${fnUsd(owed)}.`;
+  if (!String(e.via || '').trim()) return 'Say how it was sent — bank transfer, Wise, Payoneer.';
+  if (String(e.via || '').trim().length > FN_REFUND_MAX_VIA) return 'Shorten how it was sent.';
+  if (String(e.reference || '').trim().length > FN_REFUND_MAX_REF) return 'That reference is too long.';
+  if (e.on && !coreToDate(e.on)) return 'That is not a date we can read. Use the date picker.';
+  return '';
+}
 
 async function fnRefunds(status){
   return fnRun(() => {
@@ -264,10 +441,249 @@ async function fnRefunds(status){
   }, []);
 }
 
-async function fnMarkRefundPaid(refundId, via){
-  return fnRun(() => sb.from('refunds')
-    .update({status:'paid', paid_at:new Date().toISOString(), paid_via:(via||'').slice(0,60)})
-    .eq('id', refundId).select().single(), null);
+/* Every refund with the client's name and the month beside it, because a row
+   that says what we owe and not who to is useless at 2am. The client list
+   is read once for the whole lot, not once per refund. */
+async function fnRefundsForScreen(){
+  const [rf, cl, ms] = await Promise.all([fnRefunds(), fnClients(), fnStanding()]);
+  if (!rf.ok) return rf;
+  const who = {}; (cl.ok ? cl.data || [] : []).forEach(c => { if (c && c.id) who[c.id] = c });
+  const month = {}; (ms.ok ? ms.data || [] : []).forEach(m => { if (m && m.month_id) month[m.month_id] = m });
+  const rows = (rf.data || []).map(r => {
+    const c = who[r.client_id] || {};
+    const m = month[r.month_id] || {};
+    return Object.assign({}, r, {
+      company: c.company || '', plan: c.plan || '', term: c.term || '',
+      client_ended_on: c.ended_on || null,
+      month_no: r.month_no == null ? (m.month_no == null ? null : m.month_no) : r.month_no,
+      state: fnRefundState(r), still_owed: fnRefundStillOwed(r), line: fnRefundLine(Object.assign({}, r, {company: c.company, month_no: m.month_no})),
+    });
+  });
+  const owed = rows.filter(r => r.state === 'owed' || fnRefundPartPaid(r));
+  return fnOk({
+    rows,
+    owed,
+    owedTotal: owed.reduce((s, r) => s + fnRefundStillOwed(r), 0),
+    paidTotal: rows.filter(r => r.state === 'paid').reduce((s, r) => s + fnCount(r.paid_amount == null ? r.amount : r.paid_amount), 0),
+    /* a refund owed on a client who has already left: the row stays owed, and
+       the client is gone from every "live clients" list there is */
+    gone: owed.filter(r => r.client_ended_on),
+    trouble: [cl.ok ? '' : cl.error, ms.ok ? '' : ms.error].filter(Boolean),
+  });
+}
+
+/* Record that a refund was actually sent. The database rule is tried first,
+   because this is money and the rule refuses what this file would only warn
+   about. A database without the rule yet (it is in a migration the owner has
+   not run) is written to directly, with the same checks, and the extra two
+   facts kept in `notes` so nothing the owner typed is lost.
+   opts = {amount, via, reference, on} — or a plain string, which is the method,
+   so the old two-argument call still works. */
+async function fnMarkRefundPaid(refundId, opts){
+  const e = typeof opts === 'string' || opts == null ? {via: opts || ''} : opts;
+  const got = await fnRun(() => sb.from('refunds').select('*').eq('id', refundId).maybeSingle(), null);
+  if (!got.ok) return got;
+  if (!got.data) return fnErr('That refund is not here any more.');
+  const bad = fnRefundProblem(got.data, e);
+  if (bad) return fnErr(bad);
+
+  const amount = Math.round(e.amount === '' || e.amount == null ? fnCount(got.data.amount) : Number(e.amount));
+  const via = String(e.via || '').trim().slice(0, FN_REFUND_MAX_VIA);
+  const ref = String(e.reference || '').trim().slice(0, FN_REFUND_MAX_REF);
+  const when = e.on ? coreToDate(e.on) : null;
+
+  const viaRpc = await fnRun(() => sb.rpc('refund_pay', {
+    p_refund: refundId, p_amount: amount, p_via: via,
+    p_reference: ref || null, p_on: when ? coreDayKey(when) : null,
+  }), null);
+  if (viaRpc.ok) return viaRpc;
+  if (coreFamily(viaRpc.error) !== 'not-ready') return viaRpc;
+
+  /* no rule in this database yet — write the row, keep every fact */
+  const note = [String(got.data.notes || '').trim(),
+    `Paid ${fnUsd(amount)}${via ? ' by ' + via : ''}${ref ? ' (ref ' + ref + ')' : ''}.`,
+    amount < fnCount(got.data.amount) ? `${fnUsd(fnCount(got.data.amount) - amount)} of it is still owed.` : '',
+  ].filter(Boolean).join(' ').slice(0, 2000);
+  const wrote = await fnRun(() => sb.from('refunds').update({
+    status: 'paid', paid_at: (when || new Date()).toISOString(), paid_via: via, notes: note,
+  }).eq('id', refundId).select().single(), null);
+  if (!wrote.ok) return wrote;
+  return fnOk(Object.assign({}, wrote.data, {partial_record: true}));
+}
+
+/* What to tell the person who clicked it. */
+function fnRefundPaidWords(data){
+  const d = data || {};
+  const rest = fnRefundStillOwed(d);
+  return (rest > 0 ? `Recorded. ${fnUsd(rest)} of it is still owed.` : 'Recorded. That refund is settled.')
+    + (d.partial_record ? ' The amount and reference are in the notes until the database update is applied.' : '');
+}
+
+/* ---- what we took in against what we owe back --------------------- */
+
+/* Nothing anywhere reconciled these two. Invoices summed one way, refunds
+   summed another, and v_money shows them as two separate totals that are never
+   compared for ONE client. A prepaid 3-month term can honestly promise back
+   more than it ever took in — 2x the month in month one plus 1x in each of
+   months two and three is four months' fee against the three that were paid —
+   and no screen noticed. This adds up the database's own figures and says so;
+   it works out no refund of its own. */
+function fnReconcile(invoices, refunds, client){
+  const c = client || {};
+  const paidIn = (Array.isArray(invoices) ? invoices : [])
+    .filter(fnInvoicePaid).reduce((s, r) => s + fnCount(r.amount), 0);
+  const list = Array.isArray(refunds) ? refunds : [];
+  const owed = list.reduce((s, r) => s + fnRefundStillOwed(r), 0);
+  const sent = list.filter(r => fnRefundState(r) === 'paid')
+    .reduce((s, r) => s + fnCount(r.paid_amount == null ? r.amount : r.paid_amount), 0);
+  const back = owed + sent;
+  return {
+    clientId: c.id || null, company: c.company || '', plan: c.plan || '', term: c.term || '',
+    paidIn, refundsOwed: owed, refundsPaid: sent, refundsTotal: back, overBy: back - paidIn,
+    over: back > paidIn,
+  };
+}
+
+/* The same question for every client, in three reads rather than three a client. */
+async function fnMoneyBack(){
+  const [inv, rf, cl] = await Promise.all([fnInvoices(), fnRefunds(), fnClients()]);
+  if (!cl.ok) return cl;
+  if (!inv.ok) return inv;
+  if (!rf.ok) return rf;
+  const byClient = (rows, key) => {
+    const out = {};
+    (rows || []).forEach(r => { if (r && r[key]) (out[r[key]] = out[r[key]] || []).push(r) });
+    return out;
+  };
+  const iv = byClient(inv.data, 'client_id'), re = byClient(rf.data, 'client_id');
+  const rows = (cl.data || []).map(c => fnReconcile(iv[c.id] || [], re[c.id] || [], c))
+    .filter(r => r.paidIn > 0 || r.refundsTotal > 0);
+  return fnOk({rows, over: rows.filter(r => r.over), owedTotal: rows.reduce((s, r) => s + r.refundsOwed, 0)});
+}
+
+/* A locked month that says it owes a refund but has no refund row behind it.
+   This is live today: RH4 Locked Month's month one carries a refund figure of
+   twice the Growth monthly fee and verdict 'missed', and there is no `refunds`
+   row for it — a month locked by a direct write rather than by lock_month().
+   (No price is written here: finance.js never holds one.) The owner would never find it, and
+   a client would never be paid. Pure; it only compares the two. */
+function fnRefundGaps(months, refunds){
+  const byMonth = {};
+  (Array.isArray(refunds) ? refunds : []).forEach(r => { if (r && r.month_id) byMonth[r.month_id] = r });
+  return (Array.isArray(months) ? months : []).filter(m => {
+    if (!m || !m.month_id && !m.id) return false;
+    if (String(m.verdict || '') !== 'missed') return false;
+    if (fnCount(m.refund_due) <= 0) return false;
+    return !byMonth[m.month_id || m.id];
+  }).map(m => ({
+    monthId: m.month_id || m.id, clientId: m.client_id || null, company: m.company || '',
+    monthNo: fnCount(m.month_no), amount: fnCount(m.refund_due),
+  }));
+}
+
+/* ---- closing a month, and the month after it ---------------------- */
+
+/* WHAT HAPPENS TODAY, CHECKED: nothing opens month two. `open_next_month` is
+   reached from this file only, `fnOpenMonth` is called only by
+   fnStartSending's fallback, and there is no trigger and no cron job that opens
+   a month (the one hourly job, journey_hourly, only chases staff approvals).
+   So a client's month one ends, Month end locks it, and the clock stops: no
+   month two, no month-two invoice, no month-two guarantee. Revenue stops after
+   one month and no screen says so.
+
+   fnCloseMonth is the loop: lock the month the database's way, then open the
+   next one and raise its invoice — EXCEPT where the answer is not settled, and
+   there it refuses in words rather than guessing. */
+
+/* Which months a term bills on. A monthly term bills every month; a 3-month
+   term bills months 1, 4, 7 … and raise_invoice returns null in between.
+   This mirrors raise_invoice; it does not decide anything raise_invoice does
+   not already do. */
+function fnTermCovers(client){ return String((client || {}).term || 'monthly') === '3month' ? 3 : 1 }
+function fnBillsOnMonth(client, monthNo){
+  const n = fnCount(monthNo);
+  return n >= 1 && (n - 1) % fnTermCovers(client) === 0;
+}
+
+/* THE QUESTION THE OWNER HAS NOT ANSWERED. A 3-month prepay reaches month four
+   and the contract and the system disagree about whether that is a new term.
+   Checked on the live functions inside a rolled-back transaction on 2026-11-27:
+   open_next_month opens month 4 without complaint, and raise_invoice(month 4)
+   raises a NEW invoice for 3 x the discounted monthly fee, noted
+   "Months 4-6, 3-month term." So the DATABASE already believes a 3-month term
+   rolls into another one at the same discount, for ever. Nothing in the browser
+   can get there, because nothing opens month two in the first place. That is
+   half of each answer, which is the one thing we must not ship.
+
+   Until the owner says, this refuses and asks. It does not pick. */
+function fnRenewalDecision(client, nextMonthNo){
+  const c = client || {};
+  const n = fnCount(nextMonthNo);
+  if (fnTermCovers(c) === 1 || !fnBillsOnMonth(c, n) || n <= 1) return {decide: false, question: ''};
+  const fee = fnUsd(fnCount(c.monthly_fee) * 3);
+  return {decide: true, monthNo: n, question:
+    `${c.company || 'This client'} is on a 3-month term and month ${n} starts a new one. `
+    + `Aviance OS would raise ${fee} for months ${n} to ${n + 2} at the 3-month price. `
+    + `Nobody has said whether a 3-month client is billed again at month ${n}, so nothing has been raised. `
+    + `Decide it once in Settings and this stops asking.`};
+}
+
+/* Lock a month, then keep the clock running: open the next month and raise its
+   invoice if that month bills. Every step is the database's; this only puts
+   them in order and stops where the answer is not known.
+   -> {month, opened, invoice, decide, says} */
+async function fnCloseMonth(monthId){
+  if (!monthId) return fnErr('Pick the month first.');
+  const locked = await fnLockMonth(monthId);
+  if (!locked.ok) return locked;
+  const m = locked.data || {};
+  if (!m.client_id || !m.month_no) return fnOk({month: m, opened: null, invoice: null, decide: null,
+    says: 'The month is locked. Aviance OS could not tell which client it belongs to, so no next month was opened.'});
+
+  const cl = await fnRun(() => sb.from('clients').select('*').eq('id', m.client_id).maybeSingle(), null);
+  if (!cl.ok) return fnOk({month: m, opened: null, invoice: null, decide: null,
+    says: 'The month is locked. We could not read the client, so no next month was opened: ' + cl.error});
+  const c = cl.data || {};
+  if (c.ended_on || String(c.stage || '') === 'ended') return fnOk({month: m, opened: null, invoice: null, decide: null,
+    says: 'The month is locked. They have left, so no new month was opened.'});
+
+  const next = fnCount(m.month_no) + 1;
+  const have = await fnRun(() => sb.from('client_months').select('id,month_no')
+    .eq('client_id', m.client_id).eq('month_no', next).maybeSingle(), null);
+  if (!have.ok) return fnOk({month: m, opened: null, invoice: null, decide: null,
+    says: 'The month is locked. We could not check whether month ' + next + ' is already open: ' + have.error});
+
+  const decision = fnRenewalDecision(c, next);
+  if (!have.data && decision.decide) {
+    return fnOk({month: m, opened: null, invoice: null, decide: decision,
+      says: 'Month ' + fnCount(m.month_no) + ' is locked. ' + decision.question});
+  }
+
+  let opened = have.data || null;
+  if (!opened) {
+    const o = await fnOpenMonth(m.client_id);
+    if (!o.ok) return fnOk({month: m, opened: null, invoice: null, decide: null,
+      says: 'The month is locked, but month ' + next + ' could not be opened: ' + o.error});
+    opened = o.data || null;
+    /* open_next_month opens the month after the LAST one, so a client who
+       already has a later month gets that one instead. The check below says so
+       rather than calling whatever came back "the next month". */
+  }
+  if (!opened || fnCount(opened.month_no) !== next) {
+    return fnOk({month: m, opened, invoice: null, decide: null,
+      says: 'Month ' + fnCount(m.month_no) + ' is locked. Month ' + next + ' was already there.'});
+  }
+
+  if (!fnBillsOnMonth(c, next)) return fnOk({month: m, opened, invoice: null, decide: null,
+    says: 'Month ' + fnCount(m.month_no) + ' is locked and month ' + next + ' is open. It is inside a term that is already paid, so there is nothing to bill.'});
+
+  const inv = await fnRaiseInvoice(opened.id, 7);
+  if (!inv.ok) return fnOk({month: m, opened, invoice: null, decide: null,
+    says: 'Month ' + fnCount(m.month_no) + ' is locked and month ' + next + ' is open, but its invoice could not be raised: ' + inv.error});
+  return fnOk({month: m, opened, invoice: inv.data || null, decide: null,
+    says: inv.data
+      ? 'Month ' + fnCount(m.month_no) + ' is locked, month ' + next + ' is open, and ' + fnUsd(inv.data.amount) + ' is raised as a draft. Send it from Invoices.'
+      : 'Month ' + fnCount(m.month_no) + ' is locked and month ' + next + ' is open. Nothing to bill for it.'});
 }
 
 /* ---- starting a client -------------------------------------------- */

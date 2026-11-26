@@ -1060,3 +1060,87 @@ test('a read that never answers is given up on, and a write never is', async () 
   assert.match(page, /pcRead\(pcSession\)/);
   assert.doesNotMatch(page, /pcRead\(\s*(function\(\)\s*\{\s*return\s*)?pcSend/);
 });
+
+/* ───────────── money coming back to them ─────────────
+   lock_month() raises a refund at status 'owed' and the portal used to say only
+   "your refund is being worked out". These are the words a client reads instead,
+   and the rule that a database without portal_refunds() says NOTHING rather than
+   telling someone who is owed money that there is none. */
+
+test('a refund that is owed says so, with the figure and no asking required', () => {
+  const one = P('pcRefundOne')({ amount: 3000, currency: 'USD', status: 'owed', month_no: 1, raised_at: '2026-11-26T10:00:00Z' });
+  assert.equal(one.state, 'owed');
+  assert.equal(one.head, 'We owe you $3,000.00');
+  assert.equal(one.month, 'Month 1');
+  assert.match(one.note, /on its way. You do not have to ask/);
+});
+
+test('a refund that was paid says when, how and the reference', () => {
+  const one = P('pcRefundOne')({ amount: 3000, currency: 'USD', status: 'paid', paid_amount: 3000,
+    paid_at: '2026-12-02T09:00:00Z', paid_via: 'bank transfer', paid_reference: 'TRN-4471' });
+  assert.equal(one.state, 'paid');
+  assert.equal(one.head, '$3,000.00 refunded');
+  assert.match(one.detail, /Sent December 2, 2026/);
+  assert.match(one.detail, /by bank transfer/);
+  assert.match(one.detail, /reference TRN-4471/);
+  assert.equal(one.note, '');
+});
+
+test('a part payment tells them what is still to come', () => {
+  const one = P('pcRefundOne')({ amount: 3000, status: 'paid', paid_amount: 1000, paid_via: 'Wise' });
+  assert.equal(one.head, '$1,000.00 refunded');
+  assert.match(one.note, /\$2,000\.00 of it is still to come\./);
+});
+
+test('a refund set aside promises a client nothing', () => {
+  assert.equal(P('pcRefundOne')({ amount: 3000, status: 'waived' }), null);
+  assert.equal(P('pcRefundsHtml')([{ amount: 3000, status: 'waived' }]), '');
+});
+
+test('the block is empty when there is nothing honest to show', () => {
+  for (const rows of [[], null, undefined, 'nonsense']) assert.equal(P('pcRefundsHtml')(rows), '');
+});
+
+test('everything in the block goes through the escape, and no figure reads undefined', () => {
+  const html = P('pcRefundsHtml')([
+    { amount: 3000, status: 'owed', month_no: 1 },
+    { amount: 500, status: 'paid', paid_amount: 500, paid_via: `<script>alert(1)</script>`, paid_reference: `O'Brien` },
+    {},
+  ]);
+  assert.ok(!/<script>/.test(html), 'no script tag survives');
+  assert.ok(html.includes('&lt;script&gt;') && html.includes('&#39;'));
+  assert.ok(!/undefined|NaN|\[object/.test(html), html);
+  assert.match(html, /Money coming back to you/);
+  /* and it is headed differently when there is nothing outstanding */
+  assert.match(P('pcRefundsHtml')([{ amount: 500, status: 'paid', paid_amount: 500 }]), /Money we have sent back/);
+});
+
+test('the client asks the rule, never the refunds table', async () => {
+  reset(); answer = { data: [{ id: 'r1', amount: 3000, status: 'owed' }], error: null };
+  const r = await P('pcRefunds')();
+  assert.equal(r.ok, true);
+  assert.equal(r.data.length, 1);
+  assert.deepEqual(rpcs.map((x) => x.name), ['portal_refunds']);
+  assert.equal(queries.length, 0, 'the refunds table is staff-only and is never selected from here');
+  const src = fs.readFileSync(path.join(root, 'portal-client.js'), 'utf8');
+  assert.ok(!/from\('refunds'\)/.test(src), 'portal-client.js must not read the refunds table');
+});
+
+test('a rule this database does not have yet draws nothing at all', async () => {
+  reset(); answer = { data: null, error: { message: 'Could not find the function public.portal_refunds', code: 'PGRST202' } };
+  const r = await P('pcRefunds')();
+  assert.equal(r.ok, false);
+  /* and whatever it says, it is a sentence a client could read */
+  assert.ok(!/PGRST|public\.|function/.test(r.error), r.error);
+  /* nothing is drawn: there is no document in this test context, so the proof is
+     that drawing does not throw and leaves no promise behind */
+  await P('pcDrawRefunds')();
+  assert.equal(P('pcBack').drawn, '');
+});
+
+test('an answer that is not a list is not an empty list', async () => {
+  reset(); answer = { data: null, error: null };
+  const r = await P('pcRefunds')();
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.data, []);
+});

@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="documents.css">
 <link rel="stylesheet" href="team.css">
 <link rel="stylesheet" href="onboarding.css">
+<link rel="stylesheet" href="money.css">
 <link rel="stylesheet" href="digest.css">
 <link rel="stylesheet" href="guarantee.css">
 <link rel="stylesheet" href="wrapup.css">
@@ -565,9 +566,10 @@ const views={
   channels:{fn:()=>V('viewChannels'),title:'Channels',sub:'Talk with your team and your clients',wide:true},
   employees:{fn:()=>V('viewEmployees'),title:'Employees',sub:'Your staff, how they get in, and your chat with each one',wide:true,owner:true},
   journey:{fn:()=>V('viewJourneyBoard'),title:'Onboarding',sub:'Every new client, from payment to launch',wide:true},
-  billing:{fn:()=>V('viewBilling'),title:'Invoices',sub:'To raise, to send, to chase'},
-  monthEnd:{fn:()=>V('viewMonthEnd'),title:'Month end',sub:'Close the months and settle what is owed',back:()=>render('billing')},
-  ending:{fn:()=>V('viewEnding'),title:'Ending',sub:'Clients on their way out, and the final figure',back:()=>render('billing')},
+  billing:{fn:()=>V('viewBilling'),title:'Invoices',sub:'To raise, to send, to chase',back:()=>render('money')},
+  money:{fn:()=>V('viewMoney'),title:'Money',sub:'Who owes us, what we owe them, and whether it adds up'},
+  monthEnd:{fn:()=>V('viewMonthEnd'),title:'Month end',sub:'Close the months and settle what is owed',back:()=>render('money')},
+  ending:{fn:()=>V('viewEnding'),title:'Ending',sub:'Clients on their way out, and the final figure',back:()=>render('money')},
   dataDeletion:{fn:()=>V('viewDataDeletion'),title:'Data deletion',sub:'What goes, and what we keep',back:()=>render('ending')},
   documents:{fn:()=>V('viewDocuments'),title:'Documents',sub:'Everything a client receives, live',owner:true},
   settings:{fn:()=>V('viewSettings'),title:'Settings',sub:'You, the calendar, and how you are paid',owner:true},
@@ -683,7 +685,7 @@ function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.s
 function navItems(){
   const n=k=>{try{return typeof window[k]==='function'?(window[k]()||''):''}catch(e){return ''}};
   const say=(c,one,many)=>c?c+' '+(String(c)==='1'?one:many):'';
-  const needs=n('dgNavCount'),cal=n('mtNavCount'),dr=n('drCount'),ch=n('chvNavCount'),emp=n('empCount'),late=n('jyLateCount');
+  const needs=n('dgNavCount'),cal=n('mtNavCount'),dr=n('drCount'),ch=n('chvNavCount'),emp=n('empCount'),late=n('jyLateCount'),money=n('moNavCount');
   return [
     {view:'home',icon:I.activity,label:'Today',badge:needs,tone:'red',badgeTitle:say(needs,'thing needs you','things need you'),also:['friday','requests','work','team']},
     {view:'calendar',icon:I.calendar,label:'Calendar',badge:cal,tone:'amber',badgeTitle:say(cal,'call needs an outcome','calls need an outcome'),also:['meeting','noShows','funnel']},
@@ -693,7 +695,7 @@ function navItems(){
     {view:'prospects',icon:I.inquiry,label:'Prospects',badge:'',also:['prospect']},
     {view:'employees',icon:I.people,label:'Employees',badge:emp,tone:'red',badgeTitle:say(emp,'unread message from your staff','unread messages from your staff')},
     {view:'journey',icon:I.steps,label:'Onboarding',badge:late,tone:'amber',badgeTitle:say(late,'step is running late','steps are running late')},
-    {view:'billing',icon:I.money,label:'Invoices',badge:'',also:['monthEnd','ending','dataDeletion']},
+    {view:'money',icon:I.money,label:'Money',badge:money,tone:'red',badgeTitle:say(money,'payment or refund needs you','payments and refunds need you'),also:['billing','monthEnd','ending','dataDeletion']},
     {view:'documents',icon:I.doc,label:'Documents',badge:''},
     {view:'settings',icon:I.gear,label:'Settings',badge:''},
   ].filter(it=>hubAllowed(it.view));
@@ -989,6 +991,7 @@ boot();
 <script src="documents.js"></script>
 <script src="team.js"></script>
 <script src="onboarding.js"></script>
+<script src="money.js"></script>
 <script src="digest.js"></script>
 <script src="guarantee.js"></script>
 <script src="wrapup.js"></script>

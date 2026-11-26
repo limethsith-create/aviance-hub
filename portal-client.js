@@ -926,3 +926,114 @@ function pcSubscribe(channelId, onChange){
     return function(){ try { sb.removeChannel(ch); } catch (e) { /* already gone */ } };
   } catch (e) { return function(){}; }
 }
+
+/* ---- data + screen: money coming back to them ----------------------
+   THE GAP THIS CLOSES. When a month ends short, lock_month() writes one
+   `refunds` row at status 'owed'. The portal's standing line (portal-tracker.js)
+   then tells the client "your refund is being worked out and we will write to
+   you about it" — and that was the end of it. No amount, no date, and no way for
+   the client to ever see that the money had actually been sent. A client owed
+   several thousand dollars had to email somebody to find out where it was, which
+   is the one thing a guarantee must not make them do.
+
+   The `refunds` table is staff-only under row level security and stays that way:
+   this reads the `portal_refunds()` rule, which hands back that client's own
+   refunds and nothing else. That rule is in a migration the owner has not run
+   yet (supabase/migrations/20261127_refunds_paid_NOT_APPLIED.sql), so a database
+   without it must say NOTHING rather than something wrong — "no refunds" to a
+   client who is owed money is the worst sentence on this page. pcRefunds()
+   reports 'not-ready' and the block is simply not drawn. */
+
+/* Everything the client may be told about one refund. Pure. */
+function pcRefundWhen(v){ const d = pcDate(v); return d || '' }
+function pcRefundOne(r){
+  const x = r || {};
+  const cur = x.currency || 'USD';
+  const promised = Number(x.amount);
+  const state = String(x.status || 'owed').toLowerCase();
+  const month = x.month_no == null ? '' : 'Month ' + Math.round(Number(x.month_no) || 0);
+  if (state === 'waived') return null;           /* nothing to promise them */
+  if (state === 'paid') {
+    const sent = x.paid_amount == null ? promised : Number(x.paid_amount);
+    const rest = Math.max(0, promised - (Number.isFinite(sent) ? sent : promised));
+    return {
+      state: 'paid', month,
+      head: pcMoney(sent, cur) + ' refunded',
+      detail: [pcRefundWhen(x.paid_at) ? 'Sent ' + pcRefundWhen(x.paid_at) : '',
+               x.paid_via ? 'by ' + String(x.paid_via) : '',
+               x.paid_reference ? 'reference ' + String(x.paid_reference) : ''].filter(Boolean).join(' · '),
+      note: rest > 0 ? pcMoney(rest, cur) + ' of it is still to come.' : '',
+    };
+  }
+  return {
+    state: 'owed', month,
+    head: 'We owe you ' + pcMoney(promised, cur),
+    detail: pcRefundWhen(x.raised_at) ? 'Raised ' + pcRefundWhen(x.raised_at) : '',
+    note: 'It is on its way. You do not have to ask for it.',
+  };
+}
+/* The whole block. '' when there is nothing honest to show. */
+function pcRefundsHtml(rows){
+  const list = (Array.isArray(rows) ? rows : []).map(pcRefundOne).filter(Boolean);
+  if (!list.length) return '';
+  const owed = list.filter((x) => x.state === 'owed');
+  return '<section class="pc-back" aria-labelledby="pcBackH">' +
+    '<h2 class="pc-back-h" id="pcBackH">' + (owed.length ? 'Money coming back to you' : 'Money we have sent back') + '</h2>' +
+    '<ul class="pc-back-list">' + list.map((x) =>
+      '<li class="pc-back-one pc-back-' + x.state + '">' +
+        '<p class="pc-back-top"><b>' + pcEsc(x.head) + '</b>' +
+          (x.month ? '<span class="pc-tag">' + pcEsc(x.month) + '</span>' : '') + '</p>' +
+        (x.detail ? '<p class="pc-small">' + pcEsc(x.detail) + '</p>' : '') +
+        (x.note ? '<p class="pc-small">' + pcEsc(x.note) + '</p>' : '') +
+      '</li>').join('') + '</ul></section>';
+}
+
+/* Their own refunds, or a failure that says which kind it is. Never throws. */
+async function pcRefunds(){
+  const r = await pcRpc('portal', 'portal_refunds', {});
+  if (!r.ok) return r;
+  return pcOk(Array.isArray(r.data) ? r.data : []);
+}
+
+/* Drawn under the standing line, which is where a client looks for this. The
+   container is made here rather than in portal.html so doc.html and join.html,
+   which load this same file and have no portal, are untouched. */
+function pcRefundsBox(){
+  if (typeof document === 'undefined' || !document.getElementById) return null;
+  let box = document.getElementById('pcMoneyBack');
+  if (box) return box;
+  const after = document.getElementById('pcStanding');
+  if (!after || !after.parentNode) return null;
+  box = document.createElement('div');
+  box.id = 'pcMoneyBack';
+  box.className = 'pc-back-box';
+  after.parentNode.insertBefore(box, after.nextSibling);
+  return box;
+}
+/* Three tries, then stop. A database without the rule yet refuses every time and
+   there is no point asking on every poll for the rest of the afternoon; a dropped
+   connection is worth asking again, and the chat polls every twenty seconds. */
+const PC_BACK_TRIES = 3;
+const pcBack = {drawn: '', failed: 0, busy: false};
+async function pcDrawRefunds(){
+  if (pcBack.failed >= PC_BACK_TRIES || pcBack.busy) return;
+  pcBack.busy = true;
+  let r;
+  try { r = await pcRead(pcRefunds); } catch (e) { r = pcErr(e); }
+  finally { pcBack.busy = false; }
+  if (!r.ok) {
+    /* Say NOTHING rather than something wrong. "No refunds" shown to a client
+       who is owed money is the worst sentence on this page, so a read that did
+       not answer draws nothing at all and leaves the standing line to speak. */
+    if (!r.offline) pcBack.failed += 1;
+    return;
+  }
+  pcBack.failed = 0;
+  const html = pcRefundsHtml(r.data);
+  if (html === pcBack.drawn) return;
+  const box = pcRefundsBox();
+  if (!box) return;
+  box.innerHTML = html;
+  pcBack.drawn = html;
+}
+if (PC && Array.isArray(PC.mounts)) PC.mounts.push(function(){ pcDrawRefunds(); });

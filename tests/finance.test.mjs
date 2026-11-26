@@ -92,7 +92,7 @@ test('every function returns {ok,data,error} and never throws', async () => {
     .filter((k) => /^fn[A-Z]/.test(k) && typeof F(k) === 'function');
   assert.ok(names.length > 15, 'expected the finance functions to be on the shell');
 
-  for (const n of ['fnMoney', 'fnExposure', 'fnPlans', 'fnClients', 'fnStanding', 'fnBehind', 'fnCalls', 'fnInvoices', 'fnRefunds', 'fnInvoiceWork']) {
+  for (const n of ['fnMoney', 'fnExposure', 'fnPlans', 'fnClients', 'fnStanding', 'fnCalls', 'fnInvoices', 'fnRefunds', 'fnInvoiceWork']) {
     reset();
     const r = await F(n)();
     assert.deepEqual(Object.keys(r).sort(), ['data', 'error', 'ok'], n + ' shape');
@@ -114,7 +114,7 @@ test('a database error comes back as a plain sentence, not a throw', async () =>
 test('nothing in the database reads as empty, not as a crash', async () => {
   reset();
   for (const k of Object.keys(tables)) tables[k] = [];
-  for (const n of ['fnMoney', 'fnExposure', 'fnPlans', 'fnClients', 'fnBehind', 'fnInvoices', 'fnRefunds', 'fnInvoiceWork']) {
+  for (const n of ['fnMoney', 'fnExposure', 'fnPlans', 'fnClients', 'fnInvoices', 'fnRefunds', 'fnInvoiceWork']) {
     const r = await F(n)();
     assert.equal(r.ok, true, n + ': ' + r.error);
     assert.ok(r.data !== undefined, n + ' gave undefined');
