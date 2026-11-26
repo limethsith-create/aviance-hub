@@ -90,9 +90,16 @@ test('dcFetch asks documents_preview and answers {ok, data, error} in plain word
   r = await t.D('dcFetch')();
   assert.equal(r.ok, false); assert.match(r.error, /Can't reach Aviance/);
 
+  /* An answer that is not a list is a FAILURE, not an empty preview. This used
+     to come back as {ok:true, data:[]}, and the screen then read "0 things a
+     client receives" — the one number this screen can never truthfully show. */
   t = load({ data: 'nonsense', error: null });
   r = await t.D('dcFetch')();
-  assert.deepEqual([r.ok, r.data.length], [true, 0]);
+  assert.deepEqual([r.ok, r.data], [false, null]);
+  assert.equal(r.error, "The documents didn't load. Try again.");
+  t = load({ data: null, error: null });
+  r = await t.D('dcFetch')();
+  assert.equal((await t.D('dcFetch')()).ok, false, 'and so is no answer at all');
 });
 
 test('the preview is drawn by the client\'s own renderer, with the document safely inlined', () => {

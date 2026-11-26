@@ -516,3 +516,119 @@ test('a seat that is one screen wide: the grant lets somebody in, and in to noth
   assert.match(html, /\.filter\(it=>hubAllowed\(it\.view\)\)/, 'the sidebar holds nothing they may not open');
   assert.match(html, /CMDK_SCREENS\.forEach\(\(\[v,label,kw\]\)=>\{if\(!views\[v\]\|\|!hubAllowed\(v\)\)return;/, 'and neither does ⌘K');
 });
+
+/* ═════════════ a read that failed is not an empty table ═════════════
+   THE CONFIDENT ZERO the house hunts. prLoadList sets rows to [] when the read
+   does not answer, so prRenderList drew "No prospects yet" — or, for a staff
+   member, the flat diagnosis "Nothing has been shared with you" — directly
+   under the red card. A screen that could not load read as a screen with
+   nothing on it, and told somebody why in words that were a guess. */
+
+/* a fake sb whose every read and rpc comes back as one failure */
+function breakReads(box, error) {
+  const fail = () => Promise.resolve({ data: null, error });
+  const b = () => { const q = { select: () => q, eq: () => q, is: () => q, not: () => q, or: () => q,
+    order: () => q, range: () => q, limit: () => q, single: () => q, maybeSingle: () => q,
+    then: (res, rej) => fail().then(res, rej) }; return q };
+  box.sb = { from: b, rpc: fail };
+}
+
+test('a prospect read that was refused says it could not load, and never "No prospects yet"', async () => {
+  reset();
+  const failures = [
+    ['row level security turned the rows away', { message: 'permission denied for table outreach_threads', code: '42501' }],
+    ['the grant update has not been applied', { message: 'function public.prospect_clients() does not exist', code: '42883' }],
+    ['the connection dropped', { message: 'TypeError: Failed to fetch' }],
+  ];
+  for (const [why, error] of failures) {
+    const P2 = sandboxFor('prospects.js');
+    vm.runInContext('globalThis.api2={prLoadList,prRenderList,prS};', P2, { filename: 'prospects.js' });
+    breakReads(P2, error);
+    await P2.api2.prLoadList();
+    await tick();
+    const html = P2.api2.prRenderList();
+    assert.ok(P2.api2.prS.err, why + ': the failure is held');
+    assert.doesNotMatch(html, /No prospects yet/, why + ': no confident zero');
+    assert.doesNotMatch(html, /Nothing has been shared with you/, why + ': and no invented diagnosis');
+    assert.ok(html.includes(P2.coreEsc(P2.api2.prS.err)), why + ': the reason is on screen');
+    assert.match(html, /Try again/, why + ': with a way to ask again');
+    assert.doesNotMatch(html, /permission denied|does not exist|42501|42883|Failed to fetch/i,
+      why + ': in plain words, not the database’s');
+  }
+});
+
+test('an answered, genuinely empty table still says so', async () => {
+  reset(); seedTwoClients();
+  db.outreach_threads.length = 0;
+  await A.prLoadList();
+  const html = A.prRenderList();
+  assert.equal(A.prS.err, '', 'nothing failed');
+  assert.match(html, /No prospects yet/, 'the owner with no leads yet is told that');
+});
+
+/* ═════════════ an id reaches a handler as a JavaScript value, not as text ═════════════
+   prX turns ' into &#39;, and the browser hands an attribute back to JavaScript
+   decoded — so the quote landed back inside the string, killing the button or
+   running whatever followed it. coreAttr makes it a JSON literal first. */
+/* what the browser hands back to JavaScript once it has decoded an attribute */
+const decodeAttr = (s) => String(s).replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+test('a prospect id with a quote in it still opens, and cannot end the handler', async () => {
+  reset(); seedTwoClients();
+  db.outreach_threads.length = 0;                /* only the awkward one, so the first row IS it */
+  const nasty = 'tz\';x=1//"<b>';
+  db.outreach_threads.push({ id: nasty, client_id: 'cA', campaign_id: 'kA',
+    lead_name: "O'Brien <script>alert(1)</script>", lead_email: 'ob@example.com',
+    lead_company: "O'Brien & Sons <b>Ltd</b>", lead_title: 'VP "Ops"',
+    sentiment: 'positive', status: 'answered', meeting_id: null,
+    last_message_at: '2026-11-26T10:00:00Z', created_at: '2026-11-20T09:00:00Z' });
+  await A.prLoadList();
+  const html = A.prRenderList();
+  assert.ok(!html.includes('<script>'), 'the name is escaped');
+  assert.ok(!/openProspect\('/.test(html), 'the id is no longer pasted into a quoted string');
+  const open = /onclick="openProspect\((.*?)\)"/.exec(html);
+  assert.ok(open, 'the row still has its handler');
+  /* what the browser would hand to JavaScript, once it has decoded the attribute */
+  assert.equal(JSON.parse(decodeAttr(open[1])), nasty, 'it arrives as the id itself, whole');
+
+  /* the one prospect screen's Try again button, the same way */
+  A.prS.threadId = nasty; A.prS.threadErr = 'We could not load this.'; A.prS.thread = null;
+  const one = A.prRenderOne();
+  const retry = /onclick="prLoadOne\((.*?)\)"/.exec(one);
+  assert.ok(retry, 'Try again still has its handler');
+  assert.equal(JSON.parse(decodeAttr(retry[1])), nasty, 'and it too arrives whole');
+});
+
+/* THE SIGNATURE: a read whose failure and whose empty answer land in the same
+   variable. prS.clients and prS.campaigns were both `c.ok ? c.data : []`, and
+   the rows' own result then overwrote prS.err — so when the client-name read
+   failed and the table read worked, the Client column read "—" for every row,
+   the Client filter vanished, and nothing said why. */
+test('a side read that failed is said, even when the table of prospects loads fine', async () => {
+  reset(); seedTwoClients();
+  const P3 = sandboxFor('prospects.js');
+  vm.runInContext('globalThis.api3={prLoadList,prRenderList,prRenderFilters,prS};', P3, { filename: 'prospects.js' });
+  /* the live database today: the grant functions are not there, the tables are */
+  const real = P3.sb;
+  P3.sb = { from: real.from, rpc: (name, args) => (name === 'prospect_clients'
+    ? Promise.resolve({ data: null, error: { message: 'function public.prospect_clients() does not exist', code: '42883' } })
+    : real.rpc(name, args)) };
+  await P3.api3.prLoadList();
+  await tick();
+  const html = P3.api3.prRenderList();
+  assert.ok(P3.api3.prS.rows.length, 'the prospects themselves loaded');
+  assert.equal(P3.api3.prS.err, '', 'and the table read did not fail');
+  assert.ok(P3.api3.prS.clientsErr, 'but the client-name read did, and that is kept');
+  assert.match(html, /Client names and the client filter are missing/);
+  assert.ok(html.includes(P3.coreEsc(P3.api3.prS.clientsErr)), 'with the reason beside it');
+  assert.doesNotMatch(html, /does not exist|42883/i, 'in plain words');
+});
+test('when nothing failed, no side-read notice is drawn', async () => {
+  reset(); seedTwoClients();
+  await A.prLoadList();
+  const html = A.prRenderList();
+  assert.doesNotMatch(html, /filter is missing/);
+  assert.equal(A.prS.clientsErr, '');
+  assert.equal(A.prS.campaignsErr, '');
+});
