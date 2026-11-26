@@ -1512,6 +1512,14 @@ function cbRenderSeats(clientId, s, meta){
     cbSeatFig(s) +
     '<p class="cb-dim">' + cbE(cbSeatLine(s)) + '</p>' +
     (s.at_limit ? cbNote(cbSeatWhyFull(s), 'amber') : '') +
+    /* The only place in the browser that can make a portal invite is the
+       'Their people' screen (portal.js viewClientPeople -> portal_invite_create).
+       Nothing linked to it, so a Growth client's logins 2, 3 and 4 needed the SQL
+       editor. This is where the owner is already looking when he wonders who can
+       sign in. */
+    '<p style="margin:12px 0 0"><button class="btn' + (s.at_limit ? ' ghost' : '') +
+      '" onclick="openClientPeople(' + cbAttr(clientId) + ')">' +
+      cbE(s.at_limit ? 'Manage their logins' : 'Give someone a login') + '</button></p>' +
     (holders.length ? '<ul style="list-style:none;margin:10px 0 0;padding:0">' + rows + '</ul>'
       : '<p class="cb-dim">' + cbE('Nobody from ' + (cbTrim(s.company) || 'this client') + ' can sign in yet. The welcome email sends the first login when their first invoice is marked paid.') + '</p>') +
     (pend ? '<p style="' + CB_EYEBROW + ';margin-top:22px">' + cbE('Invited, not opened yet') + '</p>' +

@@ -49,11 +49,10 @@
 /* ===================== 0. CONSTANTS + STATE ===================== */
 
 /* Only used when calendar_settings has no row. Never used to override it. */
-const MT_FALLBACK = {
-  open_time:'07:00', close_time:'21:00', days:[1,2,3,4,5], slot_minutes:30,
-  min_notice_h:12, days_ahead:30,
-  us_zone:'America/New_York', owner_zone:'Asia/Colombo', meeting_link:null
-};
+/* The working-hours defaults live once, in core.js. This file used to keep its own
+   copy and it had drifted: 30 days ahead here against 21 in Settings and in the
+   database's own row. Inert while the live row exists, wrong the day it does not. */
+const MT_FALLBACK = CORE_HOURS_FALLBACK;
 /* The kinds of call we book. `qualified` is the one that touches the money. */
 const MT_KINDS = {
   discovery:  'Discovery call',

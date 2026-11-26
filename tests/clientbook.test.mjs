@@ -1215,3 +1215,14 @@ test('a settled month says its refund once, not twice', () => {
   assert.equal((text(h).match(/\$1,500 refunded/g) || []).length, 1, 'the same money, said once');
   assert.match(text(h), /Month 2: missed — 3 of 5\. \$1,500 refunded\./);
 });
+
+/* The 'Who can sign in' card must lead to the one screen that can make a portal
+   invite. Before this, nothing in the hub linked to it, so a client's second, third
+   and fourth logins could only be made in the SQL editor. */
+test('the seats card links to the screen that makes a portal invite', () => {
+  const src = fs.readFileSync(path.join(root, 'clientbook.js'), 'utf8');
+  const body = src.slice(src.indexOf('function cbRenderSeats'), src.indexOf('function cbRenderSeats') + 4000);
+  assert.match(body, /onclick="openClientPeople\('/, 'the card calls openClientPeople');
+  assert.match(body, /Give someone a login/);
+  assert.match(body, /Manage their logins/, 'at the limit it still leads there, to free a login');
+});

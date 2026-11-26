@@ -870,3 +870,42 @@ test('a known client still reads normally', async () => {
   assert.equal(asked, 'client_months');
   assert.equal(rows.length, 1);
 });
+
+/* ───────────── "as of": the numbers come from a third party, so they carry a date ─────────────
+   Instantly or Smartlead can be down for days. Without a date on the Campaign tab a
+   client reads Tuesday's figures on Friday as today's, on the tab the guarantee is
+   argued over. */
+test('the campaign tab says when the sending platform was last read', () => {
+  const now = new Date('2026-12-10T12:00:00Z');
+  assert.match(pctAsOf('2026-12-10T11:40:00Z', now), /last read within the last hour or so\.$/);
+  assert.match(pctAsOf('2026-12-10T05:00:00Z', now), /last read about 7 hours ago\.$/);
+  assert.match(pctAsOf('2026-12-09T10:00:00Z', now), /last read yesterday\.$/);
+});
+test('numbers more than a day and a half old say they may be behind', () => {
+  const now = new Date('2026-12-10T12:00:00Z');
+  const t = pctAsOf('2026-12-07T12:00:00Z', now);
+  assert.match(t, /last read 3 days ago/);
+  assert.match(t, /may be behind/);
+});
+test('when we were not told when it was read, the tab claims nothing about freshness', () => {
+  for (const v of ['', null, undefined, 'not a date']) {
+    const t = pctAsOf(v, new Date('2026-12-10T12:00:00Z'));
+    assert.doesNotMatch(t, /last read|fresh|a few times a day/i, 'no freshness claim for ' + JSON.stringify(v));
+  }
+});
+test('the newest sync across a client\'s campaigns is the one shown, and only their own', () => {
+  const d = {campaigns: [
+    {id:'a', client_id:'c1', name:'A', status:'active', sent:10, last_synced_at:'2026-12-08T00:00:00Z'},
+    {id:'b', client_id:'c1', name:'B', status:'active', sent:10, last_synced_at:'2026-12-09T06:00:00Z'},
+    {id:'x', client_id:'OTHER', name:'X', status:'active', sent:10, last_synced_at:'2026-12-10T11:59:00Z'},
+  ], daily: []};
+  assert.equal(pctCampaignNorm(d, 'c1').synced, '2026-12-09T06:00:00.000Z');
+  assert.equal(pctCampaignNorm({campaigns:[{id:'a', client_id:'c1', sent:1}], daily:[]}, 'c1').synced, '');
+});
+test('the daily read keeps the NEWEST days when there are more than the ceiling', () => {
+  /* it used to order oldest first, so past the row limit the recent days were dropped */
+  const src = fs.readFileSync(path.join(root, 'portal-tracker.js'), 'utf8');
+  const body = src.slice(src.indexOf('async function pctLoadCampaign'), src.indexOf('async function pctLoadCalls'));
+  assert.match(body, /order\('on_day', \{ ascending: false \}\)/);
+  assert.doesNotMatch(body, /ascending: true/);
+});

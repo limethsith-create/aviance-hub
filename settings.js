@@ -51,7 +51,8 @@ async function stSaveMe(fields){
 /* ---- The calendar ---- */
 /* One row, id = 1. Every screen that offers a time reads it, so this is the only
    place the working day is set. */
-const ST_CAL_FALLBACK={id:1,open_time:'07:00',close_time:'21:00',days:[1,2,3,4,5],slot_minutes:30,min_notice_h:12,days_ahead:21,us_zone:'America/New_York',owner_zone:'Asia/Colombo',meeting_link:null};
+/* one set of working-hours defaults, in core.js — see CORE_HOURS_FALLBACK */
+const ST_CAL_FALLBACK=CORE_HOURS_FALLBACK;
 
 async function stCalendar(){
   const r=await stRun(()=>sb.from('calendar_settings').select('*').eq('id',1).maybeSingle(),null);
