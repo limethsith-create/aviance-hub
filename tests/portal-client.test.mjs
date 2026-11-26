@@ -678,3 +678,189 @@ test('the migration that retires the trial plan ships, with its self-check', () 
   assert.ok(sql.includes("array['starter','starter3','growth','growth3','scale','scale3']"));
   assert.ok(sql.includes('governed by [the laws of Sri Lanka]'));
 });
+
+/* ───────────── how to pay: every rail, several at once, and the honest fallback ─────────────
+   The rail is not chosen yet, so all five are proved here. Every value below is an obvious
+   fake — zeros, TESTTEST, example.com — and no real account number or link is in this file. */
+const PAY_WIRE = { kind: 'bank_wire', fields: { account_holder: 'AVIANCE TEST HOLDER',
+  beneficiary_address: '1 Test Lane, Test City, Testland', account_number: '0000 0000 0000',
+  iban: 'TT00 TEST 0000 0000 0000', bank_name: 'Example Bank PLC', swift: 'TESTTEST',
+  bank_address: '1 Example Road, Test City 03, Testland',
+  intermediary_bank: 'Example Correspondent Bank, New York', intermediary_swift: 'TESTUS33' } };
+const PAY_SECOND = { kind: 'wise', fields: { account_holder: 'AVIANCE TEST HOLDER',
+  bank_name: 'Second Example Bank', account_number: '1111111111', swift: 'TESTSCND' } };
+const PAY_PAYONEER = { kind: 'payoneer', fields: { link: 'https://pay.example/payoneer/request' } };
+const PAY_PAYPAL = { kind: 'paypal', fields: { link: 'https://paypal.example/me/avianceTEST', email: 'billing@example.test' } };
+const PAY_CARD = { kind: 'card_link', fields: { link: 'https://checkout.example/test-session' } };
+const payInv = (pay) => ({ ...TERM3, pay: { ready: true, currency: 'USD', terms: 'Net 7', ...pay } });
+
+test('how to pay: each rail renders its own fields, on its own', () => {
+  const f = P('pcInvoiceHtml');
+
+  /* The wire is the rail that works today, and it is a wire FROM a US company TO a bank
+     abroad: beneficiary, SWIFT, branch address with its country, and the correspondent bank. */
+  const wire = f(payInv({ preferred: 'bank_wire', methods: [PAY_WIRE] }));
+  assert.ok(wire.includes('How to pay') && wire.includes('>Bank transfer</p>'));
+  for (const [label, value] of [['Beneficiary name', 'AVIANCE TEST HOLDER'],
+    ['Beneficiary address', '1 Test Lane, Test City, Testland'],
+    ['Account number', '0000 0000 0000'], ['IBAN', 'TT00 TEST 0000 0000 0000'],
+    ['Beneficiary bank', 'Example Bank PLC'], ['SWIFT / BIC', 'TESTTEST'],
+    ['Bank address', '1 Example Road, Test City 03, Testland'],
+    ['Correspondent bank', 'Example Correspondent Bank, New York'],
+    ['Correspondent SWIFT / BIC', 'TESTUS33']]) {
+    assert.ok(wire.includes('>' + label + '</dt>'), 'label missing: ' + label);
+    assert.ok(wire.includes('>' + value + '</dd>'), 'value missing: ' + label);
+  }
+  /* the fields read down in the order a US wire form asks for them */
+  assert.ok(wire.indexOf('Beneficiary name') < wire.indexOf('Account number'));
+  assert.ok(wire.indexOf('Account number') < wire.indexOf('SWIFT / BIC'));
+  assert.ok(wire.indexOf('SWIFT / BIC') < wire.indexOf('Correspondent bank'));
+  /* no ABA is claimed when there is none: a Sri Lankan account has no routing number */
+  assert.ok(!wire.includes('Routing number'), 'routing is left out unless it is filled in');
+  const us = f(payInv({ preferred: 'bank_wire', methods: [{ kind: 'bank_wire', fields: { ...PAY_WIRE.fields, routing_number: '000000000' } }] }));
+  assert.ok(us.includes('>Routing number (ABA)</dt>') && us.indexOf('Routing number') > us.indexOf('Correspondent SWIFT'),
+    'and it is last when it is there');
+
+  /* a second bank account is a second bank account; Wise is never named to a client */
+  const second = f(payInv({ preferred: 'wise', methods: [PAY_SECOND] }));
+  assert.ok(second.includes('>Bank transfer (second account)</p>'));
+  assert.ok(second.includes('>1111111111</dd>') && second.includes('>TESTSCND</dd>'));
+  assert.doesNotMatch(f(payInv({ preferred: 'wise', methods: [PAY_SECOND] })), /wise/i, 'the word Wise reaches no client');
+
+  const payo = f(payInv({ preferred: 'payoneer', methods: [PAY_PAYONEER] }));
+  assert.ok(payo.includes('>Payoneer</p>') && payo.includes('href="https://pay.example/payoneer/request"'));
+  assert.ok(payo.includes('>Pay with Payoneer</a>') && /no Payoneer account needed/.test(payo));
+
+  const pp = f(payInv({ preferred: 'paypal', methods: [PAY_PAYPAL] }));
+  assert.ok(pp.includes('>PayPal</p>') && pp.includes('>Pay with PayPal</a>') && pp.includes('>billing@example.test</dd>'));
+  assert.ok(/goods-and-services payment/.test(pp), 'the client is told which kind of PayPal payment to send');
+
+  const card = f(payInv({ preferred: 'card_link', methods: [PAY_CARD] }));
+  assert.ok(card.includes('>Card or online checkout</p>') && card.includes('>Pay by card</a>'));
+  assert.ok(card.includes('href="https://checkout.example/test-session"') && !card.includes('<pre'));
+});
+
+test('how to pay: several rails at once — the preferred one large, the rest as "or"', () => {
+  const all = [PAY_WIRE, PAY_SECOND, PAY_PAYONEER, PAY_PAYPAL, PAY_CARD];
+  const h = P('pcInvoiceHtml')(payInv({ preferred: 'card_link', methods: all }));
+  assert.equal((h.match(/class="pc-pay-main"/g) || []).length, 1, 'exactly one rail is the big one');
+  assert.equal((h.match(/class="pc-pay-alt"/g) || []).length, 4, 'the other four read as "or"');
+  assert.ok(h.indexOf('Or pay this way instead') > h.indexOf('pc-pay-main'));
+  /* the preferred one comes first on the page */
+  assert.ok(h.indexOf('Card or online checkout') < h.indexOf('Bank transfer<'), 'the pick is above the rest');
+  for (const name of ['Bank transfer', 'Bank transfer (second account)', 'Payoneer', 'PayPal', 'Card or online checkout']) assert.ok(h.includes(name), name);
+  /* the house order when no pick is made: wire, second account, Payoneer, card, PayPal last */
+  assert.deepEqual(P('pcPayPlan')({ ready: true, methods: all }).others.map((m) => m.kind),
+    ['wise', 'payoneer', 'card_link', 'paypal'], 'PayPal is last, the wire is first');
+});
+
+test('how to pay: preferred wins; an unknown or missing pick falls back to the first rail', () => {
+  const plan = P('pcPayPlan');
+  const two = { ready: true, methods: [PAY_WIRE, PAY_PAYPAL] };
+  assert.equal(plan({ ...two, preferred: 'paypal' }).preferred.kind, 'paypal');
+  assert.deepEqual(plan({ ...two, preferred: 'paypal' }).others.map((m) => m.kind), ['bank_wire']);
+  assert.equal(plan({ ...two, preferred: 'nonsense' }).preferred.kind, 'bank_wire', 'an unknown pick is not obeyed');
+  assert.equal(plan(two).preferred.kind, 'bank_wire', 'no pick: the first rail in the house order');
+  /* the house order is the same whatever order the database sent */
+  assert.deepEqual(plan({ ready: true, methods: [PAY_CARD, PAY_PAYPAL, PAY_WIRE] }).preferred.kind, 'bank_wire');
+  /* a rail named twice is one rail */
+  assert.equal(plan({ ready: true, methods: [PAY_WIRE, PAY_WIRE] }).others.length, 0);
+  /* a rail the file does not know, or one switched on with nothing in it, is simply not there */
+  assert.equal(plan({ ready: true, methods: [{ kind: 'crypto', fields: { account_number: '1' } }, { kind: 'paypal', fields: {} }] }).ready, false);
+});
+
+test('how to pay: the client is told the amount, the currency, the due date and the reference', () => {
+  const h = P('pcInvoiceHtml')(payInv({ preferred: 'bank_wire', methods: [PAY_WIRE] }));
+  assert.ok(h.includes('$3,600.00 USD') && h.includes('December 3, 2026'), 'what to pay and by when');
+  assert.ok(h.includes('>Reference to quote</span> <span class="pc-pay-v pc-pay-num">AV-2026-1051</span>'));
+  assert.ok(/Put the reference on the payment/.test(h));
+  /* the owner may tell his bank to expect something else; then that is what the client quotes */
+  const own = P('pcInvoiceHtml')(payInv({ preferred: 'bank_wire',
+    methods: [{ kind: 'bank_wire', fields: { ...PAY_WIRE.fields, reference: 'AVIANCE-TEST-REF' } }] }));
+  assert.ok(own.includes('>AVIANCE-TEST-REF</span>') && !own.includes('>AV-2026-1051</span>'));
+  assert.ok(!own.includes('>Reference to quote</dt>'), 'the convention is not also a field row');
+  /* nothing reads "undefined" when the invoice has no number, no due date and no currency */
+  const bare = P('pcInvoiceHtml')({ ...payInv({ preferred: 'bank_wire', methods: [PAY_WIRE] }), number: null, due_on: null, currency: null, terms: null });
+  assert.ok(bare.includes('How to pay') && !bare.includes('Reference to quote'));
+  assert.ok(!/undefined|null|NaN|\[object/.test(bare.replace(/class="[^"]*"/g, '')));
+});
+
+test('how to pay: nothing configured keeps the honest sentence and invents nothing', () => {
+  const f = P('pcInvoiceHtml');
+  for (const pay of [undefined, null, {}, { ready: false }, { ready: true, methods: [] },
+    { ready: false, methods: [PAY_WIRE] }, { ready: true, methods: 'not a list' },
+    { ready: true, methods: [{ kind: 'bank_wire', fields: { account_number: '[YOUR ACCOUNT NUMBER]' } }] }]) {
+    const h = f({ ...TERM3, pay });
+    assert.ok(h.includes('We’ll send these to you directly. Reply to our email if you need them now.'), JSON.stringify(pay));
+    assert.ok(!h.includes('How to pay') && !h.includes('pc-pay-main') && !h.includes('Reference to quote'), JSON.stringify(pay));
+    assert.ok(!/YOUR ACCOUNT NUMBER|Account number/.test(h), 'no invented or bracketed detail');
+  }
+});
+
+test('receipt: a paid invoice says how it was paid and never how to pay', () => {
+  const paid = { ...payInv({ preferred: 'bank_wire', methods: [PAY_WIRE], paid_method: 'bank_wire' }), status: 'paid', paid_at: '2026-12-02T10:00:00Z' };
+  const h = P('pcInvoiceHtml')(paid);
+  assert.ok(h.includes('>Receipt</h1>') && h.includes('Payment received'));
+  assert.ok(h.includes('Paid in full on December 2, 2026. Nothing more is owed on this invoice.'));
+  assert.ok(h.includes('Paid by Bank transfer') && h.includes('Keep this receipt for your records.'));
+  assert.ok(h.includes('>Reference</span>') && h.includes('AV-2026-1051'));
+  /* not one instruction, not one stored detail */
+  assert.ok(!h.includes('How to pay') && !h.includes('Reference to quote') && !h.includes('pc-pay-main'));
+  for (const secret of ['0000 0000 0000', '000000000', 'TESTTEST', 'Example Bank', 'Aviance Test Holder']) {
+    assert.ok(!h.includes(secret), 'a receipt shows no account detail: ' + secret);
+  }
+  /* no rail recorded: it says nothing rather than guessing one */
+  const q = P('pcInvoiceHtml')({ ...paid, pay: { ...paid.pay, paid_method: undefined } });
+  assert.ok(!q.includes('Paid by') && q.includes('Payment received'));
+  assert.ok(!/undefined|null|NaN/.test(q.replace(/class="[^"]*"/g, '')));
+});
+
+test('how to pay: not one field reaches the page unescaped', () => {
+  const nasty = '<img src=x onerror=alert(1)>';
+  const h = P('pcInvoiceHtml')({ ...TERM3, number: nasty, pay: { ready: true, preferred: 'bank_wire', currency: '"><b>',
+    methods: [
+      { kind: 'bank_wire', fields: { account_holder: nasty, bank_name: '</dd><script>a()</script>', account_number: nasty,
+        routing_number: nasty, swift: nasty, bank_address: nasty, note: '</section><script>b()</script>' } },
+      { kind: 'card_link', fields: { link: 'javascript:alert(1)', note: nasty } },
+      { kind: 'paypal', fields: { link: 'https://a.example/"onmouseover="x', email: nasty } },
+    ] } });
+  assert.ok(!h.includes('<img src=x') && !h.includes('<script>') && !h.includes('</script>'));   /* the Aviance logo is the only <img */
+  assert.ok(!/<[^>]*onerror=/i.test(h) && !/<[^>]*onmouseover=/i.test(h), 'no handler lands inside a tag');
+  assert.ok(h.includes('&lt;img src=x onerror=alert(1)&gt;'), 'it is shown, escaped');
+  assert.ok(!h.includes('Pay by card') && !h.includes('>Pay with PayPal</a>'), 'neither unsafe link becomes a button');
+  assert.ok(!/href="javascript:|href="https:\/\/a\.example\/"/.test(h));
+  /* and a note that is only an admin reminder is dropped, not shown */
+  const held = P('pcInvoiceHtml')(payInv({ preferred: 'bank_wire',
+    methods: [{ kind: 'bank_wire', fields: { account_holder: 'Aviance Test Holder', note: '[ADD A NOTE IN SETTINGS]' } }] }));
+  assert.ok(!held.includes('ADD A NOTE IN SETTINGS') && held.includes('Aviance Test Holder'));
+});
+
+test('how to pay: the older invoice shape still works, and ready:false still wins', () => {
+  const plan = P('pcPayPlan');
+  const legacy = plan({ wise_details: 'Account 0000, SWIFT TESTTEST', payoneer_link: 'https://pay.example/x' });
+  assert.equal(legacy.ready, true);
+  /* the old free-text box was always just bank transfer details, and reads as that */
+  assert.deepEqual([legacy.preferred.kind, legacy.others.map((m) => m.kind)], ['bank_wire', ['card_link']]);
+  assert.equal(legacy.preferred.free, 'Account 0000, SWIFT TESTTEST');
+  assert.equal(legacy.preferred.label, 'Bank transfer');
+  assert.equal(plan({ ready: false, wise_details: 'Account 0000' }).ready, false);
+  assert.equal(plan({ wise_details: '[WISE BANK DETAILS — add in Settings]', payoneer_link: '' }).ready, false);
+  /* the new list, when there is one, is what is used */
+  assert.equal(plan({ ready: true, methods: [PAY_PAYPAL], wise_details: 'Account 0000' }).preferred.kind, 'paypal');
+  assert.deepEqual([plan(null).ready, plan('x').ready, plan(undefined).ready], [false, false, false]);
+  /* currency and terms travel with the block */
+  const p = plan({ ready: true, methods: [PAY_WIRE], currency: 'usd', terms: ' Net 7 ' });
+  assert.deepEqual([p.currency, p.terms], ['USD', 'Net 7']);
+});
+
+test('how to pay: the preferred rail is one click to copy, and the whole block prints', () => {
+  const h = P('pcInvoiceHtml')(payInv({ preferred: 'bank_wire', methods: [PAY_WIRE, PAY_CARD] }));
+  assert.ok(h.includes('class="pc-pay-v pc-pay-num">0000 0000 0000<'), 'a number is select-all and in mono');
+  const css = fs.readFileSync(path.join(root, 'portal-client.css'), 'utf8');
+  assert.ok(/\.pc-pay-v\{[^}]*user-select:all/.test(css), 'select-all is what makes it copyable');
+  assert.ok(/\.pc-pay-num\{[^}]*var\(--pc-mono\)/.test(css), 'numbers are JetBrains Mono');
+  assert.ok(css.includes('.pc-pay-main{border:2px solid #000') && /\.pc-pay-main\{/.test(css));
+  assert.ok(/@media print[\s\S]*\.pc-pay-main\{/.test(css), 'the pay block has print rules too');
+  /* the card button is hidden on paper, but the URL is printed as text */
+  assert.ok(h.includes('<p class="pc-noprint"><a class="pc-btn') && h.includes('class="pc-pay-url pc-pay-v">https://checkout.example/test-session<'));
+});

@@ -254,13 +254,18 @@ async function fnStartSending(clientId, day1){
 
 const fnUsd = n => '$' + Math.round(Number(n) || 0).toLocaleString('en-US');
 
-/* One plain sentence for a month, the same words on your screen and theirs. */
+/* One plain sentence for a month, the same words on your screen and theirs.
+   A number the view did not send is read as 0, and a missing day count says so
+   in words: a client must never read "undefined of undefined" or "null days left". */
+const fnCount = n => (Number.isFinite(Number(n)) ? Math.round(Number(n)) : 0);
 function fnMonthLine(row){
   if (!row) return '';
-  if (row.verdict === 'hit')    return `Month ${row.month_no}: hit — ${row.calls_delivered} of ${row.calls_promised} calls.`;
-  if (row.verdict === 'missed') return `Month ${row.month_no}: missed — ${row.calls_delivered} of ${row.calls_promised}. ${fnUsd(row.refund_due)} refunded.`;
-  if (row.verdict === 'waived') return `Month ${row.month_no}: set aside.`;
-  const left = row.days_left;
-  const when = left < 0 ? 'the month has ended' : left === 0 ? 'last day' : `${left} day${left===1?'':'s'} left`;
-  return `Month ${row.month_no}: ${row.calls_delivered} of ${row.calls_promised} calls, ${when}.`;
+  const no = fnCount(row.month_no), got = fnCount(row.calls_delivered), want = fnCount(row.calls_promised);
+  if (row.verdict === 'hit')    return `Month ${no}: hit — ${got} of ${want} calls.`;
+  if (row.verdict === 'missed') return `Month ${no}: missed — ${got} of ${want}. ${fnUsd(row.refund_due)} refunded.`;
+  if (row.verdict === 'waived') return `Month ${no}: set aside.`;
+  const left = Number(row.days_left);
+  const when = !Number.isFinite(left) ? 'the month is still running'
+    : left < 0 ? 'the month has ended' : left === 0 ? 'last day' : `${left} day${left===1?'':'s'} left`;
+  return `Month ${no}: ${got} of ${want} calls, ${when}.`;
 }

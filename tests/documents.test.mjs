@@ -110,3 +110,53 @@ test('documents.js no longer talks about the retired plan as something on offer'
   assert.deepEqual(code.match(/pilot/gi), ['pilot', 'pilot', 'pilot'], 'only the three checks inside dcRetired');
   assert.ok(!/\$300/.test(src));
 });
+
+/* ───────────── the Documents screen says whether an invoice can be paid ─────────────
+   Same `pay` block portal-client.js renders, so this never guesses. Only the name of a
+   method is shown to the owner here — never an account number or a link. */
+const FAKE_PAY = { ready: true, preferred: 'paypal', currency: 'USD', terms: 'Net 7',
+  methods: [{ kind: 'bank_wire', fields: { account_holder: 'Aviance Test Holder', account_number: '0000 0000 0000' } },
+    { kind: 'paypal', fields: { link: 'https://paypal.example/me/avianceTEST' } }] };
+
+test('an invoice with no way to pay is flagged to the owner, and pointed at Settings', () => {
+  const { D } = load();
+  const note = D('dcPayNote');
+  for (const pay of [{ ready: false, methods: [], wise_details: null, payoneer_link: '' },
+    { ready: false, methods: [], payoneer_link: '' }]) {
+    const h = note({ type: 'invoice', doc: { kind: 'invoice', status: 'sent', pay } });
+    assert.match(h, /cannot tell a client how to pay/);
+    assert.match(h, /Settings → Payment details/);
+  }
+  /* no pay block at all (an older preview): nothing is claimed either way */
+  assert.equal(note({ type: 'invoice', doc: { kind: 'invoice', status: 'sent' } }), '');
+  assert.equal(note({ type: 'agreement', doc: { pay: { ready: false } } }), '');
+  for (const junk of [null, undefined, {}, { type: 'invoice' }, { type: 'invoice', doc: { pay: 'nope' } }]) {
+    assert.doesNotThrow(() => note(junk));
+  }
+});
+
+test('an invoice that can be paid names the method shown first, and shows no detail of it', () => {
+  const { D } = load();
+  const h = D('dcPayNote')({ type: 'invoice', doc: { kind: 'invoice', status: 'sent', pay: FAKE_PAY } });
+  assert.match(h, /How to pay: <b>PayPal<\/b> first, then Bank transfer\./);
+  assert.ok(!h.includes('cannot tell a client'));
+  for (const secret of ['0000 0000 0000', 'Aviance Test Holder', 'paypal.example']) {
+    assert.ok(!h.includes(secret), 'the owner\'s screen leaked a stored value: ' + secret);
+  }
+  /* an unknown pick falls back to the first method the database sent */
+  assert.match(D('dcPayNote')({ type: 'invoice', doc: { kind: 'invoice', pay: { ...FAKE_PAY, preferred: 'nonsense' } } }),
+    /<b>Bank transfer<\/b> first, then PayPal/);
+  /* the older shape still counts as payable */
+  assert.match(D('dcPayNote')({ type: 'invoice', doc: { kind: 'invoice', pay: { ready: true, methods: [], wise_details: 'Account 0000' } } }),
+    /How to pay: <b>Bank transfer<\/b> first\./);
+});
+
+test('a receipt is never nagged about how to pay, and the note sits above the preview', () => {
+  const { D } = load();
+  assert.equal(D('dcPayNote')({ type: 'invoice', doc: { kind: 'invoice', status: 'paid', pay: { ready: false, methods: [] } } }), '');
+  const html = D('dcPreviewHTML')({ type: 'invoice', title: 'Invoice — Growth',
+    doc: { kind: 'invoice', status: 'sent', pay: { ready: false, methods: [] } } });
+  assert.ok(html.indexOf('cannot tell a client how to pay') < html.indexOf('<iframe'));
+  const ok = D('dcPreviewHTML')({ type: 'invoice', title: 'x', doc: { kind: 'invoice', status: 'paid', pay: FAKE_PAY } });
+  assert.ok(!ok.includes('cannot tell a client') && ok.includes('<iframe'));
+});

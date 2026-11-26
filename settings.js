@@ -88,12 +88,14 @@ function stProviders(){
 
 /* ---- Payments and documents (admin only) ---- */
 /* [key the database knows, label, kind of field, a hint] */
+/* The old "Wise bank details" box and "Payoneer link" are gone from this card: the Payment
+   details card below supersedes them, and Wise cannot be held in Sri Lanka at all. The two
+   database keys still exist and are still read — an invoice with nothing in the new card falls
+   back to them — so an older setup keeps working. They are simply no longer edited here. */
 const ST_BIZ_FIELDS=[
   ['legal_name','Company legal name','text','The name on the agreement and the invoice'],
   ['address','Company address','text','Printed on every invoice'],
   ['email','Billing email','email','Where a client writes about an invoice'],
-  ['wise_details','Wise bank details','area','Shown on the invoice so they can pay by bank transfer'],
-  ['payoneer_link','Payoneer link','url','Optional. Shown on the invoice as a second way to pay'],
   ['kickoff_link','Kickoff booking link','url','Only used if a client cannot book inside their portal'],
   ['signer_name','Who signs for Aviance','text','Your full name. Shown as the Aviance signature on every agreement and the welcome email'],
   ['phone','Business phone','text','Optional. Printed on invoices']
@@ -140,6 +142,213 @@ function stRenderBiz(data){
   return rows+`<div class="st-act"><button class="btn" onclick="stSubmitBiz()">Save</button><span id="stBizMsg" class="st-msg"></span></div>`;
 }
 
+/* ---- Payment details: which rails are on, and what each one needs ----
+   An international USD wire into his own bank is the rail that works today, so it is first and
+   is what a client is normally shown. Payoneer is the backup. Card checkout needs a US entity
+   and PayPal costs about 7.3% and cannot issue an invoice in Sri Lanka, so both are here with
+   that said plainly rather than left for him to find out. Wise is not offered by name: it
+   cannot be held in Sri Lanka at all.
+
+   Nothing in this file is a real account number or link: every value below is typed in by the
+   owner and kept in the database under business.pay_methods. An error message names the field,
+   never what is in it, and no stored value is ever written to a log.
+/* An international USD wire FROM a US company TO a bank abroad. A Sri Lankan account has no
+   ABA, so routing is an optional extra for the day there is a US account; what a US client's
+   bank really asks for is the beneficiary, the SWIFT, the branch address with its country, and
+   the correspondent bank. The correspondent line is the one most often missing and the most
+   expensive to miss. Every hint below is for the owner; none of it reaches a client.
+
+   [key, label, kind of field, a hint]  —  kind: text | acct | code | iban | url | email | area */
+const ST_PAY_WIRE=[
+  ['account_holder','Beneficiary name','text','Exactly as the bank holds it, character for character. A name that does not match bounces the wire.'],
+  ['beneficiary_address','Beneficiary address','area','Your own address as the bank has it. US wire forms ask for it.'],
+  ['account_number','Beneficiary account number','acct','The USD account the money should land in — not an account that converts on arrival.'],
+  ['iban','IBAN','iban','Only if your bank issues one. Leave it empty if it does not.'],
+  ['bank_name','Beneficiary bank name','text','The bank’s full legal name.'],
+  ['swift','Beneficiary bank SWIFT / BIC','code','8 or 11 characters, from the bank itself — never from a web lookup.'],
+  ['bank_address','Beneficiary bank branch address','area','Street, city, postal code, and the country.'],
+  ['intermediary_bank','Correspondent / intermediary bank','text','Ask your bank for its USD inward-remittance instructions sheet and copy this from there. Leave it out and the wire takes an extra hop and an extra cut.'],
+  ['intermediary_swift','Correspondent bank SWIFT / BIC','code','From the same sheet as the line above.'],
+  ['reference','Reference to quote','text','What you want written on the payment. Leave it empty and the invoice number is used, which is usually what you want.'],
+  ['routing_number','Routing / ABA number (optional)','acct','Optional, and only for a US account. A Sri Lankan account has no ABA — leave this empty.']
+];
+/* [key, label here, what the client is told it is, the fields, a hint for the owner]
+   Order is the order he should think about them in: the wire first, then the backup, then the
+   two he cannot switch on today. `wise` is a historic key kept so older invoices and the
+   wise_details setting still work — to him and to a client it is just a second bank account. */
+const ST_PAY_KINDS=[
+  ['bank_wire','Bank wire (USD)','Bank transfer',ST_PAY_WIRE,
+   'The primary rail: a US company wires USD to your bank. It works today and costs roughly 1–4% at these amounts. The client types these fields into their bank.'],
+  ['wise','Second bank account','Bank transfer (second account)',ST_PAY_WIRE,
+   'Only if you ever hold a second account worth offering. Same fields as above.'],
+  ['payoneer','Payoneer','Payoneer',[['link','Payment request link','url','The “Request a Payment” link. The client pays by US bank debit or card with no Payoneer account of their own.']].concat(ST_PAY_WIRE),
+   'The backup rail, and the nicest for the client — if your signup is accepted. A link, or the receiving account details, or both.'],
+  ['card_link','Card link','Card or online checkout',[['link','Hosted checkout URL','url','A Stripe or PayPal checkout page.']],
+   'You cannot switch this on today: a hosted checkout needs a US entity, because Stripe does not operate in Sri Lanka. It is here for the day that changes.'],
+  ['paypal','PayPal (last resort)','PayPal',[['email','PayPal or invoice email','email','The address a goods-and-services payment should be sent to.'],['link','paypal.me link','url','Optional. A paypal.me link, if you have one.']],
+   'Last resort. PayPal invoicing and PayPal Checkout do not work in Sri Lanka, so the client has to send a goods-and-services payment by hand to your email address, and it costs about 7.3% all in. Read that again before choosing it.']
+];
+/* every rail also takes a free note, printed under it on the invoice */
+const ST_PAY_NOTE=['note','Note to the client','area','Optional. One line printed under this method on the invoice.'];
+const ST_PAY_FIELDS_BY_KIND=(()=>{ const o={}; ST_PAY_KINDS.forEach(([k,,,f])=>{ o[k]=f.concat([ST_PAY_NOTE]) }); return o })();
+
+function stPayOn(m){ const v=m&&m.on; return v===true||v==='true'||v===1||v==='1'||v==='yes'||v==='on' }
+/* What the database holds, read into one shape the screen and the validator both use. */
+function stPayState(data){
+  const d=(data&&typeof data==='object')?data:{};
+  const raw=(d.pay_methods&&typeof d.pay_methods==='object')?d.pay_methods:{};
+  const methods={};
+  ST_PAY_KINDS.forEach(([k])=>{
+    const m=(raw[k]&&typeof raw[k]==='object')?raw[k]:{};
+    const f={};
+    ST_PAY_FIELDS_BY_KIND[k].forEach(([fk])=>{ f[fk]=String(m[fk]==null?'':m[fk]) });
+    methods[k]={on:stPayOn(m),fields:f};
+  });
+  return {methods,
+    preferred:String(d.pay_preferred==null?'':d.pay_preferred),
+    currency:String(d.pay_currency==null?'':d.pay_currency)||'USD',
+    terms:String(d.pay_terms==null?'':d.pay_terms)||'Net 7'};
+}
+/* Can an invoice tell a client how to pay today? A method switched on with every field
+   empty cannot, so it does not count. */
+function stPayFilled(st,k){
+  const m=(st.methods||{})[k];
+  if(!m||!m.on)return false;
+  const payable=fk=>fk!=='note'&&fk!=='reference';   /* neither of these is somewhere money can go */
+  return ST_PAY_FIELDS_BY_KIND[k].some(([fk])=>payable(fk)&&String(m.fields[fk]||'').trim()!==''&&String(m.fields[fk]||'').trim().charAt(0)!=='[');
+}
+function stPayLive(st){ return ST_PAY_KINDS.map(([k])=>k).filter(k=>stPayFilled(st,k)) }
+/* The one line the owner should be able to read without thinking. */
+function stPayStatus(st){
+  const live=stPayLive(st);
+  if(!live.length)return {ok:false,text:'Invoices cannot tell a client how to pay yet. A client sees “We’ll send these to you directly.” Switch a method on below and fill it in.'};
+  const name=k=>{ const r=ST_PAY_KINDS.find(x=>x[0]===k); return r?r[2]:k };
+  const pref=live.indexOf(st.preferred)>=0?st.preferred:live[0];
+  return {ok:true,text:'Invoices show how to pay. '+name(pref)+' is shown first'
+    +(live.length>1?', with '+live.filter(k=>k!==pref).map(name).join(' and ')+' as the other way'+(live.length>2?'s':''):'')+'.'};
+}
+/* Shapes, not opinions: enough to catch a typo, not enough to argue with a real bank. */
+function stValidPayField(kind,label,value){
+  const v=String(value==null?'':value).trim();
+  if(!v)return '';
+  if(kind==='acct'&&!/^[0-9][0-9 -]*$/.test(v))return label+' should be digits, with spaces or dashes if you like.';
+  if(kind==='code'&&!/^[A-Za-z0-9][A-Za-z0-9 -]{5,19}$/.test(v))return label+' should be 6 to 20 letters and digits.';
+  if(kind==='iban'&&!/^[A-Za-z0-9][A-Za-z0-9 ]{9,41}$/.test(v))return label+' should be 10 to 42 letters and digits.';
+  if(kind==='url'&&!/^https:\/\/\S+$/i.test(v))return label+' has to start with https://';
+  if(kind==='email'&&!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v))return label+' does not look like an email address.';
+  return '';
+}
+function stValidPay(f){
+  const st=stPayState(f);
+  for(const [k,label,,,] of ST_PAY_KINDS){
+    const m=st.methods[k];
+    for(const [fk,flabel,fkind] of ST_PAY_FIELDS_BY_KIND[k]){
+      const bad=stValidPayField(fkind,label+' — '+flabel,m.fields[fk]);
+      if(bad)return bad;
+    }
+    if(m.on&&!stPayFilled(st,k))return label+' is switched on but has nothing in it. Fill one of its fields in, or switch it off.';
+  }
+  if(String(f&&f.pay_currency||'').trim()&&!/^[A-Za-z]{3}$/.test(String(f.pay_currency).trim()))return 'The currency is a three-letter code, such as USD.';
+  const live=stPayLive(st);
+  if(st.preferred&&live.indexOf(st.preferred)<0&&live.length)return 'The method you marked preferred is not switched on. Pick one of the ones that are.';
+  return '';
+}
+async function stPay(){
+  if(!stIsAdmin())return stErr('Only the owner can see the payment details.');
+  return stRun(()=>sb.rpc('biz_get'),{});
+}
+/* Sends the whole picture at once: which methods are on, their fields, and the pick. */
+async function stSavePay(fields){
+  if(!stIsAdmin())return stErr('Only the owner can change the payment details.');
+  const f=fields||{};
+  const bad=stValidPay(f);
+  if(bad)return stErr(bad);
+  const st=stPayState(f);
+  const pay_methods={};
+  ST_PAY_KINDS.forEach(([k])=>{
+    const m=st.methods[k], out={on:!!m.on};
+    ST_PAY_FIELDS_BY_KIND[k].forEach(([fk])=>{ out[fk]=String(m.fields[fk]||'').trim() });
+    pay_methods[k]=out;
+  });
+  const live=stPayLive(st);
+  const preferred=live.indexOf(st.preferred)>=0?st.preferred:(live[0]||'');
+  return stRun(()=>sb.rpc('biz_set',{p:{pay_methods,pay_preferred:preferred,
+    pay_currency:String(st.currency||'USD').trim().toUpperCase(),pay_terms:String(st.terms||'').trim()}}),{});
+}
+/* The look lives here rather than in settings.css, the same way the Wise box above does. */
+const ST_PAY_CSS={
+  in:'background:var(--surface-2);border:1px solid var(--border);color:var(--text);font:inherit;font-size:var(--fs-base);padding:7px 9px;width:100%',
+  area:'background:var(--surface-2);border:1px solid var(--border);color:var(--text);font:inherit;font-size:var(--fs-base);padding:7px 9px;width:100%;resize:vertical',
+  f:'display:flex;flex-direction:column;gap:4px',
+  lab:'color:var(--muted-2);font-size:var(--fs-min)',
+  fs:'display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px 16px;margin-top:10px',
+  m:'border:1px solid var(--border);padding:12px 14px;margin:0 0 10px',
+  mOn:'border:1px solid var(--text);padding:12px 14px;margin:0 0 10px',
+  leg:'padding:0 6px;font-size:var(--fs-base);color:var(--text)',
+  ms:'margin-top:16px',
+  ok:'color:var(--text);font-size:var(--fs-base);border-left:3px solid var(--ok,#1f9d55);padding:8px 12px;margin:0 0 14px;background:var(--surface-2)',
+  bad:'color:var(--text);font-size:var(--fs-base);border-left:3px solid #E0290F;padding:8px 12px;margin:0 0 14px;background:var(--surface-2)'
+};
+/* The card's inside. Pure: the saved values in, HTML out. Nothing is logged. */
+function stRenderPay(data){
+  const st=stPayState(data);
+  const status=stPayStatus(st);
+  const live=stPayLive(st);
+  const pick=live.indexOf(st.preferred)>=0?st.preferred:(live[0]||'');
+  const field=(k,fk,flabel,fkind,fhint)=>{
+    const id='stPay_'+k+'_'+fk;
+    const v=String((st.methods[k].fields[fk])||'');
+    const box=fkind==='area'
+      ?`<textarea id="${id}" rows="3" class="st-pay-area" style="${ST_PAY_CSS.area}">${esc(v)}</textarea>`
+      :`<input id="${id}" value="${esc(v)}"${fkind==='url'?' inputmode="url" placeholder="https://…"':fkind==='email'?' inputmode="email"':fkind==='acct'?' inputmode="numeric"':''} class="st-pay-in" style="${ST_PAY_CSS.in}">`;
+    return `<div class="st-pay-f" style="${ST_PAY_CSS.f}"><label for="${id}" style="${ST_PAY_CSS.lab}">${esc(flabel)}</label>${box}${fhint?`<small class="st-pay-fhint" style="${ST_PAY_CSS.lab}">${esc(fhint)}</small>`:''}</div>`;
+  };
+  const blocks=ST_PAY_KINDS.map(([k,label,shown,,hint])=>{
+    const on=st.methods[k].on;
+    return `<fieldset class="st-pay-m${on?' on':''}"${stPayFilled(st,k)?' data-st-live="1"':''} style="${on?ST_PAY_CSS.mOn:ST_PAY_CSS.m}">
+      <legend style="${ST_PAY_CSS.leg}"><label style="cursor:pointer"><input type="checkbox" id="stPay_on_${k}"${on?' checked':''}> ${esc(label)}</label></legend>
+      <small class="st-pay-hint" style="${ST_PAY_CSS.lab}">${esc(hint)}</small>
+      <small class="st-pay-shown" style="${ST_PAY_CSS.lab};display:block;margin-top:2px">On the invoice it reads “${esc(shown)}”${stPayFilled(st,k)?'':' · nothing in it yet'}</small>
+      <div class="st-pay-fs" style="${ST_PAY_CSS.fs}">${ST_PAY_FIELDS_BY_KIND[k].map(([fk,fl,fkd,fh])=>field(k,fk,fl,fkd,fh)).join('')}</div>
+    </fieldset>`;
+  }).join('');
+  const opts=ST_PAY_KINDS.map(([k,,shown])=>`<option value="${esc(k)}"${pick===k?' selected':''}>${esc(shown)}</option>`).join('');
+  return `<p class="st-pay-status ${status.ok?'good':'bad'}" role="status" style="${status.ok?ST_PAY_CSS.ok:ST_PAY_CSS.bad}">${esc(status.text)}</p>
+    ${stRow('Shown first',`<select id="stPayPref"><option value="">— none —</option>${opts}</select>`,'The one a client sees large; the rest read as “or”')}
+    ${stRow('Currency',`<input id="stPayCurrency" value="${esc(st.currency)}" maxlength="3" class="st-pay-cur" style="max-width:92px">`,'A three-letter code. Every plan is priced in USD.')}
+    ${stRow('Payment terms',`<input id="stPayTerms" value="${esc(st.terms)}" placeholder="Net 7">`,'Printed on the invoice beside the due date')}
+    <div class="st-pay-ms" style="${ST_PAY_CSS.ms}">${blocks}</div>
+    <div class="st-act"><button class="btn" onclick="stSubmitPay()">Save</button><span id="stPayMsg" class="st-msg"></span></div>`;
+}
+function stReadPay(){
+  const f={pay_methods:{},
+    pay_preferred:(document.getElementById('stPayPref')||{}).value||'',
+    pay_currency:(document.getElementById('stPayCurrency')||{}).value||'',
+    pay_terms:(document.getElementById('stPayTerms')||{}).value||''};
+  ST_PAY_KINDS.forEach(([k])=>{
+    const box=document.getElementById('stPay_on_'+k);
+    const m={on:!!(box&&box.checked)};
+    ST_PAY_FIELDS_BY_KIND[k].forEach(([fk])=>{ const e=document.getElementById('stPay_'+k+'_'+fk); m[fk]=e?String(e.value||''):'' });
+    f.pay_methods[k]=m;
+  });
+  return f;
+}
+async function stLoadPay(){
+  const el=document.getElementById('stPay'); if(!el)return;
+  const r=await stPay();
+  if(!r.ok){ el.innerHTML=`<p class="st-err">${esc(r.error)}</p>`; return }
+  el.innerHTML=stRenderPay(r.data);
+}
+async function stSubmitPay(){
+  const msg=document.getElementById('stPayMsg'); if(msg)msg.textContent='Saving…';
+  const r=await stSavePay(stReadPay());
+  if(!r.ok){ if(msg)msg.textContent=r.error; return r }
+  const el=document.getElementById('stPay'); if(el)el.innerHTML=stRenderPay(r.data);
+  const again=document.getElementById('stPayMsg'); if(again)again.textContent='Saved.';
+  if(typeof toast==='function')toast('The payment details are saved.');
+  return r;
+}
+
 /* ---- Screens ---- */
 function stRow(label,html,hint){
   return `<div class="st-row"><div class="st-lab">${esc(label)}${hint?`<small>${esc(hint)}</small>`:''}</div><div class="st-fld">${html}</div></div>`;
@@ -156,10 +365,13 @@ function viewSettings(){
   +(stIsAdmin()?`
 <div class="card"><h3>Payments and documents</h3>
   <p class="st-note">These go on every agreement, invoice and welcome email. Anything marked “not set yet” still shows a stand-in to the client, so fill it in before the first call is won.</p>
-  <div id="stBiz" class="st-wrap">Loading…</div></div>`:'');
+  <div id="stBiz" class="st-wrap">Loading…</div></div>
+<div class="card"><h3>Payment details</h3>
+  <p class="st-note">How a client is told to pay. Switch on the ways you really accept, fill each one in, and mark the one to show first. Until one of them has something in it, an invoice can only say the details are coming.</p>
+  <div id="stPay" class="st-wrap">Loading…</div></div>`:'');
 }
 
-async function stLoad(){ stLoadMe(); stLoadCal(); stLoadOut(); stLoadBiz(); }
+async function stLoad(){ stLoadMe(); stLoadCal(); stLoadOut(); stLoadBiz(); stLoadPay(); }
 
 async function stLoadBiz(){
   const el=document.getElementById('stBiz'); if(!el)return;

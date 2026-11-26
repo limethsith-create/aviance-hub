@@ -81,6 +81,16 @@ test('countdown words: one day, today, live', () => {
   assert.match(pctRender(journey({days_to_launch:null}), {now:NOW}), /<b>8<\/b>/);
 });
 
+test('a late step with no date on it says "Late", not "Late ·" with nothing after it', () => {
+  const j = journey();
+  j.steps[1].planned_on = null;            // the date was never set, so late comes from the server
+  j.steps[1].late = true;
+  const h = pctRender(j, {now:NOW});
+  assert.match(h, /<span class="pct-d">Late<\/span>/);
+  assert.doesNotMatch(text(h), /Late ·\s*(<|$|[A-Z]?\s*Step)/);
+  assert.doesNotMatch(h, /Late · <\/span>/);
+});
+
 test('everything from the database is escaped', () => {
   const j = journey(); j.steps[2].title = '<img src=x onerror=alert(1)>';
   const h = pctRender(j, {now:NOW});

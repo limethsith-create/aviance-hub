@@ -1036,3 +1036,17 @@ test('Paid asks how the money came, then sends that to mark_paid; View and Resen
   tables['rpc.resend_pack'] = () => ({data:null, error:{message:'Only the owner can send the pack again.'}});
   assert.equal((await cbResend('c1')).error, 'Only the owner can send the pack again.');
 });
+
+test('the month sentence never shows a client "undefined" or a day count it does not have', () => {
+  const line = cbMonthLine;
+  assert.equal(line(null), '');
+  assert.match(line({ month_no: 1, verdict: 'hit', calls_delivered: 10, calls_promised: 10 }), /Month 1: hit — 10 of 10 calls\./);
+  // a view row with the day count missing must not claim it is the last day of the month
+  assert.equal(line({ month_no: 2, verdict: 'open' }), 'Month 2: 0 of 0 calls, the month is still running.');
+  for (const row of [{ verdict: 'hit' }, { verdict: 'missed' }, { month_no: 2, verdict: 'open', days_left: null }]) {
+    assert.doesNotMatch(line(row), /undefined|null|NaN/);
+  }
+  // and it still reads word for word like the finance.js original
+  assert.match(line({ month_no: 2, verdict: 'open', calls_delivered: 4, calls_promised: 20, days_left: 0 }), /last day\./);
+  assert.match(line({ month_no: 2, verdict: 'open', calls_delivered: 4, calls_promised: 20, days_left: -3 }), /the month has ended\./);
+});

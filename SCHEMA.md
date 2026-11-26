@@ -176,6 +176,15 @@ SQL the documents and email side provides: `agreement_terms(p_client)`,
 `mail_welcome(p_client, p_join_url, p_agreement_url, p_receipt_url, p_kickoff_url)`,
 and the helper `biz(p_key text) returns text`.
 
+`p_kickoff_url` is ignored on purpose, and has been since the welcome email was
+written: a client does not book their kickoff from a link, they reply to the
+times we post in their channel ("We'll send you a few times in your channel"),
+so the email has nowhere to put one. `mark_paid` still passes
+`biz('kickoff_link')` into it. The argument is kept rather than dropped because
+three live callers pass five arguments and the house rule is to avoid DROP; a
+`comment on function` in `20261204_mail_welcome_kickoff_arg.sql` says the same
+thing to anyone reading the database instead of this file.
+
 ## The words the database will accept
 
 A module holding a word the database refuses does not crash — the write just

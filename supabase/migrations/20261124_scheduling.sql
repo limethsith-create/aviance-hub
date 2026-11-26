@@ -44,11 +44,11 @@ language sql stable security definer set search_path to 'public' as $$
     'America/New_York');
 $$;
 
--- 'tue nov 26, 10am ET' / 'tue nov 26, 10:30am ET' — the words the chat uses.
+-- 'Tue Nov 26, 10am ET' / 'Tue Nov 26, 10:30am ET' — the words the chat uses.
 create or replace function public.sched_when(p_at timestamptz, p_zone text) returns text
 language sql stable set search_path to 'public' as $$
   with z as (select coalesce(nullif(btrim(p_zone), ''), 'America/New_York') as zone)
-  select to_char(p_at at time zone z.zone, 'dy mon FMDD, FMHH12')
+  select to_char(p_at at time zone z.zone, 'Dy Mon FMDD, FMHH12')
       || case when to_char(p_at at time zone z.zone, 'MI') = '00' then '' else ':' || to_char(p_at at time zone z.zone, 'MI') end
       || to_char(p_at at time zone z.zone, 'am') || ' '
       || regexp_replace(public.pretty_when(p_at, z.zone), '^.* [AP]M ', '')
@@ -135,10 +135,10 @@ begin
 
   select string_agg(o.n || ') ' || public.sched_when((o.v->>'starts_at')::timestamptz, v_zone), ' ' order by o.n)
     into v_lines from jsonb_array_elements(v_opts) with ordinality as o(v, n);
-  v_body := 'hey, which works for ur ' || case when p_kind = 'kickoff' then 'kickoff' else 'onboarding call' end || '? '
-         || v_lines || ' just reply '
+  v_body := 'Which of these works for your ' || case when p_kind = 'kickoff' then 'kickoff' else 'onboarding call' end || '? '
+         || v_lines || ' Just reply '
          || case jsonb_array_length(v_opts) when 1 then '1' when 2 then '1 or 2' else '1, 2 or 3' end
-         || ' (or tap one)';
+         || ', or tap one.';
 
   v_draft := public.draft_write(p_client, 'offer', v_body, 'offer',
     jsonb_build_object('offer_id', v_offer, 'kind', p_kind, 'options', v_opts, 'zone', v_zone),

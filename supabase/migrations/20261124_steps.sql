@@ -72,19 +72,19 @@ begin
   if st is null then return; end if;
 
   if p_step = 'kickoff' and st = 'done' then
-    body := 'thx for the call! diving into research now, back in ~2 days w ur icp + a few angles';
+    body := 'Thank you for the call. We''re starting on your research now, and will be back in about two days with your target profile and a few angles.';
   elsif p_step = 'testing' and st = 'doing' then
-    body := 'testing started 🚀 we''re sending small batches from our warmed inboxes to see which angle lands. daily numbers here';
+    body := 'Testing has started. We''re sending small batches from our warmed inboxes to see which angle lands, and the daily numbers will appear here.';
   elsif p_step = 'testing' and st = 'done' then
     select nullif(trim(t.leading_angle), '') into lead from public.testing_days t
      where t.client_id = p_client and nullif(trim(t.leading_angle), '') is not null
      order by t.on_date desc limit 1;
-    body := case when lead is null then 'testing done. building the real campaign now'
-                 else 'testing done — ' || lead || ' came out on top. building the real campaign now' end;
+    body := case when lead is null then 'Testing is done. We''re building the real campaign now.'
+                 else 'Testing is done — ' || lead || ' came out on top. We''re building the real campaign now.' end;
   elsif p_step = 'onboarding' and st = 'done' then
-    body := 'great call. we launch tmrw';
+    body := 'Great call, thank you. We launch tomorrow.';
   elsif p_step = 'launch' and st = 'done' then
-    body := 'ur live 🎉 first emails just went out, month one starts today';
+    body := 'You''re live 🎉 Your first emails have just gone out, and month one starts today.';
   else
     return; -- research done (the approval carries it), build done, anything else: nothing
   end if;
@@ -116,9 +116,9 @@ begin
   values (p_client, ch, p_kind, t, b, 'pending') returning id into aid;
 
   line := case p_kind
-    when 'icp'    then 'here''s ur icp + angles — have a look and hit approve (or tell me what to change)'
-    when 'angles' then 'here are the angles we''ll test — have a look and hit approve (or tell me what to change)'
-    else               'here''s the copy for ur campaign — have a look and hit approve (or tell me what to change)' end;
+    when 'icp'    then 'Here''s your target profile and the angles that come out of it. Have a look and press Approve, or tell me what you''d like changed.'
+    when 'angles' then 'Here are the angles we''ll test. Have a look and press Approve, or tell me what you''d like changed.'
+    else               'Here''s the copy for your campaign. Have a look and press Approve, or tell me what you''d like changed.' end;
 
   return public.draft_write(p_client, 'approval', line, 'approval',
     jsonb_build_object('approval_id', aid, 'kind', p_kind, 'title', t, 'body', b), 'approval: ' || t);
@@ -192,7 +192,7 @@ begin
      for update of a skip locked
   loop
     perform public.draft_write(r.client_id, 'reminder',
-      'hey just checking — did u get a chance to look at the ' || r.title || '?', 'bot',
+      'Just checking in — did you get a chance to look at the ' || r.title || '?', 'bot',
       jsonb_build_object('approval_id', r.id), 'approval still open after 24h');
     update public.approvals set reminded_at = now() where id = r.id;
     n := n + 1;
@@ -212,7 +212,7 @@ begin
    where d.client_id = p_client and d.msg_kind = 'form' and d.status in ('pending', 'sent')
    order by d.created_at desc limit 1;
   if old is not null then return old; end if;
-  return public.draft_write(p_client, 'form', 'quick one before the call — 4 short qs so we don''t waste ur time 👇', 'form',
+  return public.draft_write(p_client, 'form', 'One quick thing before the call: four short questions, so we make the most of your time.', 'form',
     jsonb_build_object('form', 'precall'), 'kickoff booked: pre-call form');
 end $$;
 
@@ -266,10 +266,10 @@ begin
      set sent = excluded.sent, replies = excluded.replies, leading_angle = excluded.leading_angle, note = excluded.note;
 
   select count(*) into dayno from public.testing_days where client_id = p_client and on_date <= current_date;
-  line := 'day ' || dayno || ' of testing: ' || p_sent || ' sent · ' || p_replies || case when p_replies = 1 then ' reply' else ' replies' end
+  line := 'Day ' || dayno || ' of testing: ' || p_sent || ' sent, ' || p_replies || case when p_replies = 1 then ' reply' else ' replies' end || '.'
        || case when lead is null then ''
-               when lead ~* 'angle' then ' · ' || lead || ' leading'
-               else ' · angle ' || lead || ' leading' end;
+               when lead ~* 'angle' then ' The strongest angle so far is ' || lead || '.'
+               else ' The strongest angle so far is angle ' || lead || '.' end;
 
   -- logging twice in a day replaces today's unsent line
   update public.bot_drafts set status = 'discarded', decided_at = now(), decided_by = auth.uid()

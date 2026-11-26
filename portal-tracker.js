@@ -80,7 +80,7 @@ function pctRender(j, opts){
     return '<li class="pct-step pct-' + cls + '"' + (isNext ? ' aria-current="step"' : '') + '>' +
       '<span class="pct-mark" aria-hidden="true">' + (s.status === 'done' ? '✓' : isNext ? '●' : String(i + 1)) + '</span>' +
       '<span class="pct-t">' + pctEsc(s.title) + '</span>' +
-      '<span class="pct-d">' + pctEsc(s.late ? 'Late · ' + pctDate(s.planned) : pctDate(s.planned)) + '</span>' +
+      '<span class="pct-d">' + pctEsc([s.late ? 'Late' : '', pctDate(s.planned)].filter(Boolean).join(' · ')) + '</span>' +
       '<span class="pct-sr">' + pctEsc(word) + '</span>' +
     '</li>';
   }).join('');

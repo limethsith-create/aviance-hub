@@ -769,15 +769,19 @@ function cbRenderMonths(r, months){
       '</li>').join('') + '</ul>' +
   '</section>';
 }
-/* The same sentence finance.js writes, for when finance.js is not loaded. */
+/* The same sentence finance.js writes, for when finance.js is not loaded. Word for word the
+   same as fnMonthLine: a number the view left out reads as 0, never "undefined", and a missing
+   day count says the month is still running rather than claiming it is the last day. */
 function cbMonthLine(m){
   if (!m) return '';
-  if (m.verdict === 'hit')    return 'Month ' + m.month_no + ': hit — ' + m.calls_delivered + ' of ' + m.calls_promised + ' calls.';
-  if (m.verdict === 'missed') return 'Month ' + m.month_no + ': missed — ' + m.calls_delivered + ' of ' + m.calls_promised + '.';
-  if (m.verdict === 'waived') return 'Month ' + m.month_no + ': set aside.';
-  const left = cbInt(m.days_left);
-  return 'Month ' + m.month_no + ': ' + cbInt(m.calls_delivered) + ' of ' + cbInt(m.calls_promised) + ' calls, ' +
-    (left < 0 ? 'the month has ended' : left === 0 ? 'last day' : cbDays(left) + ' left') + '.';
+  const no = cbInt(m.month_no), got = cbInt(m.calls_delivered), want = cbInt(m.calls_promised);
+  if (m.verdict === 'hit')    return 'Month ' + no + ': hit — ' + got + ' of ' + want + ' calls.';
+  if (m.verdict === 'missed') return 'Month ' + no + ': missed — ' + got + ' of ' + want + '.';
+  if (m.verdict === 'waived') return 'Month ' + no + ': set aside.';
+  const left = Number(m.days_left);
+  return 'Month ' + no + ': ' + got + ' of ' + want + ' calls, ' +
+    (!Number.isFinite(left) ? 'the month is still running'
+      : left < 0 ? 'the month has ended' : left === 0 ? 'last day' : cbDays(left) + ' left') + '.';
 }
 
 /* The dated history: every line any module has written, newest first. */

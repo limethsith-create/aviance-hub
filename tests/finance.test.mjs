@@ -270,6 +270,12 @@ test('the month sentence says the same thing on our screen and theirs', () => {
   assert.match(line({ month_no: 2, verdict: 'open', calls_delivered: 4, calls_promised: 20, days_left: 0 }), /last day/);
   assert.match(line({ month_no: 2, verdict: 'open', calls_delivered: 4, calls_promised: 20, days_left: -3 }), /the month has ended/);
   assert.equal(line(null), '');
+  // a view row that leaves a number out must never read as "undefined" or "null" to a client
+  const thin = line({ month_no: 3, verdict: 'open' });
+  assert.equal(thin, 'Month 3: 0 of 0 calls, the month is still running.');
+  assert.doesNotMatch(thin, /undefined|null|NaN/);
+  assert.doesNotMatch(line({ verdict: 'hit' }), /undefined|null|NaN/);
+  assert.doesNotMatch(line({ month_no: 1, verdict: 'missed' }), /undefined|null|NaN/);
 });
 
 test('money is written the way a person reads it', () => {
