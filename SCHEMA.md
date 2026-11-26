@@ -76,12 +76,27 @@ and `created_at timestamptz not null default now()` unless said otherwise.
 ### Meetings and the calendar
 The Calendar (meetings.js) is the one place every call lives. It reads `meetings`
 **and** `discovery_bookings` and draws both; there is no separate Bookings screen.
-A booking's outcome is still written only by pipeline.js (Won goes through `close_won`, below). Both tables hold their
-time: the hub's slot finder treats any booking that is not `cancelled` as taken.
+A booking's outcome is still written only by pipeline.js (Won goes through `close_won`, below).
 `discovery_bookings.status` starts as `booked` (the website), becomes `brief_sent`
 (the research engine), then `held`, `no_show`, `won`, `lost` or `cancelled`. A
 booking is open unless it is `won`, `lost` or `cancelled` — never test for a list
 of "open" words.
+
+**Which bookings hold their slot.** A booking holds its time unless it is
+`cancelled` **or `lost`** — a lead turned down or written off before the call
+frees that half hour again. `won`, `held` and `no_show` still hold theirs,
+because those calls happened or are going to. This rule lives in two places and
+they must agree: `free_slots()` in the database (what the website offers) and
+`MT_BOOKING_FREES_TIME` in meetings.js (what the hub offers). Note that
+meetings.js keeps a separate, shorter list for `meetings` rows —
+`MT_FREES_TIME = ['cancelled']` — because a meeting has no `lost`. Change one
+and you must change the other, or the website and the hub will offer different
+times for the same half hour.
+
+Until 2026-11-27 both treated only `cancelled` as freeing a slot, so every lead
+marked `lost` blocked its slot permanently and no button in the hub could release
+it. If you are reading an older migration or an older test that asserts "every
+status but cancelled holds the time", that is the old behaviour, not a rule.
 - **meetings** — client_id, booking_id, kind*, starts_at* timestamptz, minutes* (15–240), time_zone*, status*, meet_link (a trigger fills in a stand-in room when it is left empty), calendar_event_id, invited_at, reminded_24h_at, reminded_1h_at, held_at, notes, title (≤160), guest_name (≤120), guest_email (a valid email or null), plan [null|starter|growth|scale] (`pilot` is retired: meetings.js refuses it and shows an old row as "Retired plan"). **Unique index on starts_at for every meeting that is not `cancelled`**, so two live meetings can never start at the same instant; a clash comes back as duplicate key (23505) and the Calendar says "There is already a call at that time." A meeting the owner adds by hand (meetings.js `mtAddOwn`) is `kind = 'other'` with its own `title`, `guest_name`, `guest_email` and `plan`; the Calendar colours it by that `plan` and falls back to the client's company and plan when a meeting has none of its own. `kind = 'qualified'` requires `client_id`.
 - **calendar_settings** — id int4 (single row, id=1), open_time* ('07:00'), close_time* ('21:00'), days* int4[] ({1,2,3,4,5}), slot_minutes* (30), min_notice_h*, days_ahead*, us_zone* ('America/New_York'), owner_zone* ('Asia/Colombo'), meeting_link, updated_at*
 - **calendar_blocks** — starts_at* timestamptz, ends_at* timestamptz, reason
