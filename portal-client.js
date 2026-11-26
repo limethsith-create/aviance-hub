@@ -136,18 +136,28 @@ function pcCleanBody(text){
 /* The guarantee in one line, for the foot of every invoice and receipt. */
 const PC_GUARANTEE = 'Miss your agreed number of calls in month one and we refund twice that month’s fee. Miss it in any later month and we refund that month in full. Money back, not credit.';
 
-/* '3 months × $1,200.00 a month · 20% off the $1,500.00 monthly price', or '' when
-   the line is not priced by the month. A one-month line says nothing: its amount
-   is already the month's price. */
-function pcLineDetail(line, currency){
+/* The two halves of a term line, for the invoice table, which sets them on
+   their own rows so the term and the saving each read at a glance:
+   {term:'3 months × $1,200.00 a month', off:'20% off the $1,500.00 monthly price'}.
+   Both are '' when the line is not priced by the month. A one-month line says
+   nothing: its amount is already the month's price. */
+function pcLineParts(line, currency){
   const l = line || {};
   const months = Number(l.months);
   const unit = Number(l.unit);
-  if (!Number.isInteger(months) || months < 2 || !isFinite(unit) || unit <= 0) return '';
-  let out = months + ' months × ' + pcMoney(unit, currency) + ' a month';
+  if (!Number.isInteger(months) || months < 2 || !isFinite(unit) || unit <= 0) return { term: '', off: '' };
   const list = Number(l.list_unit);
-  if (isFinite(list) && list > unit) out += ' · ' + Math.round((1 - unit / list) * 100) + '% off the ' + pcMoney(list, currency) + ' monthly price';
-  return out;
+  return {
+    term: months + ' months × ' + pcMoney(unit, currency) + ' a month',
+    off: isFinite(list) && list > unit ? Math.round((1 - unit / list) * 100) + '% off the ' + pcMoney(list, currency) + ' monthly price' : '',
+  };
+}
+
+/* The same thing in one sentence: '3 months × $1,200.00 a month · 20% off the
+   $1,500.00 monthly price', or ''. Kept because older callers read one string. */
+function pcLineDetail(line, currency){
+  const p = pcLineParts(line, currency);
+  return p.term ? (p.off ? p.term + ' · ' + p.off : p.term) : '';
 }
 
 /* The invoice's lines, and a check that they add up to what the database says
@@ -159,9 +169,13 @@ function pcInvoiceLines(inv){
   const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
   let lines = (Array.isArray(d.lines) ? d.lines : [])
     .filter((l) => l && l.amount != null && l.amount !== '' && isFinite(Number(l.amount)))
-    .map((l) => ({ label: String(l.label == null ? '' : l.label), amount: Number(l.amount), credit: Number(l.amount) < 0, detail: pcLineDetail(l, d.currency) }))
+    .map((l) => {
+      const p = pcLineParts(l, d.currency);
+      return { label: String(l.label == null ? '' : l.label), amount: Number(l.amount), credit: Number(l.amount) < 0,
+        detail: pcLineDetail(l, d.currency), term: p.term, off: p.off };
+    })
     .filter((l) => !(l.credit && /pilot/i.test(l.label)));
-  if (!lines.length && d.gross != null) lines = [{ label: 'Services', amount: num(d.gross), credit: false, detail: '' }];
+  if (!lines.length && d.gross != null) lines = [{ label: 'Services', amount: num(d.gross), credit: false, detail: '', term: '', off: '' }];
   const sum = lines.reduce((t, l) => t + l.amount, 0);
   const total = d.amount == null || d.amount === '' || !isFinite(Number(d.amount)) ? sum : Number(d.amount);
   return { lines, sum, total, matches: sum === total };
@@ -397,12 +411,13 @@ function pcPayPlan(pay){
 function pcPayMethodHtml(m, big){
   if (!m) return '';
   const fields = m.rows.length
-    ? `<dl class="pc-pay-fields">${m.rows.map((r) => `<div><dt class="pc-tag">${pcEsc(r.label)}</dt><dd class="pc-pay-v${r.mono ? ' pc-pay-num' : ''}">${pcEsc(r.value)}</dd></div>`).join('')}</dl>`
+    ? `<dl class="pc-pay-fields">${m.rows.map((r) => `<div class="pc-pay-f${r.mono ? ' pc-pay-f-num' : ''}"><dt class="pc-tag">${pcEsc(r.label)}</dt><dd class="pc-pay-v${r.mono ? ' pc-pay-num' : ''}">${pcEsc(r.value)}</dd></div>`).join('')}</dl>`
     : '';
   const btn = m.url ? `<p class="pc-noprint"><a class="pc-btn${big ? '' : ' pc-btn-line'}" href="${pcEsc(m.url)}" target="_blank" rel="noopener noreferrer">${pcEsc(m.action)}</a></p>
       <p class="pc-pay-url pc-pay-v">${pcEsc(m.url)}</p>` : '';
   return `<p class="pc-pay-kind">${pcEsc(m.label)}</p>
     ${big && m.hint ? `<p class="pc-small pc-pay-hint">${pcEsc(m.hint)}</p>` : ''}
+    ${big && m.rows.length ? '<p class="pc-small pc-noprint pc-pay-copy">Click or tap any value below and it selects whole, ready to copy.</p>' : ''}
     ${fields}
     ${m.free ? `<pre class="pc-pre pc-pay-v">${pcEsc(m.free)}</pre>` : ''}
     ${btn}
@@ -416,7 +431,7 @@ function pcPayHtml(plan, o){
   const q = o || {};
   if (!p.ready || !p.preferred) {
     return `<section class="pc-pay pc-pay-later" aria-labelledby="pcPayH">
-      <h2 class="pc-tag pc-red" id="pcPayH">Payment details</h2>
+      <h2 class="pc-tag" id="pcPayH">Payment details</h2>
       <p class="pc-pay-lede">We’ll send these to you directly. Reply to our email if you need them now.</p>
     </section>`;
   }
@@ -439,7 +454,7 @@ function pcPayHtml(plan, o){
       ${p.others.map((m) => `<div class="pc-pay-alt">${pcPayMethodHtml(m, false)}</div>`).join('')}</div>`
     : '';
   return `<section class="pc-pay" aria-labelledby="pcPayH">
-    <h2 class="pc-tag pc-red" id="pcPayH">How to pay</h2>
+    <h2 class="pc-tag" id="pcPayH">How to pay</h2>
     <p class="pc-pay-lede">${lede}</p>
     ${ref}
     <div class="pc-pay-main">${pcPayMethodHtml(p.preferred, true)}</div>
@@ -458,7 +473,7 @@ function pcPaidHtml(d, plan){
   const def = PC_PAY_KINDS[kind];
   const how = def ? `<p class="pc-pay-kind">Paid by ${pcEsc(def.label)}</p>` : '';
   return `<section class="pc-pay pc-paidnote" aria-label="Payment received">
-    <p class="pc-tag pc-red">Payment received</p>
+    <p class="pc-tag">Payment received</p>
     <p class="pc-pay-lede">Paid in full${when ? ' on ' + pcEsc(when) : ''}. Nothing more is owed on this invoice. Thank you.</p>
     ${how}
     ${num ? `<p class="pc-pay-ref"><span class="pc-tag">Reference</span> <span class="pc-pay-v pc-pay-num">${pcEsc(num)}</span></p>` : ''}
@@ -471,8 +486,31 @@ function pcPaidHtml(d, plan){
 function pcLogoHtml(){
   return `<img class="pc-logo" src="${PC_LOGO}" width="44" height="44" alt="Aviance">`;
 }
+
+/* The mark and the wordmark beside it. The <img> carries the name for a screen
+   reader, so the wordmark itself is decoration and is hidden from one. */
+function pcMarkHtml(){
+  return `<span class="pc-mark">${pcLogoHtml()}<span class="pc-wordmark" aria-hidden="true">Aviance</span></span>`;
+}
+
+/* The letterhead on every document: the mark on the left, what the document is
+   on the right as an eyebrow, with its reference under it in mono. */
+function pcLetterheadHtml(kind, ref){
+  const r = String(ref == null ? '' : ref).trim();
+  return `<header class="pc-dochead">${pcMarkHtml()}
+    <div class="pc-dockind"><p class="pc-tag">${pcEsc(kind)}</p>${r ? `<p class="pc-docref">${pcEsc(r)}</p>` : ''}</div>
+  </header>`;
+}
+
+/* The foot of every document: who it is from and which document it is. It
+   prints, so a page that has been forwarded on paper still says both. */
+function pcDocFootHtml(kind, ref){
+  const r = String(ref == null ? '' : ref).trim();
+  return `<footer class="pc-docend"><p class="pc-tag">Aviance · ${pcEsc(kind)}</p>${r ? `<p class="pc-docref">${pcEsc(r)}</p>` : ''}</footer>`;
+}
+
 function pcNoticeHtml(title, text, extra){
-  return `<main class="pc-wrap pc-notice">${pcLogoHtml()}<h1 class="pc-h1" tabindex="-1">${pcEsc(title)}</h1><p class="pc-lede">${pcEsc(text)}</p>${extra || ''}</main>`;
+  return `<main class="pc-wrap pc-notice">${pcMarkHtml()}<h1 class="pc-h1" tabindex="-1">${pcEsc(title)}</h1><p class="pc-lede">${pcEsc(text)}</p>${extra || ''}</main>`;
 }
 function pcDeadLinkHtml(){
   return pcNoticeHtml('This link has closed.', PC_DEAD_LINK);
@@ -501,12 +539,13 @@ function pcSignaturesHtml(doc){
   const ours = (Array.isArray(t.signatures) ? t.signatures : []).filter((x) => x && typeof x === 'object');
   const a = ours[0] || { label: 'For Aviance', name: '[YOUR NAME]', role: 'Founder', org: 'Aviance' };
   const signed = d.status === 'signed';
+  const dated = (v) => `<p class="pc-sig-date"><span class="pc-tag">Date</span><span class="pc-sig-dv">${v}</span></p>`;
   const theirs = signed
-    ? `<p class="pc-signature">${pcEsc(d.signed_name)}</p><p class="pc-sig-who">${pcEsc(d.signed_name)}</p><p class="pc-sig-org">${pcEsc(company)}${d.signed_at ? ' · ' + pcEsc(pcDate(d.signed_at)) : ''}</p>`
-    : `<p class="pc-signature pc-signature-empty" aria-hidden="true">&nbsp;</p><p class="pc-sig-who">Signs below</p><p class="pc-sig-org">${pcEsc(company)}</p>`;
+    ? `<p class="pc-signature">${pcEsc(d.signed_name)}</p><p class="pc-sig-who">${pcEsc(d.signed_name)}</p><p class="pc-sig-org">${pcEsc(company)}</p>${dated(pcEsc(pcDate(d.signed_at)) || '—')}`
+    : `<p class="pc-signature pc-signature-empty" aria-hidden="true">&nbsp;</p><p class="pc-sig-who">Signs below</p><p class="pc-sig-org">${pcEsc(company)}</p>${dated('&nbsp;')}`;
   return `<section class="pc-sigs" aria-label="Signatures">
     <div class="pc-sig"><p class="pc-tag">For ${pcEsc(company)}</p>${theirs}</div>
-    <div class="pc-sig"><p class="pc-tag">${pcEsc(a.label || 'For Aviance')}</p><p class="pc-signature pc-signature-ours">${pcFillHtml(a.name || '[YOUR NAME]')}</p><p class="pc-sig-who">${pcFillHtml(a.name || '[YOUR NAME]')}, ${pcEsc(a.role || 'Founder')}</p><p class="pc-sig-org">${pcEsc(a.org || 'Aviance')}</p></div>
+    <div class="pc-sig"><p class="pc-tag">${pcEsc(a.label || 'For Aviance')}</p><p class="pc-signature pc-signature-ours">${pcFillHtml(a.name || '[YOUR NAME]')}</p><p class="pc-sig-who">${pcFillHtml(a.name || '[YOUR NAME]')}, ${pcEsc(a.role || 'Founder')}</p><p class="pc-sig-org">${pcEsc(a.org || 'Aviance')}</p>${dated(signed && d.signed_at ? pcEsc(pcDate(d.signed_at)) : '&nbsp;')}</div>
   </section>`;
 }
 
@@ -516,8 +555,14 @@ function pcAgreementHtml(doc){
   const company = d.company || 'your company';
   const parties = (Array.isArray(t.parties) ? t.parties : [])
     .map((p) => `<div class="pc-party"><dt class="pc-tag">${pcEsc(p && p.label)}</dt><dd>${pcFillHtml(p && p.value)}</dd></div>`).join('');
+  /* the guarantee is the clause the client is really buying: it gets the one
+     warm block in the system, found by what it is called, not by its number */
   const sections = (Array.isArray(t.sections) ? t.sections : [])
-    .map((s, i) => `<section class="pc-sec"><h2><span class="pc-num">${i + 1}</span>${pcEsc(String((s && s.h) || "").replace(/^\s*\d+[.)]\s*/, ""))}</h2>${pcParasHtml(s && s.body)}</section>`).join('');
+    .map((s, i) => {
+      const h = pcEsc(String((s && s.h) || '').replace(/^\s*\d+[.)]\s*/, ''));
+      const warm = /guarantee/i.test(h) ? ' pc-sec-warm' : '';
+      return `<section class="pc-sec${warm}"><h2><span class="pc-num">${i + 1}</span>${h}</h2>${pcParasHtml(s && s.body)}</section>`;
+    }).join('');
   let foot;
   if (d.status === 'signed') {
     foot = `${pcSignaturesHtml(d)}<section class="pc-signed" id="pcSigned" tabindex="-1" aria-label="Signed">
@@ -529,7 +574,7 @@ function pcAgreementHtml(doc){
     foot = `<section class="pc-signed"><p class="pc-tag">Withdrawn</p><p class="pc-signed-line">This agreement has been withdrawn and can no longer be signed. Reply to our email if you were expecting to sign it.</p></section>`;
   } else {
     foot = `${pcSignaturesHtml(d)}<form class="pc-sign pc-noprint" id="pcSignForm" novalidate>
-      <p class="pc-tag pc-red">Sign</p>
+      <p class="pc-tag">Sign</p>
       <label class="pc-label" for="pcSignName">Type your full name to sign</label>
       <input class="pc-input pc-input-sign" id="pcSignName" name="name" type="text" autocomplete="name" maxlength="120" required aria-describedby="pcSignErr">
       <label class="pc-check" for="pcSignAgree"><input id="pcSignAgree" name="agree" type="checkbox" required><span>I have read this agreement and I am authorised to sign for ${pcEsc(company)}</span></label>
@@ -538,13 +583,17 @@ function pcAgreementHtml(doc){
       <p class="pc-small">Typing your name and pressing the button signs this agreement on behalf of ${pcEsc(company)}. We record the time and the device used.</p>
     </form>`;
   }
-  return `<main class="pc-wrap pc-doc">
-    <header class="pc-dochead">${pcLogoHtml()}<p class="pc-tag">Agreement</p></header>
-    <h1 class="pc-h1" tabindex="-1">${pcEsc(t.title || 'Service agreement')}</h1>
-    ${t.intro ? `<p class="pc-lede">${pcFillHtml(t.intro)}</p>` : ''}
+  const title = pcEsc(t.title || 'Service agreement');
+  return `<main class="pc-wrap pc-doc pc-agreement">
+    ${pcLetterheadHtml('Agreement', company)}
+    <div class="pc-title">
+      <h1 class="pc-h1" tabindex="-1">${title}</h1>
+      ${t.intro ? `<p class="pc-lede">${pcFillHtml(t.intro)}</p>` : ''}
+    </div>
     ${parties ? `<dl class="pc-parties">${parties}</dl>` : ''}
     <div class="pc-terms">${sections}</div>
     ${foot}
+    ${pcDocFootHtml('Agreement', company)}
   </main>`;
 }
 
@@ -569,17 +618,22 @@ function pcInvoiceHtml(doc){
   const plan = pcPayPlan(d.pay);   /* pcPayDetails still reads the two keys an older invoice carried */
   const kind = paid ? 'Receipt' : 'Invoice';
   const period = typeof d.period === 'string' ? d.period.trim() : '';
-  const rows = built.lines.map((l, i) => `<tr${l.credit ? ' class="pc-credit"' : ''}><td><span class="pc-line-t">${pcEsc(l.label)}</span>${l.detail ? `<span class="pc-line-d">${pcEsc(l.detail)}</span>` : ''}${!i && period ? `<span class="pc-line-d">${pcEsc(period)}</span>` : ''}</td><td class="pc-amt">${pcEsc(pcMoney(l.amount, cur))}</td></tr>`).join('');
+  /* the term on its own row and the saving on its own, each in mono, so a
+     finance person reads what was bought and what it saved without parsing a
+     sentence. `detail` is the same two halves joined, kept for anything else. */
+  const rows = built.lines.map((l, i) => `<tr${l.credit ? ' class="pc-credit"' : ''}><td><span class="pc-line-t">${pcEsc(l.label)}</span>${l.term ? `<span class="pc-line-d pc-line-term">${pcEsc(l.term)}</span>` : ''}${l.off ? `<span class="pc-line-d pc-line-off">${pcEsc(l.off)}</span>` : ''}${!i && period ? `<span class="pc-line-d">${pcEsc(period)}</span>` : ''}</td><td class="pc-amt">${pcEsc(pcMoney(l.amount, cur))}</td></tr>`).join('');
   let stamp = '';
   if (paid) stamp = `<p class="pc-stamp pc-stamp-paid"><strong>Paid</strong>${d.paid_at ? `<span>${pcEsc(pcDate(d.paid_at))}</span>` : ''}</p>`;
   else if (word === 'Void' || word === 'Overdue' || word === 'Draft') stamp = `<p class="pc-stamp"><strong>${pcEsc(word)}</strong></p>`;
+  /* the reference strip: every value mono, the due date marked so the eye
+     finds it. A row is left out entirely rather than shown empty. */
   const meta = [
-    ['Invoice no.', d.number],
-    ['Issued', pcDate(d.issued_on)],
-    [paid ? 'Paid on' : 'Due', paid ? pcDate(d.paid_at) : pcDate(d.due_on)],
-    ['Status', paid ? '' : word],   /* a receipt carries the red Paid stamp instead */
-    ['Terms', paid || dead ? '' : d.terms],
-  ].filter((m) => m[1]).map((m) => `<div><dt class="pc-tag">${m[0]}</dt><dd>${pcEsc(m[1])}</dd></div>`).join('');
+    ['Invoice no.', d.number, 'pc-meta-ref'],
+    ['Issued', pcDate(d.issued_on), ''],
+    [paid ? 'Paid on' : 'Due', paid ? pcDate(d.paid_at) : pcDate(d.due_on), paid || dead ? '' : 'pc-meta-due'],
+    ['Status', paid ? '' : word, ''],   /* a receipt carries the red Paid stamp instead */
+    ['Terms', paid || dead ? '' : d.terms, ''],
+  ].filter((m) => m[1]).map((m) => `<div class="pc-meta-r${m[2] ? ' ' + m[2] : ''}"><dt class="pc-tag">${m[0]}</dt><dd>${pcEsc(m[1])}</dd></div>`).join('');
   /* until the owner fills in the company details, a client sees just 'Aviance' */
   const fromKeys = from.ready === false ? ['legal_name', 'email', 'phone'] : ['legal_name', 'address', 'email', 'phone'];
   const fromVals = Object.assign({}, from, from.ready === false ? { legal_name: 'Aviance' } : {});
@@ -600,20 +654,27 @@ function pcInvoiceHtml(doc){
     how = pcPayHtml(plan, { amount: built.total, currency: cur, due_on: d.due_on, number: d.number, terms: d.terms });
   }
   const totalLabel = paid ? 'Total paid' : (dead ? 'Total' : 'Total due');
+  const money = pcEsc(pcMoney(built.total, cur));
+  const number = typeof d.number === 'string' ? d.number.trim() : '';
   return `<main class="pc-wrap pc-doc pc-invoice${paid ? ' pc-receipt' : ''}">
-    <header class="pc-dochead">${pcLogoHtml()}<p class="pc-tag">${kind}</p></header>
+    ${pcLetterheadHtml(kind, number)}
     <div class="pc-invtop"><h1 class="pc-h1" tabindex="-1">${kind}</h1>${stamp}</div>
-    <dl class="pc-meta">${meta}</dl>
+    <div class="pc-headline">
+      <div class="pc-total"><p class="pc-tag">${totalLabel} · ${pcEsc(cur)}</p><p class="pc-total-n">${money}</p></div>
+      <dl class="pc-meta">${meta}</dl>
+    </div>
     <div class="pc-two">
       <div><p class="pc-tag">From</p>${fromHtml}</div>
       ${toHtml ? `<div><p class="pc-tag">${paid ? 'Received from' : 'Bill to'}</p>${toHtml}</div>` : ''}
     </div>
     ${service ? `<p class="pc-service"><span class="pc-tag">Service</span><span class="pc-service-t">${pcEsc(service)}</span></p>` : ''}
-    <table class="pc-lines"><thead><tr><th scope="col" class="pc-tag">Description</th><th scope="col" class="pc-tag pc-amt">Amount</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="pc-total"><p class="pc-tag">${totalLabel} · ${pcEsc(cur)}</p><p class="pc-total-n">${pcEsc(pcMoney(built.total, cur))}</p></div>
+    <table class="pc-lines"><thead><tr><th scope="col" class="pc-tag">Description</th><th scope="col" class="pc-tag pc-amt">Amount</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><th scope="row">${totalLabel} · ${pcEsc(cur)}</th><td class="pc-amt">${money}</td></tr></tfoot></table>
     ${how}
     ${dead ? '' : `<p class="pc-guarantee"><span class="pc-tag">Our guarantee</span> ${pcEsc(PC_GUARANTEE)}</p>`}
     ${pcPrintHtml()}
+    ${pcDocFootHtml(kind, number)}
   </main>`;
 }
 

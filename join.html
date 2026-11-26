@@ -30,9 +30,12 @@
 
   function formHtml(v){
     const company = v.company || 'your company';
-    return `<main class="pc-wrap pc-notice">${pcLogoHtml()}
-      <h1 class="pc-h1" tabindex="-1">Welcome, ${pcEsc(pcFirstName(v.name))}.</h1>
-      <p class="pc-lede">Set a password to open ${pcEsc(company)}'s channel with Aviance.</p>
+    return `<main class="pc-wrap pc-doc pc-join">
+      ${pcLetterheadHtml('Set your password', company)}
+      <div class="pc-title">
+        <h1 class="pc-h1" tabindex="-1">Welcome, ${pcEsc(pcFirstName(v.name))}.</h1>
+        <p class="pc-lede">Set a password to open ${pcEsc(company)}'s channel with Aviance.</p>
+      </div>
       <p class="pc-small pc-join-what">Your private line to the Aviance team — updates, approvals and questions, all in one place.</p>
       <form class="pc-form" id="pcJoinForm" novalidate>
         <div class="pc-field">
@@ -56,6 +59,7 @@
         <p class="pc-small pc-under">Opening this page doesn't use your link — only setting your password does.</p>
         <p class="pc-small">Stuck? Reply to any of our emails.</p>
       </form>
+      ${pcDocFootHtml('Set your password', company)}
     </main>`;
   }
 
