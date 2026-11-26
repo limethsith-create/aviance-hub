@@ -240,3 +240,73 @@ test('an answer she has cleared stays cleared when the card is drawn again', () 
   assert.doesNotMatch(h, /what the database had/);
   assert.match(P('pstFormHtml')({ id: 'm9' }, { offer: 'what the database had' }, {}), /what the database had/);
 });
+
+test('a card never claims a state it has not been told: not loaded, and failed', () => {
+  const ap = P('pstApprovalHtml'), fm = P('pstFormHtml');
+  const m = { id: 'm1', meta: { approval_id: 'a1', kind: 'icp', title: 'Your target profile', body: 'US dental groups' } };
+
+  /* still being read: no Approve button, because she may have approved it days ago */
+  const reading = ap(m, undefined, {}, null, { loaded: false, failed: '' });
+  assert.ok(clean(reading));
+  assert.doesNotMatch(reading, /data-pc-act="pstApprove"|data-pc-act="pstAskChanges"/);
+  assert.match(reading, /Checking where this is up to/);
+
+  /* the ask failed: the sentence, and a way out other than reloading */
+  const broke = ap(m, undefined, {}, null, { loaded: false, failed: 'We could not reach Aviance. Check your connection and try again.' });
+  assert.ok(clean(broke));
+  assert.doesNotMatch(broke, /data-pc-act="pstApprove"/);
+  assert.match(broke, /could not reach Aviance/);
+  assert.match(broke, /data-pc-act="pstRetry"/);
+
+  /* told, and pending: exactly as before */
+  const live = ap(m, { id: 'a1', status: 'pending' }, {}, null, { loaded: true, failed: '' });
+  assert.match(live, /data-pc-act="pstApprove"/);
+  /* told it is decided while the rest is still loading: the stamp wins over the wait */
+  const done = ap(m, { id: 'a1', status: 'approved', decided_name: 'Dana' }, {}, null, { loaded: false, failed: 'x' });
+  assert.match(done, /Approved by Dana/);
+  assert.doesNotMatch(done, /pstRetry/);
+  /* no load argument at all: today's behaviour, so nothing that already calls this moves */
+  assert.match(ap(m, undefined, {}, null), /data-pc-act="pstApprove"/);
+
+  /* the form: four empty boxes before the answers arrive could wipe what she wrote,
+     because portal_precall_submit overwrites */
+  const fReading = fm({ id: 'm9' }, null, {}, { loaded: false, failed: '' });
+  assert.ok(clean(fReading));
+  assert.doesNotMatch(fReading, /<textarea|data-pc-act="pstPrecall"/);
+  assert.match(fReading, /Checking your answers/);
+  const fBroke = fm({ id: 'm9' }, null, {}, { loaded: false, failed: 'Something went wrong at our end.' });
+  assert.doesNotMatch(fBroke, /<textarea/);
+  assert.match(fBroke, /data-pc-act="pstRetry"/);
+  /* answered, or asked and genuinely empty, or no load argument: as before */
+  assert.match(fm({ id: 'm9' }, {}, {}, { loaded: true }), /data-pc-act="pstPrecall"/);
+  assert.match(fm({ id: 'm9' }, null, {}), /data-pc-act="pstPrecall"/);
+  assert.match(fm({ id: 'm9' }, { submitted_at: '2026-11-24T10:00:00Z' }, {}, { loaded: false, failed: 'x' }), /Done ✓/);
+});
+
+test('a load that failed is written down, cleared on the next good answer, and retryable', async () => {
+  const mount = theMount();
+  pstState.who = ''; pstState.loaded = false; pstState.failed = ''; pstState.at = 0; pstState.seen = '';
+  pstState.approvals = {}; pstState.form = null; pstState.items = {};
+  const home = { person: { id: 'p1', name: 'Dana' }, channel: { id: 'ch1' } };
+
+  let bad = true;
+  const ctx = { home, rpc: async (n) => (bad
+    ? { ok: false, error: 'We could not reach Aviance. Check your connection and try again.' }
+    : { ok: true, data: n === 'portal_approvals' ? [{ id: 'a1', status: 'approved' }] : { submitted_at: '2026-11-24T10:00:00Z' } }) };
+
+  await withCards(['a:', 'f:'], () => mount(ctx));
+  assert.match(pstState.failed, /could not reach Aviance/);
+  assert.equal(pstState.loaded, false);
+
+  bad = false;
+  pstState.at = 0;
+  await withCards(['a:', 'f:'], () => mount(ctx));
+  assert.equal(pstState.failed, '');
+  assert.equal(pstState.loaded, true);
+  assert.equal(pstState.approvals.a1.status, 'approved');
+
+  assert.equal(typeof P('PC').actions.pstRetry, 'function');
+  bad = true; pstState.at = Date.now();
+  await withCards(['a:', 'f:'], () => P('PC').actions.pstRetry(null, ctx));
+  assert.match(pstState.failed, /could not reach Aviance/);   /* the back-off was forgotten and it asked again */
+});

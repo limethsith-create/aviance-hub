@@ -119,10 +119,48 @@ async function fnLockMonth(monthId){
 
 /* ---- calls that count -------------------------------------------- */
 
+/* THE RULE BEHIND EVERY WRITE BELOW. `qualified_calls.counts` is a generated
+   column, so it is right the instant the row changes. `client_months.calls_
+   delivered` is NOT: nothing in the database recounts it on its own — there is
+   no trigger on qualified_calls. Only call_verdict(), lock_month() and an
+   explicit recount_month() move it. So a write straight to a call leaves the
+   month saying a number its own calls no longer add up to, and every screen,
+   the client's portal, the exposure total and the day-20 warning read the month.
+   Checked live on 2026-11-26: a direct update that made a call count left
+   client_months.calls_delivered at 0 while the calls behind it said 1.
+   Every write here therefore recounts afterwards. Prefer call_verdict() (the
+   rpc) when you are answering "did they show up?" — it does all of this inside
+   one database call and refuses a locked month. */
+
+/* Every month of a client that a call at this instant could belong to, recounted.
+   The month's edges are US dates and this is a UTC instant, so the window is
+   widened by a day at each end; recount_month is idempotent, counts by its own
+   date window and does nothing to a locked month, so one month too many is free. */
+async function fnRecountAround(clientId, whenIso){
+  if (!clientId || !whenIso) return fnOk(0);
+  const t = coreToDate(whenIso);
+  if (!t) return fnOk(0);
+  const day = n => new Date(t.getTime() + n * 86400000).toISOString().slice(0,10);
+  const got = await fnRun(() => sb.from('client_months').select('id')
+    .eq('client_id', clientId).is('locked_at', null)
+    .lte('starts_on', day(1)).gte('ends_on', day(-1)), []);
+  if (!got.ok) return got;
+  const rows = Array.isArray(got.data) ? got.data : [];
+  let done = 0;
+  /* One month in all but a boundary case, so this is one round trip in practice. */
+  for (const m of rows) { if (m && m.id && (await fnRecount(m.id)).ok) done++; }
+  return fnOk(done);
+}
+/* The month(s) a call row touches, recounted. Safe to call with a failed read. */
+function fnRecountForCall(row){
+  const r = row || {};
+  return fnRecountAround(r.client_id, r.happened_at || r.booked_for);
+}
+
 /* A call only counts when it matches the profile AND actually happened. */
 async function fnLogCall(clientId, call){
   const c = call || {};
-  return fnRun(() => sb.from('qualified_calls').insert({
+  const r = await fnRun(() => sb.from('qualified_calls').insert({
     client_id:        clientId,
     prospect_name:    c.name    || null,
     prospect_email:   c.email   || null,
@@ -132,27 +170,35 @@ async function fnLogCall(clientId, call){
     happened:         !!c.happened,
     happened_at:      c.happened ? (c.happenedAt || c.bookedFor) : null
   }).select().single(), null);
+  if (r.ok && r.data && r.data.counts) await fnRecountForCall(r.data);
+  return r;
 }
 
 /* They turned up. This is what moves the month's number. */
 async function fnCallHappened(callId, whenIso){
-  return fnRun(() => sb.from('qualified_calls')
+  const r = await fnRun(() => sb.from('qualified_calls')
     .update({happened:true, happened_at: whenIso || new Date().toISOString()})
     .eq('id', callId).select().single(), null);
+  if (r.ok) await fnRecountForCall(r.data);
+  return r;
 }
 
 /* The client says a call should not count. Held aside until you decide. */
 async function fnDisputeCall(callId, reason){
-  return fnRun(() => sb.from('qualified_calls')
+  const r = await fnRun(() => sb.from('qualified_calls')
     .update({dispute_status:'raised', dispute_reason: (reason||'').slice(0,600)})
     .eq('id', callId).select().single(), null);
+  if (r.ok) await fnRecountForCall(r.data);
+  return r;
 }
 
 /* You decide. 'upheld' = it does not count. 'rejected' = it stands. */
 async function fnSettleDispute(callId, outcome){
   const o = outcome === 'upheld' ? 'upheld' : 'rejected';
-  return fnRun(() => sb.from('qualified_calls')
+  const r = await fnRun(() => sb.from('qualified_calls')
     .update({dispute_status:o}).eq('id', callId).select().single(), null);
+  if (r.ok) await fnRecountForCall(r.data);
+  return r;
 }
 
 async function fnCalls(clientId, monthId){

@@ -115,8 +115,20 @@ h1,h2,h3,h4{font-family:var(--font);font-weight:700;letter-spacing:-.03em;line-h
    !important here the red button and the lit place in the sidebar — both of them
    red grounds — took a red ring and the focus disappeared. White on #E0290F
    measures 4.67:1, well past the 3:1 a focus ring needs. */
-:focus-visible{outline:2px solid var(--text);outline-offset:2px}
-.btn:focus-visible,.nav-item:focus-visible,
+/* !important here is not decoration. theme.css sets
+   :focus-visible{outline:2px solid var(--brand)!important} — a RED ring — and
+   without !important this line loses to it. The result was that only the handful of
+   selectors repeated below with !important were ever actually fixed, and every other
+   control in the system, and every control added after, silently took the red ring
+   back. On a red button that measures 1.0:1 against the thing it is marking: it reads
+   as the button getting a pixel fatter, not as a focus ring. One keyword fixes all of
+   them, and every future one. */
+:focus-visible{outline:2px solid var(--text)!important;outline-offset:2px}
+/* the red-filled buttons, wherever they live, take the white ring: white on #E0290F
+   measures 4.67:1, well past the 3:1 a ring needs. Added here rather than in each
+   file so there is one list to keep. */
+.btn:focus-visible,.nav-item:focus-visible,.pt-btn.primary:focus-visible,
+.chv-btn.primary:focus-visible,.chv-send:focus-visible,.tmc-btn:focus-visible,
 .tmc-msg-mine :focus-visible{outline:2px solid #fff!important;outline-offset:-4px}
 /* the outline buttons sit on paper: ink, not the white the filled ones take */
 .btn.ghost:focus-visible,.tb-btn:focus-visible{outline:2px solid var(--text)!important;outline-offset:2px}

@@ -380,9 +380,10 @@ test('pcMessages reads only this channel, oldest first', async () => {
   tableAnswer = () => ({ data: null, error: { message: 'permission denied' } });
   const e = await P('pcMessages')('c1');
   /* a client never reads the database's own words: "permission denied" told them
-     nothing they could act on and named our plumbing */
+     nothing they could act on and named our plumbing. It must also not be dressed up
+     as an expired session — that sends them round a sign-in loop that cannot end. */
   assert.equal(e.ok, false);
-  assert.equal(e.error, 'Your sign-in has run out. Please sign in again.');
+  assert.equal(e.error, 'This part of your portal is not open to your login. Tell us in Chat and we will sort it out — signing in again will not change it.');
 });
 test('pcSend writes as the client person, never as a team user, and never an empty message', async () => {
   reset();
@@ -1023,8 +1024,14 @@ test('no client is ever shown the database\'s own words', () => {
     /* it ends like a sentence, and tells them something to do */
     assert.match(r.error, /[.!]$/, 'reads as a sentence: ' + r.error);
   }
-  /* the four sentences it does use are the ones a person can act on */
-  assert.match(plain('permission denied'), /sign in again/i);
+  /* the sentences it does use are the ones a person can act on — and crucially a
+     REFUSAL and an EXPIRED SESSION must not give the same advice. Telling a client
+     whose read was refused by a policy to sign in again sends them round a loop that
+     cannot end: they sign out, sign back in, meet the same rule, and conclude the
+     portal is broken. Signing in does not grant a policy. */
+  assert.match(plain('permission denied'), /not open to your login/i);
+  assert.doesNotMatch(plain('permission denied'), /^Your sign-in has run out/,
+    'a refusal must never be reported as an expired session');
   assert.match(plain('JWT expired'), /sign in again/i);
   assert.match(plain('Failed to fetch'), /connection/i);
   assert.match(plain('relation "x" does not exist'), /try again|tell us/i);
@@ -1041,4 +1048,50 @@ test('our own sentences, and our own database messages, pass through untouched',
   /* offline is still flagged, so a screen can say "check your connection" its own way */
   assert.equal(err({message: 'Failed to fetch'}).offline, true);
   assert.equal(err({message: 'permission denied'}).offline, false);
+});
+
+test('the portal-seat sentence reaches the client whole, with its code and without it', () => {
+  /* seat_full_message() in 20261207_seats.sql, client wording, verbatim. It is 211
+     characters for a 14-character company name, and the ceiling here used to be
+     180, so it was being replaced by
+     "try again in a moment" — which is false: trying again refuses again for ever
+     and never says that a login has to be freed. The portal-accept function sends
+     it with no code at all, so matching on ZS001 alone is not enough. */
+  const plain = P('pcPlain'), err = P('pcErr');
+  const seat = 'Stone Dental already has all 2 of its Aviance logins in use, so this link cannot open another one. '
+    + 'Ask whoever set up your Aviance portal to free a login, or reply to any of our emails and we will sort it out.';
+  assert.ok(seat.length > 180 && seat.length < 400, 'the real sentence is past the old ceiling: ' + seat.length);
+  assert.equal(plain(seat, 'ZS001'), seat);
+  assert.equal(plain(seat), seat);            /* the join.html path carries no code */
+  assert.equal(err(seat).error, seat);
+  assert.equal(err({ message: seat, code: 'ZS001' }).error, seat);
+  /* the ceiling still exists, and the machine room is still caught whatever its length */
+  assert.match(plain('x'.repeat(401)), /try again|tell us/i);
+  assert.match(plain('duplicate key value violates unique constraint "client_people_one_seat_per_user"', '23505'), /try again|tell us/i);
+  assert.match(plain('relation "portal_invites" does not exist and here is a much longer sentence about it'), /try again|tell us/i);
+});
+
+test('a read that never answers is given up on, and a write never is', async () => {
+  const read = P('pcRead');
+  /* the failure that used to leave the portal on "Loading" for ever */
+  const hangs = () => new Promise(() => {});
+  const r = await read(hangs, 20);
+  assert.equal(r.ok, false);
+  assert.equal(r.offline, true);
+  assert.match(r.error, /connection|reach/i);
+  /* an answer inside the limit comes back untouched, {ok,data,error} or not */
+  assert.deepEqual(await read(() => ({ ok: true, data: [1, 2], error: '' }), 500), { ok: true, data: [1, 2], error: '' });
+  assert.deepEqual(await read(() => 'plain', 500), { ok: true, data: 'plain', error: '' });
+  /* it never throws, whatever it is handed */
+  assert.equal((await read(() => { throw new Error('boom'); }, 500)).ok, false);
+  assert.equal((await read(null)).ok, false);
+  assert.equal((await read(() => Promise.reject(new Error('Failed to fetch')), 500)).offline, true);
+  /* and the writes are not wrapped in it: a message or a booking that may already
+     have landed is never given up on and retried */
+  const src = read.toString();
+  assert.ok(!/pcSend|pcBookKickoff|pcAccept|pcDocSign/.test(src));
+  const page = fs.readFileSync(path.join(root, 'portal.html'), 'utf8');
+  assert.match(page, /pcRead\(\s*function\(\)\{\s*return pcMessages\(id\)/);
+  assert.match(page, /pcRead\(pcSession\)/);
+  assert.doesNotMatch(page, /pcRead\(\s*(function\(\)\s*\{\s*return\s*)?(pcSend|pcBookKickoff)/);
 });

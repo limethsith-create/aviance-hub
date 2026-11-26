@@ -111,7 +111,10 @@
 .chv-cbox{display:flex;align-items:flex-end;gap:8px;border:1px solid var(--border-strong,#CFCFCA);border-radius:var(--r,8px);background:var(--surface,#fff);padding:8px}
 .chv-cbox:focus-within{outline:2px solid var(--brand,#E0290F);outline-offset:1px}
 .chv-cbox textarea{flex:1;min-width:0;border:0;outline:0;resize:none;background:transparent;color:inherit;font:inherit;line-height:1.5;max-height:160px;padding:4px}
-.chv-cbox textarea:focus-visible{outline:0}
+/* Deliberately NOT outline:0. The box hides its resting border so it reads as part
+   of the card, but keyboard-only the ring is the only thing that says the caret is
+   in the message box. Inset so it sits inside the card's own edge. */
+.chv-cbox textarea:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
 .chv-attach{min-height:36px;padding:0 12px;border:0;border-radius:var(--r-sm,6px);background:transparent;color:var(--muted,#5B5E63);font-weight:600;cursor:pointer}
 .chv-attach:hover{background:var(--surface-2,#F4F4F2);color:var(--text,#121314)}
 .chv-send{min-height:36px;padding:0 16px;border:0;border-radius:var(--r-sm,6px);background:var(--brand,#E0290F);color:var(--brand-ink,#fff);font-weight:600;cursor:pointer}
@@ -160,7 +163,13 @@
 .chv-title{flex:1 1 180px}
 .chv.chv-panel-open:not(.chv-solo){grid-template-columns:240px minmax(0,1fr) 360px}
 .chv.chv-solo.chv-panel-open{grid-template-columns:minmax(0,1fr) 360px}
-.chv .chv-cbox textarea,.chv .chv-cbox textarea:focus,.chv .chv-cbox textarea:focus-visible{outline:0!important;box-shadow:none!important;border-color:transparent!important}
+/* The compose box is drawn as part of its surrounding card, so it hides its own
+   border and glow — but it was hiding its FOCUS ring too, and keyboard-only there was
+   then nothing at all to say the caret was in the message box. :focus-visible is split
+   out and keeps its ring; the plain :focus case, which fires on a mouse click, stays
+   quiet as intended. */
+.chv .chv-cbox textarea,.chv .chv-cbox textarea:focus{outline:0!important;box-shadow:none!important;border-color:transparent!important}
+.chv .chv-cbox textarea:focus-visible{box-shadow:none!important;border-color:transparent!important}
 .chv-side .nm-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
 .chv-side .nm-table{display:block;overflow-x:auto;white-space:nowrap}
 .chv-solo .chv-list{display:none}

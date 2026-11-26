@@ -33,17 +33,26 @@ const CHV_NO_FILES="Sending files isn't switched on yet. Send the message as tex
 const CHV_GROUP_MS=5*60*1000;         // same person within 5 minutes = one group
 const CHV_POLL_MS=20000;              // unread counts for the channels that are not open (the open one is live)
 const CHV_TYPING_MS=4500;
+/* How long a send that was reported as failed is still believed to have landed.
+   A message is one insert: the row can be committed and the answer lost on the
+   way back (a dropped connection, a re-read the rule would not allow). The
+   screen is then told "it didn't send" about a message the client can read, and
+   the words go back in the box — so pressing Send again says it twice. For this
+   long after such a failure, the same words arriving back from the server as my
+   own message are taken as proof it did send: the warning goes, and the box is
+   emptied of the copy rather than left waiting to be sent a second time. */
+const CHV_UNSURE_MS=90000;
 const chv={
   chs:[], loaded:false, err:null, loading:false,
   cur:null, want:null, msgs:[], hasMore:false, loadingOlder:false, msgsErr:null, msgsLoading:false,
   divId:null, newBelow:0, editing:null, sending:false,
-  drafts:{}, pending:[], cerr:'',
+  drafts:{}, pending:[], cerr:'', unsure:{},
   typing:{}, typingTimer:null, unsub:null,
   q:'', hits:[], searchSeq:0, searchTimer:null,
   panelSet:false, panelOpen:false, pane:'list',
   archOpen:false, noChOpen:false, noChDone:{},
   urls:{}, urlWait:{},
-  staff:null, loadStaff:null,
+  staff:null, staffErr:'', loadStaff:null,
   unreadTotal:0, peekAt:0, timer:null, seq:0, tmpSeq:0, creating:false, visHooked:false, caught:'',
   bot:[], botEdits:{}, botBusy:{}, botErr:'', botSeq:0, botTimers:[],
 };
@@ -519,6 +528,7 @@ function chvOnMessage(m){
   const own=m.userId===chvMe();
   const atBottom=chvAtBottom();
   chv.msgs.push(m);
+  if(own)chvSendLanded(m);
   if(m.isClient)chvBotSoon();
   if(chv.typing[m.userId]){delete chv.typing[m.userId];chvPaintTyping();}
   const c=chvFindCh(chv.cur);if(c)c.lastMessageAt=m.createdAt||c.lastMessageAt;
@@ -531,6 +541,25 @@ function chvOnMessage(m){
     chvPaintThread(true);chvShowPill(true);
   }
   chvPaintList();
+}
+/* My own message arriving from the server after a send that was reported as
+   failed: it did send after all. Take the copy out of the box and take the
+   warning down, so it is not said to the client twice. Only the exact words,
+   only mine, only inside CHV_UNSURE_MS. */
+function chvSendLanded(m){
+  const id=m&&m.channelId||chv.cur;if(!id)return false;
+  const u=chv.unsure[id];if(!u)return false;
+  if(chvNow()-u.at>CHV_UNSURE_MS){delete chv.unsure[id];return false;}
+  if(String(m.body||'').trim()!==String(u.body||'').trim())return false;
+  delete chv.unsure[id];
+  if(String(chv.drafts[id]||'').trim()===String(u.body||'').trim()){
+    chv.drafts[id]='';
+    const box=chvEl('chvInput');if(box){box.value='';if(box.style)box.style.height='auto';}
+  }
+  chv.cerr='It did send after all — it was only the answer that went missing.';
+  const e=chvEl('chvCErr');if(e)e.textContent=chv.cerr;
+  const b=chvEl('chvSend');if(b)b.disabled=false;
+  return true;
 }
 function chvOnUpdate(m){
   if(!m||!m.id)return;
@@ -627,6 +656,10 @@ async function chvSend(){
   catch(e){ r={ok:false,data:null,error:"Your message didn't send. Try again."}; }
   finally{ chv.sending=false; }
   if(tmp)chv.msgs=chv.msgs.filter(x=>x!==tmp);
+  /* It said no — but a send is one insert, so the row may be on the server all
+     the same. Remember the words, so that the same message coming back as mine
+     clears the warning instead of sitting in the box to be sent twice. */
+  if(!r.ok&&body)chv.unsure[id]={body:body,at:chvNow()};
   if(id!==chv.cur){
     // he moved to another channel while it was on its way: never lose the words
     if(!r.ok){if(tmp&&!chv.drafts[id])chv.drafts[id]=raw;toast((r.error||"Your message didn't send.")+' It is back in the box in '+(c.name||'that channel')+'.');}
@@ -647,7 +680,7 @@ async function chvSend(){
   }
   // anything typed while it was on its way stays in the box
   chv.drafts[id]=tmp?String(box?box.value||'':''):chvLeftover(raw,box?box.value:raw);
-  chv.pending=[];chv.cerr='';
+  chv.pending=[];chv.cerr='';delete chv.unsure[id];
   const m=r.data&&typeof r.data==='object'&&r.data.id?r.data:null;
   if(m){
     if(!m.userId)m.userId=chvMe();
@@ -712,9 +745,14 @@ async function chvLoadStaffList(){
   try{
     if(chv.loadStaff){chv.staff=await chv.loadStaff();return chv.staff;}
     const {data,error}=await sb.from('profiles').select('id,name,email,role,approved');
-    if(error||!Array.isArray(data))return [];   // a failed lookup is not remembered: the next open asks again
+    /* A failed lookup is not remembered: the next open asks again. It is also not
+       an empty team — "No one else on the team yet" under a read that was
+       refused is the same confident zero, in a modal. */
+    if(error||!Array.isArray(data)){chv.staffErr="The team list didn't load, so nobody can be picked here. Close this and try again.";return [];}
+    chv.staffErr='';
     chv.staff=data.filter(p=>p&&p.approved&&(p.role==='admin'||p.role==='employee')).map(p=>({id:p.id,name:p.name||p.email||'Team member'}));
-  }catch(e){return [];}
+  }catch(e){chv.staffErr="The team list didn't load, so nobody can be picked here. Close this and try again.";return [];}
+  chv.staffErr='';
   return chv.staff;
 }
 async function chvNewChannel(){
@@ -722,7 +760,7 @@ async function chvNewChannel(){
   const staff=(await chvLoadStaffList()).filter(p=>p.id!==chvMe());
   openModal(`<div class="modal-head"><div><h3>New channel</h3><p>A team channel. Client channels are started from the client's name in the list.</p></div></div>
     <div class="modal-body"><div class="field"><label for="chvNewName">Name</label><input id="chvNewName" maxlength="80" placeholder="For example: Sales" autocomplete="off"></div>
-    <div class="field"><label>Members</label><div class="chv-pick">${staff.length?staff.map((p,i)=>`<label class="chv-check"><input type="checkbox" id="chvNm${i}" value="${esc(p.id)}"> <span>${esc(p.name)}</span></label>`).join(''):'<span class="muted">No one else on the team yet.</span>'}</div></div>
+    <div class="field"><label>Members</label><div class="chv-pick">${staff.length?staff.map((p,i)=>`<label class="chv-check"><input type="checkbox" id="chvNm${i}" value="${esc(p.id)}"> <span>${esc(p.name)}</span></label>`).join(''):(chv.staffErr?`<span class="chv-err" role="alert">${esc(chv.staffErr)}</span>`:'<span class="muted">No one else on the team yet.</span>')}</div></div>
     <div id="chvModalErr" class="chv-err" role="alert" hidden></div></div>
     <div class="modal-foot"><button class="btn ghost" type="button" onclick="closeModal()">Cancel</button><button class="btn" type="button" onclick="chvCreate(${staff.length})">Create channel</button></div>`);
   const n=chvEl('chvNewName');if(n&&n.focus)n.focus();
@@ -787,6 +825,7 @@ async function chvPaintMembers(){
   const addable=staff.filter(p=>!ids[p.id]);
   // A client's own people are shown, marked Client, and are not removable here (that would cut the client off).
   b2.innerHTML=`<ul class="chv-members">${mem.map(m=>{const uid=m.userId||m.id,cl=!!m.isClient||m.kind==='client';return `<li${cl?' class="client"':''}><span class="chv-av${cl?' client':''}" aria-hidden="true">${esc(chvInitial(m.name))}</span><span class="chv-mname">${esc(m.name||'Member')}</span>${cl?'<span class="chv-client-tag">Client</span>':uid===chvMe()?'<span class="muted">You</span>':`<button type="button" class="chv-link" onclick="chvRemoveMember(${chvA(uid)})">Remove</button>`}</li>`;}).join('')||'<li class="muted">No members.</li>'}</ul>
+    ${!addable.length&&chv.staffErr?`<div class="chv-err" role="alert">${esc(chv.staffErr)}</div>`:''}
     ${addable.length?`<div class="field"><label for="chvAddSel">Add a team member</label><div class="chv-addrow"><select id="chvAddSel">${addable.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><button type="button" class="btn" onclick="chvAddMember()">Add</button></div></div>`:''}
     <div id="chvModalErr" class="chv-err" role="alert" hidden></div>`;
 }
@@ -833,7 +872,11 @@ async function chvBotLoad(){
   const id=chv.cur,seq=++chv.botSeq;
   const r=await chvCall('chBotDrafts',id);
   if(seq!==chv.botSeq||id!==chv.cur)return;
-  if(!r.ok||!Array.isArray(r.data))return;   // quiet: the thread still works without them
+  /* A read that failed and a channel with no drafts both used to leave an empty
+     strip, so a draft waiting behind a refused read looked like no draft at all.
+     The thread still works without them, but the owner is told. */
+  if(!r.ok||!Array.isArray(r.data)){chv.botErr=r.error||"The bot's drafts didn't load. They are still in Replies.";chvPaintBot();return;}
+  chv.botErr='';
   chv.bot=r.data;
   const have={};chv.bot.forEach(d=>{have[d.id]=1;});
   Object.keys(chv.botEdits).forEach(k=>{if(!have[k])delete chv.botEdits[k];});
@@ -930,6 +973,6 @@ function channelsForget(){
   channelsStopTimer();
   if(chv.unsub){try{chv.unsub();}catch(e){}chv.unsub=null;}
   clearTimeout(chv.searchTimer);clearTimeout(chv.typingTimer);
-  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',typing:{},q:'',hits:[],panelSet:false,panelOpen:false,pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,unreadTotal:0,peekAt:0,creating:false,caught:'',seq:chv.seq+1});
+  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',unsure:{},typing:{},q:'',hits:[],panelSet:false,panelOpen:false,pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,staffErr:'',unreadTotal:0,peekAt:0,creating:false,caught:'',seq:chv.seq+1});
   chvBotClear();
 }

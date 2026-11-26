@@ -43,7 +43,7 @@ const text = (h) => String(h).replace(/<[^>]*>/g,' ').replace(/&amp;/g,'&').repl
 beforeEach(() => {
   pct.open = false; pct.drawn = ''; pct.at = 0; pct.data = null; pct.busy = false; pct.who = "|";
   pct.tab = 'chat'; pct.gone = {}; pct.standing = ''; pct.campaignDrawn = ''; pct.callsDrawn = '';
-  pct.month = null; pct.monthAt = 0; pct.monthBusy = false;
+  pct.month = null; pct.monthAt = 0; pct.monthBusy = false; pct.monthFailed = false;
   pct.campaign = null; pct.campaignAt = 0; pct.campaignBusy = false; pct.campaignFailed = false;
   pct.calls = null; pct.callsAt = 0; pct.callsBusy = false; pct.callsFailed = false;
   PC.tab = 'chat';
@@ -195,11 +195,31 @@ test('met, and closed under the number, both say so plainly', () => {
   const met = pctMonthNorm(month({calls_delivered:11}), journey(), NOWD(2026, 12, 28));
   assert.equal(met.state, 'met');
   assert.match(text(pctStandingHtml(met)), /Guarantee met/);
-  const short = pctMonthNorm(month({calls_delivered:6}), journey(), NOWD(2027, 1, 8));
+  /* ends_on is 2027-01-08, so the month is closed on the 9th, not on the 8th */
+  const short = pctMonthNorm(month({calls_delivered:6}), journey(), NOWD(2027, 1, 9));
   assert.equal(short.state, 'short');
   const h = pctStandingHtml(short);
   assert.match(text(h), /Refund due/);
   assert.match(text(h), /refund/i);
+});
+
+/* ends_on is the last day INSIDE the month's window — recount_month counts a
+   call `between starts_on and ends_on` — so a call can still land on it. The
+   standing line used to say "Refund due · This month closed under the number"
+   on that day, which promises the client money that may not be owed and tells
+   them to stop expecting calls while we are still booking them. */
+test('the last day of the month is not called closed, and no refund is promised on it', () => {
+  const lastDay = pctMonthNorm(month({calls_delivered:6}), journey(), NOWD(2027, 1, 8));
+  assert.equal(lastDay.daysLeft, 0);
+  assert.equal(lastDay.state, 'behind', 'behind, not short: the day is not over');
+  const h = text(pctStandingHtml(lastDay));
+  assert.doesNotMatch(h, /Refund due/);
+  assert.doesNotMatch(h, /closed under the number/);
+  assert.match(h, /4 more calls to go and today is the last day/);
+  /* hit on the last day is still met */
+  assert.equal(pctMonthNorm(month({calls_delivered:10}), journey(), NOWD(2027, 1, 8)).state, 'met');
+  /* and the day after, it is closed */
+  assert.equal(pctMonthNorm(month({calls_delivered:6}), journey(), NOWD(2027, 1, 9)).state, 'short');
 });
 
 test('before launch it counts down to launch and still names the promise', () => {
@@ -268,9 +288,19 @@ test('the campaign tab with no data at all explains what is coming and when', ()
   assert.match(t, /money back, not credit/i);  /* the guarantee block */
   assert.ok(!/\b0\b\s*(SENT|Sent)/.test(t), 'no zeroed figures and no empty chart');
   assert.ok(!/<svg/.test(h));
-  /* and once it is live but today has no numbers yet, it says so instead */
+  /* and once it is live but today has no numbers yet, it says so instead — without
+     putting a clock on it. The copy used to promise "the first numbers land this
+     evening"; nothing we control guarantees that. The provider reports when it
+     reports, and on a client with no provider key configured at all the numbers
+     never arrive, so the promise was simply false. It must say that sending has
+     started and that the page fills in as the tool reports back, and it must not
+     name an hour, an evening or a day. */
   const live = pctMonthNorm(month({calls_delivered:0}), journey(), NOWD(2026, 12, 10));
-  assert.match(text(pctCampaignHtml(null, live)), /first numbers land this evening/i);
+  const liveText = text(pctCampaignHtml(null, live));
+  assert.match(liveText, /sending has started/i);
+  assert.match(liveText, /as the sending tool reports back/i);
+  assert.doesNotMatch(liveText, /this evening|within a few hours|the same evening/i,
+    'the campaign card must not promise numbers by a time we do not control');
 });
 
 /* ───────────── the calls tab ───────────── */
@@ -515,6 +545,59 @@ test('a thrown error, a timeout and a denied table read all read the same way', 
   }
 });
 
+/* The standing line is the figure a refund turns on. A month that could not be
+   read used to be turned into "no month" — and the pre-launch panel then told a
+   client fifteen days into a running month "Not started · month one · the clock
+   starts on launch day", which is the opposite of the truth and identical to
+   what a client who has genuinely not launched sees. Live there is no
+   portal_month RPC yet, so every client goes down the table-read path, which is
+   the path that throws. */
+test('a month that could not be read says so, and never reads as "not started"', async () => {
+  const dead = (rpcOk) => ({
+    home: {person:{id:'p1'}, channel:{id:'ch1'}},
+    sb: {from(){ const q = {select(){ return q }, eq(){ return q }, order(){ return q },
+      limit(){ return Promise.resolve({data:null, error:{message:'canceling statement due to statement timeout'}}) }}; return q }},
+    rpc: async (n) => n === 'portal_journey'
+      ? (rpcOk ? {ok:true, data:journey(), error:''} : {ok:false, data:null, error:'Something went wrong at our end.'})
+      : {ok:false, data:null, error:'Could not find the function public.' + n + ' in the schema cache'},
+  });
+  for (const [what, rpcOk] of [['the month read failed', true], ['portal_journey failed too', false]]) {
+    pct.who = '|'; pct.at = 0; pct.gone = {}; pct.data = null;
+    pct.month = null; pct.monthAt = 0; pct.monthFailed = false; pct.standing = '';
+    boxes.pcStanding.innerHTML = '';
+    await pctMount(dead(rpcOk));
+    const h = text(boxes.pcStanding.innerHTML);
+    assert.equal(pct.monthFailed, true, what);
+    assert.match(h, /could not load where this month stands/i, what);
+    assert.doesNotMatch(h, /Not started/i, what);
+    assert.doesNotMatch(h, /clock starts on launch day/i, what);
+    assert.match(boxes.pcStanding.innerHTML, /data-pc-act="trackerRetry"/, what + ': a way out');
+    assert.equal(pct.monthBusy, false, what + ': the guard flag is clear');
+  }
+  /* and "Try again" clears it, so a client who taps it is not stuck on the panel */
+  PC.actions.trackerRetry(null, {rpc: async () => ({ok:true, data:journey(), error:''}),
+    sb: {from(){ const q = {select(){ return q }, eq(){ return q }, order(){ return q },
+      limit(){ return Promise.resolve({data:[], error:null}) }}; return q }}});
+  assert.equal(pct.monthFailed, false);
+});
+
+/* A month that answered with nothing is NOT a failure: a client who has paid
+   and not launched still gets the pre-launch panel. */
+test('no month rows yet is still the honest pre-launch panel, not a failure', async () => {
+  pct.who = '|'; pct.at = 0; pct.gone = {};
+  await pctMount({
+    home: {person:{id:'p1'}, channel:{id:'ch1'}},
+    sb: {from(){ const q = {select(){ return q }, eq(){ return q }, order(){ return q },
+      limit(){ return Promise.resolve({data:[], error:null}) }}; return q }},
+    rpc: async (n) => n === 'portal_journey' ? {ok:true, data:journey(), error:''}
+      : {ok:false, data:null, error:'Could not find the function public.' + n + ' in the schema cache'},
+  });
+  assert.equal(pct.monthFailed, false);
+  const h = text(boxes.pcStanding.innerHTML);
+  assert.doesNotMatch(h, /could not load/i);
+  assert.match(h, /clock starts on launch day/i);
+});
+
 test('a guard flag is never left true by a failure — the page can always ask again', async () => {
   PC.tab = 'campaign'; pct.tab = 'campaign';
   const dead = {rpc: () => Promise.reject(new Error('boom'))};
@@ -640,7 +723,8 @@ test('nothing a client presses is ever retried for them', () => {
      no second attempt anywhere, so a dropped Send cannot become two messages */
   for (const [what, src, call] of [['Send', send, 'await pcSend('], ['Book', send, 'await pcBookKickoff('],
                                    ['Approve', steps, 'await pstDecide('], ['Send answers', steps, 'await pstSubmitForm('],
-                                   ['Pick a time', sched, "await ctx.rpc('portal_offer_pick'"]]) {
+                                   /* psCapped puts a time limit on this one ask; it does not ask twice */
+                                   ['Pick a time', sched, "ctx.rpc('portal_offer_pick'"]]) {
     assert.equal((src.split(call).length - 1), 1, what + ' is attempted from exactly one place');
   }
   /* and the retry helper exists only in this file, which only ever reads */

@@ -90,9 +90,16 @@ test('dcFetch asks documents_preview and answers {ok, data, error} in plain word
   r = await t.D('dcFetch')();
   assert.equal(r.ok, false); assert.match(r.error, /Can't reach Aviance/);
 
+  /* An answer that is not a list is a FAILURE, not an empty preview. This used
+     to come back as {ok:true, data:[]}, and the screen then read "0 things a
+     client receives" — the one number this screen can never truthfully show. */
   t = load({ data: 'nonsense', error: null });
   r = await t.D('dcFetch')();
-  assert.deepEqual([r.ok, r.data.length], [true, 0]);
+  assert.deepEqual([r.ok, r.data], [false, null]);
+  assert.equal(r.error, "The documents didn't load. Try again.");
+  t = load({ data: null, error: null });
+  r = await t.D('dcFetch')();
+  assert.equal((await t.D('dcFetch')()).ok, false, 'and so is no answer at all');
 });
 
 test('the preview is drawn by the client\'s own renderer, with the document safely inlined', () => {
@@ -180,4 +187,42 @@ test('a data call that throws clears dc.loading, so the screen can be asked agai
   const n = t.calls.length;
   await t.D('dcLoad(false)');
   assert.ok(t.calls.length > n, 'it asked again rather than sitting on the flag');
+});
+
+/* ── the preview must actually load ─────────────────────────────────────────
+   The owner's preview iframe loaded portal-client.js on its own. That file opens
+   with `const pcEsc = coreEsc`, so without core.js it throws on its first line and
+   every agreement and every invoice came up as:
+
+       Preview failed: Cannot access 'pcEsc' before initialization
+
+   — a broken screen AND machine wording shown to a person, in the one place he goes
+   to check what a client is about to receive. doc.html, which is what the CLIENT
+   sees, has always loaded core.js first; only the owner's preview of the same
+   document was broken.
+
+   These read the generated markup as text rather than running a browser, because the
+   thing that regresses is the script order in one template string. */
+test('the preview loads core.js, and loads it before portal-client.js', () => {
+  const src = fs.readFileSync(path.join(root, 'documents.js'), 'utf8');
+  const tpl = /return `<!doctype html>[\s\S]*?<\/head>/.exec(src);
+  assert.ok(tpl, 'the preview document template must still be a template literal here');
+  const head = tpl[0];
+
+  const core = head.indexOf('/core.js');
+  const portal = head.indexOf('/portal-client.js');
+  assert.ok(core !== -1,
+    'the preview must load core.js — portal-client.js aliases coreEsc on its first line and throws without it');
+  assert.ok(portal !== -1, 'the preview still loads portal-client.js');
+  assert.ok(core < portal,
+    'core.js must come FIRST: portal-client.js reads coreEsc at parse time, not at call time');
+});
+
+test('portal-client.js really does need core.js at parse time', () => {
+  /* Pins the reason the test above exists, so nobody "tidies" it away: if this
+     aliasing ever stops being top-level, the ordering above stops mattering and
+     this test should be the one that tells you. */
+  const pc = fs.readFileSync(path.join(root, 'portal-client.js'), 'utf8');
+  assert.match(pc, /^const pc[A-Za-z]+ = core[A-Za-z]+;/m,
+    'portal-client.js still aliases a core.js helper at the top level');
 });

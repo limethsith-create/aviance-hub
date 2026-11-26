@@ -786,7 +786,10 @@ function dgFactList(f){
     ['Where it stands', String(f.status || DG_DASH)],
     ['Refund if it locks short', f.refund && f.refund.amount ? dgUsd(f.refund.amount) + ' at ' + dgMultWords(f.refund.multiplier) : DG_DASH]
   ];
-  return '<dl class="dg-facts">' + rows.map(r => '<div><dt>' + dgEsc(r[0]) + '</dt><dd>' + dgEsc(r[1]) + '</dd></div>').join('') + '</dl>';
+  /* DESIGN.md: the figures in this list are mono. They are counts, money and
+     day counts, read side by side, so they line up or they are harder to read
+     than they need to be. */
+  return '<dl class="dg-facts">' + rows.map(r => '<div><dt>' + dgEsc(r[0]) + '</dt><dd class="fig">' + dgEsc(r[1]) + '</dd></div>').join('') + '</dl>';
 }
 function dgRenderFriday(data){
   const d = data || {};

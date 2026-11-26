@@ -146,6 +146,31 @@ test('a failed pick shows plain words and leaves the buttons usable', async () =
   assert.doesNotMatch(h, / disabled/);
 });
 
+/* The worst way a booking can go wrong is for the request to never answer at
+   all: the tapped button used to be left showing "…", psUi[offer].busy stayed
+   true, and the client could pick neither that time nor another, with nothing
+   on the screen to tell them why. */
+test('a booking that never answers says so and frees the card, and is never sent twice', async () => {
+  clearUi();
+  const opts = P('psOpts');
+  opts.pickMs = 20;
+  try {
+    let sent = 0;
+    const ctx = { calls: [], rpc: () => { sent++; return new Promise(() => {}) }, refresh() { this.calls.push('refresh') } };
+    const r = await P('psPick')(btn(OFFER, 2), ctx);
+    assert.equal(r.ok, false);
+    assert.equal(sent, 1, 'asked once, never asked again');
+    assert.deepEqual(ctx.calls, ['refresh'], 'and the database is asked what really happened');
+    const ui = P('psUi')[OFFER];
+    assert.equal(ui.busy, false, 'the card is not left stuck');
+    assert.ok(!ui.picked, 'and it is not shown as booked, because we do not know that');
+    const h = P('psOfferHtml')(item(), 'America/New_York', NOW);
+    assert.match(h, /We did not hear back from Aviance\. Refresh the page/);
+    assert.doesNotMatch(h, /That did not book/, 'it does not claim something it cannot know');
+    assert.doesNotMatch(h, / disabled/, 'they can try again when they choose to');
+  } finally { opts.pickMs = 0 }
+});
+
 test('pick never throws and refuses junk without calling the database', async () => {
   clearUi();
   const ctx = fakeCtx(new Error('boom'));

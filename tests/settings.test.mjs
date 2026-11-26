@@ -127,7 +127,11 @@ test('the card loads into the page and Save reads the fields off the screen', as
   assert.equal(rpcs.at(-1).name, 'biz_set'); assert.equal(rpcs.at(-1).args.p.legal_name, 'Aviance (Pvt) Ltd');
   assert.ok(!('wise_details' in rpcs.at(-1).args.p), 'the retired box is not sent');
   assert.equal(elements.stBiz.innerHTML.split('not set yet').length - 1, 1, 'one fewer stand-in after the save');
-  assert.ok(toasts.includes('The payment details are saved.'));
+  /* the business-details card and the payment-details card are two different
+     cards: each says which one was saved, so a save on one cannot read as a
+     save on the other */
+  assert.ok(toasts.includes('Your business details are saved.'));
+  assert.ok(!toasts.includes('The payment details are saved.'), 'that sentence belongs to the card below');
   el('stBiz_email').value = 'nope';
   assert.equal((await stSubmitBiz()).ok, false);
   assert.match(elements.stBizMsg.textContent, /billing email/);
@@ -394,4 +398,31 @@ test('no stored payment value is ever written to a log, and no real detail is in
   for (const re of [/\bsk_live\b/, /\bpk_live\b/, /paypal\.me\/[a-z0-9]/i, /wise\.com\/[a-z]/i]) {
     assert.doesNotMatch(src, re, String(re));
   }
+});
+
+/* ───────────── the rehearsal pass ───────────── */
+
+test('opening Settings asks the database for the business row ONCE, not once per card', async () => {
+  /* Two cards — "Payments and documents" and "Payment details" — are two views
+     of one row. Each used to read it on open. */
+  el('stMe'); el('stCal'); el('stOut'); el('stBiz'); el('stPay');
+  await stLoad();
+  const reads = rpcs.filter((r) => r.name === 'biz_get').length;
+  assert.equal(reads, 1, 'biz_get is asked for once per open, not twice');
+  assert.match(elements.stBiz.innerHTML, /not set yet/, 'the business card still fills in');
+  assert.ok(elements.stPay.innerHTML.length > 0, 'the payment card still fills in');
+});
+
+test('a client list that FAILED to load does not read as "no clients yet"', () => {
+  /* The picker that connects an Instantly or Smartlead account. An empty list
+     and a list that did not load look the same from here; they must not read
+     the same. */
+  const failed = stRenderOut([], [], 'Can’t reach Aviance right now. Check your connection and try again.');
+  assert.match(text(failed), /Your clients did not load/);
+  assert.ok(!/No clients yet/.test(text(failed)), 'it never claims he has no clients');
+  assert.match(text(failed), /Check your connection/, 'and it says why');
+
+  const empty = stRenderOut([], [], '');
+  assert.match(text(empty), /No clients yet/);
+  assert.ok(!/did not load/.test(text(empty)));
 });

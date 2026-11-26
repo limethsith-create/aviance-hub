@@ -149,12 +149,19 @@ async function plBooking(id) {
   if (!got.data) return plErr('That booking is not here any more.');
   const b = got.data;
 
-  const brief = await plBrief(id);
-  const state = await plResearchState(id);
-  const client = await plRun(() => sb.from('clients').select('*').eq('booking_id', id).limit(1), []);
+  /* The brief, the research log, the client and the price list do not depend on
+     one another, so they are asked for together: this screen used to wait for
+     six round trips end to end, which on a slow connection is most of a second
+     of nothing. The brief is read ONCE and handed to plResearchState, which
+     used to read it a second time by itself. */
+  const [brief, log, client, prices] = await Promise.all([
+    plBrief(id),
+    plResearchLog(id, 20),
+    plRun(() => sb.from('clients').select('*').eq('booking_id', id).limit(1), []),
+    plRun(() => sb.from('plan_prices').select('*'), []),
+  ]);
+  const state = plResearchFrom(brief, log);
   const theClient = client.ok && Array.isArray(client.data) && client.data.length ? client.data[0] : null;
-  /* the price list, so the Won picker can say what they are buying; the team can read it */
-  const prices = await plRun(() => sb.from('plan_prices').select('*'), []);
   /* their first invoice once they are a client. Only an admin can read invoices, so
      anyone else simply sees no invoice line. */
   let invoice = null;
@@ -233,10 +240,15 @@ function plLogWords(row) {
 }
 /* none · running · done · failed — worked out from research_briefs and research_log. */
 async function plResearchState(bookingId) {
-  const brief = await plBrief(bookingId);
-  if (!brief.ok) return brief;
-  const log = await plResearchLog(bookingId, 20);
-  const rows = log.ok && Array.isArray(log.data) ? log.data.slice().sort((a, b) => plMs(b && b.at) - plMs(a && a.at)) : [];
+  const [brief, log] = await Promise.all([plBrief(bookingId), plResearchLog(bookingId, 20)]);
+  return plResearchFrom(brief, log);
+}
+
+/* The same answer, worked out from a brief and a log already in hand. PURE, so a
+   screen that has read them for another reason does not read them again. */
+function plResearchFrom(brief, log) {
+  if (!brief || !brief.ok) return brief || plErr('The research could not be read.');
+  const rows = log && log.ok && Array.isArray(log.data) ? log.data.slice().sort((a, b) => plMs(b && b.at) - plMs(a && a.at)) : [];
   const latest = rows[0] || null;
 
   if (brief.data) return plOk({ state: 'done', since: brief.data.updated_at || (latest && latest.at) || null, writer: brief.data.writer || '', log: rows });
@@ -615,9 +627,9 @@ function renderPlFunnel(f, meta) {
     const v = Number(n) || 0;
     return `<div class="pl-bar-row"><span class="pl-bar-label">${esc(label)}</span>
       <span class="pl-bar-track"><span class="pl-bar-fill" style="width:${plPct(v, top)}%"></span></span>
-      <b class="pl-bar-num">${esc(String(v))}</b></div>`;
+      <b class="pl-bar-num fig">${esc(String(v))}</b></div>`;
   }).join('');
-  const rate = (label, pct, of) => `<div class="pl-rate"><b>${esc(String(pct))}%</b><small>${esc(label)}</small><span class="muted pl-small">${esc(of)}</span></div>`;
+  const rate = (label, pct, of) => `<div class="pl-rate"><b class="fig">${esc(String(pct))}%</b><small>${esc(label)}</small><span class="muted pl-small">${esc(of)}</span></div>`;
   const reasons = Object.keys(f.reasons || {}).sort((a, b) => f.reasons[b] - f.reasons[a]);
 
   return `<div class="pl-funnel">

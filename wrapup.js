@@ -105,10 +105,13 @@ async function wuEvent(clientId, event, detail){
 
 /* Stop the sending that is still running. Rows only: the hub's own view of it. */
 async function wuPauseSending(clientId){
-  const camps = await wuRun(() => sb.from('outreach_campaigns')
-    .update({status:'paused'}).eq('client_id', clientId).eq('status','running').select(), []);
-  const accts = await wuRun(() => sb.from('outreach_accounts')
-    .update({status:'paused'}).eq('client_id', clientId).eq('status','ok').select(), []);
+  /* Two writes over two different tables, neither waiting on the other. */
+  const [camps, accts] = await Promise.all([
+    wuRun(() => sb.from('outreach_campaigns')
+      .update({status:'paused'}).eq('client_id', clientId).eq('status','running').select(), []),
+    wuRun(() => sb.from('outreach_accounts')
+      .update({status:'paused'}).eq('client_id', clientId).eq('status','ok').select(), []),
+  ]);
   /* This pauses the hub's own rows ONLY: the hub has no line to the tool that
      sends the email, so somebody must also pause the campaigns inside that
      tool. wuEndClient says so in its result (`providerStillRunning: true`). */
@@ -306,19 +309,25 @@ async function wuHandover(clientId, opts){
   if (!cl.ok) return cl;
   const c = cl.data;
 
-  const threads = await wuRun(() => sb.from('outreach_threads').select('*')
-    .eq('client_id', clientId).order('last_message_at'), []);
+  /* None of these five depends on another. They used to be read one after the
+     next, so building a handover waited for six round trips end to end; now it
+     waits for two. The order they are CHECKED in is unchanged, so the same
+     failure is still the one reported. */
+  const [threads, msgs, meets, prof, invs] = await Promise.all([
+    wuRun(() => sb.from('outreach_threads').select('*')
+      .eq('client_id', clientId).order('last_message_at'), []),
+    wuRun(() => sb.from('outreach_messages').select('*')
+      .eq('client_id', clientId).order('sent_at'), []),
+    wuRun(() => sb.from('meetings').select('*')
+      .eq('client_id', clientId).order('starts_at'), []),
+    wuRun(() => sb.from('client_profiles').select('*')
+      .eq('client_id', clientId).maybeSingle(), null),
+    wuInvoices(clientId),
+  ]);
   if (!threads.ok) return threads;
-  const msgs = await wuRun(() => sb.from('outreach_messages').select('*')
-    .eq('client_id', clientId).order('sent_at'), []);
   if (!msgs.ok) return msgs;
-  const meets = await wuRun(() => sb.from('meetings').select('*')
-    .eq('client_id', clientId).order('starts_at'), []);
   if (!meets.ok) return meets;
-  const prof = await wuRun(() => sb.from('client_profiles').select('*')
-    .eq('client_id', clientId).maybeSingle(), null);
   if (!prof.ok) return prof;
-  const invs = await wuInvoices(clientId);
   if (!invs.ok) return invs;
 
   const messages = msgs.data || [];
@@ -570,13 +579,20 @@ async function wuLoadEnding(){
   return wuOk(out);
 }
 
+/* The shell's own icon set, or nothing. DESIGN.md allows no emoji and no glyph
+   standing in for a mark, so an icon we do not have is simply absent. */
+function wuIcon(name){ return (typeof I !== 'undefined' && I && I[name]) || '' }
+
 /* Clients ending or ended: the net figure and what is still outstanding. */
 function viewEnding(){
   if (wu.ending === null){ wuKick(wuLoadEnding); return '<div class="card wu-wait" role="status">Reading the final figures…</div>' }
   if (wu.endingErr) return `<div class="card"><p class="wu-err" role="alert">${wuE(wu.endingErr)}</p></div>`;
   if (!wu.ending.length){
     return typeof emptyState === 'function'
-      ? emptyState('🏁', 'Nobody is leaving', 'Clients appear here once they are ending or ended.', '', '')
+      /* DESIGN.md: no emoji anywhere in this system. The icon slot wants the
+         shell's own inline SVG; a flag glyph rendered at whatever size and
+         colour the reader's font felt like. */
+      ? emptyState(wuIcon('clients'), 'Nobody is leaving', 'Clients appear here once they are ending or ended.', '', '')
       : '<div class="card"><h3>Nobody is leaving</h3><p>Clients appear here once they are ending or ended.</p></div>';
   }
   const rows = wu.ending.map(r => {

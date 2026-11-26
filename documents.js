@@ -37,7 +37,11 @@ async function dcFetch(){
       const m=String(r.error.message||'');
       return {ok:false,data:null,error:/failed to fetch|network/i.test(m)?"Can't reach Aviance right now. Check your connection and try again.":(r.error.code==='P0001'&&m?m:"The documents didn't load. Try again.")};
     }
-    return {ok:true,data:Array.isArray(r&&r.data)?r.data:[],error:null};
+    /* An answer that is not a list is not an empty preview. Turning null into []
+       made a failed build read as "0 things a client receives", which is the one
+       number this screen can never truthfully show. */
+    if(!Array.isArray(r&&r.data))return {ok:false,data:null,error:"The documents didn't load. Try again."};
+    return {ok:true,data:r.data,error:null};
   }catch(e){return {ok:false,data:null,error:"Can't reach Aviance right now. Check your connection and try again."};}
 }
 /* Sort + tidy what the database sent: the per-plan booking confirmation repeats the "Discovery call" one, so it goes. */
@@ -141,7 +145,12 @@ function dcChatExtra(x){
 function dcDocSrc(x){
   const data=JSON.stringify(x.doc||{}).replace(/</g,'\\u003c');
   const fn=x.type==='agreement'?'pcAgreementHtml':'pcInvoiceHtml';
-  return `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/portal-client.css"><script src="/portal-client.js"><\/script></head>
+  // core.js FIRST, and not optional: portal-client.js opens with `const pcEsc = coreEsc`,
+  // so without it the whole file throws on its first line and the owner's preview panel
+  // showed him "Preview failed: Cannot access 'pcEsc' before initialization" in place of
+  // every agreement and every invoice. doc.html, which is what the client sees, has always
+  // loaded core.js first; it was only this preview of the same document that was broken.
+  return `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/portal-client.css"><script src="/core.js"><\/script><script src="/portal-client.js"><\/script></head>
 <body><div id="pcRoot"></div><script>try{document.getElementById('pcRoot').innerHTML=${fn}(${data});}catch(e){document.body.textContent='Preview failed: '+e.message;}<\/script></body></html>`;
 }
 function documentsForget(){Object.assign(dc,{items:[],loaded:false,loading:false,err:null,pick:null,seq:dc.seq+1});}

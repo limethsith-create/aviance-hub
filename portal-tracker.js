@@ -61,7 +61,7 @@ const pct = {
   open: false, drawn: '', at: 0, data: null, busy: false, who: '',
   tab: 'chat',
   standing: '', campaignDrawn: '', callsDrawn: '',
-  month: null, monthAt: 0, monthBusy: false,
+  month: null, monthAt: 0, monthBusy: false, monthFailed: false,
   campaign: null, campaignAt: 0, campaignBusy: false, campaignFailed: false,
   calls: null, callsAt: 0, callsBusy: false, callsFailed: false,
   gone: {}, readMs: 0,          /* a test may shorten the limit on a read */
@@ -210,13 +210,20 @@ function pctMonthNorm(m, j, now){
   out.have = true;
   out.total = Math.max(1, Math.round((ends - starts) / PCT_DAY_MS) + 1);
   out.elapsed = Math.min(out.total, Math.max(1, Math.round((today - starts) / PCT_DAY_MS) + 1));
+  /* 0 means "today IS the last day", not "the month is over": ends_on is the
+     last day INSIDE the window, which is how recount_month counts a call
+     (`between starts_on and ends_on`). A call booked at four o'clock on the
+     last day still counts, so the month is only closed once the day is past. */
+  const over = today > ends;
   out.daysLeft = Math.max(0, Math.round((ends - today) / PCT_DAY_MS));
   out.expected = promised * (out.elapsed / out.total);
   out.share = Math.max(0, Math.min(1, delivered / promised));
   /* how often a call has to land from here to finish the month on the number */
   out.pace = out.left > 0 && out.daysLeft > 0 ? out.daysLeft / out.left : 0;
   if (delivered >= promised) out.state = 'met';
-  else if (out.daysLeft <= 0) out.state = 'short';
+  /* "Refund due" is a promise of money. It is said once the month is genuinely
+     over and short — never on the last day, while a call can still land. */
+  else if (over) out.state = 'short';
   /* "behind" only once a whole call behind the straight line: a client should
      never be told they are behind on a rounding error. */
   else if (delivered < Math.floor(out.expected)) out.state = 'behind';
@@ -229,7 +236,8 @@ const PCT_STAMP = { met: 'Guarantee met', ontrack: 'On track', behind: 'Behind',
 function pctStandingNote(n){
   if (n.state === 'met') return 'Your guarantee for this month is met. Every call after this is yours on top.';
   if (n.state === 'short') return 'This month closed under the number. Your refund is being worked out and we will write to you about it — you do not have to ask.';
-  if (n.state === 'behind') return n.left + (n.left === 1 ? ' more call' : ' more calls') + ' to go and ' + n.daysLeft + (n.daysLeft === 1 ? ' day' : ' days') + ' left. We are behind our own pace and are pushing volume on the angles that are replying.';
+  if (n.state === 'behind') return n.left + (n.left === 1 ? ' more call' : ' more calls') + ' to go and ' +
+    (n.daysLeft === 0 ? 'today is the last day' : n.daysLeft + (n.daysLeft === 1 ? ' day' : ' days') + ' left') + '. We are behind our own pace and are pushing volume on the angles that are replying.';
   if (n.state === 'ontrack') return n.left + (n.left === 1 ? ' more call' : ' more calls') + ' to go, about one every ' + Math.max(1, Math.round(n.pace)) + (Math.round(n.pace) === 1 ? ' day' : ' days') + ' from here.';
   return '';
 }
@@ -396,14 +404,20 @@ function pctStepsHtml(items){
    bad news about their campaign rather than about our page. So it says plainly
    that this is our end, that their numbers are safe, and how to get them back.
    Same motifs as every other panel: eyebrow, red rule, headline, lede. Pure. */
-function pctFailHtml(what){
+function pctFailHtml(what, eyebrow){
   const thing = String(what || 'this');
   return '<section class="pcte" aria-label="Could not load ' + pctEsc(thing) + '" role="status">' +
-    '<p class="pc-tag">' + pctEsc(thing === 'your booked calls' ? 'Booked calls' : 'Campaign') + '</p>' +
+    '<p class="pc-tag">' + pctEsc(eyebrow || (thing === 'your booked calls' ? 'Booked calls' : 'Campaign')) + '</p>' +
     '<p class="pcte-rule" aria-hidden="true"></p>' +
     '<h2 class="pcte-h">' + pctEsc('We could not load ' + thing + ' just now.') + '</h2>' +
+    /* It used to say "we try again every half minute, so this usually fixes itself".
+       That is true of a dropped connection and false of a refusal: a rule that says no
+       says no again every thirty seconds, for ever, while the client sits watching a
+       panel that has promised to heal. This page cannot currently tell the two apart —
+       see the note on pctAsk — so it promises neither, and gives a next step that works
+       in both cases. Nothing here should ever put a clock on something we do not control. */
     '<p class="pcte-lede">' + pctEsc('This is our page, not your campaign — nothing has been lost and no figure has changed. '
-      + 'We try again every half minute, so this usually fixes itself. If it does not, reload the page or tell us in Chat.') + '</p>' +
+      + 'We keep trying in the background. If it is still here after a reload, tell us in Chat and we will fix it.') + '</p>' +
     '<p class="pcte-steps pctf"><button type="button" class="pctf-btn" data-pc-act="trackerRetry">Try again</button></p>' +
   '</section>';
 }
@@ -415,19 +429,19 @@ function pctCampaignEmptyHtml(month, opts){
   const n = month && month.state ? month : pctMonthNorm(null, null, o.now);
   const launched = n.have || n.live;
   const when = n.launch ? pctDate(n.launch) : '';
-  const head = launched ? 'The first numbers land this evening.'
+  const head = launched ? 'Sending has started. The numbers follow.'
     : when ? 'Your campaign goes live on ' + when + '.' : 'Your campaign is being built.';
   const lede = launched
-    ? 'Sending has started. Instantly and Smartlead report to us a few times a day, and every figure on this page fills in as they do.'
+    ? 'Your campaign is sending. This page fills in as the sending tool reports back to us. If it is still empty a day after your first batch, tell us in Chat and we will chase it.'
     : 'Nothing has been sent yet, so there is nothing to count. Here is the order it happens in.';
   const steps = launched
     ? ['Emails go out from our warmed inboxes, in small batches, so they land in the inbox and not the promotions tab.',
-       'Opens and replies appear here within a few hours of the first send.',
+       'Opens and replies appear here once the sending tool has reported them to us.',
        'A positive reply becomes a booked call, and that call appears on the Calls tab and in your email.',
        'Every figure on this page is the provider’s own, not ours. Nothing is rounded up.']
     : ['We warm the inboxes and domains we will send from. This is quiet and takes days, not minutes.',
        'You approve the target profile, the angles and the copy in Chat. Nothing is sent before you do.',
-       'Launch day: the first batch goes out and this page starts filling in the same evening.',
+       'Launch day: the first batch goes out, and this page starts filling in as the sending tool reports back.',
        'Your first calls usually land in the second week, and every one of them appears on the Calls tab.'];
   return '<section class="pcte" aria-label="Your campaign">' +
     '<p class="pc-tag">Campaign</p><p class="pcte-rule" aria-hidden="true"></p>' +
@@ -762,7 +776,14 @@ function pctPaintAll(){
   const box = pctBox('pcTracker');
   if (m.have) { if (box && box.innerHTML !== '') { box.innerHTML = ''; } pct.drawn = ''; }
   else pctPaint(box);
-  const standing = pctStandingHtml(m);
+  /* The standing line is the one figure a refund turns on, so it is the last
+     place that may guess. If the month could not be read, "Not started · month
+     one" is not a smaller version of the truth, it is the opposite of it: a
+     client fifteen days into a running month, with calls already booked, read
+     that their clock had not started yet. So a failed read says so, in the same
+     words the other two panels use, and the retry button is right there. */
+  const standing = pct.monthFailed ? pctFailHtml('where this month stands', 'Your guarantee')
+    : pctStandingHtml(m);
   if (standing !== pct.standing) pct.standing = pctPut('pcStanding', standing, pct.standing);
   /* A tab is drawn only once it has been asked AND answered. Before that it
      waits: telling a client "no calls yet" while their calls are still loading
@@ -833,7 +854,19 @@ async function pctReadTwice(fn, isBlip){
 
 /* One RPC, with a fallback for the day it does not exist yet. A missing
    function is remembered so it is asked for only once a session; a real error
-   (offline, not allowed) is NOT papered over with a guess. */
+   (offline, not allowed) is NOT papered over with a guess.
+
+   KNOWN GAP, deliberately left rather than guessed at during integration: this
+   returns one PCT_FAIL for every kind of failure, so the panel cannot tell a
+   dropped connection (trying again IS the fix) from a refusal by row level
+   security (trying again is never the fix, and the half-minute retry runs for
+   ever). core.js already makes exactly this distinction in coreFamily() —
+   'offline' versus 'no-access' — and the right fix is a second marker here that
+   carries the family through, so the panel can say "we are retrying" or "this is
+   not open to your login" as appropriate. Until then pctFailHtml() promises
+   neither. This is live-reachable today: portal_client_id() and the outreach_*
+   client-read policies are not in the database, so a client on the Campaign tab
+   can land on the refusal branch. */
 async function pctAsk(ctx, name, args, fallback){
   if (!pct.gone[name] && ctx && typeof ctx.rpc === 'function') {
     const r = (await pctReadTwice(() => ctx.rpc(name, args || {}))).r;
@@ -942,7 +975,7 @@ async function pctMount(ctx){
   if (who !== pct.who) {
     pct.who = who;
     pct.data = null; pct.at = 0; pct.drawn = ''; pct.open = false;
-    pct.month = null; pct.monthAt = 0;
+    pct.month = null; pct.monthAt = 0; pct.monthFailed = false;
     pct.campaign = null; pct.campaignAt = 0; pct.campaignFailed = false; pct.campaignDrawn = '';
     pct.calls = null; pct.callsAt = 0; pct.callsFailed = false; pct.callsDrawn = '';
     pct.standing = '';
@@ -975,7 +1008,8 @@ async function pctMount(ctx){
     /* The stamp is set either way, so a database that is down is asked again in
        half a minute rather than on every single refresh. */
     pct.monthAt = Date.now();
-    if (pctFailed(m)) m = null;
+    pct.monthFailed = pctFailed(m);
+    if (pct.monthFailed) m = null;
     pct.month = m || null;
     pctPaintAll();
   }
@@ -1018,7 +1052,7 @@ if (typeof window !== 'undefined') {
      so a client who is looking at the failure has a way out other than reloading. */
   P.actions.trackerRetry = function(el, ctx){
     pct.campaignAt = 0; pct.callsAt = 0; pct.monthAt = 0;
-    pct.campaignFailed = false; pct.callsFailed = false;
+    pct.campaignFailed = false; pct.callsFailed = false; pct.monthFailed = false;
     pctPaintAll();
     return pctMount(ctx);
   };
