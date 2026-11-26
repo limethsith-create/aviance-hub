@@ -36,8 +36,21 @@ const TM_DEPT_LABEL = {
   marketing:'Marketing', sales:'Sales', onboarding:'Onboarding', operations:'Operations',
   deliverability:'Deliverability', finance:'Finance', client_success:'Client success', admin:'Admin'
 };
-const TM_ROLES = ['admin','staff','viewer'];
-const TM_ROLE_LABEL = {admin:'Admin', staff:'Staff', viewer:'Viewer'};
+/* The roles the Team screen may HAND OUT. This list has to agree with the
+   database's own `is_approved()`, which is `role in ('admin','employee') and
+   approved` — the same two the shell lets into the hub (index.html, routeUser).
+   It used to offer 'staff', which the live trigger `staff_never_approved()`
+   turns into `approved := false`: clicking "Staff" quietly took the person's
+   access away and nothing on the screen said so. 'viewer' is approved but still
+   fails `is_approved()`, so the shell sent them to the client portal, which has
+   nothing in it for a team member.
+   'staff' stays in the LABEL map, and only there: an existing contractor still
+   reads as something, and nobody can be put into that role from this screen. */
+const TM_ROLES = ['admin','employee'];
+const TM_ROLE_LABEL = {admin:'Admin', employee:'Team member', staff:'Contractor (no hub)', viewer:'Viewer (no hub)'};
+/* What the database's is_approved() accepts. Kept beside the list above so the
+   two cannot drift apart again; the test pins them together. */
+const TM_ROLES_WITH_HUB = ['admin','employee'];
 const TM_TASK_STATUSES = ['todo','doing','blocked','done','cancelled'];
 const TM_OPEN_STATUSES = ['todo','doing','blocked'];
 const TM_BOARD_STATUSES = ['todo','doing','blocked','done'];
@@ -46,7 +59,7 @@ const TM_PRIORITY_LABEL = {1:'Lowest', 2:'Low', 3:'Normal', 4:'High', 5:'Urgent'
 
 /* What each screen is holding right now. null means "not loaded yet". */
 const tmS = {
-  people:null, tasks:null, mine:null, clients:null,
+  people:null, tasks:null, mine:null, clients:null, clientsErr:'',
   grants:null, grantErr:'', grantBusy:false,
   err:'', dept:'', who:'', busy:false, workSeq:0
 };
@@ -120,11 +133,11 @@ async function tmApprove(id){
     .eq('id', id).select().single(), null);
 }
 
-/* admin / staff / viewer. An admin cannot take away their own admin role:
+/* admin or team member. An admin cannot take away their own admin role:
    one wrong tap would lock the whole team out with nobody left to fix it. */
 async function tmSetRole(id, role){
   if (!id) return tmErr('Pick the person first.');
-  if (TM_ROLES.indexOf(String(role)) < 0) return tmErr('A role is admin, staff or viewer.');
+  if (TM_ROLES.indexOf(String(role)) < 0) return tmErr('A role is admin or team member.');
   const me = tmMeId();
   if (role !== 'admin' && me && String(id) === me && tmMeIsAdmin()) {
     return tmErr('You cannot take away your own admin role. Ask another admin to do it for you.');
@@ -216,7 +229,11 @@ function tmRenderGrants(){
   const people = (tmS.people || []).filter(p => String(p.id) !== tmMeId());
   const clients = Object.keys(tmS.clients || {}).map(id => ({id, company:tmS.clients[id] || 'A client'}))
     .sort((a,b) => String(a.company).localeCompare(String(b.company)));
-  const err = tmS.grantErr ? tmErrorCard(tmS.grantErr, 'tmLoadGrants()') : '';
+  /* Two different failures, said apart: the grants did not load, or the client
+     list did not. Either one leaves this card with less than the truth, so it
+     says which, rather than drawing an empty box. */
+  const err = (tmS.grantErr ? tmErrorCard(tmS.grantErr, 'tmLoadGrants()') : '')
+    + (tmS.clientsErr ? tmErrorCard('Your clients did not load, so this list may be short of names. ' + tmS.clientsErr, 'tmLoadGrants()') : '');
 
   const rows = held.length ? held.map(h => `<div class="tm-prow tm-grow">
       <span class="tm-av">${tmX(tmInitials(h.person))}</span>
@@ -235,7 +252,11 @@ function tmRenderGrants(){
         <select id="tmGrantClient">${clients.map(c => `<option value="${tmX(c.id)}">${tmX(c.company)}</option>`).join('')}</select></label>
       <button class="btn" type="button" onclick="tmDoGrant()"${tmS.grantBusy ? ' disabled' : ''}>Give them this client</button>
     </div>`
-    : `<p class="tm-muted tm-small">${clients.length ? 'Nobody else has an account here yet.' : 'There are no clients to give out yet.'}</p>`;
+    : `<p class="tm-muted tm-small">${
+        tmS.clientsErr ? 'Your clients did not load, so there is nothing to choose from here.'
+          : clients.length ? 'Nobody else has an account here yet.'
+          : 'There are no clients to give out yet.'
+      }</p>`;
 
   return `<div class="tm-head"><h3>Who can see which prospects</h3><span class="tm-count">${held.length}</span></div>
     <div class="card tm-pad tm-grantcard">
@@ -247,9 +268,15 @@ function tmRenderGrants(){
 
 async function tmLoadGrants(){
   if (!tmMeIsAdmin()) { tmS.grants = []; return }
-  if (tmS.clients === null) await tmLoadClients();
-  if (tmS.people === null) { const p = await tmPeople(); tmS.people = p.ok ? p.data : [] }
-  const r = await tmGrants();
+  /* The clients, the people and the grants do not depend on one another, so
+     they are asked for together: this card used to cost three round trips end
+     to end and now costs one. */
+  const [, people, r] = await Promise.all([
+    tmS.clients === null ? tmLoadClients() : null,
+    tmS.people  === null ? tmPeople()      : null,
+    tmGrants()
+  ]);
+  if (people) tmS.people = people.ok ? people.data : [];
   tmS.grantErr = r.ok ? '' : r.error;
   tmS.grants = r.ok ? r.data : [];
   tmPaint('tmGrantHost', tmRenderGrants());
@@ -441,12 +468,17 @@ async function tmWorkload(today){
 
 /* ================= SCREENS ======================================== */
 
-/* Client names for the cards. A task without a client just shows nothing. */
+/* Client names for the cards. A task without a client just shows nothing.
+   A read that FAILED is remembered as a failure, not as an empty list: an empty
+   map and a map we could not fill look identical from here, and the grant form
+   used to tell the owner "There are no clients to give out yet" when the truth
+   was that the list had not loaded. */
 async function tmLoadClients(){
   const r = await tmRun(() => sb.from('clients').select('id,company'), []);
   const map = {};
   if (r.ok) (r.data || []).forEach(c => { map[String(c.id)] = c.company || '' });
   tmS.clients = map;
+  tmS.clientsErr = r.ok ? '' : r.error;
   return map;
 }
 function tmClientName(id){
@@ -669,6 +701,6 @@ function viewMyWork(){
 
 /* Forget everything on sign-out. */
 function tmForget(){
-  Object.assign(tmS, {people:null, tasks:null, mine:null, clients:null, grants:null, grantErr:'',
+  Object.assign(tmS, {people:null, tasks:null, mine:null, clients:null, clientsErr:'', grants:null, grantErr:'',
     grantBusy:false, err:'', dept:'', who:'', busy:false, workSeq:tmS.workSeq + 1});
 }

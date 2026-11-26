@@ -681,3 +681,45 @@ test('the statement can be handed rows that are already read, and works out the 
   assert.equal(handed.data.invoiced, fresh.data.invoiced);
   assert.deepEqual(handed.data.unlockedMonths, fresh.data.unlockedMonths);
 });
+
+/* ═════════════ the rehearsal pass ═════════════ */
+
+test('building a handover asks for its five lists together, not one after the other', async () => {
+  /* The prospects, the conversations, the meetings, the inputs and the invoices
+     do not depend on one another. Read one after the next, a handover waited for
+     six round trips end to end. */
+  const t = load(base({
+    clients: [Object.assign(clone(CLIENT), { stage: 'ended', ended_on: '2026-09-30' })],
+  }));
+  let open = 0, mostAtOnce = 0;
+  const realFrom = t.ctx.sb.from;
+  t.ctx.sb.from = (table) => {
+    const b = realFrom(table), realThen = b.then;
+    b.then = (res, rej) => { open++; mostAtOnce = Math.max(mostAtOnce, open);
+      return realThen.call(b, (v) => { open--; return res(v); }, rej); };
+    return b;
+  };
+  let r;
+  try { r = await t.ctx.wuHandover('c1'); } finally { t.ctx.sb.from = realFrom; }
+  assert.equal(r.ok, true, r.error);
+  assert.ok(mostAtOnce >= 4, 'the lists are in flight together (saw ' + mostAtOnce + ' at once)');
+});
+
+test('a handover still reports the FIRST failure, whichever list was slow', async () => {
+  /* Asking for them together must not change which failure is reported. */
+  const t = load(base({ clients: [Object.assign(clone(CLIENT), { stage: 'ended', ended_on: '2026-09-30' })] }));
+  const realFrom = t.ctx.sb.from;
+  t.ctx.sb.from = (table) => {
+    if (table === 'outreach_threads' || table === 'meetings') {
+      return { select: () => ({ eq: () => ({ order: () => ({ then: (res) =>
+        Promise.resolve({ data: null, error: { message: 'permission denied for table ' + table, code: '42501' } }).then(res) }) }) }) };
+    }
+    return realFrom(table);
+  };
+  let r;
+  try { r = await t.ctx.wuHandover('c1'); } finally { t.ctx.sb.from = realFrom; }
+  assert.equal(r.ok, false);
+  assert.ok(!/outreach_threads|meetings|permission denied|\{|\[object/.test(r.error),
+    'no table name and no database wording reaches the screen: ' + r.error);
+  assert.match(r.error, /don.t have access/i, 'it says what actually happened');
+});
