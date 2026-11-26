@@ -1,0 +1,39 @@
+{
+  "from": "priya@outbounddomain.test",
+  "to": "dana@leadco.test",
+  "history": [
+    {
+      "stats_id": "9f1c7a40-0000-4000-8000-000000000001",
+      "message_id": "<sl-out-1@outbounddomain.test>",
+      "type": "SENT",
+      "time": "2026-11-03T13:02:00.000Z",
+      "email_seq_number": 1,
+      "subject": "Leadco + a second pair of hands",
+      "email_body": "<p>Hi Dana,</p><p>Saw you were scaling ops. Worth 15 minutes?</p><p>Priya</p>",
+      "open_count": 2,
+      "click_count": 0
+    },
+    {
+      "stats_id": "9f1c7a40-0000-4000-8000-000000000002",
+      "message_id": "<sl-in-1@leadco.test>",
+      "type": "REPLY",
+      "time": "2026-11-05T08:41:00.000Z",
+      "email_seq_number": 1,
+      "subject": "Re: Leadco + a second pair of hands",
+      "email_body": "<div>Sure &mdash; Thursday works. Dana</div>",
+      "open_count": 0,
+      "click_count": 0
+    },
+    {
+      "stats_id": "9f1c7a40-0000-4000-8000-000000000003",
+      "message_id": "<sl-out-2@outbounddomain.test>",
+      "type": "SENT",
+      "time": "2026-11-05T10:00:00.000Z",
+      "email_seq_number": 2,
+      "subject": "Re: Leadco + a second pair of hands",
+      "email_body": "<p>Thursday 3pm ET — booked.</p>",
+      "open_count": 1,
+      "click_count": 0
+    }
+  ]
+}

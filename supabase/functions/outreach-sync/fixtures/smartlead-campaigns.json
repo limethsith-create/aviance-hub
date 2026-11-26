@@ -1,0 +1,35 @@
+[
+  {
+    "id": 12345,
+    "user_id": 1001,
+    "name": "SaaS COOs — November",
+    "status": "ACTIVE",
+    "created_at": "2026-10-28T10:43:46.826Z",
+    "updated_at": "2026-11-25T14:02:21.776Z",
+    "track_settings": ["DONT_LINK_CLICK"],
+    "scheduler_cron_value": { "tz": "America/New_York", "days": [1, 2, 3, 4, 5], "startHour": "09:00", "endHour": "17:00" },
+    "min_time_btwn_emails": 20,
+    "max_leads_per_day": 90,
+    "stop_lead_settings": "REPLY_TO_AN_EMAIL",
+    "schedule_start_time": "2026-10-29T13:00:00.000Z",
+    "enable_ai_esp_matching": true,
+    "send_as_plain_text": true,
+    "follow_up_percentage": 25,
+    "unsubscribe_text": "",
+    "parent_campaign_id": null,
+    "client_id": null
+  },
+  {
+    "id": 12346,
+    "user_id": 1001,
+    "name": "Logistics — finished",
+    "status": "COMPLETED",
+    "created_at": "2026-08-01T10:43:46.826Z",
+    "updated_at": "2026-10-01T14:02:21.776Z",
+    "min_time_btwn_emails": 24,
+    "max_leads_per_day": 60,
+    "schedule_start_time": "2026-08-04T13:00:00.000Z",
+    "parent_campaign_id": null,
+    "client_id": null
+  }
+]

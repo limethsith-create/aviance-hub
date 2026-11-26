@@ -100,7 +100,7 @@ test('every route names a screen function that one of the loaded files defines',
     const name = /V\('(\w+)'/.exec(fn)[1];
     assert.ok(new RegExp('function\\s+' + name + '\\s*\\(').test(screenCode), `route ${v} calls ${name}, which no loaded file defines`);
   }
-  for (const gone of ['calling', 'callTargets', 'dnc', 'outreach', 'outreachClient', 'outreachThread', 'myWork', 'finalStatement'])
+  for (const gone of ['calling', 'callers', 'callTargets', 'dnc', 'outreach', 'outreachClient', 'outreachThread', 'myWork', 'finalStatement'])
     assert.equal(run(`views[${JSON.stringify(gone)}]`), undefined, gone + ' is not a route any more');
 });
 
@@ -138,7 +138,7 @@ test('index.html loads no file twice, none for a removed screen, and npm run che
 test('the sidebar: eleven plain places for the owner, each with its own icon, most used first', () => {
   const { run } = shell('admin');
   const items = plain(run('navItems()'));
-  assert.deepEqual(items.map((i) => i.label), ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Callers', 'Employees', 'Onboarding', 'Invoices', 'Documents', 'Settings']);
+  assert.deepEqual(items.map((i) => i.label), ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Prospects', 'Employees', 'Onboarding', 'Invoices', 'Documents', 'Settings']);
   assert.equal(new Set(items.map((i) => i.icon)).size, items.length, 'no two places share an icon');
   for (const i of items) { assert.ok(i.icon.startsWith('<svg'), i.label + ' has an icon'); assert.match(i.label, /^[A-Z][a-z]+$/); }
   // every screen that is not a place sits under one, with a way back
@@ -152,13 +152,13 @@ test('the sidebar: eleven plain places for the owner, each with its own icon, mo
 test('a team member who is not the owner is offered no owner-only place, in the sidebar or in ⌘K', () => {
   const { run } = shell('employee');
   const labels = plain(run('navItems().map(i=>i.label)'));
-  assert.deepEqual(labels, ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Onboarding', 'Invoices']);
+  assert.deepEqual(labels, ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Prospects', 'Onboarding', 'Invoices']);
   const found = plain(run("cmdkEntities().filter(x=>x.type==='Screens').map(x=>x.label)"));
-  for (const l of ['Callers', 'Employees', 'Documents', 'Settings']) assert.ok(!found.includes(l), l);
+  for (const l of ['Employees', 'Documents', 'Settings']) assert.ok(!found.includes(l), l);
   assert.ok(found.includes('Calendar') && found.includes('Team'));
   const owner = shell('admin');
   const all = plain(owner.run("cmdkEntities().filter(x=>x.type==='Screens').map(x=>x.label)"));
-  for (const l of ['Callers', 'Employees', 'Documents', 'Settings', 'Replies', 'Onboarding', 'No-shows']) assert.ok(all.includes(l), l);
+  for (const l of ['Prospects', 'Employees', 'Documents', 'Settings', 'Replies', 'Onboarding', 'No-shows']) assert.ok(all.includes(l), l);
   for (const l of ['Outreach', 'Calling']) assert.ok(!all.includes(l), l + ' is gone from ⌘K');
 });
 
@@ -188,11 +188,11 @@ test('the phone tab bar never holds more than five: four places and More, which 
     if (role === 'admin') assert.match(tabs[4], /class="badge red" title="something is waiting in Employees, Onboarding"[^>]*>2</);
     else assert.match(tabs[4], /class="badge amber" title="something is waiting in Onboarding"[^>]*>1</);
     // the sidebar still lists every place
-    assert.equal(el('navArea').innerHTML.split('<button class="nav-item').length - 1, role === 'admin' ? 11 : 7);
+    assert.equal(el('navArea').innerHTML.split('<button class="nav-item').length - 1, role === 'admin' ? 11 : 8);
     run('openMore()');
     const sheet = el('modal').innerHTML;
     const rows = [...sheet.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]);
-    assert.deepEqual(rows, [...(role === 'admin' ? ['Channels', 'Callers', 'Employees', 'Onboarding', 'Invoices', 'Documents', 'Settings'] : ['Channels', 'Onboarding', 'Invoices']),
+    assert.deepEqual(rows, [...(role === 'admin' ? ['Channels', 'Prospects', 'Employees', 'Onboarding', 'Invoices', 'Documents', 'Settings'] : ['Channels', 'Prospects', 'Onboarding', 'Invoices']),
       'Find a client or a screen', 'Switch light / dark', 'Sign out']);
     assert.ok(sheet.includes(`onclick="closeModal();render('journey')" aria-current="page"`));
     assert.ok(sheet.includes('onclick="closeModal();logout()"'), 'a phone can sign out');
@@ -225,7 +225,7 @@ test('deep links: the ones in use still land, and a link to a screen that is gon
   const p = (h) => plain(run(`parseDeepLink(${JSON.stringify(h)})`));
   assert.deepEqual(p('#clients'), { view: 'clients' }); assert.deepEqual(p('#trials'), { view: 'clients' });
   assert.deepEqual(p('#onboarding'), { view: 'journey' }); assert.deepEqual(p('#drafts'), { view: 'drafts' });
-  assert.deepEqual(p('#callers'), { view: 'callers' }); assert.deepEqual(p('#settings/keys'), { view: 'settings' });
+  assert.deepEqual(p('#prospects'), { view: 'prospects' }); assert.deepEqual(p('#settings/keys'), { view: 'settings' });
   assert.deepEqual(p('#inquiries'), { view: 'calendar' }); assert.deepEqual(p('#calendar/m-1'), { view: 'calendar', id: 'm-1' });
   assert.deepEqual(p('#inquiry/b-1'), { view: 'inquiry', id: 'b-1' });
   for (const old of ['#numbers', '#system/abc', '#system/abc/inboxes', '#trial/abc', '#nothing']) assert.equal(p(old), null, old);

@@ -1,8 +1,9 @@
-// Aviance OS — caller-link
+// Aviance OS — caller-link (the staff invite link; the name is kept because /go in
+// vercel.json and the Employees screen both point at this path).
 // The one-click invite link. The owner sends her one URL; she taps it and lands on
 // her own page already signed in, with no Gmail to type and no access code to copy.
 //
-//   GET /caller-link?k=TOKEN  ->  302 to https://aviance.store/callers#k=<one-time>
+//   GET /caller-link?k=TOKEN  ->  302 to https://aviance.store/team#k=<one-time>
 //
 // Reached in production as https://aviance.store/go?k=TOKEN: /go is rewritten to this
 // function in vercel.json, so what she receives is an aviance.store address.
@@ -21,13 +22,14 @@ const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 });
 
 const SITE = "https://aviance.store";
-const PAGE: Record<string, string> = { caller: "/callers", employee: "/team" };
+// Every staff member lands on the staff channel. There is only one staff page now.
+const PAGE = "/team";
 
 /** Every exit from this function is a redirect: she clicked a link, she should land on a page. */
 function go(to: string): Response {
   return new Response(null, { status: 302, headers: { Location: to, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
 }
-const bad = (why: string, page = "/callers") => go(`${SITE}${page}?link=${encodeURIComponent(why)}`);
+const bad = (why: string, page = PAGE) => go(`${SITE}${page}?link=${encodeURIComponent(why)}`);
 
 /** A password nobody is ever told, for a login that is only ever reached by link. */
 function randomSecret(): string {
@@ -47,11 +49,11 @@ Deno.serve(async (req) => {
   const claim = await sb.rpc("staff_link_claim", { p_token: token });
   if (claim.error) return bad("again");
   const who = claim.data as
-    | { ok: boolean; error?: string; id?: string; email?: string; kind?: string; name?: string; user_id?: string | null }
+    | { ok: boolean; error?: string; id?: string; email?: string; name?: string; user_id?: string | null }
     | null;
   if (!who?.ok) return bad(who?.error === "expired" ? "expired" : "bad");
 
-  const page = PAGE[String(who.kind ?? "caller")] ?? "/callers";
+  const page = PAGE;
   const email = String(who.email ?? "").trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) return bad("email", page);
 
@@ -78,7 +80,7 @@ Deno.serve(async (req) => {
     });
     if (mk.error || !mk.data?.user) return bad("again", page);
     // Tie the new login to her row, her channel seat and her role. No access code has been issued,
-    // so the code hash stays empty: the Callers screen reads it to say whether she has a code, and a
+    // so the code hash stays empty: the Employees screen reads it to say whether she has a code, and a
     // random value here made it say "yes" when she had none. (Her password is the random one above.)
     const linked = await sb.rpc("staff_link_auth", {
       p_staff: who.id, p_user: mk.data.user.id, p_code_hash: "",

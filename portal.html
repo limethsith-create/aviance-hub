@@ -28,6 +28,14 @@
   let home = null, rows = [], drawn = '', stopLive = null, timer = null, loading = false, sendBusy = false;
   let kick = null, kickUi = { day: '', pick: '', busy: false, error: '' };
 
+  /* The three tabs. Chat is what has always been here; Campaign and Calls are
+     drawn by portal-tracker.js into #pcCampaign and #pcCalls. PC.tab tells it
+     which one the client is looking at, so a tab nobody has opened is never
+     asked for. */
+  const TABS = [{ key: 'chat', label: 'Chat' }, { key: 'campaign', label: 'Campaign' }, { key: 'calls', label: 'Calls' }];
+  let tab = 'chat';
+  PC.tab = tab;
+
   /* ---- signing in ---- */
   function showSignIn(message, email){
     stopChat();
@@ -82,20 +90,34 @@
         <div class="pc-bar-t"><h1>${pcEsc(home.company || 'Your channel')}</h1><p class="pc-tag">Direct line to Aviance</p></div>
         <button type="button" class="pc-btn pc-btn-quiet" id="pcOut">Sign out</button>
       </div></header>
-      <div id="pcTracker" class="pc-tracker-box"></div>
-      <div id="pcKick" class="pc-kick-box"></div>
-      <div class="pc-scroll" id="pcScroll" tabindex="0" aria-label="Messages">
-        <div class="pc-thread" id="pcThread" role="log" aria-live="polite" aria-relevant="additions"><p class="pc-tag" style="margin:auto">Loading</p></div>
+      <div id="pcStanding" class="pc-standing"></div>
+      <nav class="pc-tabs" aria-label="Your portal"><div class="pc-tabs-in" role="tablist">
+        ${TABS.map(function(t){ return `<button type="button" role="tab" class="pc-tab" id="pcTab-${t.key}" data-pc-tab="${t.key}" aria-controls="pcPanel-${t.key}" aria-selected="${t.key === tab ? 'true' : 'false'}" tabindex="${t.key === tab ? '0' : '-1'}">${pcEsc(t.label)}</button>`; }).join('')}
+      </div></nav>
+      <div class="pc-panels">
+        <section class="pc-panel" id="pcPanel-chat" role="tabpanel" aria-labelledby="pcTab-chat"${tab === 'chat' ? '' : ' hidden'}>
+          <div id="pcTracker" class="pc-tracker-box"></div>
+          <div id="pcKick" class="pc-kick-box"></div>
+          <div class="pc-scroll" id="pcScroll" tabindex="0" aria-label="Messages">
+            <div class="pc-thread" id="pcThread" role="log" aria-live="polite" aria-relevant="additions"><p class="pc-tag" style="margin:auto">Loading</p></div>
+          </div>
+          <form class="pc-compose" id="pcCompose"><div class="pc-compose-in">
+            <p class="pc-err" id="pcSendErr" role="alert" aria-live="assertive"></p>
+            <div class="pc-compose-row">
+              <label class="pc-sr" for="pcText">Message the Aviance team</label>
+              <textarea id="pcText" rows="1" maxlength="${PC_MAX_BODY}" placeholder="Write a message" enterkeyhint="send" aria-describedby="pcCount"></textarea>
+              <button type="submit" class="pc-btn" id="pcSendBtn">Send</button>
+            </div>
+            <p class="pc-tag pc-count" id="pcCount" aria-live="polite"></p>
+          </div></form>
+        </section>
+        <section class="pc-panel" id="pcPanel-campaign" role="tabpanel" aria-labelledby="pcTab-campaign" tabindex="0"${tab === 'campaign' ? '' : ' hidden'}>
+          <div class="pc-sheet"><div class="pc-sheet-in" id="pcCampaign"></div></div>
+        </section>
+        <section class="pc-panel" id="pcPanel-calls" role="tabpanel" aria-labelledby="pcTab-calls" tabindex="0"${tab === 'calls' ? '' : ' hidden'}>
+          <div class="pc-sheet"><div class="pc-sheet-in" id="pcCalls"></div></div>
+        </section>
       </div>
-      <form class="pc-compose" id="pcCompose"><div class="pc-compose-in">
-        <p class="pc-err" id="pcSendErr" role="alert" aria-live="assertive"></p>
-        <div class="pc-compose-row">
-          <label class="pc-sr" for="pcText">Message the Aviance team</label>
-          <textarea id="pcText" rows="1" maxlength="${PC_MAX_BODY}" placeholder="Write a message" enterkeyhint="send" aria-describedby="pcCount"></textarea>
-          <button type="submit" class="pc-btn" id="pcSendBtn">Send</button>
-        </div>
-        <p class="pc-tag pc-count" id="pcCount" aria-live="polite"></p>
-      </div></form>
     </div>`;
     drawn = ''; rows = [];
     /* the kickoff is now offered in the chat (portal-schedule.js); the old self-booking card stays off */
@@ -105,7 +127,25 @@
     timer = setInterval(function(){ if (!document.hidden) refresh(false); }, PC_POLL_MS);
   }
 
+  /* Show one tab. The other panels stay in the page, hidden, so the chat keeps
+     its live connection, its scroll and anything half-typed. */
+  function showTab(key, focus){
+    if (!TABS.some(function(t){ return t.key === key; })) return;
+    tab = key;
+    PC.tab = key;
+    TABS.forEach(function(t){
+      const btn = document.getElementById('pcTab-' + t.key), panel = document.getElementById('pcPanel-' + t.key);
+      const on = t.key === key;
+      if (btn) { btn.setAttribute('aria-selected', on ? 'true' : 'false'); btn.tabIndex = on ? 0 : -1; if (on && focus) btn.focus(); }
+      if (panel) { if (on) panel.removeAttribute('hidden'); else panel.setAttribute('hidden', ''); }
+    });
+    if (key === 'chat') { const box = document.getElementById('pcScroll'); if (box) box.scrollTop = box.scrollHeight; }
+    runMounts();
+  }
+
   function stopChat(){
+    tab = 'chat';
+    PC.tab = 'chat';
     if (stopLive) { stopLive(); stopLive = null; }
     if (timer) { clearInterval(timer); timer = null; }
     home = null; rows = []; drawn = '';
@@ -202,6 +242,8 @@
     if (e.target.id === 'pcCompose') { e.preventDefault(); send(); }
   });
   root.addEventListener('click', async function(e){
+    const tb = e.target && e.target.closest ? e.target.closest('[data-pc-tab]') : null;
+    if (tb) { showTab(tb.getAttribute('data-pc-tab')); return; }
     const k = e.target && e.target.closest ? e.target.closest('[data-pc-day],[data-pc-slot],[data-pc-unpick],[data-pc-book]') : null;
     if (k) {
       if (k.hasAttribute('data-pc-day')) { kickUi.day = k.getAttribute('data-pc-day'); kickUi.pick = ''; kickUi.error = ''; drawKick(); }
@@ -219,6 +261,19 @@
   });
   root.addEventListener('keydown', function(e){
     if (e.target && e.target.id === 'pcText' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+    /* the tab strip answers to the arrow keys, as a tablist should */
+    const tb = e.target && e.target.closest ? e.target.closest('[data-pc-tab]') : null;
+    if (!tb) return;
+    const i = TABS.findIndex(function(t){ return t.key === tb.getAttribute('data-pc-tab'); });
+    if (i < 0) return;
+    let to = -1;
+    if (e.key === 'ArrowRight') to = (i + 1) % TABS.length;
+    else if (e.key === 'ArrowLeft') to = (i - 1 + TABS.length) % TABS.length;
+    else if (e.key === 'Home') to = 0;
+    else if (e.key === 'End') to = TABS.length - 1;
+    if (to < 0) return;
+    e.preventDefault();
+    showTab(TABS[to].key, true);
   });
   root.addEventListener('input', function(e){
     if (e.target && e.target.id === 'pcText') { grow(e.target); count(e.target); }

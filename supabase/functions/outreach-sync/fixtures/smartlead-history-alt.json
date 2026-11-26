@@ -1,0 +1,6 @@
+{
+  "messages": [
+    { "id": "msg_1", "subject": "Partnership opportunity", "direction": "outbound", "sent_at": "2026-11-15T10:00:00Z", "opened_at": "2026-11-15T10:30:00Z", "body": "<p>Short note about working together.</p>" },
+    { "id": "msg_2", "subject": "Re: Partnership opportunity", "direction": "inbound", "received_at": "2026-11-20T14:00:00Z", "body": "Not right now, thanks." }
+  ]
+}

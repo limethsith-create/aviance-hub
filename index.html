@@ -7,13 +7,13 @@
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="clientbook.css">
 <link rel="stylesheet" href="pipeline.css">
+<link rel="stylesheet" href="prospects.css">
 <link rel="stylesheet" href="meetings.css">
 <link rel="stylesheet" href="channels.css">
 <link rel="stylesheet" href="portal.css">
 <link rel="stylesheet" href="journey.css">
 <link rel="stylesheet" href="drafts.css">
 <link rel="stylesheet" href="employees.css">
-<link rel="stylesheet" href="callers.css">
 <link rel="stylesheet" href="documents.css">
 <link rel="stylesheet" href="team.css">
 <link rel="stylesheet" href="onboarding.css">
@@ -383,10 +383,11 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
      digest.js      Today, Friday update, month end     meetings.js    every call, and how it went
      drafts.js      replies the bot wrote, to approve   pipeline.js    website bookings and the funnel
      clientbook.js  clients, and what needs you         channels.js    talking with the team and clients
-     callers.js     the caller team                     employees.js   staff, and the chat with each
+     employees.js   staff, and the chat with each
      journey.js     onboarding, payment to launch       onboarding.js  the onboarding checklist, invoices
      documents.js   what a client receives              finance.js     the money
      portal.js      client requests, their people       wrapup.js      a client leaving
+     prospects.js   every business we are emailing       
      team.js        hub accounts to approve, the work   settings.js    you, the calendar, payments
 
    The email sending itself happens in an outside tool. No keys are kept here. */
@@ -458,10 +459,11 @@ const views={
   client:{fn:()=>V('viewClient',currentClientId),title:'Client',sub:'',back:()=>render('clients')},
   needsYou:{fn:()=>V('viewNeedsYou'),title:'Needs you',sub:'What is actually behind',back:()=>render('clients')},
   clientPeople:{fn:()=>V('viewClientPeople',currentClientId),title:'Their people',sub:'Who from their business can sign in',back:()=>render('clients')},
+  prospects:{fn:()=>V('viewProspects'),title:'Prospects',sub:'Every business we are emailing, and every reply',wide:true},
+  prospect:{fn:()=>V('viewProspect',currentThreadId),title:'Prospect',sub:'',back:()=>render('prospects')},
   onboarding:{fn:()=>V('viewOnboarding'),title:'Onboarding checklist',sub:'What is blocking each new client',back:()=>render('clients')},
   onboardingClient:{fn:()=>V('viewOnboardingClient',currentClientId),title:'Onboarding checklist',sub:'',back:()=>render('onboarding')},
   channels:{fn:()=>V('viewChannels'),title:'Channels',sub:'Talk with your team and your clients',wide:true},
-  callers:{fn:()=>V('viewCallers'),title:'Callers',sub:'Who is dialling, what they have booked, and what you owe them',wide:true,owner:true},
   employees:{fn:()=>V('viewEmployees'),title:'Employees',sub:'Your staff, how they get in, and your chat with each one',wide:true,owner:true},
   journey:{fn:()=>V('viewJourneyBoard'),title:'Onboarding',sub:'Every new client, from payment to launch',wide:true},
   billing:{fn:()=>V('viewBilling'),title:'Invoices',sub:'To raise, to send, to chase'},
@@ -473,7 +475,7 @@ const views={
 };
 
 /* Which client or meeting is open. Set by the open* helpers below. */
-let currentClientId=null, currentMeetingId=null;
+let currentClientId=null, currentMeetingId=null, currentThreadId=null;
 
 /* Every screen goes through here, so a screen whose file has not loaded yet says so
    instead of throwing. Each area is one file; see SCHEMA.md. */
@@ -484,6 +486,8 @@ function V(name,arg){
   try{return f(arg)}catch(e){return viewError(e)}
 }
 function openClient(id){currentClientId=id;render('client')}
+/* One prospect's whole window: the company, the people, every mail, every reply, the call it won. */
+function openProspect(id){currentThreadId=id;render('prospect')}
 /* A website booking has no screen of its own any more: it opens the Calendar on that booking's week, with its panel open. */
 function openEnquiry(id){if(typeof mt!=='undefined'&&id)mt.want='booking:'+id;render('calendar')}
 function openMeeting(id){currentMeetingId=id;render('meeting')}
@@ -501,12 +505,25 @@ async function hubLoadClients(){
 function tkListRows(){return hubClients.map(c=>({id:c.id,name:c.company,stage:c.stage}))}
 function tkFindRow(id){return tkListRows().find(r=>r.id===id)||null}
 const tk={hub:null};
+/* A seat that is one screen wide. Somebody the owner has appointed to one client's
+   prospects (a row in `prospect_grants`) is not approved team: they hold no role, see
+   no money, no invoice, no agreement, no setting and no other client, and the database
+   gives them nothing anywhere else. In here they get the prospect window and nothing
+   beside it. The grant is the seat; RLS, not this list, is what keeps them out. */
+const PROSPECT_SEAT_VIEWS=['prospects','prospect'];
+function hubProspectSeat(){return !!(authUser&&authUser.role==='prospect');}
+function hubAllowed(v){
+  if(hubProspectSeat())return PROSPECT_SEAT_VIEWS.includes(v);
+  return !(views[v]&&views[v].owner)||!authUser||authUser.role==='admin';
+}
 /* Kept for the screens that ask. The shell itself never holds a client: routeUser sends one to portal.html. */
 function hubIsClient(){return !!(authUser&&authUser.role==='client');}
 /* What each screen's file wants to hear after any screen is drawn (its timers, its badge). */
-const RENDER_HOOKS=['mtOnRender','channelsOnRender','empOnRender','calOnRender'];
+const RENDER_HOOKS=['mtOnRender','channelsOnRender','empOnRender'];
 function render(v){
-  const view=views[v];if(!view||!authUser)return;
+  if(!views[v]||!authUser)return;
+  if(!hubAllowed(v))v=hubProspectSeat()?'prospects':'home';
+  const view=views[v];if(!view)return;
   currentView=v;
   const box=document.getElementById('content');
   const paint=html=>{box.innerHTML=`<div class="view${view.wide?' wide':''}">${html}</div>`;};
@@ -527,7 +544,7 @@ function render(v){
 function goBack(){const v=views[currentView];if(v&&v.back)v.back();else render('home');}
 
 /* ---- Deep links: #clients (and the old #trials, #paying), #calendar, #calendar/{meetingId}, #inquiry/{bookingId},
-   #channels, #channels/{id}, #drafts, #employees, #callers, #documents, #onboarding, #settings.
+   #channels, #channels/{id}, #drafts, #employees, #documents, #onboarding, #settings.
    Honoured on load and on hashchange; when signed out, kept until sign-in. A link to a screen that is gone opens Today. ---- */
 function parseDeepLink(h){
   h=String(h||'');const at=h.indexOf('#');if(at<0)return null;h=h.slice(at+1).replace(/^\/+/,'').replace(/\/+$/,'');
@@ -535,8 +552,8 @@ function parseDeepLink(h){
   if(h==='onboarding'||h==='journey')return {view:'journey'};
   if(h==='alerts'||h==='settings'||/^settings\//.test(h))return {view:'settings'};
   if(h==='inquiries')return {view:'calendar'};
-  if(['calendar','channels','drafts','employees','callers','documents'].includes(h))return {view:h};
-  const m=h.match(/^(inquiry|calendar|channels)\/([^/?#&=]+)$/);if(!m)return null;
+  if(['calendar','channels','drafts','employees','documents','prospects'].includes(h))return {view:h};
+  const m=h.match(/^(inquiry|calendar|channels|prospect)\/([^/?#&=]+)$/);if(!m)return null;
   let id='';try{id=decodeURIComponent(m[2]);}catch(e){return null;}
   return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:m[1],id}:null;
 }
@@ -548,6 +565,7 @@ function goDeepLink(d){
   try{history.replaceState(null,'',location.pathname+location.search);}catch(e){} // so the same link can open it again
   closeModal();closeCmdk();
   if(d.view==='client')openClient(d.id);
+  else if(d.view==='prospect')openProspect(d.id);
   else if(d.view==='enquiry'||d.view==='inquiry')openEnquiry(d.id);
   else if(d.view==='enquiries'||d.view==='inquiries')render('calendar');
   else if(d.view==='meeting')openMeeting(d.id);
@@ -572,13 +590,13 @@ function navItems(){
     {view:'drafts',icon:I.inbox,label:'Replies',badge:dr,tone:'red',badgeTitle:say(dr,'reply the bot drafted is waiting for you','replies the bot drafted are waiting for you')},
     {view:'clients',icon:I.clients,label:'Clients',badge:'',also:['client','needsYou','clientPeople','onboarding','onboardingClient']},
     {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':''},
-    {view:'callers',icon:I.phone,label:'Callers',badge:''},
+    {view:'prospects',icon:I.inquiry,label:'Prospects',badge:'',also:['prospect']},
     {view:'employees',icon:I.people,label:'Employees',badge:emp,tone:'red',badgeTitle:say(emp,'unread message from your staff','unread messages from your staff')},
     {view:'journey',icon:I.steps,label:'Onboarding',badge:late,tone:'amber',badgeTitle:say(late,'step is running late','steps are running late')},
     {view:'billing',icon:I.money,label:'Invoices',badge:'',also:['monthEnd','ending','dataDeletion']},
     {view:'documents',icon:I.doc,label:'Documents',badge:''},
     {view:'settings',icon:I.gear,label:'Settings',badge:''},
-  ].filter(it=>!views[it.view].owner||!authUser||authUser.role==='admin');
+  ].filter(it=>hubAllowed(it.view));
 }
 const TAB_PLACES=4;   // places in the phone's tab bar, before "More"
 function navOn(it){return it.view===currentView||(it.also||[]).includes(currentView);}
@@ -649,6 +667,15 @@ async function routeUser(errId){
     // Not the team. They may be a client: portal_home() answers only for a portal client. A client never
     // enters this shell — they are sent to their own page, still signed in.
     authUser=null;
+    // Appointed to a client's prospects? The grant itself is the seat: one screen, nothing else.
+    let seat=false;
+    try{const r=await sb.rpc('prospect_seat');seat=!!(r&&!r.error&&r.data);}catch(e){seat=false;}
+    if(seat&&prof){
+      authUser={uid:prof.id,name:prof.name||'Team member',role:'prospect',email:prof.email||user.email||''};
+      try{document.body.classList.add('ro');}catch(e){}
+      document.getElementById('loginPass').value='';
+      enterApp();return;
+    }
     let home=null;
     try{const r=await sb.rpc('portal_home');home=r&&!r.error?r.data:null;}catch(e){home=null;}
     if(home){showLogin();try{location.replace('/portal.html');}catch(e){}return;}
@@ -668,7 +695,7 @@ function enterApp(){
   document.getElementById('whoAvatar').textContent=(authUser.name||'A').trim().charAt(0).toUpperCase()||'A';
   document.getElementById('whoName').textContent=authUser.name;
   document.getElementById('whoEmail').textContent=authUser.email;
-  if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render('home');
+  if(!(pendingDeepLink&&goDeepLink(pendingDeepLink)))render(hubProspectSeat()?'prospects':'home');
   try{tkDropOldPhoneAlerts();}catch(e){}
 }
 function showLogin(){
@@ -680,7 +707,7 @@ function showLogin(){
   try{if(typeof channelsStopTimer==='function')channelsStopTimer();}catch(e){}
 }
 /* Every screen that keeps rows in memory forgets them on sign-out, so the next person on this device starts clean. */
-const FORGET_HOOKS=['mtForget','channelsForget','draftsForget','documentsForget','employeesForget','callersForget','cbForget','jyForget','plForget','tmForget'];
+const FORGET_HOOKS=['mtForget','channelsForget','draftsForget','documentsForget','employeesForget','cbForget','jyForget','plForget','tmForget','prForget'];
 async function logout(){
   try{await sb.auth.signOut();}catch(e){}
   authUser=null;
@@ -745,8 +772,8 @@ function cmdkActions(){return [
   {type:'Command',label:'Sign out',icon:I.logout,sub:'End your session',kw:'log out sign out logout',run:()=>{closeCmdk();logout();}},
 ];}
 /* [view, what it is called, other words people type]. The sidebar's places first, then the pages inside them. */
-const CMDK_SCREENS=[['home','Today','dashboard home'],['calendar','Calendar','calls bookings meetings'],['drafts','Replies','drafts bot approve inbox'],['clients','Clients','book list'],
-  ['channels','Channels','messages chat'],['callers','Callers','dial phone cold calling'],['employees','Employees','staff people chat'],['journey','Onboarding','new clients steps launch'],
+const CMDK_SCREENS=[['home','Today','dashboard home'],['calendar','Calendar','calls bookings meetings'],['drafts','Replies','drafts bot approve inbox'],['clients','Clients','book list'],['prospects','Prospects','leads prospect window emails replies sequence'],
+  ['channels','Channels','messages chat'],['employees','Employees','staff people chat'],['journey','Onboarding','new clients steps launch'],
   ['billing','Invoices','billing money paid'],['documents','Documents','agreement welcome invoice'],['settings','Settings','preferences'],
   ['needsYou','Needs you','behind attention'],['funnel','Funnel','enquiries wins'],['noShows','No-shows','missed calls'],['requests','Requests','client asks questions'],
   ['friday','Friday update','weekly note'],['monthEnd','Month end','close months'],['ending','Ending','wrap up leaving cancel'],['dataDeletion','Data deletion','remove erase privacy'],
@@ -757,7 +784,7 @@ function cmdkEntities(){
   (list||[]).forEach(c=>{if(!c||!c.id||seen[c.id])return;seen[c.id]=1;
     out.push({type:'Clients',label:String(c.company||c.contact_name||'Client'),sub:[c.contact_name,c.stage].filter(Boolean).join(' · '),icon:I.people,
       kw:[c.company,c.contact_name,c.contact_email,'client'].filter(Boolean).join(' '),run:()=>{closeCmdk();openClient(c.id);}});});
-  CMDK_SCREENS.forEach(([v,label,kw])=>{if(!views[v]||(views[v].owner&&authUser&&authUser.role!=='admin'))return;
+  CMDK_SCREENS.forEach(([v,label,kw])=>{if(!views[v]||!hubAllowed(v))return;
     out.push({type:'Screens',label,sub:views[v].sub||'',icon:I.pulse,kw:label+' '+kw+' '+v,run:()=>{closeCmdk();render(v);}});});
   return out;
 }
@@ -815,13 +842,13 @@ boot();
 <script src="finance.js"></script>
 <script src="clientbook.js"></script>
 <script src="pipeline.js"></script>
+<script src="prospects.js"></script>
 <script src="meetings.js"></script>
 <script src="channels.js"></script>
 <script src="portal.js"></script>
 <script src="journey.js"></script>
 <script src="drafts.js"></script>
 <script src="employees.js"></script>
-<script src="callers.js"></script>
 <script src="documents.js"></script>
 <script src="team.js"></script>
 <script src="onboarding.js"></script>

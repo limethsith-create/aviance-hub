@@ -1,0 +1,56 @@
+{
+  "items": [
+    {
+      "email": "ab@sendingdomain.test",
+      "first_name": "A",
+      "last_name": "B",
+      "timestamp_created": "2026-08-01T10:00:00.000Z",
+      "timestamp_updated": "2026-11-26T05:00:00.000Z",
+      "organization": "01a18390-0000-7000-8000-000000000001",
+      "daily_limit": 40,
+      "warmup": { "limit": 20, "increment": "2", "reply_rate": 30, "advanced": { "weekday_only": true } },
+      "status": 1,
+      "warmup_status": 1,
+      "stat_warmup_score": 97,
+      "provider_code": 2,
+      "setup_pending": false,
+      "is_managed_account": false,
+      "sending_gap": 10,
+      "timestamp_warmup_start": "2026-08-02T10:00:00.000Z",
+      "autofix_failed": false
+    },
+    {
+      "email": "cd@sendingdomain.test",
+      "first_name": "C",
+      "last_name": "D",
+      "timestamp_created": "2026-11-18T10:00:00.000Z",
+      "timestamp_updated": "2026-11-26T05:00:00.000Z",
+      "organization": "01a18390-0000-7000-8000-000000000001",
+      "daily_limit": null,
+      "warmup": { "limit": 15 },
+      "status": 1,
+      "warmup_status": 1,
+      "stat_warmup_score": 58,
+      "provider_code": 3,
+      "setup_pending": false,
+      "is_managed_account": false
+    },
+    {
+      "email": "ef@otherdomain.test",
+      "first_name": "E",
+      "last_name": "F",
+      "timestamp_created": "2026-06-01T10:00:00.000Z",
+      "timestamp_updated": "2026-11-20T05:00:00.000Z",
+      "organization": "01a18390-0000-7000-8000-000000000001",
+      "daily_limit": 50,
+      "status": -1,
+      "warmup_status": 0,
+      "stat_warmup_score": null,
+      "provider_code": 1,
+      "setup_pending": false,
+      "is_managed_account": false,
+      "status_message": { "code": 535, "e_message": "authentication failed" }
+    }
+  ],
+  "next_starting_after": null
+}

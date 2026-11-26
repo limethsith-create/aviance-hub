@@ -46,10 +46,6 @@
       "destination": "/team.html"
     },
     {
-      "source": "/callers",
-      "destination": "/callers.html"
-    },
-    {
       "source": "/go",
       "destination": "https://zjbxnkpktbghhudjbxhk.supabase.co/functions/v1/caller-link"
     }

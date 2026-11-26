@@ -69,7 +69,16 @@
     if (!r.ok) { show(pcOfflineHtml()); return; }
     if (r.data.ok && r.data.email) { invite = r.data; show(formHtml(invite)); return; }
     const reason = r.data.reason;
-    if (reason === 'used') {
+    if (reason === 'seats_full') {
+      /* Their plan's portal logins are all taken. invite_peek writes the
+         sentence (seat_full_message), so the number and the company in it are
+         always the real ones; we only ever show it, escaped. The link is NOT
+         burnt — once someone frees a login this same link still works. */
+      show(pcNoticeHtml('Your logins are all in use.',
+        r.data.message || 'Every login on your company’s Aviance plan is in use, so this link cannot open another one.',
+        '<p class="pc-small">' + pcEsc('Your link still works. Once a login is freed, open it again and set your password.') + '</p>' +
+        '<p class="pc-small">' + pcEsc('Stuck? Reply to any of our emails.') + '</p>'));
+    } else if (reason === 'used') {
       show(pcNoticeHtml('You are already set up.', pcInviteMessage('used'), '<p><a class="pc-btn" href="/portal.html">Sign in</a></p><p class="pc-small">Forgotten your password? Reply to our email and we\'ll send a fresh link.</p>'));
     } else if (reason === 'expired') {
       show(pcNoticeHtml('This link has expired.', 'Reply to our email and we\'ll send a fresh link.', '<p class="pc-small">Stuck? Reply to any of our emails.</p>'));

@@ -88,7 +88,7 @@ test('dgHome with zero rows: every number reads 0, never blank and never NaN', a
   const r = shape(await dgHome(NOW));
   assert.equal(r.ok, true);
   const d = r.data;
-  assert.deepEqual([d.calls.bookedThisWeek, d.calls.deliveredThisWeek, d.clientsLive, d.openRequests, d.overdueTasks, d.dialsToday], [0, 0, 0, 0, 0, 0]);
+  assert.deepEqual([d.calls.bookedThisWeek, d.calls.deliveredThisWeek, d.clientsLive, d.openRequests, d.overdueTasks], [0, 0, 0, 0, 0]);
   assert.deepEqual([d.money.invoiced, d.money.owed, d.money.paidEver, d.refundsExposed], [0, 0, 0, 0]);
   assert.deepEqual(d.shortMonths, []);
   assert.deepEqual(d.missing, []);
@@ -97,12 +97,12 @@ test('dgHome with zero rows: every number reads 0, never blank and never NaN', a
   const t = text(html);
   assert.ok(!/NaN|undefined|null/.test(t), t);
   assert.ok(!t.includes('—'), 'every source answered, so no dashes: ' + t);
-  for (const w of ['Calls booked this week 0', 'Calls delivered this week 0', 'Clients live 0', 'Invoiced $0', 'Owed to us $0', 'Refunds exposed $0', 'Open requests 0', 'Overdue tasks 0', 'Dials today 0']) {
+  for (const w of ['Calls booked this week 0', 'Calls delivered this week 0', 'Clients live 0', 'Invoiced $0', 'Owed to us $0', 'Refunds exposed $0', 'Open requests 0', 'Overdue tasks 0']) {
     assert.ok(t.includes(w), 'missing "' + w + '" in: ' + t);
   }
   assert.ok(t.includes('No month is running short'));
   /* nothing is read from a stored counter: each number came from a query or a view */
-  assert.ok(calls.some((c) => c.table === 'qualified_calls') && calls.some((c) => c.table === 'tasks') && calls.some((c) => c.table === 'call_log'));
+  assert.ok(calls.some((c) => c.table === 'qualified_calls') && calls.some((c) => c.table === 'tasks'));
 });
 
 test('dgHome counts this week from rows, and lists the months running short with what they would cost', async () => {
@@ -113,7 +113,6 @@ test('dgHome counts this week from rows, and lists the months running short with
   tables.qualified_calls = [call(), call({ booked_for: '2026-11-19T14:00:00Z', happened_at: '2026-11-19T14:00:00Z' }), call({ booked_for: '2026-11-02T14:00:00Z', happened_at: '2026-11-02T14:00:00Z' })];
   tables.client_requests = [{ id: 'r1', status: 'open' }, { id: 'r2', status: 'closed' }];
   tables.tasks = [{ id: 't1', status: 'todo', due_on: '2026-11-01' }, { id: 't2', status: 'todo', due_on: '2026-12-30' }, { id: 't3', status: 'done', due_on: '2026-11-01' }];
-  tables.call_log = [{ id: 'l1', called_at: '2026-11-20T09:00:00Z' }, { id: 'l2', called_at: '2026-11-19T09:00:00Z' }];
 
   const d = (await dgHome(NOW)).data;
   assert.equal(d.calls.bookedThisWeek, 2, 'only the two in this week');
@@ -121,7 +120,6 @@ test('dgHome counts this week from rows, and lists the months running short with
   assert.equal(d.clientsLive, 2, 'the ended client is not live');
   assert.equal(d.openRequests, 1);
   assert.equal(d.overdueTasks, 1);
-  assert.equal(d.dialsToday, 1);
   assert.equal(d.money.owed, 3000);
   assert.equal(d.refundsExposed, 6000);
   assert.equal(d.shortMonths.length, 1, 'only the one that is actually behind');
@@ -300,7 +298,6 @@ test('dgMonthClose with nothing to close, and a hit month that costs nothing', a
 test('a missing module degrades to a dash and nothing throws', async () => {
   dropFinance();                                     /* finance.js is not loaded at all */
   errors.client_requests = 'relation "client_requests" does not exist';
-  errors.call_log = 'permission denied';
   tables.tasks = [{ id: 't1', status: 'todo', due_on: '2026-11-01' }];
 
   const r = shape(await dgHome(NOW));
@@ -309,12 +306,11 @@ test('a missing module degrades to a dash and nothing throws', async () => {
   assert.equal(d.money.invoiced, null);
   assert.equal(d.refundsExposed, null);
   assert.equal(d.openRequests, null);
-  assert.equal(d.dialsToday, null);
   assert.equal(d.overdueTasks, 1, 'the sources that did answer still count');
-  assert.ok(d.missing.length >= 4);
+  assert.ok(d.missing.length >= 3);          /* one fewer source since the call log went */
 
   const t = text(dgRenderHome(d));
-  assert.ok(t.includes('Invoiced —') && t.includes('Refunds exposed —') && t.includes('Open requests —') && t.includes('Dials today —'), t);
+  assert.ok(t.includes('Invoiced —') && t.includes('Refunds exposed —') && t.includes('Open requests —'), t);
   assert.ok(t.includes('Overdue tasks 1'));
   assert.ok(!/NaN|undefined/.test(t), t);
   assert.ok(/not in yet/.test(t), 'it says which parts did not answer');
@@ -331,7 +327,6 @@ test('a missing module degrades to a dash and nothing throws', async () => {
   try {
     const bare = await dgHome(NOW);
     assert.equal(bare.ok, true);
-    assert.equal(bare.data.dialsToday, null);
     assert.ok(text(dgRenderHome(bare.data)).includes('—'));
     const w = await dgClientWeek('c1', NOW);
     assert.equal(w.ok, true);

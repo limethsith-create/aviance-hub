@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "id": "01a18395-0ad6-7e17-beab-fae7b41bc39e",
+      "name": "US founders — Q4",
+      "status": 1,
+      "timestamp_created": "2026-10-06T09:12:44.000Z",
+      "timestamp_updated": "2026-11-25T18:02:01.000Z",
+      "is_evergreen": false,
+      "daily_limit": 120,
+      "email_list": ["ab@sendingdomain.test", "cd@sendingdomain.test"],
+      "organization": "01a18390-0000-7000-8000-000000000001"
+    },
+    {
+      "id": "01a18395-0ad6-7e17-beab-fae7b41bc3aa",
+      "name": "Agency owners — paused",
+      "status": 2,
+      "timestamp_created": "2026-09-01T07:00:00.000Z",
+      "timestamp_updated": "2026-10-02T07:00:00.000Z",
+      "organization": "01a18390-0000-7000-8000-000000000001"
+    },
+    {
+      "id": "01a18395-0ad6-7e17-beab-fae7b41bc3bb",
+      "name": "Draft, never started",
+      "status": 0,
+      "timestamp_created": "2026-11-20T07:00:00.000Z",
+      "organization": "01a18390-0000-7000-8000-000000000001"
+    }
+  ],
+  "next_starting_after": null
+}

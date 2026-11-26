@@ -1,0 +1,21 @@
+{
+  "id": 12345,
+  "name": "SaaS COOs — November",
+  "status": "ACTIVE",
+  "start_date": "2026-10-29",
+  "end_date": "2026-11-26",
+  "sent_count": "3120",
+  "unique_sent_count": "2980",
+  "open_count": "1510",
+  "unique_open_count": "844",
+  "click_count": "40",
+  "unique_click_count": "31",
+  "reply_count": "72",
+  "total_reply_count": "90",
+  "non_ooo_reply_count": "61",
+  "block_count": "3",
+  "bounce_count": "28",
+  "unsubscribed_count": "6",
+  "total_count": "3000",
+  "drafted_count": "0"
+}

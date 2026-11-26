@@ -110,6 +110,7 @@ test('no file mentions a module that was deleted, even in a comment', () => {
     'trials.js', 'calendar.js', 'inquiries.js', 'messages.js', 'warmup.js',
     'keys.js', 'autobuy.js', 'seats.js', 'people.js', 'numbers.js',
     'cleanup.js', 'feed.js', 'stages.js',
+    'callers.js', 'caller-page.js', 'outreach-adapter.js',
   ];
   const sources = [...jsFiles, 'index.html'];
   for (const f of sources) {

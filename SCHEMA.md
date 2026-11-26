@@ -29,8 +29,11 @@ async function xxRun(fn, whenEmpty){ try{ return xxWrap(await fn(), whenEmpty) }
 
 ## RLS
 
-All tables: approved staff can read and write (`is_approved()`). The `dnc` table
-is add-only for staff; only `is_admin()` can change or remove a row.
+All tables: approved staff can read and write (`is_approved()`) **except the six
+`outreach_*` tables, which are read by grant**: `can_see_prospects(client_id)` — the
+owner (`is_admin()`), or a live row in `prospect_grants` for that person and that
+client. Being approved team is not enough; an employee with no grant reads zero
+prospect rows. Writing them is still `is_approved()` (the sync runs as service_role).
 `invoices` are admin-read. A signed-in portal client sees ONLY their own channel:
 they may select the `channel_messages` of that channel (`deleted_at is null`) and
 insert `{channel_id, author_person, body}` (with `author_user` null). Every other
@@ -54,10 +57,12 @@ and `created_at timestamptz not null default now()` unless said otherwise.
 `*` marks NOT NULL. Check-constrained values are listed in brackets.
 
 ### Money (built — read only, through finance.js)
-- **plan_prices** — plan* (pk: starter|growth|scale; a leftover `pilot` row is retired and finance.js `fnPlans` never returns it), label*, calls_promised*, monthly_fee*, three_month_fee*, is_recurring*, updated_at*
+- **plan_prices** — plan* (pk: starter|growth|scale; a leftover `pilot` row is retired and finance.js `fnPlans` never returns it), label*, calls_promised*, monthly_fee*, three_month_fee*, is_recurring*, **portal_seats** (null = unlimited), updated_at*
+  `portal_seats` is the ONE place the seat numbers live: Starter 2, Growth 4, Scale `null`. Nothing in the browser holds a number.
 - **clients** — booking_id, company*, contact_name*, contact_email*, website, plan*, term*, calls_promised*, monthly_fee*, stage*, inputs_complete_on date, day1_on date, owner_id, ended_on date, end_reason, notes, updated_at*
 - **client_months** — client_id*, month_no*, starts_on* date, ends_on* date, calls_promised*, calls_delivered*, verdict*, locked_at, refund_due*
-- **qualified_calls** — client_id*, month_id, prospect_name, prospect_email, prospect_company, booked_for* timestamptz, matched_icp*, happened*, happened_at, dispute_status*, dispute_reason, counts (generated)
+- **qualified_calls** — client_id*, month_id, **meeting_id**, prospect_name, prospect_email, prospect_company, booked_for* timestamptz, matched_icp*, happened*, happened_at, **verdict_at**, **verdict_by**, **verdict_note**, **rsvp** [accepted|declined|tentative|no_reply], **rsvp_at**, **rsvp_source**, dispute_status*, dispute_reason, counts (generated)
+  `verdict_at` is null until a person has answered "did they show up?". That is NOT the same as `happened = false`, which is a real no-show. `rsvp` is only a HINT read off the calendar invitation; it never moves the money.
 - **invoices** — client_id*, month_id, number*, gross_amount*, amount*, currency*, issued_on* date, due_on* date, status*, sent_at, paid_at, paid_via, notes
 - Retired with the $300 Pilot plan: `clients.pilot_credit`, `clients.pilot_credit_used` and `invoices.pilot_credit`. If the columns are still in the database no browser code reads or writes them, and no invoice shows a credit line.
 - **refunds** — client_id*, month_id, amount*, multiplier* numeric, reason*, status*, paid_at, paid_via, notes
@@ -86,6 +91,11 @@ of "open" words.
 - **portal_invites** — client_id*, person_id, email*, token_hash, portal_role* [viewer|manager], status* [pending|accepted|revoked|expired], expires_at* (now + 14 days), accepted_at, accepted_user. **There is no `token` column.** Only a hash is stored; the raw token is handed back once by `portal_invite_create` and is never readable again, so a listed invite has a status and no link (portal.js).
 - **client_requests** — client_id*, person_id, kind* [question|change|complaint|dispute|pause|cancel|other], subject*, body, status* [open|in_progress|answered|closed], owner, closed_at
 
+### Portal seats, the show-up verdict, and their calendar (20261207_*)
+- Seats: a seat is one person of a client with `client_people.user_id` set. The limit is `plan_prices.portal_seats` and is enforced in the database twice — `portal_invite_create` (issuing) and `portal_invite_consume` (accepting) — each behind `select … from clients … for update`, so two people opening the last invite cannot both get in. A unique index `client_people_one_seat_per_user` backs it up. A refusal is raised with SQLSTATE `ZS001` and its own plain sentence (`seat_full_message`), which `portal-accept` passes through as it is. Team rules: `portal_seat_state(client)`, `portal_seat_free(person, reason)`, `plan_seats(plan)`.
+- Show-up: `call_verdict(call, showed, note)` and `call_verdict_by_meeting(meeting, showed, note)` are the truth — they set `happened`, move the meeting to `held`/`no_show` and `recount_month()` every month the call touches, and they say so when a month is already locked. `call_rsvp_set(meeting, rsvp, source)` writes the calendar hint and touches nothing else. View **v_calls_awaiting_verdict** (`security_invoker`, so a client sees nothing) lists every past qualified call with no verdict; meetings.js draws it above the Calendar.
+- Their calendar: **calendar_connections** (client_id*, provider* [google|microsoft|calendly], status*, account_email, account_name, calendar_id, scopes, write_events*, read_busy*, connected_at*, last_synced_at, last_error) — a client's own people may read their own rows. **calendar_tokens** (connection_id pk, access_token, refresh_token, expires_at) — **RLS on and no policy at all**: only the service role reaches it. **calendar_oauth_states** (one-use handshake, same). **calendar_busy** (connection_id*, client_id*, starts_at*, ends_at*) — times only, no titles. Rules: `calendar_connections_for`, `calendar_disconnect`, `calendar_may_connect`, `calendar_state_new`/`_take`, `calendar_connection_save`, `calendar_busy_put`, `client_busy(client, from, to)`. The OAuth handshake is the `calendar-connect` edge function; the OAuth client id and secret are Supabase secrets read by name (`GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`, `MICROSOFT_CALENDAR_CLIENT_ID`, `MICROSOFT_CALENDAR_CLIENT_SECRET`, `MICROSOFT_CALENDAR_TENANT`, `CALENDAR_CONNECT_REDIRECT`).
+
 ### Conversations
 - **channels** — name*, purpose, kind* [team|internal|client], client_id (required for client), created_by, archived_at
 - **channel_members** — channel_id*, user_id, person_id (exactly one of the two), member_role* [member|owner], last_read_at, added_at*. Unique (channel_id,user_id) and (channel_id,person_id).
@@ -104,16 +114,14 @@ Edits and deletes from the screen only ever touch your own messages (`author_use
 ### Work queue
 - **tasks** — title*, detail, department* [marketing|sales|onboarding|operations|deliverability|finance|client_success|admin], client_id, assignee, status* [todo|doing|blocked|done|cancelled], priority* 1-5 (default 3), due_on date, created_by, done_at
 
-### Cold calling
-- **call_targets** — company*, person_name, job_title, phone, email, website, country, timezone, source, status* [new|queued|calling|booked|not_interested|bad_number|callback|dnc], attempts*, last_called_at, next_call_at, owner, notes
-- **call_log** — target_id*, caller, called_at*, target_local_time time, outcome* [no_answer|voicemail|gatekeeper|conversation|booked|not_interested|bad_number|dnc_request|callback], duration_seconds, meeting_id, notes
-- **dnc** — phone, email, domain (at least one), reason* [requested|complaint|legal|bounced|competitor|other], note, added_by
+### Cold calling — retired
 
-**The do-not-call list is enforced in the database, not the screen.** Inserting
-or updating a `call_targets` row whose phone, email or website matches a `dnc`
-row raises an error. Adding a `dnc` row sets any matching target to status
-`dnc`. Never work around this; show the error.
-US calling hours are 8am-9pm in the prospect's own time zone (TCPA).
+Aviance does not cold call any more. The Callers screen, the caller's own page,
+the `leads` table and every `caller_*` function are gone, and `call_log`,
+`call_targets` and the `dnc` list go with them — one reviewed file,
+`/home/claude/out/remove-calling.sql`, drops the lot (not applied yet: the owner
+runs it). Nothing in the browser dials, imports leads, keeps a do-not-call list
+or counts dials; Today has no "Dials today" tile.
 
 ### Outreach (the custom tool)
 - **outreach_accounts** — client_id*, provider* [demo|smartlead|instantly], label*, external_id, key_ref (a NAME, never a key), status* [ok|needs_key|error|paused], last_synced_at, last_error
@@ -123,7 +131,27 @@ US calling hours are 8am-9pm in the prospect's own time zone (TCPA).
 - **outreach_messages** — thread_id*, client_id*, external_id, direction* [out|in], subject, body, sent_at*, delivery* [synced|queued|sending|sent|failed], delivery_error, author_user
 - **outreach_inboxes** — account_id*, client_id*, external_id, email*, domain, warmed*, health 0-100, daily_limit, sent_today*, status* [ok|warming|warning|blocked|paused], last_synced_at
 
-View **v_outreach_summary** — client_id, client_name, campaigns, running, sent, replied, positive, booked, reply_pct, last_synced_at.
+View **v_outreach_summary** — client_id, client_name, campaigns, running, sent, replied, positive, booked, reply_pct, last_synced_at. (`security_invoker`, so the grant rule above applies to it too.)
+
+The owner's screen over these tables is **prospects.js** (`viewProspects`, `viewProspect`):
+one page of threads at a time, filtered by client, campaign, sentiment and whether a
+call was booked. It never reads the whole table.
+
+### Prospect access (who may see a client's prospects)
+- **prospect_grants** — user_id* (profiles.id), client_id*, granted_by, note, revoked_at.
+  One live row per (person, client) — unique where `revoked_at is null`. Only the owner
+  writes it (`is_admin()`); a person may read their own rows. Given and taken back on the
+  Team screen (team.js). The grant is the whole appointment: nothing about the person's
+  role changes, so they still match no other table's policy and see no money, no invoice,
+  no agreement, no setting and no other client. index.html lets a grant-holder who is not
+  approved team in with the Prospects screen and nothing beside it.
+- `can_see_prospects(client uuid)` → boolean — the one question every outreach policy asks.
+- `prospect_seat()` → boolean — does the person signed in hold any live grant (the shell asks).
+- `prospect_clients()` → jsonb `[{id, company}]` — the clients they may see, by name only
+  (`clients` also carries the monthly fee, so it is not read directly).
+- `prospect_window(p_thread uuid)` → jsonb `{thread, client, campaign, messages, call}` —
+  one prospect whole, including the booked `meetings` row; refuses a client with no grant.
+  Migration: `supabase/migrations/20261207_prospect_access.sql`.
 
 ### Already there, untouched
 - **profiles** — id (= auth user), email, name, role*, approved*, title, loc, init, color, workload, status, phone, emp_no
@@ -199,6 +227,8 @@ one, change it here and in `tests/vocabulary.test.mjs` in the same commit.**
 - **meetings.status** — `requested, booked, held, no_show, cancelled` (`confirmed` is retired, now `booked`)
 - **channels.kind** — `team, internal, client`
 - **tasks.department** — the eight: `marketing, sales, onboarding, operations, deliverability, finance, client_success, admin`
+- **qualified_calls.rsvp** — `accepted, declined, tentative, no_reply` (Google's `needsAction` and Microsoft's `notResponded` are both folded into `no_reply` by `call_rsvp_set`)
+- **calendar_connections.provider** — `google, microsoft, calendly` · **.status** — `connected, needs_reconnect, error, revoked`
 - **plans** (plan_prices.plan, clients.plan, meetings.plan, discovery_bookings.plan, close_won `p_plan`) — `starter, growth, scale`
   (`pilot` is retired. Old rows may still carry it. finance.js holds the one guard, `fnPlanRetired`:
   every write refuses it with "That plan is retired. Pick Starter, Growth or Scale." and every screen shows "Retired plan".)

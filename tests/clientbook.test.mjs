@@ -452,10 +452,17 @@ test('viewClient renders with zero rows: no months, no inputs, no history', asyn
   assert.ok(!/cbDoMove\(&quot;c1&quot;,&quot;ended&quot;\)/.test(h), 'Ended is two stages away');
 
   /* the anchors other screens will hang off, and nothing written for them */
-  for (const id of ['cbMeetings','cbOutreach','cbPeople','cbHandover']) {
+  for (const id of ['cbMeetings','cbOutreach','cbHandover']) {
     assert.ok(h.includes('id="' + id + '"'), id + ' anchor');
     assert.ok(h.includes('<section class="card cb-slot" id="' + id + '" data-cb-client="c1"></section>'), id + ' is left empty');
   }
+  /* cbPeople and cbCalendar are this file's own now: who holds a portal login,
+     and their connected calendar. With no rows they say so rather than sitting
+     empty, and neither invents a seat number. */
+  assert.ok(h.includes('id="cbPeople"'), 'cbPeople anchor');
+  assert.ok(h.includes('id="cbCalendar"'), 'cbCalendar anchor');
+  assert.match(t, /Who can sign in/);
+  assert.match(t, /Their calendar/);
   /* the invoices block is drawn for the owner, and says so when there are none */
   assert.ok(h.includes('id="cbInvoices"'), 'cbInvoices anchor');
   assert.match(t, /No invoice yet/);
@@ -919,7 +926,7 @@ test('Paid on the client page calls the mark_paid rule, never a table update, an
   tables['rpc.mark_paid'] = () => ({data:{invoice_id:'i-1', client_id:'c1', welcome_sent:true}, error:null});
   let r = await cbMarkPaid('c1', 'i-1');
   assert.equal(r.ok, true);
-  assert.deepEqual(rpcs, [{name:'mark_paid', args:{p_invoice:'i-1', p_via:null}}]);
+  assert.deepEqual(rpcs.filter(x => x.name === 'mark_paid'), [{name:'mark_paid', args:{p_invoice:'i-1', p_via:null}}]);
   assert.equal(calls.filter(c => c.table === 'invoices' && c.op !== 'select').length, 0, 'no direct write to invoices');
   assert.equal(toasts.at(-1), 'Paid. The welcome email and their way in are on their way.');
 
@@ -1011,6 +1018,7 @@ test('Paid asks how the money came, then sends that to mark_paid; View and Resen
   tables['clients.select'] = () => ({data:[client({stage:'won'})], error:null});
   tables['invoices.select'] = () => ({data:[{...INVOICES[0], amount:3000, is_first:true}], error:null});
   await cbLoadOne('c1', true);
+  rpcs.length = 0;                 /* loading the page reads the seats and their calendar */
   const ask = cbAskPaid('c1', 'i-1');
   assert.match(text(ask), /Mark \$3,000 paid and send their welcome email/);
   for (const w of ['Wise', 'Payoneer', 'Bank transfer', 'Other']) assert.ok(ask.includes('>' + w + '<'), w);
@@ -1019,19 +1027,22 @@ test('Paid asks how the money came, then sends that to mark_paid; View and Resen
   tables['rpc.mark_paid'] = () => ({data:{invoice_id:'i-1', client_id:'c1', welcome_sent:true}, error:null});
   const r = await cbConfirmPaid('c1', 'i-1');
   assert.equal(r.ok, true);
-  assert.deepEqual(rpcs.at(-1), {name:'mark_paid', args:{p_invoice:'i-1', p_via:'Wise · TX-42'}});
+  assert.deepEqual(rpcs.filter(x => x.name === 'mark_paid').at(-1),
+    {name:'mark_paid', args:{p_invoice:'i-1', p_via:'Wise · TX-42'}});
   assert.equal(cbPaidVia('Other', ''), 'Other');
 
   tables['rpc.invoice_link'] = () => ({data:'https://aviance.store/doc.html#i.x.sig', error:null});
   const opened = {location:{href:''}, close(){}};
   globalThis.open = () => opened;
   const v = await cbViewInvoice('i-1');
-  assert.equal(v.ok, true); assert.deepEqual(rpcs.at(-1), {name:'invoice_link', args:{p_invoice:'i-1'}});
+  assert.equal(v.ok, true);
+  assert.deepEqual(rpcs.filter(x => x.name === 'invoice_link').at(-1), {name:'invoice_link', args:{p_invoice:'i-1'}});
   assert.equal(opened.location.href, 'https://aviance.store/doc.html#i.x.sig');
   delete globalThis.open;
   tables['rpc.resend_pack'] = () => ({data:{email:'sam@stone.test', invoice_number:'AV-1'}, error:null});
   const s = await cbResend('c1');
-  assert.equal(s.ok, true); assert.deepEqual(rpcs.at(-1), {name:'resend_pack', args:{p_client:'c1'}});
+  assert.equal(s.ok, true);
+  assert.deepEqual(rpcs.filter(x => x.name === 'resend_pack').at(-1), {name:'resend_pack', args:{p_client:'c1'}});
   assert.equal(toasts.at(-1), 'Sent again to sam@stone.test.');
   tables['rpc.resend_pack'] = () => ({data:null, error:{message:'Only the owner can send the pack again.'}});
   assert.equal((await cbResend('c1')).error, 'Only the owner can send the pack again.');

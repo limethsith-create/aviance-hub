@@ -1,0 +1,147 @@
+/* ===================== AVIANCE OS — the prospect window (prospects.js) =====================
+   An internal screen, so density beats drama: hairline rule stacks, mono figures, one red
+   thing per screenful (the booked call). Every colour, radius and space is a theme.css
+   variable, so light and dark both work and no new colour is introduced here. */
+
+.pr { display: grid; gap: var(--s4); }
+.pr-pad { padding: var(--s4); }
+
+/* The eyebrow: mono, uppercase, muted, with a short red rule under it. Once per section. */
+.pr-eyebrow {
+  margin: 0 0 var(--s3); padding-bottom: var(--s2);
+  font-family: var(--mono); font-size: var(--fs-min); font-weight: 500;
+  text-transform: uppercase; letter-spacing: .16em; color: var(--muted);
+  position: relative;
+}
+.pr-eyebrow::after {
+  content: ""; position: absolute; left: 0; bottom: 0; width: 24px; height: 2px; background: var(--brand);
+}
+.pr-head { display: grid; gap: var(--s1); }
+.pr-head h3 { margin: 0; font-size: var(--fs-h2); font-weight: 700; letter-spacing: -.02em; }
+.pr-dim { color: var(--muted); }
+.pr-note { margin: 0; font-size: var(--fs-small); color: var(--muted); }
+.pr-err { color: var(--red); }
+
+/* Every figure in the house is mono and tabular. */
+.pr-fig { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ---- the filter bar ---- */
+.pr-filters { padding: var(--s3) var(--s4); }
+.pr-filter-row { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: end; }
+.pr-field { display: grid; gap: var(--s1); min-width: 150px; }
+.pr-field > span {
+  font-family: var(--mono); font-size: var(--fs-min); text-transform: uppercase;
+  letter-spacing: .12em; color: var(--muted);
+}
+.pr-field select, .pr-field input {
+  font: inherit; font-size: var(--fs-base); color: var(--text);
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-xs); padding: 7px 9px; min-height: 36px;
+}
+.pr-field select:focus-visible, .pr-field input:focus-visible { outline: none; box-shadow: var(--ring-soft); border-color: var(--brand); }
+.pr-search { flex: 1 1 260px; }
+.pr-clear { align-self: end; }
+
+/* ---- the list: a rule stack, not a grid of cards ---- */
+.pr-tablecard { padding: 0; overflow: hidden; }
+.pr-scroll { overflow-x: auto; }
+.pr-table { width: 100%; border-collapse: collapse; font-size: var(--fs-base); }
+.pr-table thead th {
+  text-align: left; white-space: nowrap;
+  font-family: var(--mono); font-size: var(--fs-min); font-weight: 500;
+  text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
+  padding: var(--s3) var(--s4);
+  border-bottom: 2px solid var(--text);          /* the 2px ink rule above the stack */
+}
+.pr-table tbody td { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); vertical-align: middle; }
+.pr-table tbody tr:last-child td { border-bottom: none; }
+.pr-row { cursor: pointer; }
+.pr-row:hover td { background: var(--surface-2); }
+.pr-row:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.pr-co { display: grid; gap: 2px; }
+.pr-co b { font-weight: 650; }
+.pr-co small { color: var(--muted); font-size: var(--fs-small); }
+.pr-when { white-space: nowrap; }
+.pr-when small { display: block; color: var(--muted); font-size: var(--fs-min); }
+.pr-booked { white-space: nowrap; }
+
+/* The stamp: a thin 2px box with mono uppercase inside. Ink in the list, where it
+   repeats down the column; the one red thing is saved for the prospect's own screen. */
+.pr-stamp {
+  display: inline-block; padding: 2px 7px; border: 2px solid var(--text); color: var(--text);
+  font-family: var(--mono); font-size: var(--fs-min); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .1em;
+}
+
+/* Sentiment: a quiet word, not a traffic light. Only the negative ones carry colour. */
+.pr-tag {
+  display: inline-block; padding: 2px 8px; border: 1px solid var(--border-strong);
+  border-radius: var(--r-xs); font-size: var(--fs-min); white-space: nowrap;
+}
+.pr-s-positive { border-color: var(--text); color: var(--text); font-weight: 600; }
+.pr-s-negative, .pr-s-unsubscribe, .pr-s-unknown, .pr-s-out_of_office { color: var(--muted); }
+.pr-plain { color: var(--muted); }
+
+/* ---- the pager ---- */
+.pr-pager {
+  display: flex; flex-wrap: wrap; gap: var(--s3); align-items: center; justify-content: space-between;
+  padding: var(--s3) var(--s4); border-top: 1px solid var(--border); background: var(--surface-2);
+}
+.pr-count { margin: 0; font-size: var(--fs-small); color: var(--muted); }
+.pr-pagebtns { display: flex; gap: var(--s3); align-items: center; }
+.pr-pageno { font-size: var(--fs-small); color: var(--muted); }
+
+/* ---- one prospect ---- */
+.pr-one { display: grid; gap: var(--s4); }
+.pr-one-co { margin: 0 0 var(--s2); font-size: var(--fs-title); font-weight: 800; letter-spacing: -.03em; }
+.pr-one-tags { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s4); }
+
+/* The key/value rule stack: hairline between rows, mono label on the left. */
+.pr-kv { display: grid; }
+.pr-kv-row {
+  display: grid; grid-template-columns: minmax(130px, 26%) 1fr; gap: var(--s3);
+  padding: var(--s2) 0; border-top: 1px solid var(--border); align-items: baseline;
+}
+.pr-kv-row:first-child { border-top: none; }
+.pr-cap {
+  margin: 0; font-family: var(--mono); font-size: var(--fs-min);
+  text-transform: uppercase; letter-spacing: .12em; color: var(--muted);
+}
+
+/* The figure block: a mono caption above a big mono number. */
+.pr-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--s4); }
+.pr-figure { display: grid; gap: var(--s1); padding-top: var(--s2); border-top: 2px solid var(--text); }
+.pr-figure b { font-size: var(--fs-num-lg); font-weight: 650; letter-spacing: -.02em; }
+.pr-figure-red { border-top-color: var(--brand); }
+.pr-figure-red b { color: var(--brand); }
+
+/* ---- the thread ---- */
+.pr-msgs { display: grid; }
+.pr-msg { padding: var(--s4) 0; border-top: 1px solid var(--border); }
+.pr-msg:first-child { border-top: none; }
+.pr-msg header { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: baseline; }
+.pr-msg-dir {
+  font-family: var(--mono); font-size: var(--fs-min); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .12em; color: var(--muted);
+}
+.pr-msg-in .pr-msg-dir { color: var(--text); }
+.pr-msg-when { font-size: var(--fs-min); color: var(--muted); }
+.pr-msg-del { font-family: var(--mono); font-size: var(--fs-min); color: var(--muted); margin-left: auto; }
+.pr-msg-failed { color: var(--red); }
+.pr-msg-err { margin: var(--s2) 0 0; font-size: var(--fs-small); color: var(--red); }
+.pr-msg h5 { margin: var(--s2) 0 0; font-size: var(--fs-strong); font-weight: 650; }
+.pr-body {
+  margin: var(--s2) 0 0; white-space: pre-wrap; word-break: break-word;
+  font: inherit; font-size: var(--fs-base); line-height: 1.55; color: var(--text);
+}
+/* Their words sit in a quiet fill, ours on the paper: the thread reads at a glance. */
+.pr-msg-in .pr-body {
+  background: var(--surface-2); border-left: 3px solid var(--text);
+  padding: var(--s3); border-radius: 0 var(--r-xs) var(--r-xs) 0;
+}
+
+@media (max-width: 720px) {
+  .pr-field { min-width: 0; flex: 1 1 140px; }
+  .pr-kv-row { grid-template-columns: 1fr; gap: 2px; }
+  .pr-table thead th, .pr-table tbody td { padding: var(--s3); }
+}
