@@ -58,17 +58,12 @@ function cbForget(){
 
 /* ===================== 1. PLUMBING (copied from finance.js) ===================== */
 
-function cbOk(data){ return {ok:true, data, error:''} }
-function cbErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const cbOk = coreOk;
+const cbErr = coreErr;
+const cbWrap = coreWrap;
 /* A supabase result -> {ok,data,error}. Never throws. */
-function cbWrap(res, whenEmpty){
-  if (!res) return cbErr('No answer from the database.');
-  if (res.error) return cbErr(res.error);
-  return cbOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
 async function cbRun(fn, whenEmpty){
   try { return cbWrap(await fn(), whenEmpty); }
   catch (e) { return cbErr(e); }
@@ -76,17 +71,14 @@ async function cbRun(fn, whenEmpty){
 
 /* ===================== 2. SMALL PURE HELPERS ===================== */
 
-/* The shell's esc(), with a real fallback so this file stands on its own in a test. */
-function cbE(s){
-  if (typeof esc === 'function') return esc(s);
-  return String(s == null ? '' : s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-/* A value safe to drop inside an onclick="…" as a JavaScript string. */
-function cbAttr(v){ return cbE(JSON.stringify(v == null ? '' : String(v))) }
+/* The one escape, from core.js: strict, five characters, the single quote among them. */
+const cbE = coreEsc;
+/* A value safe inside onclick="…" as a JavaScript string, from core.js. */
+const cbAttr = coreAttr;
 function cbTrim(v){ return String(v == null ? '' : v).trim() }
 function cbInt(v){ const n = Number(v); return Number.isFinite(n) ? Math.round(n) : 0 }
-const cbUsd = n => '$' + cbInt(n).toLocaleString('en-US');
+/* Whole dollars, grouped, with a dollar sign — from core.js. */
+const cbUsd = coreUsd;
 const cbIsEmail = s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cbTrim(s));
 const cbToday = () => new Date().toISOString().slice(0,10);
 
@@ -910,7 +902,10 @@ function cbRenderClient(r, months, events, extra){
 function cbRenderNeeds(rows, meta){
   const m = meta || {};
   const mine = (rows || []).filter(r => r.needs);
-  if (m.error && !mine.length) return cbErrNote(m.error);
+  /* It would not load and there is nothing to show. This used to be a bare red
+     bar with no way on: the only move left was reloading the app. */
+  if (m.error && !mine.length) return cbErrNote(m.error) +
+    cbEmpty('Nothing loaded', 'This could not be read just now, so nothing can be shown as behind. Nothing has been changed.', 'Try again', 'cbReload()');
   if (!(rows || []).length) return (m.error ? cbErrNote(m.error) : '') +
     cbEmpty('Nothing to do', 'There are no clients yet, so nothing is behind.', 'Add a client', 'cbOpenAdd()');
   if (!mine.length) return (m.error ? cbErrNote(m.error) : '') +
@@ -1022,7 +1017,35 @@ function cbPaint(){
 function cbLoading(what){
   return '<div class="cb-loading" role="status">' + cbE('Loading ' + (what || 'the clients') + '…') + '</div>';
 }
-function cbReload(){ cb.tried = false; cbLoadAll(true).then(cbPaint) }
+
+/* Every screen here asks for its rows and draws again when they land. The load
+   functions are built not to throw — but if one ever does, the promise rejects,
+   nothing redraws, and the screen sits on "Loading…" for the rest of the day
+   with nobody told. So no load is ever started without a failure path: the
+   screen is marked as asked (so it stops saying "Loading"), the reason is put
+   where the screen already shows one, and it is drawn again. The person then
+   sees a sentence and a Try again button instead of a spinner.
+   `what` is what was being read, in the words the screen uses. */
+function cbThen(p, what, clientId){
+  if (!p || typeof p.then !== 'function') return p;
+  return p.then(cbPaint, (e) => {
+    const why = 'Aviance could not read ' + (what || 'this') + ' just now. Try again in a moment.';
+    if (clientId) cb.oneErr[clientId] = why; else cb.err = why;
+    cb.tried = true; cb.at = Date.now();
+    cbPaint();
+  });
+}
+function cbReload(){ cb.tried = false; cbThen(cbLoadAll(true), 'the clients') }
+/* Try their page again: forget the last failure first, or the screen would draw
+   the failure straight back instead of asking. */
+function cbRetryClient(clientId){
+  const id = cbTrim(clientId);
+  if (!id) return;
+  delete cb.oneErr[id]; delete cb.one[id];
+  const p = cbThen(cbLoadOne(id, true), 'their page', id);
+  cbPaint();
+  return p;
+}
 
 /* Open one client. The shell's openClient() sets the id its 'client' view reads;
    on its own, this file remembers it. */
@@ -1042,7 +1065,7 @@ function cbBag(extra){
 /* ---- the main screen ---- */
 function viewClients(){
   if (!cb.clients) {
-    if (!cb.tried) { cbLoadAll().then(cbPaint); return cbLoading('the clients'); }
+    if (!cb.tried) { cbThen(cbLoadAll(), 'the clients'); return cbLoading('the clients'); }
     return cbRenderClients([], {error: cb.err});   /* it was asked for and it would not come */
   }
   return cbRenderClients(cbRows(cb.clients, cbBag()), {error: cb.err});
@@ -1059,7 +1082,16 @@ function viewClient(clientId){
   if (!id) return cbEmpty('No client chosen', 'Pick someone from the clients list.', 'All clients', "render('clients')");
   cbOpenId = id;
   const got = cb.one[id];
-  if (!got) { cbLoadOne(id).then(cbPaint); return cbLoading('their page'); }
+  /* Their page would not load. cb.oneErr was already being filled in and never
+     read, so this screen used to answer "Loading their page…" for ever AND ask
+     the database again on every redraw — a spinner that never stops and a query
+     loop behind it. Now it says what happened and offers the way back. */
+  if (!got && cb.oneErr[id]) {
+    return cbErrNote(cb.oneErr[id]) +
+      cbEmpty('Their page did not load', 'Nothing has been changed. Try again, or go back to the list.',
+              'Try again', 'cbRetryClient(' + cbAttr(id) + ')');
+  }
+  if (!got) { cbThen(cbLoadOne(id), 'their page', id); return cbLoading('their page'); }
   const r = cbRow(got.client, {
     standing: got.months, owners: got.owners, requests: got.requests,
     profiles: got.profile ? {[id]: got.profile} : {},
@@ -1093,7 +1125,7 @@ function cbFirstOf(invoices){
 /* ---- what needs a person today ---- */
 function viewNeedsYou(){
   if (!cb.clients) {
-    if (!cb.tried) { cbLoadAll().then(cbPaint); return cbLoading('what needs you'); }
+    if (!cb.tried) { cbThen(cbLoadAll(), 'what needs you'); return cbLoading('what needs you'); }
     return cbRenderNeeds([], {error: cb.err});
   }
   return cbRenderNeeds(cbRows(cb.clients, cbBag()), {error: cb.err});
@@ -1301,9 +1333,11 @@ function cbFnBase(){
 /* A database rule that is not there yet reads as "not switched on", never as a
    crash and never as a Postgres code. */
 function cbMissing(error){
-  const m = cbTrim(error).toLowerCase();
-  return m.indexOf('does not exist') >= 0 || m.indexOf('could not find the function') >= 0 ||
-         m.indexOf('schema cache') >= 0 || m.indexOf('not find the table') >= 0 || m.indexOf('pgrst202') >= 0;
+  const m = cbTrim(error);
+  /* coreFamily decides the kind, once, for every screen: by the time this asks,
+     the database's own wording has already become plain words, so looking for
+     "schema cache" here would no longer find it. */
+  return coreFamily(m) === 'not-ready' || m.toLowerCase().indexOf('not find the table') >= 0;
 }
 
 /* ---- reads ---- */

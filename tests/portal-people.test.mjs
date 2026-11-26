@@ -133,6 +133,7 @@ const fakeSb = {
 globalThis.sb = fakeSb;
 
 const SRC = fs.readFileSync(path.join(root, 'portal.js'), 'utf8');
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(SRC, { filename: 'portal.js' });
 
 const OWNER = { uid: 'u-owner', name: 'Owner', role: 'admin', approved: true, email: 'o@aviance.test' };

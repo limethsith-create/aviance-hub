@@ -39,9 +39,9 @@ function makeDb(tables, rpcs) {
   });
   function from(table) {
     db[table] ||= [];
-    const q = { table, filters: [], op: 'select', payload: null, single: false, maybeSingle: false, order: null };
+    const q = { table, filters: [], op: 'select', cols: '*', or: null, payload: null, single: false, maybeSingle: false, order: null };
     const b = {
-      select() { return b; },
+      select(c) { if (c !== undefined) q.cols = c; return b; },
       eq(c, v) { q.filters.push(['eq', c, v]); return b; },
       lte(c, v) { q.filters.push(['lte', c, v]); return b; },
       gt(c, v) { q.filters.push(['gt', c, v]); return b; },
@@ -49,6 +49,10 @@ function makeDb(tables, rpcs) {
       in(c, v) { q.filters.push(['in', c, v]); return b; },
       order(c, o) { q.order = [c, !o || o.ascending !== false]; return b; },
       limit() { return b; },
+      /* The ending screen narrows its client read at the database with `or`.
+         The same test is applied in JS afterwards, so this records the filter
+         for the test to look at and lets every row through. */
+      or(expr) { q.or = expr; return b; },
       insert(p) { q.op = 'insert'; q.payload = p; return b; },
       update(p) { q.op = 'update'; q.payload = p; return b; },
       delete() { q.op = 'delete'; return b; },
@@ -57,7 +61,7 @@ function makeDb(tables, rpcs) {
       then(res, rej) { return Promise.resolve().then(run).then(res, rej); },
     };
     function run() {
-      log.push({ table, op: q.op, filters: q.filters, payload: q.payload });
+      log.push({ table, op: q.op, filters: q.filters, payload: q.payload, or: q.or || null, cols: q.cols });
       let rows = db[table];
       let out;
       if (q.op === 'insert') {
@@ -141,6 +145,7 @@ function load(tables, rpcs) {
   };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), ctx, { filename: 'core.js' });
   vm.runInContext(FINANCE, ctx, { filename: 'finance.js' });
   vm.runInContext(WRAPUP, ctx, { filename: 'wrapup.js' });
   return { ctx, db: made.db, log: made.log, modal: () => modal, toasted, errs, fields, painted: () => painted };
@@ -574,4 +579,105 @@ test('a database that answers with an error reads as a plain sentence on every s
   assert.match(text(t.ctx.viewDataDeletion()), /did not answer/);
   await t.ctx.wuLoadStatement('c1');
   assert.match(text(t.ctx.viewFinalStatement('c1')), /did not answer/);
+});
+
+/* ───────────── how much the Ending screen costs ─────────────
+   These are about round trips, not about what is shown. The screen used to
+   read every client row and then four more rows-per-client, one client after
+   the next, so twenty clients leaving was eighty-one round trips. If someone
+   puts the per-client read back, the counts below go up and these fail. */
+
+const leaver = (n) => ({
+  id: 'c' + n, company: 'Co ' + n, contact_name: 'Pat', contact_email: 'p@x.test',
+  plan: 'growth', term: 'monthly', calls_promised: 10, monthly_fee: 3000,
+  stage: 'ended', ended_on: '2026-11-0' + (1 + (n % 9)), end_reason: 'Moved on',
+  day1_on: '2026-08-01', website: null, pilot_credit: 0,
+});
+const endingDb = (n) => {
+  const clients = [], client_months = [], invoices = [], refunds = [];
+  for (let i = 1; i <= n; i++) {
+    clients.push(leaver(i));
+    client_months.push(month({ id: 'm' + i, client_id: 'c' + i, locked_at: '2026-11-01T00:00:00Z', verdict: 'hit' }));
+    invoices.push(invoice({ id: 'i' + i, client_id: 'c' + i, month_id: 'm' + i, status: 'paid', paid_at: '2026-11-01T00:00:00Z' }));
+    refunds.push(refund({ id: 'r' + i, client_id: 'c' + i, month_id: 'm' + i, amount: 500, status: 'owed', paid_at: null }));
+  }
+  return base({ clients, client_months, invoices, refunds });
+};
+const reads = (log, table) => log.filter((e) => e.table === table && e.op === 'select').length;
+
+test('the Ending screen reads each table once however many clients are leaving', async () => {
+  const few = load(endingDb(2));
+  await few.ctx.wuLoadEnding();
+  const many = load(endingDb(20));
+  await many.ctx.wuLoadEnding();
+
+  for (const t of ['clients', 'client_months', 'invoices', 'refunds']) {
+    assert.equal(reads(few.log, t), 1, 'two clients leaving: one read of ' + t);
+    assert.equal(reads(many.log, t), 1, 'twenty clients leaving: still one read of ' + t);
+  }
+  assert.equal(many.log.filter((e) => e.op === 'select').length, 4,
+    'four round trips in all, not four per client');
+});
+
+test('the Ending screen asks the database for the leaving clients, and for named columns', async () => {
+  const t = load(endingDb(3));
+  await t.ctx.wuLoadEnding();
+  const read = t.log.find((e) => e.table === 'clients' && e.op === 'select');
+  assert.match(String(read.or), /ended_on\.not\.is\.null/,
+    'the clients who have left are chosen by the database, not by reading them all and throwing most away');
+  assert.match(String(read.or), /stage\.in\.\(ended,lost,paused\)/);
+  assert.notEqual(read.cols, '*', 'not every column of a 21-column table');
+  for (const c of ['id', 'company', 'stage', 'ended_on', 'end_reason', 'plan', 'term', 'day1_on']) {
+    assert.ok(read.cols.split(',').includes(c), 'the ending screen and the handover read ' + c);
+  }
+});
+
+test('the Ending screen shows the same figures row by row as the statement does on its own', async () => {
+  const t = load(endingDb(3));
+  const loaded = await t.ctx.wuLoadEnding();
+  const list = Array.isArray(loaded.data) ? loaded.data : [];
+  assert.equal(list.length, 3);
+  for (const r of list) {
+    const one = await t.ctx.wuFinalStatement(r.client.id);
+    assert.equal(one.ok, true);
+    assert.equal(r.net, one.data.net, r.client.id + ': the same net either way');
+    assert.equal(r.owedToUs, one.data.owedToUs);
+    assert.equal(r.owedToThem, one.data.owedToThem);
+    assert.deepEqual(r.unlocked, one.data.unlockedMonths);
+    assert.equal(r.trouble, '');
+  }
+});
+
+test('a table the Ending screen cannot read is said out loud on every row, not shown as nothing owed', async () => {
+  const t = load(endingDb(3));
+  const realFrom = t.ctx.sb.from;
+  t.ctx.sb.from = (table) => {
+    if (table === 'refunds') return { select: () => ({ in: () => ({ order: () => ({ then: (res) => Promise.resolve({ data: null, error: { message: 'The refunds would not load.' } }).then(res) }) }) }) };
+    return realFrom(table);
+  };
+  const r = await t.ctx.wuLoadEnding();
+  assert.equal(r.ok, true, 'the screen still draws');
+  for (const row of r.data) {
+    assert.match(row.trouble, /refunds would not load/, 'each row says the figures are not whole');
+    assert.equal(row.net, 0, 'and shows no figure rather than a wrong one');
+  }
+  /* The screen does not print `trouble` today, and this run did not change
+     that. What is checked here is that the row carries the reason instead of a
+     confident zero, which is what a person acting on the figure needs. */
+});
+
+test('the statement can be handed rows that are already read, and works out the same answer', async () => {
+  const t = load(endingDb(1));
+  const fresh = await t.ctx.wuFinalStatement('c1');
+  const before = t.log.filter((e) => e.op === 'select').length;
+  const handed = await t.ctx.wuFinalStatement('c1', {
+    client: t.db.clients[0], months: t.db.client_months,
+    invoices: t.db.invoices, refunds: t.db.refunds,
+  });
+  assert.equal(t.log.filter((e) => e.op === 'select').length, before,
+    'nothing was read: the rows were handed in');
+  assert.equal(handed.ok, true);
+  assert.equal(handed.data.net, fresh.data.net);
+  assert.equal(handed.data.invoiced, fresh.data.invoiced);
+  assert.deepEqual(handed.data.unlockedMonths, fresh.data.unlockedMonths);
 });

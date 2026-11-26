@@ -440,6 +440,7 @@ async function loadSettings() {
   };
   ctx.globalThis = ctx; ctx.window = ctx;
   vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), ctx, { filename: 'core.js' });
   vm.runInContext(fs.readFileSync(path.join(root, 'settings.js'), 'utf8'), ctx, { filename: 'settings.js' });
   return ctx;
 }

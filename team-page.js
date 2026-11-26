@@ -47,12 +47,8 @@ const TMC_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'];
 
 /* ---- pure helpers --------------------------------------------------- */
 
-/* The one escape. Use it on everything that did not come from this file. */
-function tmcEsc(s){
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+/* The one escape, from core.js. Use it on everything that did not come from this file. */
+const tmcEsc = coreEsc;
 
 /* What she typed -> what is stored. The database trims to the same length. */
 function tmcCleanBody(text){
@@ -145,22 +141,18 @@ function tmcFileLabel(path){
   return last;
 }
 
-function tmcToDate(v){
-  if (v == null || v === '') return null;
-  if (v instanceof Date) return isNaN(v) ? null : v;
-  const d = new Date(v);
-  return isNaN(d) ? null : d;
-}
-function tmcTime(v){
-  const d = tmcToDate(v);
-  if (!d) return '';
-  try { return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
-  catch (e) { return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
-}
-function tmcDayKey(v){
-  const d = tmcToDate(v);
-  return d ? d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2) : '';
-}
+/* A value -> a Date, from core.js. A date-only value is a calendar day and does
+   not slide with the reader's zone; a timestamp is a moment.
+   This file used to read a date-only value with new Date(), which is UTC
+   midnight, so anywhere behind UTC it showed the day BEFORE. Only timestamps
+   reach it today, so nothing on her page was ever wrong — but the next field
+   someone shows here would have been. core.js has the right one. */
+const tmcToDate = coreToDate;
+/* A clock reading in the reader's own style, from core.js. */
+const tmcTime = coreTime;
+/* A day key, from core.js: 'YYYY-MM-DD' zero-padded in the reader's own calendar.
+   One implementation, because a day key one day out is a refund. */
+const tmcDayKey = coreDayKey;
 function tmcDayLabel(v, now){
   const d = tmcToDate(v);
   if (!d) return '';
@@ -365,7 +357,9 @@ function tmcPendingHtml(file){
 
 /* ---- plumbing ------------------------------------------------------- */
 
-function tmcOk(data){ return { ok: true, data, error: '' }; }
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const tmcOk = coreOk;
 function tmcErr(e){
   let m = (e && (e.message || e.error_description || e.msg || e.error)) || (typeof e === 'string' ? e : '');
   m = String(m || 'Something went wrong. Please try again.');

@@ -88,16 +88,12 @@ function drRefresh(){return drTick();}
 function draftsForget(){drStop();Object.assign(dr,{list:[],loaded:false,loading:false,err:null,count:0,countAt:0,busy:{},edits:{},seq:dr.seq+1,shown:null});}
 
 /* ===================== 3. VIEW ===================== */
-function drA(v){return esc(JSON.stringify(v==null?'':String(v)));}
+/* A value safe inside onclick="…" as a JavaScript string, from core.js. */
+const drA = coreAttr;
 function drEl(id){return typeof document!=='undefined'?document.getElementById(id):null;}
 function drKindLabel(k){return ({reply:'Reply',welcome:'Welcome',step:'Step update',offer:'Call times',update:'Testing numbers',reminder:'Reminder',approval:'Approval',form:'Form'})[k]||'Message';}
-function drAgo(s){
-  const t=Date.parse(s||'');if(!t)return '';
-  const m=Math.max(0,Math.round((Date.now()-t)/60000));
-  if(m<1)return 'just now';if(m<60)return m+' min ago';
-  const h=Math.round(m/60);if(h<24)return h+(h===1?' hour ago':' hours ago');
-  const d=Math.round(h/24);return d+(d===1?' day ago':' days ago');
-}
+/* coreAgo, and in a draft row a time we do not have shows nothing at all. */
+function drAgo(s){ return coreAgo(s, '') }
 function viewDrafts(){
   drLoad(false);
   const html=drBodyHTML();dr.shown=html;
@@ -139,8 +135,12 @@ async function drLoad(force){
   if(dr.loading&&!force)return;
   dr.loading=true;
   const seq=++dr.seq;
-  const r=await drPending();
-  if(seq!==dr.seq)return;
+  let r;
+  /* A guard flag left true never asks again: the drafts would stop arriving
+     with nothing on screen to say so. */
+  try{ r=await drPending(); }
+  catch(e){ dr.loading=false; dr.err=drPlain(e,"The drafts didn't load. Try again."); drPaint(false); return; }
+  if(seq!==dr.seq){dr.loading=false;return;}
   dr.loading=false;
   if(r.ok){
     dr.list=r.data;dr.loaded=true;dr.err=null;

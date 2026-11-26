@@ -129,6 +129,7 @@ function sandboxFor(file, extra) {
   };
   Object.assign(box, extra || {});
   vm.createContext(box);
+  vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), box, { filename: 'core.js' });
   vm.runInContext(read(file) + '\n;globalThis.__box=this;', box, { filename: file });
   return box;
 }
@@ -414,7 +415,12 @@ test('every screen draws with zero rows, and a database that is down is said in 
   const broken = { ...P.sb, from: () => { throw new Error('socket hung up') } };
   const saved = P.sb; P.sb = broken;
   const r = await A.prThreads({});
-  assert.equal(r.ok, false); assert.match(r.error, /socket hung up/);
+  /* CHANGED in the plain-words pass: this used to assert the thrown message
+     itself ('socket hung up') reached the screen. A dropped socket IS a
+     connection failure, so he is now told that, and what to do about it. */
+  assert.equal(r.ok, false);
+  assert.match(r.error, /Check your connection/);
+  assert.ok(!/socket/.test(r.error), 'not the plumbing\'s own word for it');
   P.sb = saved;
 });
 

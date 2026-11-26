@@ -26,6 +26,7 @@ globalThis.toast = (m) => { toasts.push(m) };
 globalThis.openModal = (h) => { fields.modal = h };
 globalThis.closeModal = () => { fields.modal = null };
 
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'journey.js'), 'utf8'), {filename:'journey.js'});
 
 const TODAY = '2026-11-24';
@@ -40,7 +41,7 @@ const steps = (over={}) => [
 const journey = (o={}) => ({client_id:'c1', company:'Stone Roofing', paid_on:'2026-11-18', launch_on:'2026-12-02', days_to_launch:8,
   steps: steps(o.over), next_step:'research', ...o});
 const shape = (r) => { assert.deepEqual(Object.keys(r).sort(), ['data','error','ok']); return r };
-const text = (h) => String(h).replace(/<[^>]*>/g,' ').replace(/&amp;/g,'&').replace(/&#?[a-z0-9]+;/gi,' ').replace(/\s+/g,' ').trim();
+const text = (h) => String(h).replace(/<[^>]*>/g,' ').replace(/&#39;/g,"'").replace(/&amp;/g,'&').replace(/&#?[a-z0-9]+;/gi,' ').replace(/\s+/g,' ').trim();
 
 beforeEach(() => {
   rpcs = []; answers = {}; toasts.length = 0;
@@ -133,7 +134,7 @@ test('the client tracker: per-step controls and the right action per step', () =
   assert.match(h, /jyOffer\(&quot;c1&quot;,&quot;onboarding&quot;\)/);
   assert.match(h, /Offer onboarding call times/);
   assert.match(h, /Send ICP \+ angles for approval/);
-  assert.match(h, /Log today.s numbers/);
+  assert.match(h, /Log today(?:&#39;|')s numbers/);
   assert.match(h, /Send copy for approval/);
   assert.match(h, /jyAskMove\(&quot;c1&quot;,&quot;testing&quot;\)/);
   assert.match(h, /Reopen/);

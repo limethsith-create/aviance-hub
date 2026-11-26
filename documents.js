@@ -62,8 +62,13 @@ function dcPrepare(list){
 async function dcLoad(force){
   if(dc.loading&&!force)return;
   dc.loading=true;const seq=++dc.seq;dcPaint();
-  const r=await dcFetch();
-  if(seq!==dc.seq)return;
+  let r;
+  /* dc.loading is the "already asking" guard. Left true after a failure the
+     Refresh button stays disabled and dcLoad() refuses to ask again, so the
+     screen is stuck until the whole app is reloaded. Cleared either way. */
+  try{ r=await dcFetch(); }
+  catch(e){ dc.loading=false; dc.err="The documents didn't load. Try again."; dcPaint(); return; }
+  if(seq!==dc.seq){dc.loading=false;return;}
   dc.loading=false;
   if(r.ok){dc.items=dcPrepare(r.data);dc.loaded=true;dc.err=null;if(!dc.pick||!dc.items.some(x=>x.key===dc.pick))dc.pick=dc.items[0]?dc.items[0].key:null;}
   else dc.err=r.error;

@@ -128,6 +128,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 /* ───────────── load the shell, then pipeline.js ───────────── */
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="finance.js">'));
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 /* finance.js loads first in the browser too: it owns the plans on offer and the one legacy guard */
 vm.runInThisContext(fs.readFileSync(path.join(root, 'finance.js'), 'utf8'), { filename: 'finance.js' });

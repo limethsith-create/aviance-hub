@@ -45,10 +45,20 @@ function pstUse(home){
 
 /* ---- pure helpers -------------------------------------------------------------------------- */
 
-function pstOk(data){ return { ok: true, data, error: '' }; }
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const pstOk = coreOk;
+/* This file is read by a CLIENT, so a failure goes through the client's own
+   edge, pcPlain in portal-client.js — the same sentences the rest of the portal
+   uses, and stricter than the owner's: a paying client is never shown a Postgres
+   message, a code or a stack, and anything unknown becomes one calm sentence.
+   core.js's corePlain stands in if this file is ever loaded on its own; it does
+   the same job, a little more generously, for the owner's screens. */
 function pstErr(e){
   const m = (e && (e.message || e.error)) || (typeof e === 'string' ? e : '') || 'Something went wrong. Please try again.';
-  return { ok: false, data: null, error: String(m) };
+  const code = e && e.code;
+  const say = typeof pcPlain === 'function' ? pcPlain : (typeof corePlain === 'function' ? corePlain : String);
+  return { ok: false, data: null, error: String(say(String(m), code)) };
 }
 function pstUi(key){ return pstState.ui[key] || (pstState.ui[key] = {}); }
 function pstCleanName(name){ return String(name == null ? '' : name).trim().replace(/\s+/g, ' '); }
@@ -261,8 +271,12 @@ if (typeof PC !== 'undefined' && PC) {
     pstUse(ctx && ctx.home);
     if (u.name == null) u.name = (pstState.home && pstState.home.person && pstState.home.person.name) || '';
     u.busy = true; u.error = ''; pstRedraw(key);
-    const r = await pstDecide(ctx, id, u.name, decision, u.note);
-    u.busy = false;
+    let r;
+    /* An approval is a write: never sent twice. The card always becomes usable
+       again, or a client could not approve anything without reloading. */
+    try { r = await pstDecide(ctx, id, u.name, decision, u.note); }
+    catch (e) { r = pstErr(e); }
+    finally { u.busy = false }
     if (!r.ok) { u.error = r.error; pstRedraw(key); return; }
     pstState.approvals[id] = Object.assign({}, pstState.approvals[id] || {}, r.data);
     u.open = false; pstRedraw(key);
@@ -282,7 +296,9 @@ if (typeof PC !== 'undefined' && PC) {
     if (u.busy) return;
     const vals = Object.assign({}, pstState.form || {}, u.values || {});
     u.busy = true; u.error = ''; pstRedraw();
-    const r = await pstSubmitForm(ctx, vals);
+    let r;
+    try { r = await pstSubmitForm(ctx, vals); }
+    catch (e) { r = pstErr(e); }
     u.busy = false;
     if (!r.ok) { u.error = r.error; pstRedraw(); return; }
     pstState.form = r.data; u.values = {};
@@ -302,8 +318,11 @@ if (typeof PC !== 'undefined' && PC) {
     if (pstState.loaded && seen === pstState.seen && Date.now() - pstState.at < PST_RELOAD_MS) return;
     const who = pstState.who;
     pstState.busy = true;
-    const r = await pstLoad(ctx, want);
-    pstState.busy = false;
+    let r;
+    /* Left true, the cards would never be read again for the rest of the visit. */
+    try { r = await pstLoad(ctx, want); }
+    catch (e) { r = pstErr(e); }
+    finally { pstState.busy = false }
     if (who !== pstState.who) return; /* someone else signed in while this was on its way */
     if (!r.ok) return; /* the cards still work; the database refuses anything already decided */
     pstState.at = Date.now(); pstState.seen = seen;

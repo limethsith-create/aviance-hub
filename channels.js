@@ -71,8 +71,15 @@ async function chvCall(name,...args){
 function chvFindCh(id){return chv.chs.find(c=>c.id===id)||null;}
 function chvInitial(name){return (String(name||'?').trim().charAt(0)||'?').toUpperCase();}
 function chvBytes(n){n=Number(n)||0;if(n<1024)return n+' B';if(n<1048576)return Math.round(n/1024)+' KB';return (Math.round(n/104857.6)/10)+' MB';}
-function chvDate(s){const d=new Date(s);return isNaN(d.getTime())?null:d;}
-function chvDayKey(d){return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();}
+/* A value -> a Date, from core.js. A date-only value is a calendar day and does
+   not slide with the reader's zone; a timestamp is a moment. */
+const chvDate = coreToDate;
+/* A day key, from core.js: 'YYYY-MM-DD' zero-padded in the reader's own calendar.
+   One implementation, because a day key one day out is a refund. */
+/* The key here used to be unpadded ('2026-1-2'). It is only ever compared for
+   equality and grouped by, so nothing read wrong — but it sorted wrong, and a
+   padded key is the one every other screen uses. */
+const chvDayKey = coreDayKey;
 function chvDayLabel(d,now){
   const n=new Date(now==null?chvNow():now);
   if(chvDayKey(d)===chvDayKey(n))return 'Today';
@@ -80,7 +87,8 @@ function chvDayLabel(d,now){
   if(chvDayKey(d)===chvDayKey(y))return 'Yesterday';
   try{return d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',year:d.getFullYear()===n.getFullYear()?undefined:'numeric'});}catch(e){return d.toDateString();}
 }
-function chvTime(d){try{return d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
+/* 'HH:MM' in the reader's own zone, from core.js. */
+const chvTime = coreHm;
 function chvBadgeText(n){n=Number(n)||0;return n>99?'99+':String(n);}
 /* The total on the nav entry. */
 function chvNavCount(){const n=Number(chv.unreadTotal)||0;return n>0?chvBadgeText(n):'';}
@@ -125,8 +133,12 @@ function chvSkeleton(){
 }
 async function chvInit(){
   const seq=++chv.seq;
-  const r=await chvCall('chListChannels');
-  if(seq!==chv.seq)return;
+  let r;
+  /* chv.loading left true keeps the grey skeleton on screen for good: no list,
+     no message, no way to ask again short of reloading the app. */
+  try{ r=await chvCall('chListChannels'); }
+  catch(e){ chv.loading=false;chv.loaded=false;chv.err="The channels didn't load. Try again.";chvPaintAll();return; }
+  if(seq!==chv.seq){chv.loading=false;return;}
   chv.loading=false;
   if(r.ok&&Array.isArray(r.data)){chv.chs=chvVisible(r.data);chv.loaded=true;chv.err=null;}
   else{chv.err=r.error||"The channels didn't load. Try again.";chv.loaded=false;}
@@ -296,7 +308,7 @@ function chvMainHTML(){
     return `<div class="chv-blank"><b>Pick a channel</b><span>Choose one from the list to read and write messages.</span></div>`;
   }
   return `<header class="chv-head" id="chvHead">${chvHeadHTML(c)}</header>
-    <div class="chv-thread" id="chvThread" onscroll="chvScroll(this)" role="log" aria-live="polite" aria-label="Messages">${chvThreadHTML()}</div>
+    <div class="chv-thread" id="chvThread" onscroll="chvScroll(this)" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages">${chvThreadHTML()}</div>
     <button type="button" class="chv-newpill" id="chvNewPill" onclick="chvJumpNew()" hidden>New messages</button>
     <div class="chv-typing" id="chvTyping" aria-live="polite">${chvTypingText()}</div>
     <div class="chv-bot" id="chvBot" aria-label="Replies the bot drafted">${chvBotHTML()}</div>
@@ -320,7 +332,8 @@ function chvThreadHTML(){
   if(chv.msgsErr&&!chv.msgs.length)return `<div class="chv-err" role="alert">${esc(chv.msgsErr)} <button type="button" class="chv-link" onclick="chvOpen(${chvA(chv.cur)},true)">Try again</button></div>`;
   if(!chv.msgs.length)return `<div class="chv-blank"><b>No messages yet</b><span>Write the first one below.</span></div>`;
   const me=chvMe();let h='';
-  if(chv.hasMore)h+=`<div class="chv-older">${chv.loadingOlder?'Loading earlier messages':'Scroll up for earlier messages'}</div>`;
+  /* a real button, not just "scroll up": a long thread has to be pageable from the keyboard */
+  if(chv.hasMore)h+=`<div class="chv-older">${chv.loadingOlder?'Loading earlier messages':'<button type="button" class="chv-link" onclick="chvLoadOlder()">Load earlier messages</button>'}</div>`;
   else h+=`<div class="chv-older">Start of the conversation</div>`;
   let prev=null,prevDay='';
   chv.msgs.forEach(m=>{
@@ -367,14 +380,19 @@ function chvAttsHTML(m){
 function chvWantUrl(path){
   if(chv.urls[path]||chv.urlWait[path])return;
   chv.urlWait[path]=true;
+  /* urlWait is the "already asking" flag. Left true it is never cleared, so the
+     attachment shows its grey placeholder for the rest of the session and is
+     never asked for again — the file looks broken when the link simply did not
+     arrive. Cleared either way, the next repaint asks again. */
+  const done=()=>{delete chv.urlWait[path];};
   chvCall('chFileUrl',path).then(r=>{
-    delete chv.urlWait[path];
+    done();
     const u=r.ok&&r.data&&(typeof r.data==='string'?r.data:r.data.url);
     if(u&&/^https?:\/\//i.test(u)){
       chv.urls[path]=u;
       chvPaintThread(true);
     }
-  });
+  },done);
 }
 async function chvFile(ev,msgId,i){
   if(ev&&ev.preventDefault)ev.preventDefault();
@@ -602,8 +620,12 @@ async function chvSend(){
     if(input){input.value='';if(input.style)input.style.height='auto';}
     chvPaintThread(false);chvScrollBottom();
   }
-  const r=await chvCall('chSend',id,body,files);
-  chv.sending=false;
+  let r;
+  /* A message is a write: never sent twice from here. But chv.sending left true
+     disables the Send button for the rest of the session. */
+  try{ r=await chvCall('chSend',id,body,files); }
+  catch(e){ r={ok:false,data:null,error:"Your message didn't send. Try again."}; }
+  finally{ chv.sending=false; }
   if(tmp)chv.msgs=chv.msgs.filter(x=>x!==tmp);
   if(id!==chv.cur){
     // he moved to another channel while it was on its way: never lose the words

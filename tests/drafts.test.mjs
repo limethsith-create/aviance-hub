@@ -187,6 +187,7 @@ let navs = 0; globalThis.renderNav = () => { navs++; };
 let rendered = []; globalThis.render = (v) => rendered.push(v);
 let rpcCalls = [], rpcs = {};
 globalThis.sb = { rpc: async (n, a) => { rpcCalls.push([n, a]); const h = rpcs[n]; return h ? h(a) : { data: null, error: null }; } };
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext('var authUser=null, currentView="drafts";');
 vm.runInThisContext(fs.readFileSync(path.join(root, 'drafts.js'), 'utf8'), { filename: 'drafts.js' });
 const dr = vm.runInThisContext('dr');
@@ -306,4 +307,22 @@ test('the 30-second refresh redraws nothing when the drafts are the same, and do
   // his own actions always redraw, changed or not
   drPaint();
   assert.equal(writes, 2);
+});
+
+/* dr.loading is the "already asking" guard: drLoad() refuses while it is true.
+   Left true by a failure the Replies screen quietly stops refreshing — drafts
+   pile up and nothing on screen says why. */
+test('a data call that throws clears dr.loading, so the drafts keep arriving', async () => {
+  setup();
+  rpcs.drafts_pending = () => { throw new Error('The database did not answer.') };
+  await drLoad(true);
+  assert.equal(dr.loading, false, 'the flag cleared, so the next refresh really asks');
+  assert.ok(dr.err, 'and the reason is on screen, not swallowed');
+  assert.doesNotMatch(String(dr.err), /permission denied|relation |PGRST|42501/i, 'in plain words');
+  /* it really does ask again */
+  const n = rpcCalls.length;
+  rpcs.drafts_pending = () => ({ data: ROWS(), error: null });
+  await drLoad(true);
+  assert.ok(rpcCalls.length > n);
+  assert.equal(dr.loaded, true);
 });

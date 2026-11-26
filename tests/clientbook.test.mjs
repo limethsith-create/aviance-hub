@@ -66,6 +66,7 @@ globalThis.openModal = (h) => { fields.modal = h };
 globalThis.closeModal = () => { fields.modal = null };
 
 /* finance.js first, as in index.html: Paid on a client's page goes through fnMarkInvoicePaid. */
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'finance.js'), 'utf8'), {filename:'finance.js'});
 vm.runInThisContext(fs.readFileSync(path.join(root, 'clientbook.js'), 'utf8'), {filename:'clientbook.js'});
 
@@ -1060,4 +1061,87 @@ test('the month sentence never shows a client "undefined" or a day count it does
   // and it still reads word for word like the finance.js original
   assert.match(line({ month_no: 2, verdict: 'open', calls_delivered: 4, calls_promised: 20, days_left: 0 }), /last day\./);
   assert.match(line({ month_no: 2, verdict: 'open', calls_delivered: 4, calls_promised: 20, days_left: -3 }), /the month has ended\./);
+});
+
+/* ───────────── a screen that would wait for ever ─────────────
+   Every screen here answers "Loading…" and asks for its rows, trusting the
+   answer to come back and redraw it. These tests take the answer away and check
+   that the screen stops waiting, says what happened, and offers a way on. */
+
+test('a client page that will not load says so instead of spinning for ever', async () => {
+  /* the client row cannot be read: the one failure cbLoadOne reports by itself */
+  tables['clients.select'] = () => ({data:null, error:{message:'That client could not be read.'}});
+  const r = await cbLoadOne('c1');
+  assert.equal(r.ok, false);
+  assert.ok(cb.oneErr.c1, 'the reason was kept');
+  assert.equal(cb.one.c1, undefined);
+  /* before: viewClient returned "Loading their page…" for ever, and asked the
+     database again on every redraw. Now it is a sentence and a button. */
+  const h = viewClient('c1');
+  assert.doesNotMatch(text(h), /Loading their page/);
+  assert.match(text(h), /did not load/i);
+  assert.match(h, /role="alert"/);
+  assert.match(h, /cbRetryClient/);
+  /* and drawing it again does not fire another query */
+  const before = seen('clients', 'select').length;
+  viewClient('c1');
+  assert.equal(seen('clients', 'select').length, before, 'a failed page does not query on every repaint');
+});
+
+test('Try again on a client page forgets the failure and really asks again', async () => {
+  tables['clients.select'] = () => ({data:null, error:{message:'nope'}});
+  await cbLoadOne('c1');
+  const before = seen('clients', 'select').length;
+  tables['clients.select'] = () => ({data:[client()], error:null});
+  await cbRetryClient('c1');
+  assert.ok(seen('clients', 'select').length > before, 'it asked again');
+  assert.equal(cb.oneErr.c1, '');
+  assert.match(text(viewClient('c1')), /Stone Roofing/);
+});
+
+test('a load that rejects is reported, not swallowed into a spinner for ever', async () => {
+  /* the data functions are built never to throw. If one ever does, the promise
+     rejects: without a failure path nothing redraws and cb.tried stays false,
+     so the screen says "Loading the clients…" until the app is reloaded. */
+  await cbThen(Promise.reject(new Error('boom')), 'the clients');
+  assert.equal(cb.tried, true, 'the screen is marked as asked, so it stops saying Loading');
+  assert.match(cb.err, /could not read the clients/i);
+  const h = viewClients();
+  assert.doesNotMatch(text(h), /Loading the clients/);
+  assert.match(text(h), /could not read the clients/i);
+  assert.match(text(h), /Try again/);
+  /* and nothing of the machine room travels with it */
+  assert.doesNotMatch(cb.err, /boom|Error|undefined/);
+});
+
+test('a rejected load of one client page lands on that page, not on the whole list', async () => {
+  await cbThen(Promise.reject(new Error('boom')), 'their page', 'c9');
+  assert.match(cb.oneErr.c9, /could not read their page/i);
+  assert.equal(cb.err, '', 'the clients list is not blamed for one page');
+  assert.match(text(viewClient('c9')), /did not load/i);
+});
+
+test('every screen in this file stops waiting when the database goes away', async () => {
+  globalThis.sb = {from: () => { throw new Error('The database did not answer.') },
+                   rpc: async () => { throw new Error('The database did not answer.') }};
+  await cbLoadAll(true);
+  assert.equal(cb.tried, true);
+  for (const h of [viewClients(), viewNeedsYou()]) {
+    assert.doesNotMatch(text(h), /Loading/, 'no screen is left on Loading');
+    assert.match(text(h), /did not answer|could not be read|Try again/i);
+  }
+});
+
+test('no failure state is a dead end: every one says why and offers a way on', async () => {
+  globalThis.sb = {from: () => { throw new Error('The database did not answer.') },
+                   rpc: async () => { throw new Error('The database did not answer.') }};
+  await cbLoadAll(true);
+  await cbLoadOne('c1');
+  for (const [what, h] of [['the clients list', viewClients()],
+                           ['what needs you', viewNeedsYou()],
+                           ['one client\'s page', viewClient('c1')]]) {
+    assert.match(h, /role="alert"/, what + ' says it is a failure, out loud');
+    assert.match(text(h), /Try again/, what + ' has a way on, not just a red bar');
+    assert.doesNotMatch(text(h), /Loading/, what + ' is not still pretending to load');
+  }
 });

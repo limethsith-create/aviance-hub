@@ -53,16 +53,11 @@ const tmS = {
 
 /* ---- plumbing (same shape as finance.js) -------------------------- */
 
-function tmOk(data){ return {ok:true, data, error:''} }
-function tmErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
-}
-function tmWrap(res, whenEmpty){
-  if (!res) return tmErr('No answer from the database.');
-  if (res.error) return tmErr(res.error);
-  return tmOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const tmOk = coreOk;
+const tmErr = coreErr;
+const tmWrap = coreWrap;
 async function tmRun(fn, whenEmpty){
   try { return tmWrap(await fn(), whenEmpty); }
   catch (e) { return tmErr(e); }
@@ -78,12 +73,8 @@ function tmMeId(){
 function tmMeIsAdmin(){
   return !!(typeof authUser !== 'undefined' && authUser && authUser.role === 'admin');
 }
-/* Today, as the database writes a date. */
-function tmToday(){
-  const d = new Date();
-  const p = n => String(n).padStart(2,'0');
-  return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate());
-}
+/* Today, as the database writes a date — from core.js. */
+const tmToday = coreTodayKey;
 function tmDay(v){ return v ? String(v).slice(0,10) : '' }
 function tmDeptLabel(d){ return TM_DEPT_LABEL[d] || (d ? String(d) : 'No department') }
 function tmStatusLabel(s){ return TM_STATUS_LABEL[s] || String(s || '') }
@@ -100,7 +91,8 @@ function tmIsOverdue(t, today){
   const d = tmDay(t.due_on);
   return !!d && d < (today || tmToday());
 }
-function tmX(s){ return typeof esc === 'function' ? esc(s) : String(s == null ? '' : s) }
+/* The one escape, from core.js: strict, five characters, the single quote among them. */
+const tmX = coreEsc;
 function tmIc(name){ return (typeof I !== 'undefined' && I && I[name]) || '' }
 function tmEmpty(icon, title, sub, btn, action){
   if (typeof emptyState === 'function') return emptyState(icon, title, sub, btn, action);
@@ -183,7 +175,10 @@ async function tmGrantAdd(userId, clientId, note){
   const text = String(note == null ? '' : note).trim().slice(0,200);
   if (text) row.note = text;
   const r = await tmRun(() => sb.from('prospect_grants').insert(row).select().single(), null);
-  if (!r.ok && /duplicate|unique/i.test(r.error)) return tmErr('They already have that client.');
+  /* "already there" is a kind of failure coreFamily names, so this still finds
+     it after the database's wording has been turned into plain words — and this
+     sentence is the better one, because it says what is already true. */
+  if (!r.ok && coreFamily(r.error) === 'already') return tmErr('They already have that client.');
   return r;
 }
 
@@ -263,8 +258,12 @@ async function tmLoadGrants(){
 async function tmDoGrant(){
   const pick = (id) => { const el = typeof document !== 'undefined' && document.getElementById ? document.getElementById(id) : null; return el ? el.value : '' };
   tmS.grantBusy = true;
-  const r = await tmGrantAdd(pick('tmGrantWho'), pick('tmGrantClient'));
-  tmS.grantBusy = false;
+  let r;
+  /* Granting access is a write: not retried. The flag always clears, or the
+     form is dead until the app is reloaded. */
+  try { r = await tmGrantAdd(pick('tmGrantWho'), pick('tmGrantClient')); }
+  catch (e) { r = tmErr(e); }
+  finally { tmS.grantBusy = false }
   if (typeof toast === 'function') toast(r.ok ? 'They can see that client\u2019s prospects now.' : r.error);
   if (r.ok) { tmS.grants = null; await tmLoadGrants() }
   return r;

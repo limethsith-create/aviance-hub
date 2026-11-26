@@ -16,10 +16,10 @@ globalThis.window = globalThis;
 /* ───────────── fake Supabase (a query builder over plain arrays) ───────────── */
 let tables, errors, calls;
 function builder(table) {
-  const call = { table, filters: [], single: false };
+  const call = { table, filters: [], single: false, cols: '*' };
   calls.push(call);
   const b = {
-    select() { return b; },
+    select(c) { if (c !== undefined) call.cols = c; return b; },
     eq(k, v) { call.filters.push(['eq', k, v]); return b; },
     in(k, v) { call.filters.push(['in', k, v]); return b; },
     is(k, v) { call.filters.push(['is', k, v]); return b; },
@@ -71,13 +71,14 @@ function dropFinance() {
   for (const n of ['fnMoney', 'fnExposure', 'fnClients', 'fnInvoices', 'fnStanding', 'fnLockMonth', 'fnUsd']) delete globalThis[n];
 }
 
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'digest.js'), 'utf8'), { filename: 'digest.js' });
 
 beforeEach(() => { tables = {}; errors = {}; calls = []; stubFinance(); globalThis.sb = { from: builder }; });
 
 /* ───────────── helpers ───────────── */
 const NOW = new Date('2026-11-20T15:00:00Z');                 /* a Friday */
-const text = (h) => h.replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+const text = (h) => h.replace(/<[^>]*>/g, ' ').replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const shape = (r) => { assert.deepEqual(Object.keys(r).sort(), ['data', 'error', 'ok']); return r; };
 const month = (o = {}) => ({ id: 'm1', client_id: 'c1', month_no: 1, starts_on: '2026-11-01', ends_on: '2026-11-30', calls_promised: 10, calls_delivered: 0, verdict: 'open', locked_at: null, refund_due: 0, monthly_fee: 3000, ...o });
 const call = (o = {}) => ({ id: 'q' + Math.random().toString(36).slice(2, 7), client_id: 'c1', month_id: 'm1', prospect_name: 'A Prospect', booked_for: '2026-11-18T14:00:00Z', matched_icp: true, happened: true, happened_at: '2026-11-18T14:00:00Z', dispute_status: 'none', counts: true, ...o });
@@ -272,7 +273,9 @@ test('dgMonthClose: months whose end has passed and are not locked, 2x on month 
   assert.ok(t.includes('Stone Roofing') && t.includes('$6,000') && t.includes('2x') && t.includes('1x'), t);
   assert.ok(t.includes('Locking all of these would refund $9,000'));
   const html = dgRenderMonthEnd(r.data);
-  assert.ok(html.includes("dgLockMonth('m1')") && html.includes("dgLockMonth('m2')"), 'a lock button per month');
+  /* the onclick is escaped for the attribute it sits in: &#39; is what ' looks like in
+     the source, and what the browser hands back to the JavaScript. */
+  assert.ok(html.includes('dgLockMonth(&#39;m1&#39;)') && html.includes('dgLockMonth(&#39;m2&#39;)'), 'a lock button per month');
 
   /* the button calls the finance function, and nothing else locks anything */
   await dgLockMonth('m1');
@@ -421,5 +424,97 @@ test('dgHome: a client in onboarding with no inputs signed off shows under Needs
   assert.deepEqual(d.onboardingWaiting, [{ clientId: 'c7', company: 'Brightline Plumbing' }]);
   const h = dgRenderHome(d);
   assert.ok(text(h).includes('Onboarding: Brightline Plumbing — waiting on their inputs'));
-  assert.ok(h.includes("dgOpenClient('c7')"));
+  assert.ok(h.includes('dgOpenClient(&#39;c7&#39;)'));
+});
+
+/* ───────────── how much the Friday screen costs ─────────────
+   Each draft needs the client, their months, their calls and their outreach
+   summary. Read per client that was four round trips each, one client after
+   the next — twenty-five live clients was a hundred and one waits in a row.
+   These count the reads, and check the figures did not move. */
+
+const tableReads = (t) => calls.filter((c) => c.table === t).length;
+
+function liveClients(n) {
+  finance.clients = [];
+  finance.standing = [];
+  tables.clients = [];
+  tables.qualified_calls = [];
+  for (let i = 1; i <= n; i++) {
+    finance.clients.push(liveClient({ id: 'c' + i, company: 'Co ' + i }));
+    /* the same rows in the table, so asking about one client on its own and
+       asking about the whole list both find the same name */
+    tables.clients.push({ id: 'c' + i, company: 'Co ' + i });
+    finance.standing.push(month({ id: 'm' + i, client_id: 'c' + i, calls_delivered: 10 }));
+    tables.qualified_calls.push(call({ id: 'q' + i, client_id: 'c' + i, month_id: 'm' + i }));
+  }
+}
+
+test('the Friday screen reads each table once however many live clients there are', async () => {
+  liveClients(2);
+  calls = [];
+  const few = await dgFridayAll(NOW);
+  assert.equal(few.ok, true);
+  assert.equal(few.data.drafts.length, 2);
+  const fewReads = calls.length;
+
+  liveClients(20);
+  calls = [];
+  const many = await dgFridayAll(NOW);
+  assert.equal(many.data.drafts.length, 20);
+  assert.equal(calls.length, fewReads,
+    'twenty clients cost the same number of reads as two: ' + calls.length + ' vs ' + fewReads);
+  assert.equal(tableReads('qualified_calls'), 1, 'the calls are read once for everybody');
+  assert.equal(tableReads('v_outreach_summary'), 1, 'and so is the outreach summary');
+  assert.equal(tableReads('clients'), 0, 'the client rows came from the list that was already read');
+});
+
+test('the Friday screen gives each client their own figures and nobody else’s', async () => {
+  liveClients(3);
+  /* three calls for Co 1, one for Co 2, none for Co 3 */
+  tables.qualified_calls = [
+    call({ id: 'a', client_id: 'c1', month_id: 'm1' }),
+    call({ id: 'b', client_id: 'c1', month_id: 'm1' }),
+    call({ id: 'c', client_id: 'c1', month_id: 'm1' }),
+    call({ id: 'd', client_id: 'c2', month_id: 'm2' }),
+  ];
+  const all = await dgFridayAll(NOW);
+  const by = {};
+  all.data.drafts.forEach((d) => { by[d.company] = d.facts; });
+  assert.equal(by['Co 1'].delivered, 3, 'three calls counted for the client who had three');
+  assert.equal(by['Co 2'].delivered, 1);
+  assert.equal(by['Co 3'].delivered, 0, 'and none for the client who had none');
+
+  /* the same client asked for on their own must say the same thing */
+  for (const id of ['c1', 'c2', 'c3']) {
+    const one = await dgFridayUpdate(id, NOW);
+    const batched = all.data.drafts.find((d) => d.clientId === id);
+    assert.equal(one.data.facts.delivered, batched.facts.delivered, id + ': same delivered');
+    assert.equal(one.data.facts.promised, batched.facts.promised, id + ': same promised');
+    assert.equal(one.data.text, batched.text, id + ': the same words either way');
+  }
+});
+
+test('a source the Friday screen cannot read stays a dash for every client, never a zero', async () => {
+  liveClients(3);
+  errors.qualified_calls = 'The calls would not load.';
+  const all = await dgFridayAll(NOW);
+  assert.equal(all.ok, true, 'the screen still draws');
+  for (const d of all.data.drafts) {
+    assert.equal(d.ok, true);
+    assert.equal(d.facts.noShows, null, 'not knowing is a dash, not none');
+    assert.ok(/—/.test(d.text) || d.facts.delivered !== 0,
+      'a count that could not be read is never reported as zero');
+  }
+});
+
+test('one client’s week asks for two columns of the client row, not all twenty-one', async () => {
+  finance.clients = [];                       /* no finance, so it reads the table itself */
+  tables.clients = [{ id: 'c1', company: 'Stone Roofing' }];
+  calls = [];
+  await dgClientWeek('c1', NOW);
+  const read = calls.find((c) => c.table === 'clients');
+  assert.ok(read, 'the client row was read');
+  assert.notEqual(read.cols, '*', 'only the name is wanted here');
+  assert.deepEqual(read.cols.split(',').sort(), ['company', 'id']);
 });

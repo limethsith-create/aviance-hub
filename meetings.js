@@ -107,16 +107,11 @@ const mt = {settings:null, view:'week', viewRead:false, day:null, cal:null, need
 
 /* ===================== 1. PLUMBING (as finance.js) ===================== */
 
-function mtOk(data){ return {ok:true, data, error:''} }
-function mtErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
-}
-function mtWrap(res, whenEmpty){
-  if (!res) return mtErr('No answer from the database.');
-  if (res.error) return mtErr(res.error);
-  return mtOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const mtOk = coreOk;
+const mtErr = coreErr;
+const mtWrap = coreWrap;
 async function mtRun(fn, whenEmpty){
   try { return mtWrap(await fn(), whenEmpty); }
   catch (e) { return mtErr(e); }
@@ -284,14 +279,19 @@ function mtHoldsTime(m){ return !!m && MT_FREES_TIME.indexOf(String(m.status||'b
 async function mtBusy(fromIso, toIso){
   const st = mtSettingsNow();
   const back = new Date(Date.parse(fromIso) - 8*3600000).toISOString();   // a call that started earlier can still run into the window
-  const ms = await mtRun(() => sb.from('meetings').select('*')
-    .gte('starts_at', back).lt('starts_at', toIso).order('starts_at'), []);
+  /* Three tables, none waiting on another, so one wait instead of three. They
+     are still checked in the same order, so the same failure is reported and a
+     time is still never offered on a guess. */
+  const [ms, bk, bl] = await Promise.all([
+    mtRun(() => sb.from('meetings').select('*')
+      .gte('starts_at', back).lt('starts_at', toIso).order('starts_at'), []),
+    mtRun(() => sb.from('discovery_bookings').select('*')
+      .gte('call_at', back).lt('call_at', toIso).order('call_at'), []),
+    mtRun(() => sb.from('calendar_blocks').select('*')
+      .gt('ends_at', fromIso).lt('starts_at', toIso).order('starts_at'), []),
+  ]);
   if(!ms.ok) return ms;
-  const bk = await mtRun(() => sb.from('discovery_bookings').select('*')
-    .gte('call_at', back).lt('call_at', toIso).order('call_at'), []);
   if(!bk.ok) return bk;
-  const bl = await mtRun(() => sb.from('calendar_blocks').select('*')
-    .gt('ends_at', fromIso).lt('starts_at', toIso).order('starts_at'), []);
   if(!bl.ok) return bl;
   const taken = [];
   (ms.data||[]).filter(mtHoldsTime).forEach(m=>{
@@ -792,19 +792,26 @@ async function mtEvents(fromIso, toIso){
   const st = got.data, now = mtNow();
   if(typeof plBookings !== 'function')
     return mtErr('The website bookings could not be read, because part of Aviance OS did not load. Reload the page.');
-  const ms = await mtMeetings(fromIso, toIso);
+  /* The meetings, the website bookings and the blocks all at once: none of the
+     three needs an answer from the others, and the calendar used to wait for
+     them one after the next. Checked in the same order, so the same failure is
+     still the one reported. */
+  const [ms, bk, bl] = await Promise.all([
+    mtMeetings(fromIso, toIso),
+    plBookings({from:fromIso, to:toIso}),
+    mtBlocks(fromIso, toIso),
+  ]);
   if(!ms.ok) return ms;
-  const bk = await plBookings({from:fromIso, to:toIso});
   if(!bk.ok) return mtErr(bk.error);
-  const bl = await mtBlocks(fromIso, toIso);
   if(!bl.ok) return bl;
 
   /* the clients behind the meetings: a name and a plan colour. Without them the
-     calls still draw, in grey. */
+     calls still draw, in grey. Three columns, not all 21 — this is the only
+     thing a client row is wanted for here. */
   const ids = []; (ms.data||[]).forEach(m=>{ if(m && m.client_id!=null && ids.indexOf(m.client_id)<0) ids.push(m.client_id) });
   const clients = {};
   if(ids.length){
-    const c = await mtRun(() => sb.from('clients').select('*').in('id', ids), []);
+    const c = await mtRun(() => sb.from('clients').select('id,company,contact_name,plan').in('id', ids), []);
     if(c.ok) (c.data||[]).forEach(r=>{ if(r && r.id!=null) clients[String(r.id)] = r });
   }
   const events = [];
@@ -889,9 +896,13 @@ async function mtCalWeek(st, dayKey, now){
   const all = mtWeekKeys(want);
   const from = mtZoneToUtc(all[0], '00:00', uz), to = mtZoneToUtc(mtAddDays(all[6],1), '00:00', uz);
   if(!from || !to) return mtErr('Your time zone is not set properly, so the calendar cannot be drawn.');
-  const ev = await mtEvents(from.toISOString(), to.toISOString());
+  /* What is booked and what is free are two separate reads of the same week;
+     neither needs the other, so they go together. */
+  const [ev, sl] = await Promise.all([
+    mtEvents(from.toISOString(), to.toISOString()),
+    mtRangeSlots(from.getTime(), to.getTime(), 'us'),
+  ]);
   if(!ev.ok) return ev;
-  const sl = await mtRangeSlots(from.getTime(), to.getTime(), 'us');
   if(!sl.ok) return sl;
 
   const byAll = {}; all.forEach(k=>{ byAll[k] = [] });
@@ -2217,9 +2228,17 @@ async function mtBellLoad(){
       const st = got.ok ? got.data : mtSettingsNow(), now = mtNow();
       const since = new Date(now.getTime() - MT_LOOKBACK_DAYS*864e5).toISOString();
       const dayAgo = new Date(now.getTime() - MT_NEW_MS).toISOString();
-      const made = await mtRun(() => sb.from('discovery_bookings').select('*').gte('created_at', dayAgo), []);
-      const past = await mtRun(() => sb.from('discovery_bookings').select('*').gte('call_at', since).lt('call_at', now.toISOString()), []);
-      const ms = await mtRun(() => sb.from('meetings').select('*').gte('starts_at', since).lt('starts_at', now.toISOString()), []);
+      /* The bell asks for the six booking columns and the six meeting columns
+         it actually reads, not all 35 and all 21 — this runs on a timer, so
+         every column is paid for again every minute. All three go together:
+         none of them depends on another. */
+      const bkCols = 'id,name,company,status,call_at,created_at';
+      const msCols = 'id,client_id,kind,title,guest_name,status,starts_at';
+      const [made, past, ms] = await Promise.all([
+        mtRun(() => sb.from('discovery_bookings').select(bkCols).gte('created_at', dayAgo), []),
+        mtRun(() => sb.from('discovery_bookings').select(bkCols).gte('call_at', since).lt('call_at', now.toISOString()), []),
+        mtRun(() => sb.from('meetings').select(msCols).gte('starts_at', since).lt('starts_at', now.toISOString()), []),
+      ]);
       if(!made.ok && !past.ok && !ms.ok) return made;
       const seen = {}, rows = [];
       (made.ok ? made.data||[] : []).concat(past.ok ? past.data||[] : []).forEach(b=>{ if(b && b.id != null && !seen[b.id]){ seen[b.id] = 1; rows.push(b) } });
@@ -2360,11 +2379,13 @@ function mtRsvpLine(r){
   if(!w) return 'No reply came back from the calendar for this one.';
   return w.hint;
 }
-/* A database rule that is not there yet reads as "not switched on". */
+/* A database rule that is not there yet reads as "not switched on". The kind of
+   failure is decided in one place (coreFamily); by the time this asks, the
+   database's own wording has already been turned into plain words, so reading
+   that wording here would no longer find it. */
 function mtNotReady(error){
-  const m = String(error==null?'':error).toLowerCase();
-  return m.indexOf('does not exist') >= 0 || m.indexOf('could not find the function') >= 0 ||
-         m.indexOf('schema cache') >= 0 || m.indexOf('not find the table') >= 0;
+  const m = String(error==null?'':error);
+  return coreFamily(m) === 'not-ready' || m.toLowerCase().indexOf('not find the table') >= 0;
 }
 
 /* ---- the truth ---- */

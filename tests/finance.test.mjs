@@ -76,6 +76,7 @@ function reset() {
 globalThis.sb = fakeSb;
 globalThis.esc = (s) => String(s == null ? '' : s);
 reset();
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'finance.js'), 'utf8'), { filename: 'finance.js' });
 
 const F = (n) => vm.runInThisContext(n);
@@ -145,9 +146,13 @@ test('a withdrawn plan code is never priced, offered or named, and a row for it 
   assert.equal(F('fnPlanWord')('pilot'), 'Retired plan', 'old data reads safely, without the old name');
   assert.deepEqual(['starter', 'growth', 'scale', 'platinum', null].map(F('fnPlanWord')), ['Starter', 'Growth', 'Scale', '', '']);
   assert.equal(F('FN_RETIRED_SAYS'), 'That plan is retired. Pick Starter, Growth or Scale.');
-  /* a price list that fails still fails in words */
+  /* a price list that fails still fails in words. CHANGED in the plain-words
+     pass: this used to assert the raw 'connection refused' reached the screen.
+     A refused connection IS the connection, so he is now told that and what to
+     do about it, rather than being handed the plumbing's own word for it. */
   failWith = { message: 'connection refused' };
-  assert.deepEqual(await F('fnPlans')(), { ok: false, data: null, error: 'connection refused' });
+  assert.deepEqual(await F('fnPlans')(),
+    { ok: false, data: null, error: "Can't reach the server right now. Check your connection and try again." });
 });
 
 test('finance.js knows the withdrawn code in exactly one place, and carries no credit for it', () => {

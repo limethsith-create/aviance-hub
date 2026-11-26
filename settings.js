@@ -10,7 +10,9 @@
 
    Every data function returns {ok, data, error} and never throws. Prefix: st. */
 
-function stOk(data){ return {ok:true, data, error:''} }
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const stOk = coreOk;
 /* What went wrong, in words the owner can act on. Our own sentences and the database's own plain messages
    pass through; the plumbing's wording never reaches the screen. */
 function stPlain(m){
@@ -19,12 +21,18 @@ function stPlain(m){
   if(/jwt|not authenticated/i.test(s))return 'Your sign-in has run out. Please sign in again.';
   if(/permission denied|row-level security|not authorized|unauthorized/i.test(s))return "You don't have access to change that.";
   if(/could not find the function|does not exist|schema cache|PGRST\d+|violates|duplicate key/i.test(s))return "That didn't work. Try again. If it keeps happening, the database needs its latest update.";
-  return s;
+  /* anything this screen has no better word for falls through to the one place
+     that decides what the owner may be shown. */
+  return corePlain(s);
 }
-function stErr(e){ const m=(e&&(e.message||e.error_description||e.msg))||String(e||'Something went wrong.'); return {ok:false,data:null,error:stPlain(m)} }
+/* Same shape as coreErr, with stPlain's rewording on top. stPlain is handed the
+   RAW text (coreRawText, not coreErrText) on purpose: coreErrText rewords it as
+   well, and this screen's own sentences are the more specific of the two, so
+   plaining it twice would replace them with core.js's generic. */
+function stErr(e){ return {ok:false,data:null,error:stPlain(coreRawText(e))} }
 /* 'admin' and 'employee' are the database's words, not his. */
 function stRoleWord(role){ return ({admin:'Owner',employee:'Team member'})[String(role||'')]||'Team member' }
-function stWrap(res,whenEmpty){ if(!res)return stErr('No answer from Aviance. Try again.'); if(res.error)return stErr(res.error); return stOk(res.data==null?whenEmpty:res.data) }
+function stWrap(res,whenEmpty){ return coreWrap(res, whenEmpty, stErr, 'No answer from Aviance. Try again.') }
 async function stRun(fn,whenEmpty){ try{ return stWrap(await fn(),whenEmpty) }catch(e){ return stErr(e) } }
 
 /* ---- You ---- */

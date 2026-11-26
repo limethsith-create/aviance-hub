@@ -11,6 +11,7 @@
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="portal-client.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script src="core.js"></script>
 <script src="portal-client.js"></script>
 <script src="portal-tracker.js"></script>
 <script src="portal-schedule.js"></script>
@@ -91,7 +92,7 @@
         <button type="button" class="pc-btn pc-btn-quiet" id="pcOut">Sign out</button>
       </div></header>
       <div id="pcStanding" class="pc-standing"></div>
-      <nav class="pc-tabs" aria-label="Your portal"><div class="pc-tabs-in" role="tablist">
+      <nav class="pc-tabs"><div class="pc-tabs-in" role="tablist" aria-label="Your portal">
         ${TABS.map(function(t){ return `<button type="button" role="tab" class="pc-tab" id="pcTab-${t.key}" data-pc-tab="${t.key}" aria-controls="pcPanel-${t.key}" aria-selected="${t.key === tab ? 'true' : 'false'}" tabindex="${t.key === tab ? '0' : '-1'}">${pcEsc(t.label)}</button>`; }).join('')}
       </div></nav>
       <div class="pc-panels">
@@ -166,8 +167,12 @@
   async function book(iso){
     if (kickUi.busy || !kick) return;
     kickUi.busy = true; kickUi.error = ''; drawKick();
-    const r = await pcBookKickoff(iso);
-    kickUi.busy = false;
+    let r;
+    /* A booking is never retried on its own — a second attempt is a second call
+       in the diary. The flag is still cleared, or they could never book at all. */
+    try { r = await pcBookKickoff(iso); }
+    catch (e) { r = pcErr(e); }
+    finally { kickUi.busy = false; }
     if (!home) return;
     if (!r.ok) {
       kickUi.pick = ''; kickUi.error = r.error;
@@ -198,8 +203,12 @@
     if (!home || loading) return;
     loading = true;
     const id = home.channel.id;
-    const r = await pcMessages(id);
-    loading = false;
+    let r;
+    /* `loading` is cleared whatever happens: left true, the chat would never ask
+       again and the client would watch a thread that silently stopped arriving. */
+    try { r = await pcMessages(id); }
+    catch (e) { r = pcErr(e); }
+    finally { loading = false; }
     if (!home || home.channel.id !== id) return;
     if (r.ok) { rows = r.data; draw(toBottom); runMounts(); }
     else if (!drawn) {
@@ -225,8 +234,13 @@
     const text = pcCleanBody(raw);
     if (!text) { el.focus(); return; }
     sendBusy = true; btn.disabled = true; err.textContent = '';
-    const r = await pcSend(home.channel.id, home.person.id, text);
-    sendBusy = false; btn.disabled = false;
+    let r;
+    /* Never retried — it may already have been written, and a client seeing their
+       own message twice is worse than seeing it once. But the button is always
+       given back, or they could never write to us again without reloading. */
+    try { r = await pcSend(home.channel.id, home.person.id, text); }
+    catch (e) { r = pcErr(e); }
+    finally { sendBusy = false; btn.disabled = false; }
     if (!r.ok) { err.textContent = 'That message did not go. ' + r.error; el.focus(); return; }
     /* keep whatever was typed while the message was on its way */
     el.value = el.value === raw ? '' : (el.value.indexOf(raw) === 0 ? el.value.slice(raw.length).replace(/^\s+/, '') : el.value);

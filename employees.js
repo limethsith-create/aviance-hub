@@ -385,23 +385,10 @@ function empStatusLabel(status) {
 function empStatusTone(status) {
   return ({ active: 'ok', invited: 'wait', revoked: 'off' })[String(status || '')] || 'wait';
 }
-function empTime(iso) {
-  const t = Date.parse(iso || '');
-  if (!t) return '';
-  const d = new Date(t);
-  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-}
-function empAgo(iso) {
-  const t = Date.parse(iso || '');
-  if (!t) return 'never';
-  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
-  if (m < 1) return 'just now';
-  if (m < 60) return m + ' min ago';
-  const h = Math.round(m / 60);
-  if (h < 24) return h + (h === 1 ? ' hour ago' : ' hours ago');
-  const d = Math.round(h / 24);
-  return d + (d === 1 ? ' day ago' : ' days ago');
-}
+/* 'HH:MM' in the reader's own zone, from core.js. */
+const empTime = coreHm;
+/* coreAgo, and under a team member's name a time we do not have reads 'never'. */
+function empAgo(iso) { return coreAgo(iso, 'never') }
 function empLastSeenText(iso) {
   const s = empAgo(iso);
   return s === 'never' ? 'Not signed in yet' : 'Last seen ' + s;
@@ -710,8 +697,12 @@ async function empLoad(force) {
   if (emp.loading && !force) return;
   emp.loading = true;
   const seq = ++emp.seq;
-  const r = await empFetchList();
-  if (seq !== emp.seq) return;
+  let r;
+  /* emp.loading left true makes empLoad() refuse every later call, so the list
+     and the unread badge freeze with no sign that anything is wrong. */
+  try { r = await empFetchList(); }
+  catch (e) { emp.loading = false; emp.err = empPlain(e, "Your team didn't load. Try again."); empPaint(); return; }
+  if (seq !== emp.seq) { emp.loading = false; return; }
   emp.loading = false;
   if (r.ok) {
     emp.list = r.data; emp.loaded = true; emp.err = null; emp.missing = false;
@@ -735,8 +726,12 @@ async function empAddSave(ev) {
   const bad = empNameProblem(name) || empEmailProblem(email);
   if (bad) { emp.addErr = bad; emp.adding = true; emp.addBusy = false; empForcePaint(); return; }
   emp.addBusy = true; emp.addErr = null; empForcePaint();
-  const r = await empAdd(name, email);
-  emp.addBusy = false;
+  let r;
+  /* Adding a person is a write: never retried here, or she is added twice. The
+     button is always given back, or the form is dead until a reload. */
+  try { r = await empAdd(name, email); }
+  catch (e) { r = { ok: false, error: empPlain(e, 'That did not save. Try again.') }; }
+  finally { emp.addBusy = false; }
   if (!r.ok) { emp.addErr = r.error; empForcePaint(); return; }
   emp.adding = false; emp.addName = ''; emp.addEmail = '';
   const id = r.data && (r.data.staff_id || r.data.staffId) || null;
@@ -776,8 +771,10 @@ async function empDelGo(msgId) {
   const s = empOpenRow();
   if (!s || !msgId || emp.delBusy) return;
   emp.delBusy = String(msgId); empForcePaint();
-  const r = await empDeleteMessage(s.channelId, msgId);
-  emp.delBusy = '';
+  let r;
+  try { r = await empDeleteMessage(s.channelId, msgId); }
+  catch (e) { r = { ok: false, error: empPlain(e, 'That did not delete. Try again.') }; }
+  finally { emp.delBusy = ''; }
   if (!r.ok) { emp.msgsErr = r.error; empForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
   emp.ask = ''; emp.msgsErr = null;
   empForcePaint();
@@ -788,8 +785,10 @@ async function empClearGo(id) {
   const s = empFind(id);
   if (!s || emp.clearBusy) return;
   emp.clearBusy = true; empForcePaint();
-  const r = await empClearChannel(s.channelId);
-  emp.clearBusy = false;
+  let r;
+  try { r = await empClearChannel(s.channelId); }
+  catch (e) { r = { ok: false, error: empPlain(e, 'That did not clear. Try again.') }; }
+  finally { emp.clearBusy = false; }
   if (!r.ok) { emp.ask = ''; emp.msgsErr = r.error; empForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
   emp.ask = ''; emp.msgsErr = null; emp.menu = '';
   if (typeof toast === 'function') toast('Your chat with ' + (s.name || 'her') + ' is cleared.');
@@ -801,8 +800,10 @@ async function empClearGo(id) {
 async function empCodeGo(id) {
   const s = empFind(id); if (!s || emp.busy[id]) return;
   emp.ask = ''; emp.busy[id] = 'code'; emp.codeErr = null; empForcePaint();
-  const r = await empCode(id);
-  delete emp.busy[id];
+  let r;
+  try { r = await empCode(id); }
+  catch (e) { r = { ok: false, error: empPlain(e, 'That code was not made. Try again.') }; }
+  finally { delete emp.busy[id]; }
   if (!r.ok) { emp.codeErr = r.error; empForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
   emp.code = { staffId: id, code: r.data };          // on screen only, until empForgetCode()
   empForcePaint();
@@ -812,8 +813,10 @@ async function empCodeGo(id) {
 async function empLinkGo(id) {
   const s = empFind(id); if (!s || emp.busy[id]) return;
   emp.ask = ''; emp.menu = ''; emp.busy[id] = 'link'; emp.codeErr = null; empForcePaint();
-  const r = await empLinkNew(id);
-  delete emp.busy[id];
+  let r;
+  try { r = await empLinkNew(id); }
+  catch (e) { r = { ok: false, error: empPlain(e, 'That link was not made. Try again.') }; }
+  finally { delete emp.busy[id]; }
   if (!r.ok) { emp.codeErr = r.error; empForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
   if (emp.open !== id) { empForcePaint(); return; }   // he moved on while it was being made: never show it under another name
   emp.link = { staffId: id, url: r.data.url };       // on screen only, until empForgetCode()
@@ -857,8 +860,10 @@ async function empRevokeGo(id, to) {
   const s = empFind(id); if (!s || emp.busy[id]) return;
   const next = to === 'active' ? 'active' : 'revoked';
   emp.ask = ''; emp.busy[id] = 'status'; empForcePaint();
-  const r = await empSetStatus(id, next);
-  delete emp.busy[id];
+  let r;
+  try { r = await empSetStatus(id, next); }
+  catch (e) { r = { ok: false, error: empPlain(e, 'That did not change. Try again.') }; }
+  finally { delete emp.busy[id]; }
   if (!r.ok) { emp.err = r.error; empForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
   emp.err = null;
   if (typeof toast === 'function') toast(next === 'revoked' ? (s.name || 'She') + ' can no longer sign in.' : (s.name || 'She') + ' can sign in again.');
@@ -867,8 +872,10 @@ async function empRevokeGo(id, to) {
 async function empWelcome(id) {
   const s = empFind(id); if (!s || emp.busy[id]) return;
   emp.busy[id] = 'doc'; empForcePaint();
-  const r = await empDocLink(id);
-  delete emp.busy[id];
+  let r;
+  try { r = await empDocLink(id); }
+  catch (e) { r = { ok: false, error: empPlain(e, 'That link did not open. Try again.') }; }
+  finally { delete emp.busy[id]; }
   empForcePaint();
   if (!r.ok) { if (typeof toast === 'function') toast(r.error); return; }
   try { if (typeof window !== 'undefined' && window.open) window.open(r.data, '_blank', 'noopener'); } catch (e) { }
@@ -900,7 +907,10 @@ async function empLoadMessages(force) {
     emp.msgs = r.data; emp.msgsLoaded = true; emp.msgsErr = null;
     if (h.ok) emp.herReadAt = h.data;
     /* show the messages now; marking them read only moves the badge, so it must not hold the paint up */
-    if (s.unread) empMarkRead(s.channelId).then(() => empLoad(true));
+    /* Marking read only moves a badge, so it must not hold the paint up — and if
+       it fails, the badge is wrong until the next refresh, which is not worth a
+       message on screen. What it must not do is reject into nowhere. */
+    if (s.unread) empMarkRead(s.channelId).then(() => empLoad(true), () => { emp.loading = false; });
   } else {
     emp.msgsErr = r.error;
     if (r.missing) emp.msgsLoaded = true;   // nothing to wait for: say so instead of spinning
@@ -932,12 +942,18 @@ async function empSendClick() {
   emp.sending = true; emp.msgsErr = null; empForcePaint();
   let path = null;
   if (file) {
-    const up = await empUpload(s.channelId, file);
+    let up;
+    try { up = await empUpload(s.channelId, file); }
+    catch (e) { up = { ok: false, error: empPlain(e, 'That file did not go up. Try again.') }; }
     if (!up.ok) { emp.sending = false; emp.fileErr = up.error; empForcePaint(); if (typeof toast === 'function') toast(up.error); return; }
     path = up.data;
   }
-  const r = await empSendMessage(s.channelId, text, path);
-  emp.sending = false;
+  let r;
+  /* A message is a write: never sent twice by us. But emp.sending left true
+     disables the box for good, so she can never be written to again. */
+  try { r = await empSendMessage(s.channelId, text, path); }
+  catch (e) { r = { ok: false, error: empPlain(e, 'That message did not send. Try again.') }; }
+  finally { emp.sending = false; }
   if (!r.ok) { emp.msgsErr = r.error; empForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
   emp.draft = ''; emp.file = null; emp.fileErr = null;
   if (r.data) emp.msgs = emp.msgs.concat([r.data]);

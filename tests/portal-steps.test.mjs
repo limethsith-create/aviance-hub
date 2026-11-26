@@ -10,6 +10,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const root = path.join(import.meta.dirname, '..');
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'portal-client.js'), 'utf8'), { filename: 'portal-client.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'portal-steps.js'), 'utf8'), { filename: 'portal-steps.js' });
 const P = (n) => vm.runInThisContext(n);

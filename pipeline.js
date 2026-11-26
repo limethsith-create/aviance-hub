@@ -63,23 +63,19 @@ const pl = { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null
 
 /* ---- plumbing (finance.js) ---------------------------------------- */
 
-function plOk(data) { return { ok: true, data, error: '' }; }
-function plErr(e) {
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return { ok: false, data: null, error: m };
-}
-function plWrap(res, whenEmpty) {
-  if (!res) return plErr('No answer from the database.');
-  if (res.error) return plErr(res.error);
-  return plOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const plOk = coreOk;
+const plErr = coreErr;
+const plWrap = coreWrap;
 async function plRun(fn, whenEmpty) {
   try { return plWrap(await fn(), whenEmpty); } catch (e) { return plErr(e); }
 }
 
 /* ---- small helpers ------------------------------------------------ */
 
-function plAttr(v) { return esc(JSON.stringify(v == null ? '' : String(v))); }
+/* A value safe inside onclick="…" as a JavaScript string, from core.js. */
+const plAttr = coreAttr;
 function plDate(v) { if (!v) return null; if (v instanceof Date) return isNaN(v) ? null : v; const d = new Date(String(v)); return isNaN(d) ? null : d; }
 function plMs(v) { const d = plDate(v); return d ? d.getTime() : 0; }
 function plWhen(v) {
@@ -501,7 +497,8 @@ function renderPlOutcome(d) {
 
 /* ---- what a plan costs, said once, from plan_prices -------------- */
 
-function plUsd(n) { const v = Math.round(Number(n) || 0); return '$' + v.toLocaleString('en-US'); }
+/* Whole dollars, grouped, with a dollar sign — from core.js. */
+const plUsd = coreUsd;
 /* "sent", "paid", "overdue": where an invoice stands, in a word. */
 function plInvoiceWord(inv) {
   const s = String((inv && inv.status) || 'sent');
@@ -636,10 +633,23 @@ function renderPlFunnel(f, meta) {
 /* ---- the one screen left here: the funnel -------------------------- */
 
 function plHostHTML() {
-  if (pl.funnelErr) return `<div class="card pl-pad"><p class="muted">${esc(pl.funnelErr)}</p></div>`;
+  /* A failure a person can act on: the reason, and a button that asks again
+     without reloading the whole app. */
+  if (pl.funnelErr) return `<div class="card pl-pad" role="alert"><p class="muted">${esc(pl.funnelErr)}</p>
+    <button type="button" class="btn ghost" onclick="plRetryFunnel()">Try again</button></div>`;
   return pl.funnel ? renderPlFunnel(pl.funnel, {}) : plLoadingHTML();
 }
 function plLoadingHTML() { return '<div class="card pl-pad" role="status"><p class="muted">Loading…</p></div>'; }
+/* Ask for the funnel again: the last reason has to go first, or the screen would
+   draw the failure straight back instead of saying it is loading. */
+function plRetryFunnel() {
+  pl.funnelErr = null;
+  plRepaint();
+  return plLoadFunnel(pl.days).then(() => plRepaint(), () => {
+    pl.funnelErr = 'Aviance could not read the funnel just now. Try again in a moment.';
+    plRepaint();
+  });
+}
 function plRepaint() {
   const h = typeof document !== 'undefined' ? document.getElementById('plHost') : null;
   if (!h) return false;
@@ -647,7 +657,12 @@ function plRepaint() {
   return true;
 }
 function viewFunnel() {
-  plLoadFunnel(pl.days).then(() => plRepaint());
+  /* Without the second handler a rejection left this screen reading "Loading…"
+     with nothing on its way and no way to ask again short of reloading the app. */
+  plLoadFunnel(pl.days).then(() => plRepaint(), () => {
+    pl.funnelErr = 'Aviance could not read the funnel just now. Try again in a moment.';
+    plRepaint();
+  });
   return `<div id="plHost" class="pl">${plHostHTML()}</div>`;
 }
 

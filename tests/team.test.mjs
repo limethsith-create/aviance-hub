@@ -62,6 +62,7 @@ const sandbox = {
   sb: { from: builder, rpc: () => Promise.resolve({ data: null, error: null }) },
 };
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), sandbox, { filename: 'core.js' });
 const SRC = fs.readFileSync(path.join(root, 'team.js'), 'utf8');
 vm.runInContext(SRC + `
 ;globalThis.api={tmPeople,tmPending,tmApprove,tmSetRole,tmSetStatus,tmSetPersonStatus,
@@ -399,6 +400,7 @@ const tmcSandbox = {
   setTimeout, clearTimeout, crypto,
 };
 vm.createContext(tmcSandbox);
+vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), tmcSandbox, { filename: 'core.js' });
 const TMC_SRC = fs.readFileSync(path.join(root, 'team-page.js'), 'utf8');
 vm.runInContext(TMC_SRC + `
 ;globalThis.api={tmcEsc,tmcCleanBody,tmcEmailProblem,tmcCodeProblem,tmcCleanCode,tmcExt,tmcIsImage,
@@ -575,7 +577,10 @@ test('team.html mentions no other part of the hub, and loads no hub module', () 
   }
   // and no hub script or stylesheet is pulled in: only her own two files plus the shared theme
   const srcs = [...teamHtml.matchAll(/<script[^>]*src="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(srcs.filter((s) => !/^https:/.test(s)), ['team-page.js'], 'one local script: ' + srcs.join(' '));
+  /* core.js is the shared leaf helpers, loaded first on every page of the site. It holds no
+     hub knowledge — no client, no invoice, no query — so it tells her nothing; it is there so
+     her page escapes and dates from the same one copy as everything else. */
+  assert.deepEqual(srcs.filter((s) => !/^https:/.test(s)), ['core.js', 'team-page.js'], 'her own file plus the shared helpers: ' + srcs.join(' '));
   const css = [...teamHtml.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/g)].map((m) => m[1]);
   // brand.css is the shared look, like theme.css — not a hub module
   assert.deepEqual(css, ['theme.css', 'polish.css', 'team-page.css', 'brand.css']);

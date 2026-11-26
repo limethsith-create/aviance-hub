@@ -25,16 +25,11 @@
 
 /* ---- plumbing (same shape as finance.js) ------------------------- */
 
-function wuOk(data){ return {ok:true, data, error:''} }
-function wuErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:m};
-}
-function wuWrap(res, whenEmpty){
-  if (!res) return wuErr('No answer from the database.');
-  if (res.error) return wuErr(res.error);
-  return wuOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const wuOk = coreOk;
+const wuErr = coreErr;
+const wuWrap = coreWrap;
 async function wuRun(fn, whenEmpty){
   try { return wuWrap(await fn(), whenEmpty); }
   catch (e) { return wuErr(e); }
@@ -52,18 +47,18 @@ function wuAddDays(day, days){
   const base = Number.isFinite(t) ? t : Date.now();
   return new Date(base + wuNum(days) * 86400000).toISOString().slice(0,10);
 }
-function wuUsd(n){
-  if (typeof fnUsd === 'function') return fnUsd(n);
-  return '$' + Math.round(wuNum(n)).toLocaleString('en-US');
-}
+/* Whole dollars, grouped, with a dollar sign — from core.js. */
+const wuUsd = coreUsd;
 function wuDay(d){
   const t = Date.parse(String(d || '') + 'T12:00:00Z');
   return Number.isFinite(t)
     ? new Date(t).toLocaleDateString('en-US', {timeZone:'UTC', day:'numeric', month:'short', year:'numeric'})
     : String(d || '');
 }
-function wuE(s){ return typeof esc === 'function' ? esc(s) : String(s == null ? '' : s) }
-function wuAttr(v){ return wuE(JSON.stringify(String(v == null ? '' : v))) }
+/* The one escape, from core.js: strict, five characters, the single quote among them. */
+const wuE = coreEsc;
+/* A value safe inside onclick="…" as a JavaScript string, from core.js. */
+const wuAttr = coreAttr;
 
 /* An invoice is settled when the row says so. A void invoice is owed by nobody. */
 const WU_DEAD = ['void','cancelled','canceled','written_off','rejected'];
@@ -75,7 +70,11 @@ const wuIsOwed  = r => !!r && !wuIsPaid(r) && !wuIsDead(r);
 
 async function wuClient(clientId){
   if (!clientId) return wuErr('No client was given.');
-  const r = await wuRun(() => sb.from('clients').select('*').eq('id', clientId).maybeSingle(), null);
+  /* The eleven columns this file reads off a client, not all 21. A new field
+     read from a client row here has to be added to this list. */
+  const r = await wuRun(() => sb.from('clients')
+    .select('id,company,contact_name,contact_email,website,plan,term,stage,day1_on,ended_on,end_reason')
+    .eq('id', clientId).maybeSingle(), null);
   if (!r.ok) return r;
   if (!r.data) return wuErr('That client is not in Aviance OS.');
   return r;
@@ -85,11 +84,13 @@ async function wuMonths(clientId){
     .eq('client_id', clientId).order('month_no'), []);
 }
 async function wuInvoices(clientId){
-  return wuRun(() => sb.from('invoices').select('*')
+  return wuRun(() => sb.from('invoices')
+    .select('id,client_id,month_id,number,amount,currency,issued_on,due_on,status,paid_at')
     .eq('client_id', clientId).order('issued_on'), []);
 }
 async function wuRefunds(clientId){
-  return wuRun(() => sb.from('refunds').select('*')
+  return wuRun(() => sb.from('refunds')
+    .select('id,client_id,month_id,amount,multiplier,reason,status,paid_at,created_at')
     .eq('client_id', clientId).order('created_at'), []);
 }
 
@@ -217,14 +218,19 @@ async function wuEndClient(clientId, opts){
    Then: what is still owed to us, what we still owe them, and the one net
    figure. Invoices and refunds with no month land in a last "Outside the
    months" line so nothing is dropped. */
-async function wuFinalStatement(clientId){
-  const cl = await wuClient(clientId);
+/* `pre` lets a caller that has already read these rows — the ending screen
+   reads every leaving client's months, invoices and refunds in one query each
+   — hand them in instead of this reading them again per client. The sums
+   below are the only place the figures are worked out either way. */
+async function wuFinalStatement(clientId, pre){
+  const have = pre && typeof pre === 'object' ? pre : null;
+  const [cl, ms, iv, rf] = have
+    ? [wuOk(have.client), wuOk(have.months || []), wuOk(have.invoices || []), wuOk(have.refunds || [])]
+    /* Four reads that do not depend on each other, so one wait, not four. */
+    : await Promise.all([wuClient(clientId), wuMonths(clientId), wuInvoices(clientId), wuRefunds(clientId)]);
   if (!cl.ok) return cl;
-  const ms = await wuMonths(clientId);
   if (!ms.ok) return ms;
-  const iv = await wuInvoices(clientId);
   if (!iv.ok) return iv;
-  const rf = await wuRefunds(clientId);
   if (!rf.ok) return rf;
 
   const months = ms.data || [], invoices = iv.data || [], refunds = rf.data || [];
@@ -511,22 +517,55 @@ function wuKick(fn){ if (typeof sb === 'undefined' || !sb) return; Promise.resol
    ended_on set counts whatever their stage says. */
 const WU_ENDING_STAGES = ['ended','lost','paused'];
 
+/* Everyone on their way out, with each one's final figures.
+   This used to read every client row, every column, and then one statement per
+   client — four more round trips each, one after the other. Now the database
+   is asked only for the clients who have actually left, and the months, the
+   invoices and the refunds come back one query each for the whole list. The
+   figures are still worked out by wuFinalStatement and nowhere else.
+   The `or` narrows the read at the database; the same test is applied again
+   here, so the screen shows the same rows whether or not the database
+   understood it. */
 async function wuLoadEnding(){
-  const cs = await wuRun(() => sb.from('clients').select('*').order('ended_on', {ascending:false}), []);
+  const cols = 'id,company,contact_name,contact_email,website,plan,term,stage,day1_on,ended_on,end_reason';
+  const cs = await wuRun(() => sb.from('clients').select(cols)
+    .or('ended_on.not.is.null,stage.in.(' + WU_ENDING_STAGES.join(',') + ')')
+    .order('ended_on', {ascending:false}), []);
   if (!cs.ok){ wu.endingErr = cs.error; wu.ending = []; wuPaint(); return cs }
   const rows = (cs.data || []).filter(c => c && (c.ended_on || WU_ENDING_STAGES.includes(String(c.stage || ''))));
-  const out = [];
-  for (const c of rows){
-    const s = await wuFinalStatement(c.id);
-    out.push({
-      client: c,
-      net: s.ok ? s.data.net : 0,
-      owedToUs: s.ok ? s.data.owedToUs : 0,
-      owedToThem: s.ok ? s.data.owedToThem : 0,
-      unlocked: s.ok ? s.data.unlockedMonths : [],
-      trouble: s.ok ? '' : s.error
-    });
+  const ids = rows.map(c => c.id);
+
+  let months = [], invoices = [], refunds = [], trouble = '';
+  if (ids.length){
+    const [ms, iv, rf] = await Promise.all([
+      wuRun(() => sb.from('client_months').select('*').in('client_id', ids).order('month_no'), []),
+      wuRun(() => sb.from('invoices').select('id,client_id,month_id,number,amount,currency,issued_on,due_on,status,paid_at')
+        .in('client_id', ids).order('issued_on'), []),
+      wuRun(() => sb.from('refunds').select('id,client_id,month_id,amount,multiplier,reason,status,paid_at,created_at')
+        .in('client_id', ids).order('created_at'), []),
+    ]);
+    months = ms.ok ? (ms.data || []) : [];
+    invoices = iv.ok ? (iv.data || []) : [];
+    refunds = rf.ok ? (rf.data || []) : [];
+    trouble = !ms.ok ? ms.error : !iv.ok ? iv.error : !rf.ok ? rf.error : '';
   }
+  const mine = (list, id) => list.filter(r => String(r.client_id) === String(id));
+
+  const made = await Promise.all(rows.map(c => wuFinalStatement(c.id, {
+    client: c, months: mine(months, c.id), invoices: mine(invoices, c.id), refunds: mine(refunds, c.id)
+  })));
+  const out = rows.map((c, i) => {
+    const s = made[i];
+    const ok = s.ok && !trouble;
+    return {
+      client: c,
+      net: ok ? s.data.net : 0,
+      owedToUs: ok ? s.data.owedToUs : 0,
+      owedToThem: ok ? s.data.owedToThem : 0,
+      unlocked: ok ? s.data.unlockedMonths : [],
+      trouble: ok ? '' : (trouble || s.error)
+    };
+  });
   wu.ending = out; wu.endingErr = ''; wuPaint();
   return wuOk(out);
 }

@@ -59,10 +59,10 @@ function keep(rows, filters) {
   }));
 }
 function builder(table) {
-  const c = { table, op: 'select', filters: [], order: null, payload: null, one: null };
+  const c = { table, op: 'select', cols: '*', filters: [], order: null, payload: null, one: null };
   calls.push(c);
   const b = {
-    select() { return b; },
+    select(x) { if (x !== undefined) c.cols = x; return b; },
     insert(p) { c.op = 'insert'; c.payload = p; return b; },
     update(p) { c.op = 'update'; c.payload = p; return b; },
     delete() { c.op = 'delete'; return b; },
@@ -136,6 +136,7 @@ globalThis.supabase = { createClient: () => fakeSb };
 /* ───────────── load the shell, then pipeline.js, then meetings.js ───────────── */
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="finance.js">'));
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
 /* the browser's order: finance.js (the plans on offer, the one legacy guard), then pipeline.js */
 vm.runInThisContext(fs.readFileSync(path.join(root, 'finance.js'), 'utf8'), { filename: 'finance.js' });
@@ -155,7 +156,7 @@ const LIVE = { id: 1, open_time: '07:00', close_time: '21:00', days: [1, 2, 3, 4
 const settingsRow = (over) => { db.calendar_settings = [Object.assign({}, LIVE, over || {})]; };
 const at = (now) => { mt.now = now; };
 const host = (id) => el(id).innerHTML;
-const visible = (h) => String(h).replace(/<[^>]*>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+const visible = (h) => String(h).replace(/<[^>]*>/g, ' ').replace(/&#39;/g, "'").replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim();
 const BROKEN = /\bundefined\b|\bNaN\b|\[object Object\]|Invalid Date/;
 
 /* the older tests were written against the month, so each test starts there; the default
@@ -1284,7 +1285,13 @@ test('mtAddOwn takes any time — 3 am on a Sunday, outside call hours, with no 
   assert.equal(d.error, 'There is already a call at that time.');
   fail['meetings.insert'] = { code: '42501', message: 'permission denied for table meetings' };
   d = await mtAddOwn({ title: 'Clash', startsAt: '2026-12-03T16:00:00.000Z' });
-  assert.deepEqual([d.ok, d.error], [false, 'permission denied for table meetings'], 'any other error is passed on as it is');
+  /* CHANGED in the plain-words pass. This used to assert that the raw text
+     ('permission denied for table meetings') was "passed on as it is" — it named
+     a table on the owner's screen and told him nothing he could do. What he gets
+     now says which of his own problems it is. The duplicate-key case above is
+     untouched, because that sentence was already written for a person. */
+  assert.deepEqual([d.ok, d.error], [false, "You don't have access to do that."]);
+  assert.ok(!/permission denied|table meetings|42501/.test(d.error), 'no database words on his screen');
   delete fail['meetings.insert'];
   assert.equal(db.meetings.length, before);
   // moving one of his own meetings is as free as adding it; the clash sentence is the same
@@ -1646,4 +1653,101 @@ test('the shell: #clients opens Clients, the bell popover closes on Escape and w
   assert.ok(all.some((x) => x.type === 'Clients' && x.label === 'Brightline Plumbing' && /brightline/i.test(x.kw)));
   assert.ok(all.some((x) => x.type === 'Screens' && x.label === 'Channels'));
   hubClients = [];
+});
+
+/* ───────────── how much the Calendar costs ─────────────
+   The bell runs on a timer while Aviance OS is open, so what it asks for is
+   paid for again every minute. These check the shape of the asking, not what
+   is drawn. */
+
+const reads = (table) => calls.filter((c) => c.table === table && c.op === 'select');
+
+test('the bell asks for the columns it reads, not every column of two wide tables', async () => {
+  settingsRow();
+  at('2026-11-20T15:00:00Z');
+  db.discovery_bookings = [{ id: 'b1', name: 'Nina', company: 'Nina Roofing', status: 'booked',
+    call_at: '2026-11-20T14:00:00Z', created_at: '2026-11-20T13:00:00Z' }];
+  db.meetings = [{ id: 'm1', client_id: 'c1', kind: 'qualified', title: 'A call', guest_name: 'Sam',
+    status: 'booked', starts_at: '2026-11-20T12:00:00Z' }];
+  calls.length = 0;
+  const r = await mtBellLoad();
+  assert.equal(r.ok, true);
+
+  for (const c of reads('discovery_bookings')) {
+    assert.notEqual(c.cols, '*', 'discovery_bookings has 35 columns; the bell reads six');
+    for (const want of ['id', 'name', 'company', 'status', 'call_at', 'created_at'])
+      assert.ok(c.cols.split(',').includes(want), 'the bell needs ' + want);
+  }
+  for (const c of reads('meetings')) {
+    assert.notEqual(c.cols, '*', 'meetings has 21 columns');
+    for (const want of ['id', 'kind', 'title', 'guest_name', 'status', 'starts_at'])
+      assert.ok(c.cols.split(',').includes(want), 'the bell needs ' + want);
+  }
+  /* and it still finds both things to tell him about */
+  const words = (mt.bell || []).map((x) => x.t).join(' | ');
+  assert.match(words, /New booking: Nina Roofing/);
+  assert.match(words, /How did/);
+});
+
+test('the bell makes its three reads in one go, not one after the other', async () => {
+  settingsRow();
+  at('2026-11-20T15:00:00Z');
+  let open = 0, mostAtOnce = 0;
+  const realFrom = sb.from;
+  sb.from = (t) => {
+    const b = realFrom(t);
+    const realThen = b.then.bind(b);
+    b.then = (res, rej) => {
+      open++; mostAtOnce = Math.max(mostAtOnce, open);
+      return realThen((v) => { open--; return v; }, (e) => { open--; throw e; }).then(res, rej);
+    };
+    return b;
+  };
+  await mtBellLoad();
+  sb.from = realFrom;
+  assert.ok(mostAtOnce >= 3, 'all three reads were in flight together, saw ' + mostAtOnce);
+});
+
+test('the calendar asks for three columns of the client row, and still colours and names the call', async () => {
+  settingsRow();
+  at('2026-11-18T05:00:00Z');
+  db.clients = [{ id: 'c1', company: 'Stone Roofing', contact_name: 'Ada Stone', plan: 'growth',
+    notes: 'must never be read here' }];
+  db.meetings = [{ id: 'm1', client_id: 'c1', kind: 'qualified', starts_at: '2026-11-18T15:00:00Z',
+    minutes: 30, status: 'booked', title: null, guest_name: null }];
+  calls.length = 0;
+  const ev = await mtEvents('2026-11-16T00:00:00Z', '2026-11-23T00:00:00Z');
+  assert.equal(ev.ok, true, ev.error);
+  const read = reads('clients')[0];
+  assert.notEqual(read.cols, '*', 'the calendar wants a name and a colour, not 21 columns');
+  assert.deepEqual(read.cols.split(',').sort(), ['company', 'contact_name', 'id', 'plan']);
+  const one = ev.data.events.find((e) => e.key === 'meeting:m1');
+  assert.equal(one.company, 'Stone Roofing', 'the name still arrives');
+  assert.equal(one.who, 'Ada Stone');
+  assert.equal(one.plan, 'growth', 'and so does the plan colour');
+});
+
+test('a week of the calendar still draws the same thing with the reads run together', async () => {
+  settingsRow();
+  at('2026-11-18T05:00:00Z');
+  db.meetings = [
+    { id: 'm1', client_id: null, kind: 'qualified', starts_at: '2026-11-18T15:00:00Z', minutes: 30, status: 'booked', guest_name: 'Sam' },
+    { id: 'm2', client_id: null, kind: 'strategy', starts_at: '2026-11-19T16:00:00Z', minutes: 45, status: 'booked', guest_name: 'Nina' },
+  ];
+  db.calendar_blocks = [{ id: 'bl1', starts_at: '2026-11-20T15:00:00Z', ends_at: '2026-11-20T16:00:00Z', reason: 'Dentist' }];
+  const st = (await mtSettings()).data;
+  const w = await mtCalWeek(st, '2026-11-18', new Date('2026-11-18T05:00:00Z'));
+  assert.equal(w.ok, true, w.error);
+  /* both calls and the block came back, and the free times came with them —
+     the events and the free slots are read together now, not one then the
+     other, and both still arrive */
+  const keys = (w.data.events || []).map((e) => e.key);
+  assert.ok(keys.includes('meeting:m1'), 'the Wednesday call: ' + keys.join(','));
+  assert.ok(keys.includes('meeting:m2'), 'the Thursday call: ' + keys.join(','));
+  assert.ok((w.data.blocks || []).some((b) => b.id === 'bl1'), 'and the block');
+  assert.ok(Object.keys(w.data.slots || {}).length > 0, 'the free times came back beside them');
+  const drawn = visible(mtRenderCal(w.data));
+  assert.ok(!BROKEN.test(drawn), drawn.slice(0, 300));
+  assert.match(drawn, /Sam/);
+  assert.match(drawn, /Dentist/);
 });

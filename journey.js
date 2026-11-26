@@ -48,7 +48,9 @@ function jyForget(){
 
 /* ===================== 1. PLUMBING ===================== */
 
-function jyOk(data){ return {ok:true, data, error:''} }
+/* The {ok,data,error} result, from core.js: one implementation, aliased to this
+   file's own name for it. See core.js for why. */
+const jyOk = coreOk;
 /* What went wrong, in words the owner can act on. Our own database messages (a plpgsql `raise exception`)
    are already plain and pass through; the plumbing's own wording never reaches the screen. */
 function jyPlain(m){
@@ -57,17 +59,19 @@ function jyPlain(m){
   if (/jwt|not authenticated|invalid.*session|session.*expired/i.test(s)) return 'Your sign-in has run out. Please sign in again.';
   if (/permission denied|row-level security|not authorized|unauthorized/i.test(s)) return "You don't have access to do that.";
   if (/could not find the function|does not exist|schema cache|PGRST\d+/i.test(s)) return "That part of Aviance isn't switched on yet. Try again once the database update is applied.";
-  return s;
+  /* anything this screen has no better word for falls through to the one place
+     that decides what the owner may be shown, so a constraint name or an
+     '[object Object]' cannot reach the screen by this route either. */
+  return corePlain(s);
 }
-function jyErr(e){
-  const m = (e && (e.message || e.error_description || e.msg)) || String(e || 'Something went wrong.');
-  return {ok:false, data:null, error:jyPlain(m)};
-}
-function jyWrap(res, whenEmpty){
-  if (!res) return jyErr('No answer from Aviance. Try again.');
-  if (res.error) return jyErr(res.error);
-  return jyOk(res.data === null || res.data === undefined ? whenEmpty : res.data);
-}
+/* Same shape as coreErr, but the message goes through jyPlain first: this screen
+   rewords the plumbing's own wording before the owner ever sees it. jyPlain is
+   given the RAW text (coreRawText, not coreErrText) on purpose: coreErrText now
+   rewords it too, and this screen's wording is the more specific of the two —
+   "isn't switched on yet" names the thing he has to go and do. Plaining it twice
+   would hand him core.js's generic instead. */
+function jyErr(e){ return {ok:false, data:null, error:jyPlain(coreRawText(e))} }
+function jyWrap(res, whenEmpty){ return coreWrap(res, whenEmpty, jyErr, 'No answer from Aviance. Try again.') }
 async function jyRpc(name, args, whenEmpty){
   try {
     if (typeof sb === 'undefined' || !sb || typeof sb.rpc !== 'function') return jyErr('Aviance is not ready yet. Please reload the page.');
@@ -77,21 +81,15 @@ async function jyRpc(name, args, whenEmpty){
 
 /* ===================== 2. SMALL PURE HELPERS ===================== */
 
-function jyE(s){
-  if (typeof esc === 'function') return esc(s);
-  return String(s == null ? '' : s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-/* A value safe inside onclick="…" as a JavaScript string. */
-function jyAttr(v){ return jyE(JSON.stringify(v == null ? '' : String(v))) }
+/* The one escape, from core.js: strict, five characters, the single quote among them. */
+const jyE = coreEsc;
+/* A value safe inside onclick="…" as a JavaScript string, from core.js. */
+const jyAttr = coreAttr;
 function jyTrim(v){ return String(v == null ? '' : v).trim() }
 function jyInt(v){ const n = Number(v); return Number.isFinite(n) ? Math.round(n) : 0 }
 function jyIsDay(v){ return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) }
-/* Today as 'YYYY-MM-DD' in the viewer's own calendar. */
-function jyToday(now){
-  const d = now instanceof Date ? now : (now == null ? new Date() : new Date(now));
-  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
-}
+/* Today as 'YYYY-MM-DD' in the viewer's own calendar, from core.js. */
+const jyToday = coreTodayKey;
 /* Whole days from a to b, both 'YYYY-MM-DD'. */
 function jyDaysBetween(a, b){
   if (!jyIsDay(a) || !jyIsDay(b)) return null;
@@ -418,11 +416,23 @@ function jyPaint(){
   if (String(currentView || '') !== 'journey') return;
   try { render('journey'); } catch (e) {}
 }
-function jyReload(){ jy.tried = false; return jyLoadBoard(true).then(jyPaint) }
+/* The board is asked for and drawn when it lands. jyLoadBoard() is built not to
+   throw, but if it ever does the promise rejects, jyPaint never runs, jy.tried
+   stays false and the screen says "Loading the board…" until the app is
+   reloaded. So every ask has a failure path: mark it asked, say why, draw. */
+function jyThen(p){
+  if (!p || typeof p.then !== 'function') return p;
+  return p.then(jyPaint, (e) => {
+    jy.tried = true; jy.at = Date.now();
+    jy.err = 'Aviance could not read the board just now. Try again in a moment.';
+    jyPaint();
+  });
+}
+function jyReload(){ jy.tried = false; return jyThen(jyLoadBoard(true)) }
 
 function viewJourneyBoard(){
   if (!jy.board) {
-    if (!jy.tried) { jyLoadBoard().then(jyPaint); return '<div class="cb-loading" role="status">Loading the board…</div>'; }
+    if (!jy.tried) { jyThen(jyLoadBoard()); return '<div class="cb-loading" role="status">Loading the board…</div>'; }
     return jyRenderBoard([], {error: jy.err});
   }
   return jyRenderBoard(jy.board, {error: jy.err});
@@ -432,7 +442,8 @@ function viewJourneyBoard(){
 function jyLateCount(){
   const isClient = typeof hubIsClient === 'function' && (() => { try { return hubIsClient(); } catch (e) { return false; } })();
   if (!isClient && typeof sb !== 'undefined' && sb && (!jy.at || Date.now() - jy.at >= JY_RELOAD_MS) && !jy.busy.board) {
-    jyLoadBoard(true).then(() => {});
+    /* the nav badge only: a failure must not become an unhandled rejection */
+    jyLoadBoard(true).then(() => {}, () => {});
   }
   if (!isClient && !jy.timer && typeof setInterval === 'function' && typeof document !== 'undefined' && document && document.getElementById) {
     jy.timer = setInterval(() => {
@@ -440,7 +451,7 @@ function jyLateCount(){
       let signedIn = true;
       try { signedIn = typeof authUser === 'undefined' || !!authUser; } catch (e) { signedIn = true; }
       if (!signedIn) { jyForget(); return; }
-      if (typeof document === 'undefined' || !document.hidden) jyLoadBoard(true).then(jyPaint);
+      if (typeof document === 'undefined' || !document.hidden) jyThen(jyLoadBoard(true));
     }, JY_RELOAD_MS);
     if (jy.timer && jy.timer.unref) jy.timer.unref();
   }

@@ -68,6 +68,7 @@ const fakeSb = {
   removeChannel: (c) => { removedChans.push(c.name); },
 };
 globalThis.sb = fakeSb;
+vm.runInThisContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), { filename: 'core.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'channels-api.js'), 'utf8'), { filename: 'channels-api.js' });
 beforeEach(() => { reset(); chTestReset(); globalThis.sb = fakeSb; });
 reset();
