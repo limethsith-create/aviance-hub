@@ -123,15 +123,39 @@ async function wuPauseSending(clientId){
   });
 }
 
+/* Which months an ending closes, and which it must not touch.
+   A month that finished on or before their last day was sold, served and is
+   judged: the guarantee applies and it is locked. A month that runs PAST their
+   last day was not. Locking it hands lock_month a month with no calls in it
+   yet, which reads as missed and raises a full refund for a month that never
+   ran.
+   This was live and it was expensive. On 2026-11-26 one client carried twelve
+   month rows out to September 2027; ending them would have locked ten months
+   that had not started and raised $15,000 of refunds for them. Across the ten
+   clients in the database it was $63,300 of refunds for months that were not
+   over, out of $69,300 raised. One button.
+   So: lock what has ended, leave what has not, and NAME what was left so the
+   decision is the owner's and not a side effect. Whether a month the client cut
+   short is owed back is a commercial question — the clock cannot answer it. */
+function wuMonthEnded(month, lastDay){
+  const ends = String((month && month.ends_on) || '').slice(0,10);
+  const last = String(lastDay || '').slice(0,10);
+  if (!ends) return false;            /* no end date: it never ends, so it never ended */
+  if (!last) return false;
+  return ends <= last;
+}
+
 /* End a client, in order:
-     1. recount and lock every unlocked month, through finance.js, so the final
-        count is the database's count and not ours;
-     2. refuse if a month is still unlocked, and say which one — ending on top
-        of an open month would hide money we owe;
+     1. recount and lock every month that ENDED on or before their last day,
+        through finance.js, so the final count is the database's count;
+     2. refuse if one of THOSE is still unlocked, and say which one — ending on
+        top of a finished, unjudged month would hide money we owe;
      3. add up the refunds the locked months raised;
      4. set clients.ended_on and end_reason, stage -> 'ended';
      5. pause what is still running;
-     6. write a client_events row. */
+     6. write a client_events row.
+   Months that run past their last day are listed in `monthsLeftOpen` and in
+   the trail, untouched. */
 async function wuEndClient(clientId, opts){
   const o = opts || {};
   const reason = String(o.reason || '').slice(0,600);
@@ -146,21 +170,27 @@ async function wuEndClient(clientId, opts){
   const first = await wuMonths(clientId);
   if (!first.ok) return first;
 
-  /* 1. the final count, made by the database */
+  /* 1. the final count, made by the database, on the months that are over.
+     fnLockMonth, NOT fnCloseMonth: closing a month also opens the next one and
+     invoices it, and this client is leaving. ended_on is not set until step 4,
+     so fnCloseMonth's own "that client has left" refusal would not save us
+     here — it would open and invoice a month for somebody who is walking out
+     the door. Locking is the only step an ending wants. */
   const trouble = [];
   for (const m of (first.data || [])){
     if (m.locked_at) continue;
+    if (!wuMonthEnded(m, lastDay)) continue;      /* not over on their last day: not ours to judge */
     const rc = await fnRecount(m.id);
     if (!rc.ok) trouble.push('Month ' + m.month_no + ': ' + rc.error);
     const lk = await fnLockMonth(m.id);
     if (!lk.ok) trouble.push('Month ' + m.month_no + ': ' + lk.error);
   }
 
-  /* 2. read them back and refuse on anything still open */
+  /* 2. read them back and refuse on a FINISHED month that still has no verdict */
   const after = await wuMonths(clientId);
   if (!after.ok) return after;
   const months = after.data || [];
-  const open = months.filter(m => !m.locked_at);
+  const open = months.filter(m => !m.locked_at && wuMonthEnded(m, lastDay));
   if (open.length){
     const which = open.map(m => 'month ' + m.month_no).join(', ');
     return wuErr('Not ended. ' + (open.length === 1 ? 'Month ' + open[0].month_no + ' has' : 'These months have')
@@ -168,6 +198,12 @@ async function wuEndClient(clientId, opts){
       + ', and ending now would hide money we may owe them.'
       + (trouble.length ? ' The database said: ' + trouble.join(' ') : ''));
   }
+  /* the months that run past their last day, left exactly as they were */
+  const leftOpen = months.filter(m => !m.locked_at).map(m => ({
+    monthId: m.id, monthNo: wuNum(m.month_no),
+    startsOn: m.starts_on || null, endsOn: m.ends_on || null,
+    promised: wuNum(m.calls_promised), delivered: wuNum(m.calls_delivered)
+  }));
 
   /* 3. what the locked months raised. The amounts are the database's. */
   const refundRows = await wuRefunds(clientId);
@@ -188,7 +224,8 @@ async function wuEndClient(clientId, opts){
   /* 6. the trail */
   const detail = {
     reason: reason, last_day: lastDay,
-    months_locked: months.length,
+    months_locked: months.filter(m => !!m.locked_at).length,
+    months_left_open: leftOpen.map(m => m.monthNo),
     refund_from_months: refundFromMonths,
     refund_outstanding: refundOutstanding,
     campaigns_paused: paused.data.campaignsPaused,
@@ -199,7 +236,8 @@ async function wuEndClient(clientId, opts){
   return wuOk({
     client: up.data,
     months: months,
-    monthsLocked: months.length,
+    monthsLocked: months.filter(m => !!m.locked_at).length,
+    monthsLeftOpen: leftOpen,
     refundFromMonths: refundFromMonths,
     refundOutstanding: refundOutstanding,
     campaignsPaused: paused.data.campaignsPaused,
@@ -284,8 +322,31 @@ async function wuFinalStatement(clientId, pre){
     owedToUs: owedToUs,
     owedToThem: owedToThem,
     net: owedToUs - owedToThem,
-    unlockedMonths: months.filter(m => !m.locked_at).map(m => wuNum(m.month_no))
+    unlockedMonths: months.filter(m => !m.locked_at).map(m => wuNum(m.month_no)),
+    /* Of those, the ones that run past their last day. An ending leaves these
+       alone on purpose (see wuEndClient), so the statement must not read them
+       as a missing count somebody forgot. */
+    monthsPastLastDay: months.filter(m => !m.locked_at && !wuMonthEnded(m, (cl.data && cl.data.ended_on) || wuToday()))
+      .map(m => wuNum(m.month_no))
   });
+}
+
+/* The warning under the statement, if there is one. Two different things:
+   a month that FINISHED and has no verdict is money we may owe and have not
+   worked out; a month that runs past their last day was deliberately left
+   open when they were ended, and saying "not final" about it would send the
+   owner looking for a count that nobody is meant to take. */
+function wuStmtWarn(d){
+  const all = (d && d.unlockedMonths) || [];
+  if (!all.length) return '';
+  const past = (d && d.monthsPastLastDay) || [];
+  const unfinished = all.filter(n => past.indexOf(n) < 0);
+  const bits = [];
+  if (unfinished.length)
+    bits.push('Month ' + unfinished.join(', ') + ' has no final count yet, so this is not final.');
+  if (past.length)
+    bits.push('Month ' + past.join(', ') + ' runs past their last day and was left open on purpose: whether any of it is owed back is your decision.');
+  return '<p class="wu-warn">' + wuE(bits.join(' ')) + '</p>';
 }
 
 /* The one sentence under the statement. */
@@ -654,7 +715,7 @@ function viewFinalStatement(clientId){
         <th class="wu-n">${wuE(wuUsd(d.invoiced))}</th><th class="wu-n">${wuE(wuUsd(d.paid))}</th>
         <th class="wu-n">${wuE(wuUsd(d.owedToUs))}</th><th class="wu-n">${wuE(wuUsd(d.refunded + d.owedToThem))}</th></tr></tfoot></table>
     <p class="wu-net"><b>${wuE(wuNetWords(d.net))}</b></p>
-    ${d.unlockedMonths && d.unlockedMonths.length ? `<p class="wu-warn">Month ${wuE(d.unlockedMonths.join(', '))} has no final count yet, so this is not final.</p>` : ''}
+    ${wuStmtWarn(d)}
     <div class="wu-print"><button type="button" class="btn ghost" onclick="window.print()">Print</button></div></div>`;
 }
 
