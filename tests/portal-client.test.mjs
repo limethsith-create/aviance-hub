@@ -86,10 +86,10 @@ test('money: whole dollars in, a full figure out', () => {
 test('invoice lines: what the database sent, with the total checked', () => {
   const r = P('pcInvoiceLines')({ lines: [{ label: 'Growth', amount: 3000 }, { label: 'Discount', amount: -300 }], gross: 3000, amount: 2700 });
   assert.equal(r.lines.length, 2);
-  assert.deepEqual(r.lines[1], { label: 'Discount', amount: -300, credit: true, detail: '' });
+  assert.deepEqual(r.lines[1], { label: 'Discount', amount: -300, credit: true, detail: '', term: '', off: '' });
   assert.equal(r.sum, 2700); assert.equal(r.total, 2700); assert.equal(r.matches, true);
   const none = P('pcInvoiceLines')({ gross: 1500, amount: 1500 });
-  assert.deepEqual(none.lines, [{ label: 'Services', amount: 1500, credit: false, detail: '' }]);
+  assert.deepEqual(none.lines, [{ label: 'Services', amount: 1500, credit: false, detail: '', term: '', off: '' }]);
 });
 test('invoice lines: fields left over from the retired trial plan are ignored, never drawn', () => {
   const f = P('pcInvoiceLines');
@@ -233,7 +233,7 @@ test('agreement: everything from the database is escaped, brackets stay, the own
   assert.ok(h.includes('Type your full name to sign'));
   assert.ok(h.includes('I have read this agreement and I am authorised to sign for Acme &lt;b&gt;Ltd&lt;/b&gt;'));
   assert.ok(h.includes('>Sign agreement</button>'));
-  assert.equal((h.match(/class="pc-sec"/g) || []).length, 2);
+  assert.equal((h.match(/class="pc-sec[ "]/g) || []).length, 2);
 });
 test('agreement: once signed, the form is replaced by who signed and when', () => {
   const h = P('pcAgreementHtml')({ ...AGREEMENT, status: 'signed', signed_name: 'Dana <W>', signed_at: new Date(2026, 10, 25, 10, 0).toISOString() });
@@ -582,7 +582,9 @@ const TERM3 = { kind: 'invoice', number: 'AV-2026-1051', status: 'sent', status_
 test('invoice: a 3-month term names the term, the monthly price and the total billed up front', () => {
   const h = P('pcInvoiceHtml')(TERM3);
   assert.ok(h.includes('<span class="pc-line-t">Starter · 5 qualified calls a month · 3-month term</span>'));
-  assert.ok(h.includes('<span class="pc-line-d">3 months × $1,200.00 a month · 20% off the $1,500.00 monthly price</span>'));
+  /* the term and the saving are their own rows, so each reads at a glance */
+  assert.ok(h.includes('<span class="pc-line-d pc-line-term">3 months × $1,200.00 a month</span>'));
+  assert.ok(h.includes('<span class="pc-line-d pc-line-off">20% off the $1,500.00 monthly price</span>'));
   assert.ok(h.includes('<span class="pc-line-d">Months 1–3 · starts the day your first emails go out</span>'));
   assert.ok(h.includes('$3,600.00') && h.includes('>Terms</dt><dd>Net 7</dd>'));
   assert.ok(!h.includes('class="pc-service"'), 'the service is not said twice when the line already says it');
@@ -644,7 +646,7 @@ const TERMS_V3 = { title: 'Service Agreement', intro: 'This is the whole agreeme
   signatures: [{ label: 'For Aviance', name: 'Limethsith', role: 'Founder', org: 'Aviance' }] };
 test('agreement: numbered clauses read as plain text, with no brackets left for the client', () => {
   const h = P('pcAgreementHtml')({ kind: 'agreement', company: 'Sample Co', status: 'sent', terms: TERMS_V3 });
-  assert.equal((h.match(/class="pc-sec"/g) || []).length, 3);
+  assert.equal((h.match(/class="pc-sec[ "]/g) || []).length, 3);
   assert.ok(h.includes('<span class="pc-num">1</span>What you are buying</h2>') && h.includes('<span class="pc-num">3</span>The small print</h2>'));
   assert.ok(h.includes('<p>1.1 You are on the Growth plan: 10 booked calls a month.</p>'));
   assert.ok(h.includes('<p>1.3 Your first month starts on the day your first emails go out (your launch day), not the day you sign.</p>'));
@@ -859,8 +861,126 @@ test('how to pay: the preferred rail is one click to copy, and the whole block p
   const css = fs.readFileSync(path.join(root, 'portal-client.css'), 'utf8');
   assert.ok(/\.pc-pay-v\{[^}]*user-select:all/.test(css), 'select-all is what makes it copyable');
   assert.ok(/\.pc-pay-num\{[^}]*var\(--pc-mono\)/.test(css), 'numbers are JetBrains Mono');
-  assert.ok(css.includes('.pc-pay-main{border:2px solid #000') && /\.pc-pay-main\{/.test(css));
+  assert.ok(/\.pc-pay-main\{border:2px solid var\(--pc-ink\)/.test(css), 'the preferred rail is a 2px Ink box');
   assert.ok(/@media print[\s\S]*\.pc-pay-main\{/.test(css), 'the pay block has print rules too');
   /* the card button is hidden on paper, but the URL is printed as text */
   assert.ok(h.includes('<p class="pc-noprint"><a class="pc-btn') && h.includes('class="pc-pay-url pc-pay-v">https://checkout.example/test-session<'));
+});
+
+/* ───────────── the house style: letterhead, figures, the guarantee block ─────────────
+   These are what makes the pages read as one firm's documents. They are
+   structural, not decorative: a letterhead that names the document and its
+   reference, mono tabular figures, and the one warm block on the clause the
+   client is really buying. */
+
+const CSS = fs.readFileSync(path.join(root, 'portal-client.css'), 'utf8');
+
+test('letterhead: the mark, the wordmark, the kind of document and its reference', () => {
+  const head = P('pcLetterheadHtml')('Invoice', 'AV-2026-1016');
+  assert.ok(head.includes('class="pc-mark"') && head.includes('>Aviance</span>'));
+  assert.ok(head.includes('<p class="pc-tag">Invoice</p>') && head.includes('<p class="pc-docref">AV-2026-1016</p>'));
+  /* no reference, no empty line */
+  assert.ok(!P('pcLetterheadHtml')('Agreement', '').includes('pc-docref'));
+  assert.ok(!P('pcLetterheadHtml')('Agreement').includes('undefined'));
+  /* the wordmark is decoration: the mark's alt already says Aviance */
+  assert.ok(head.includes('aria-hidden="true"'));
+  /* everything escapes */
+  const bad = P('pcLetterheadHtml')('<b>Invoice</b>', '"><script>alert(1)</script>');
+  assert.ok(!bad.includes('<script>') && !bad.includes('<b>Invoice</b>') && bad.includes('&lt;script&gt;'));
+});
+
+test('letterhead and footer are on the agreement, the invoice and the receipt', () => {
+  const a = P('pcAgreementHtml')({ kind: 'agreement', company: 'Sample Co', status: 'sent', terms: TERMS_V3 });
+  assert.ok(a.includes('class="pc-dochead"') && a.includes('<p class="pc-tag">Agreement</p>'));
+  assert.ok(a.includes('class="pc-docend"') && a.includes('Aviance · Agreement'));
+  assert.ok(a.indexOf('pc-docend') > a.indexOf('pc-sigs'), 'the footer is last');
+  const i = P('pcInvoiceHtml')(INVOICE);
+  assert.ok(i.includes('<p class="pc-docref">AV-1042</p>') && i.includes('Aviance · Invoice'));
+  const r = P('pcInvoiceHtml')({ ...INVOICE, status: 'paid', paid_at: '2026-11-26T09:00:00Z' });
+  assert.ok(r.includes('Aviance · Receipt'));
+  /* an invoice with no number still draws a clean letterhead */
+  assert.ok(!P('pcInvoiceHtml')({ ...INVOICE, number: null }).includes('pc-docref'));
+});
+
+test('invoice: the amount, the due date and the reference sit together at the top', () => {
+  const h = P('pcInvoiceHtml')(INVOICE);
+  const headline = h.indexOf('class="pc-headline"');
+  assert.ok(headline > 0 && headline < h.indexOf('class="pc-two"'), 'the figure block comes before the addresses');
+  assert.ok(h.indexOf('class="pc-total"') > headline && h.indexOf('class="pc-meta"') > headline);
+  /* the due row is marked so the eye finds it; a receipt has nothing due */
+  assert.ok(h.includes('<div class="pc-meta-r pc-meta-due"><dt class="pc-tag">Due</dt>'));
+  assert.ok(h.includes('<div class="pc-meta-r pc-meta-ref"><dt class="pc-tag">Invoice no.</dt>'));
+  const paid = P('pcInvoiceHtml')({ ...INVOICE, status: 'paid', paid_at: '2026-11-26T09:00:00Z' });
+  assert.ok(!paid.includes('pc-meta-due'));
+  /* the table closes with the same total, so a page of lines still foots */
+  assert.ok(h.includes('<tfoot><tr><th scope="row">Total due · USD</th><td class="pc-amt">$2,700.00</td></tr></tfoot>'));
+  assert.ok(paid.includes('<th scope="row">Total paid · USD</th>'));
+});
+
+test('invoice: every figure is mono and tabular, and the money column is right-aligned', () => {
+  assert.ok(/\.pc-total-n\{font-family:var\(--pc-mono\)[^}]*font-variant-numeric:tabular-nums/.test(CSS));
+  assert.ok(/\.pc-meta dd\{[^}]*font-family:var\(--pc-mono\)[^}]*font-variant-numeric:tabular-nums/.test(CSS));
+  assert.ok(/\.pc-lines \.pc-amt\{text-align:right[^}]*font-family:var\(--pc-mono\)[^}]*font-variant-numeric:tabular-nums/.test(CSS));
+  assert.ok(/\.pc-docref\{[^}]*var\(--pc-mono\)/.test(CSS));
+});
+
+test('the term and the saving are each their own line, in mono', () => {
+  const parts = P('pcLineParts');
+  assert.deepEqual(parts({ months: 3, unit: 1200, list_unit: 1500 }, 'USD'),
+    { term: '3 months × $1,200.00 a month', off: '20% off the $1,500.00 monthly price' });
+  assert.deepEqual(parts({ months: 3, unit: 2400 }, 'USD'), { term: '3 months × $2,400.00 a month', off: '' });
+  for (const quiet of [{ months: 1, unit: 3000 }, {}, null, { months: 3, unit: 0 }]) assert.deepEqual(parts(quiet, 'USD'), { term: '', off: '' });
+  /* the one-sentence form older callers read is still the two halves joined */
+  assert.equal(P('pcLineDetail')({ months: 3, unit: 1200, list_unit: 1500 }, 'USD'),
+    '3 months × $1,200.00 a month · 20% off the $1,500.00 monthly price');
+  assert.ok(/\.pc-line-term\{font-family:var\(--pc-mono\)/.test(CSS) && /\.pc-line-off\{font-family:var\(--pc-mono\)/.test(CSS));
+});
+
+test('the guarantee gets the one warm block, on the invoice and in the agreement', () => {
+  const h = P('pcAgreementHtml')({ kind: 'agreement', company: 'Sample Co', status: 'sent', terms: TERMS_V3 });
+  /* found by what the clause is called, not by its number */
+  assert.equal((h.match(/class="pc-sec pc-sec-warm"/g) || []).length, 1);
+  assert.ok(h.indexOf('pc-sec-warm') < h.indexOf('Our guarantee'));
+  const none = P('pcAgreementHtml')({ kind: 'agreement', status: 'sent', terms: { sections: [{ h: '1. How we send', body: ['x'] }] } });
+  assert.ok(!none.includes('pc-sec-warm'), 'no guarantee clause, no warm block');
+  /* Sand with a red rule on the left edge, and never red text on Sand */
+  assert.ok(/\.pc-sec-warm\{[^}]*background:var\(--pc-sand\)[^}]*border-left:3px solid var\(--pc-red\)/.test(CSS));
+  assert.ok(/\.pc-guarantee\{[^}]*background:var\(--pc-sand\)[^}]*border-left:3px solid var\(--pc-red\)/.test(CSS));
+  assert.ok(/\.pc-sec-warm \.pc-num\{color:var\(--pc-ink\)\}/.test(CSS));
+  /* a printer that drops backgrounds still shows both blocks as blocks */
+  assert.ok(/@media print[\s\S]*\.pc-sec-warm\{[^}]*border-left:2pt solid var\(--pc-red\)/.test(CSS));
+  assert.ok(/@media print[\s\S]*\.pc-guarantee\{[^}]*border-left:2pt solid var\(--pc-red\)/.test(CSS));
+  assert.ok(/\.pc-guarantee,\n?\s*\.pc-sec-warm\{-webkit-print-color-adjust:exact/.test(CSS));
+});
+
+test('the signature block is something you sign: a name on a rule and a date under it', () => {
+  const sign = P('pcSignaturesHtml');
+  const unsigned = sign({ company: 'Sample Co', status: 'sent', terms: TERMS_V3 });
+  assert.ok(unsigned.includes('<p class="pc-sig-date"><span class="pc-tag">Date</span><span class="pc-sig-dv">&nbsp;</span></p>'));
+  const signed = sign({ company: 'Sample Co', status: 'signed', signed_name: 'Dana W', signed_at: '2026-11-25T10:00:00Z', terms: TERMS_V3 });
+  assert.ok(signed.includes('<span class="pc-sig-dv">November 25, 2026</span>'));
+  assert.ok(!/undefined|NaN/.test(sign({ status: 'signed', signed_name: 'Dana W', signed_at: null, terms: TERMS_V3 })));
+  assert.ok(/\.pc-sig-dv\{[^}]*border-bottom:1px solid var\(--pc-line\)/.test(CSS), 'the date has a line to sit on');
+  assert.ok(/\.pc-signature\{[^}]*border-bottom:1px solid var\(--pc-ink\)/.test(CSS), 'so does the name');
+});
+
+test('the palette is the house palette, and the clause column is one width', () => {
+  for (const token of ['--pc-ink:#0A0A0C', '--pc-line:#DCDCE0', '--pc-grey:#63636A', '--pc-sand:#F4EFE9', '--pc-red:#E0290F', '--pc-red-text:#C42408']) {
+    assert.ok(CSS.includes(token), token);
+  }
+  /* the clause number and every line of its clause share one column */
+  assert.ok(/\.pc-sec h2\{display:grid;grid-template-columns:var\(--pc-clause\) 1fr/.test(CSS));
+  assert.ok(/\.pc-sec p\{[^}]*padding-left:var\(--pc-clause\)/.test(CSS));
+});
+
+test('the two pages wear the same letterhead as the documents', () => {
+  const doc = fs.readFileSync(path.join(root, 'doc.html'), 'utf8');
+  const join = fs.readFileSync(path.join(root, 'join.html'), 'utf8');
+  assert.ok(doc.includes("pcLetterheadHtml('Welcome'") && doc.includes('pcDocFootHtml('));
+  assert.ok(join.includes("pcLetterheadHtml('Set your password'") && join.includes('pcDocFootHtml('));
+  /* both pages still build their text with the shared, escaping helpers */
+  assert.ok(doc.includes('pcParasHtml(') && doc.includes('pcEsc(') && join.includes('pcEsc('));
+  /* the unfilled-placeholder highlight is still the one in portal-client.js */
+  assert.ok(P('pcFillHtml')('[YOUR NAME] signs').includes('<mark class="pc-fill">[YOUR NAME]</mark>'));
+  assert.equal(P('pcFillHtml')('<b>[5 business days]</b>'), '&lt;b&gt;5 business days&lt;/b&gt;');
 });
