@@ -1,0 +1,46 @@
+/* money.css — the Money screen. Design system: /home/claude/design/DESIGN.md.
+   Ink #0A0A0C · Paper #FFF · Mist #F6F7F9 · Line #DCDCE0 · Muted #63636A ·
+   Red #C42408. Every figure is monospace (.fig, from brand.css). */
+
+.mo-card{padding:18px 20px}
+.mo-card + .section-head{margin-top:26px}
+
+/* the four numbers at the top of a block */
+.mo-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
+.mo-tile{border:1px solid var(--line,#DCDCE0);border-radius:10px;padding:12px 14px;background:var(--mist,#F6F7F9)}
+.mo-tile-t{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#63636A)}
+.mo-tile-n{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:24px;font-weight:600;letter-spacing:-.02em;margin:4px 0 2px}
+.mo-tile-s{font-size:12px;color:var(--muted,#63636A);line-height:1.35}
+.mo-tile.mo-red{border-color:#C4240833;background:#C424080a}
+.mo-tile.mo-red .mo-tile-n{color:var(--red,#C42408)}
+
+/* one age band, or one group of refunds */
+.mo-band{border-top:1px solid var(--line,#DCDCE0);padding-top:12px;margin-top:14px}
+.mo-band:first-child{border-top:0;padding-top:0;margin-top:0}
+.mo-band-head{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+.mo-band-head h4{font-size:13px;font-weight:600;letter-spacing:-.01em}
+.mo-band-head .fig{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:13px;color:var(--muted,#63636A)}
+.mo-band-head .count{margin-left:auto}
+.mo-band.mo-red .mo-band-head h4{color:var(--red,#C42408)}
+
+.mo-list{list-style:none;margin:0;padding:0}
+.mo-row{display:grid;grid-template-columns:minmax(0,2fr) 110px minmax(0,2fr) auto;gap:12px;align-items:center;
+  padding:9px 0;border-top:1px solid var(--line,#DCDCE0)}
+.mo-row:first-child{border-top:0}
+.mo-who{display:flex;flex-direction:column;min-width:0}
+.mo-who b{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mo-sub{font-size:11.5px;color:var(--muted,#63636A);line-height:1.35}
+.mo-amt{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:14px;font-weight:600;text-align:right}
+.mo-when{font-size:12px;min-width:0;display:flex;flex-direction:column;gap:2px}
+.mo-acts{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.mo-acts .btn{padding:5px 10px;font-size:12px}
+
+.mo-warn{border:1px solid #C4240833;background:#C424080a;color:var(--red,#C42408);
+  border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px}
+.mo-hint{font-size:11.5px;color:var(--muted,#63636A);margin-top:4px;line-height:1.4}
+
+@media (max-width:760px){
+  .mo-row{grid-template-columns:1fr auto;grid-template-areas:'who amt' 'when when' 'acts acts';gap:4px 10px}
+  .mo-who{grid-area:who}.mo-amt{grid-area:amt}.mo-when{grid-area:when}
+  .mo-acts{grid-area:acts;justify-content:flex-start;margin-top:6px}
+}
