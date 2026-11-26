@@ -8,7 +8,7 @@
                                instant and the strip at the top can show today beside the week.
      2. Where do the leads     The CSV upload — he picks a file, we parse it in the browser (headers in
         come from?             any order, extra columns, blank rows, quoted commas, a BOM, CRLF), show
-                               him what we read and how it will split across the active callers, and
+                               him what we read and who the leads go to, and
                                nothing is sent until he presses Import.
      3. How does a caller      "Add a caller" then the access code, exactly as the Employees screen does
         get in?                it: caller_add, then the staff-code edge function with his session token.
@@ -41,6 +41,9 @@ const CAL_WEEK_DAYS = 7;
 const CAL_MAX_ROWS = 5000;                 // "a few thousand" — past this he is told what was kept
 const CAL_MAX_CSV = 8 * 1024 * 1024;       // 8 MB of text is far more than a few thousand rows
 const CAL_FEED_MAX = 50;
+/* The one-click invite link. /go is rewritten to the caller-link function (vercel.json),
+   so what she receives is an aviance.store address and not a Supabase one. */
+const CAL_LINK_BASE = 'https://aviance.store/go?k=';
 const CAL_BONUS_DEFAULT = 25;              // mirrors biz_settings.caller_bonus, until the board says otherwise
 const CAL_DEAL_CUT = 0.02;                 // 2% of a closed deal's first-month fee
 const CAL_CELL_MAX = 500;                  // one CSV cell: longer than this is somebody's essay, not a lead
@@ -74,6 +77,7 @@ const cal = {
   boardErr: null, boardMissing: false, boardLoading: false,
   adding: false, addErr: null, addBusy: false, addName: '', addEmail: '',
   code: null,                        // {staffId, code} — lives only while the panel is open
+  link: null,                        // {staffId, url} — the one-click invite, also on screen only
   codeErr: null, busy: {},
   ask: '',                           // inline "are you sure": 'revoke:<id>' | 'reset:<id>' | 'import'
   up: false,                         // the CSV panel is open
@@ -210,6 +214,18 @@ async function calSetStatus(staffId, status) {
 /* The access code. The edge function makes it, sets it as her password, emails her the invite and
    hands the code back once. It is never logged and never kept anywhere but cal.code, which is
    dropped by calForgetCode() when the panel closes, on sign-out and when the screen is left. */
+/* The one-click invite link. staff_link_new stores only a hash of the token and
+   hands the token back once, so this is the only moment the real URL exists. */
+async function calLinkNew(staffId) {
+  if (!staffId) return { ok: false, data: null, error: 'Pick a caller first.', missing: false };
+  const r = await calRpc('staff_link_new', { p_staff: staffId, p_days: 14 },
+    'Aviance could not make a link. Try again in a moment.');
+  if (!r.ok) return r;
+  const token = r.data && r.data.token ? String(r.data.token) : '';
+  if (!token) return { ok: false, data: null, error: 'Aviance could not make a link. Try again in a moment.', missing: false };
+  return { ok: true, data: { url: CAL_LINK_BASE + encodeURIComponent(token), expires: (r.data && r.data.expires_at) || null }, error: null, missing: false };
+}
+
 async function calCode(staffId) {
   if (!staffId) return { ok: false, data: null, error: 'Pick a caller first.', missing: false };
   const s = calSb();
@@ -337,10 +353,16 @@ function calParseCsv(text, limit) {
     },
   };
 }
-/* How leads_import will split them: evenly across the active callers, the remainder to the first few.
+/* How leads_import will split them: evenly across the callers who can be given work, the
+   remainder to the first few. The statuses here must match leads_import in the database
+   ('new','invited','active'): a caller who has her code but has not signed in yet is still
+   'invited', and the server does give her leads. Filtering to 'active' alone told the owner
+   his leads would land unassigned while the server quietly assigned them.
    Shown before he presses Import so the split is never a surprise. */
+const CAL_TAKES_LEADS = ['new', 'invited', 'active'];
 function calSplitPlan(count, callers) {
-  const list = (Array.isArray(callers) ? callers : []).filter(c => c && c.id && c.status === 'active');
+  const list = (Array.isArray(callers) ? callers : [])
+    .filter(c => c && c.id && CAL_TAKES_LEADS.indexOf(String(c.status)) >= 0);
   const n = Math.max(0, Math.floor(calNum(count)));
   if (!list.length) return [];
   const base = Math.floor(n / list.length), extra = n % list.length;
@@ -407,9 +429,11 @@ function calTick() {
 }
 /* The code never outlives its panel. */
 function calForgetCode() { cal.code = null; cal.codeErr = null; }
+function calForgetLink() { cal.link = null; }
 /* Sign-out: drop the list, the boards, the file he picked and — above all — any code still on screen. */
 function callersForget() {
   calStop();
+  calForgetLink();
   Object.assign(cal, {
     list: [], loaded: false, loading: false, err: null, missing: false,
     range: 'day', day: null, week: null, boardErr: null, boardMissing: false, boardLoading: false,
@@ -515,6 +539,7 @@ function calBoardRowHTML(r, ctx) {
     <td class="num cal-owed">${esc(calMoney(r.owed))}</td>
     <td class="cal-acts-cell">
       <button type="button" class="cal-link" onclick="${r.codeSet ? `calAskYes('reset',${calA(r.id)})` : `calCodeGo(${calA(r.id)})`}"${busy ? ' disabled' : ''}>${busy === 'code' ? 'Making a code…' : (r.codeSet ? 'Reset code' : 'Access code')}</button>
+      <button type="button" class="cal-link" onclick="calLinkGo(${calA(r.id)})"${busy || r.status === 'revoked' ? ' disabled' : ''}>${busy === 'link' ? 'Making a link…' : 'Invite link'}</button>
       <button type="button" class="cal-link" onclick="${r.status === 'revoked' ? `calStatusGo(${calA(r.id)},'active')` : `calAskYes('revoke',${calA(r.id)})`}"${busy ? ' disabled' : ''}>${busy === 'status' ? 'Changing…' : (r.status === 'revoked' ? 'Let her back in' : 'Revoke')}</button>
     </td>
   </tr>`;
@@ -575,6 +600,27 @@ function calAddFormHTML(ctx) {
     </div>
   </form>`;
 }
+/* The one-click invite link, shown once. Sending this is all she needs: it signs her
+   in and lands her on her own calling screen, so there is no email address to type and
+   no code to copy. It is a key in an inbox, which is why it runs out on its own. */
+function calLinkHTML(url, caller) {
+  const v = String(url == null ? '' : url);
+  const who = (caller && caller.name) || 'her';
+  if (!v) return '';
+  return `<div class="card cal-code" role="alert" aria-live="assertive">
+    <h3>${esc(who)}’s one-click link</h3>
+    <p class="cal-code-val cal-code-url" id="calLinkVal">${esc(v)}</p>
+    <div class="cal-acts">
+      <button type="button" class="btn" onclick="calCopyLink()">Copy link</button>
+      <button type="button" class="btn ghost" onclick="calLinkHide()">Done — I’ve copied it</button>
+    </div>
+    <p class="cal-code-warn"><b>This link is shown once and will not be shown again.</b> Send it to ${esc(who)} on
+      WhatsApp or by email. She taps it and lands on her calling screen, already signed in.</p>
+    <p class="cal-note">It works for 14 days and anyone holding it can open her screen, so send it to her and nobody
+      else. Press “Invite link” again to make a new one, which switches the old one off.</p>
+  </div>`;
+}
+
 /* The code, shown once. No copy of it is kept once this panel closes, and it is never logged. */
 function calCodeHTML(code, caller) {
   const v = String(code == null ? '' : code);
@@ -600,7 +646,7 @@ function calAskHTML(what, caller) {
   if (/^import/.test(w)) {
     const n = Number(String(w).split(':')[1]) || 0;
     return `<div class="cal-ask" role="alert">
-      <p>Import ${esc(calCount(n, 'lead'))} and split them across your active callers? Leads already in Aviance are skipped.</p>
+      <p>Import ${esc(calCount(n, 'lead'))}? The split is shown above, and leads already in Aviance are skipped.</p>
       <div class="cal-acts">
         <button type="button" class="btn" onclick="calImportGo()">Yes, import them</button>
         <button type="button" class="btn ghost" onclick="calAskNo()">No, not yet</button>
@@ -629,8 +675,12 @@ function calBadRowHTML(b) {
 function calSplitHTML(plan, count) {
   const rows = Array.isArray(plan) ? plan : [];
   if (!rows.length) {
-    return `<p class="cal-warn" role="alert">No caller is active yet, so these ${esc(calCount(count, 'lead'))} would land
-      unassigned. Give at least one caller an access code first, or import now and assign later.</p>`;
+    return `<p class="cal-warn" role="alert">No caller has been added yet, so these ${esc(calCount(count, 'lead'))} would land
+      unassigned. That is safe: add a caller and the first one to open her list picks them up.</p>`;
+  }
+  /* One caller is the normal case at the start, and "split" reads strangely for one person. */
+  if (rows.length === 1) {
+    return `<p class="cal-split">All ${esc(calCount(count, 'lead'))} go to ${esc(rows[0].name)}.</p>`;
   }
   return `<p class="cal-split">How they will split: ${rows.map(p => esc(p.name) + ' <b>' + esc(String(p.share)) + '</b>').join(' · ')}</p>`;
 }
@@ -727,13 +777,16 @@ function calScreenHTML(ctx) {
   const board = String(c.range) === 'week' ? c.week : c.day;
   const feed = (board && board.feed && board.feed.length) ? board.feed
     : (((c.week && c.week.feed) || []).length ? c.week.feed : ((c.day && c.day.feed) || []));
-  const openCaller = c.code ? (((board && board.callers) || []).find(r => r.id === c.code.staffId)
-    || (c.list || []).find(r => r.id === c.code.staffId) || null) : null;
+  const find = (id) => (((board && board.callers) || []).find(r => r.id === id)
+    || (c.list || []).find(r => r.id === id) || null);
+  const openCaller = c.code ? find(c.code.staffId) : null;
+  const openLinkCaller = c.link ? find(c.link.staffId) : null;
   /* The strip would read as a row of honest zeros before the migration lands, so it waits for a board. */
   return `${c.err ? `<div class="cal-bad cal-top" role="alert">${esc(c.err)}</div>` : ''}
     ${(c.day || c.week) ? calStripHTML(c.day, c.week) : ''}
     ${c.codeErr ? `<p class="cal-bad" role="alert">${esc(c.codeErr)}</p>` : ''}
     ${c.code && c.code.code ? calCodeHTML(c.code.code, openCaller) : ''}
+    ${c.link && c.link.url ? calLinkHTML(c.link.url, openLinkCaller) : ''}
     ${c.adding ? calAddFormHTML(c) : ''}
     ${calBoardHTML(board, c)}
     <div class="cal-acts cal-main-acts">
@@ -747,7 +800,7 @@ function calScreenHTML(ctx) {
 /* ===================== 4. THE SCREEN ===================== */
 function calCtx() {
   return {
-    range: cal.range, day: cal.day, week: cal.week, list: cal.list,
+    range: cal.range, day: cal.day, week: cal.week, list: cal.list, link: cal.link,
     err: cal.err, missing: cal.missing, boardErr: cal.boardErr, boardMissing: cal.boardMissing,
     adding: cal.adding, addErr: cal.addErr, addBusy: cal.addBusy, addName: cal.addName, addEmail: cal.addEmail,
     code: cal.code, codeErr: cal.codeErr, busy: cal.busy, ask: cal.ask,
@@ -861,6 +914,28 @@ async function calCodeGo(id) {
   calLoad(true);                                        // her status is 'invited' now
 }
 function calCodeHide() { calForgetCode(); calForcePaint(); }
+
+async function calLinkGo(id) {
+  if (!id || cal.busy[id]) return;
+  cal.ask = ''; cal.busy[id] = 'link'; cal.codeErr = null; calForcePaint();
+  const r = await calLinkNew(id);
+  delete cal.busy[id];
+  if (!r.ok) { cal.codeErr = r.error; calForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
+  cal.link = { staffId: String(id), url: r.data.url };   // on screen only, until calForgetLink()
+  calForcePaint();
+  const v = calEl('calLinkVal'); if (v && v.focus) { try { v.setAttribute('tabindex', '-1'); v.focus(); } catch (e) { } }
+  calLoad(true);
+}
+function calLinkHide() { calForgetLink(); calForcePaint(); }
+function calCopyLink() {
+  const url = cal.link && cal.link.url;
+  if (!url) return;
+  const done = () => { if (typeof toast === 'function') toast('Link copied. Send it to her and nobody else.'); };
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(url).then(done, () => calCopyFallback('calLinkVal')); return; }
+  } catch (e) { }
+  calCopyFallback('calLinkVal');
+}
 function calCopyCode() {
   const code = cal.code && cal.code.code;
   if (!code) return;
@@ -870,17 +945,19 @@ function calCopyCode() {
   } catch (e) { }
   calCopyFallback();
 }
-function calCopyFallback() {
-  const v = calEl('calCodeVal');
+function calCopyFallback(which) {
+  const id = String(which || 'calCodeVal');
+  const what = id === 'calLinkVal' ? 'link' : 'code';
+  const v = calEl(id);
   if (v && typeof document !== 'undefined' && document.createRange && typeof window !== 'undefined' && window.getSelection) {
     try {
       const r = document.createRange(); r.selectNodeContents(v);
       const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-      if (typeof toast === 'function') toast('The code is selected — press Ctrl+C to copy it.');
+      if (typeof toast === 'function') toast('The ' + what + ' is selected — press Ctrl+C to copy it.');
       return;
     } catch (e) { }
   }
-  if (typeof toast === 'function') toast('Copying did not work here. Select the code and copy it by hand.');
+  if (typeof toast === 'function') toast('Copying did not work here. Select the ' + what + ' and copy it by hand.');
 }
 async function calStatusGo(id, to) {
   if (!id || cal.busy[id]) return;

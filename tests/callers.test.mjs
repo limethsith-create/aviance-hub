@@ -84,6 +84,7 @@ vm.runInContext(SRC + `
   calFeedRowHTML,calFeedHTML,calScreenHTML,calCtx,viewCallers,calBodyHTML,calPaint,calForcePaint,
   calLoad,calLoadBoard,calLoadAll,calSetRange,calAddOpen,calAddCancel,calAddSave,calAskYes,
   calAskNo,calAskImport,calCodeGo,calCodeHide,calCopyCode,calStatusGo,calUploadOpen,
+  calLinkNew,calLinkGo,calLinkHide,calLinkHTML,calForgetLink,CAL_LINK_BASE,
   calUploadClose,calUploadReset,calPick,calBatchIn,calFileIn,calImportGo,calOnRender,
   CAL_OUTCOMES,CAL_TALKED,CAL_FIELDS,CAL_MAX_ROWS,CAL_BONUS_DEFAULT,CAL_DEAL_CUT,
   CAL_NOT_READY,CAL_CODE_NOT_READY,CAL_IMPORT_NOT_READY,CAL_FEED_MAX};`,
@@ -282,12 +283,12 @@ test('2,000 rows parse, and the cap past that keeps what it read and says what i
   assert.equal(capped.data.over, 1500, 'he is told exactly how many were not read');
   assert.match(A.calPreviewHTML(capped.data, { list: CALLERS() }), /1500 more are past the limit/);
 
-  // the split across three callers (two active) adds up to the row count, remainder first
+  // the split across the three callers who can be given work adds up to the row count, remainder first
   const plan = A.calSplitPlan(2000, CALLERS());
-  assert.equal(plan.length, 2, 'only active callers get leads');
+  assert.equal(plan.length, 3, 'every caller who is not revoked gets leads, as the database does it');
   assert.equal(plan.reduce((s, p) => s + p.share, 0), 2000, 'the split loses nobody');
   const odd = A.calSplitPlan(7, CALLERS());
-  assert.deepEqual(plain(odd).map((p) => p.share), [4, 3], 'the remainder goes to the first callers');
+  assert.deepEqual(plain(odd).map((p) => p.share), [3, 2, 2], 'the remainder goes to the first callers');
   assert.equal(odd.reduce((s, p) => s + p.share, 0), 7);
 });
 
@@ -731,7 +732,7 @@ test('the feed, the day/week switch and the empty states all behave', async () =
   assert.equal(A.calBoardShape({}).bonus, A.CAL_BONUS_DEFAULT, 'with no bonus from the database we use the default');
 });
 
-test('the upload panel tells him the rules before he picks, and warns when nobody is active', () => {
+test('the upload panel tells him the rules before he picks, and warns when there is no caller', () => {
   reset();
   const shut = A.calUploadHTML({ up: false });
   assert.match(shut, /Upload leads/);
@@ -741,12 +742,13 @@ test('the upload panel tells him the rules before he picks, and warns when nobod
   assert.match(open, /Nothing is sent until you press Import/);
   assert.match(open, /accept="\.csv,\.txt,\.tsv,text\/csv"/);
 
-  // no active caller: say where the leads will land rather than failing
+  // no caller at all: say where the leads will land rather than failing
   const warn = A.calSplitHTML([], 40);
-  assert.match(warn, /No caller is active yet/);
+  assert.match(warn, /No caller has been added yet/);
   assert.match(warn, /40 leads/);
   const split = A.calSplitHTML(A.calSplitPlan(40, CALLERS()), 40);
-  assert.match(split, /<b>20<\/b> · Mariam <b>20<\/b>/, 'the two active callers get twenty each');
+  assert.match(split, /<b>14<\/b> · Mariam <b>13<\/b> · Yasmin <b>13<\/b>/,
+    'all three who can be given work share the forty, the remainder to the first');
   assert.doesNotMatch(split, /<script>/, "and her name is escaped where it is shown");
   // the done panel after an import with nobody to hand them to
   assert.match(A.calImportDoneHTML({ added: 10, skipped: 0, assigned: 0 }, {}), /waiting unassigned/);
@@ -779,21 +781,93 @@ test('the rows the browser would send are exactly the shape leads_import reads',
   assert.equal(r.data.skipped, 1);
 });
 
-test('the split shown before Import is the active callers only', () => {
+test('the split shown before Import matches what leads_import actually does', () => {
   reset();
-  /* KNOWN GAP 2: leads_import hands leads to every caller whose status is 'new', 'invited' or 'active';
-     this preview counts only 'active'. So with a caller who has a code but has not signed in, the split he
-     is shown is not the split he gets. Pinned here so the difference is not silent. */
+  /* The preview and leads_import must agree on who can be given work: 'new', 'invited' and
+     'active'. A caller who holds her code but has not signed in yet is 'invited', and the
+     server does hand her leads, so the preview has to say so. */
   const list = [
     { id: 'c1', name: 'Nour', status: 'active' },
     { id: 'c2', name: 'Mariam', status: 'invited' },
     { id: 'c3', name: 'Yasmin', status: 'revoked' },
   ];
   const plan = A.calSplitPlan(10, list);
-  assert.deepEqual(plain(plan), [{ id: 'c1', name: 'Nour', share: 10 }]);
-  assert.match(A.calSplitHTML(plan, 10), /Nour <b>10<\/b>/);
+  assert.deepEqual(plain(plan), [
+    { id: 'c1', name: 'Nour', share: 5 },
+    { id: 'c2', name: 'Mariam', share: 5 },
+  ]);
+  assert.match(A.calSplitHTML(plan, 10), /Nour <b>5<\/b>/);
   // a revoked caller never appears in a split, whatever else changes
   assert.ok(!plan.some((p) => p.id === 'c3'));
   assert.deepEqual(plain(A.calSplitPlan(10, null)), []);
-  assert.deepEqual(plain(A.calSplitPlan(0, list)), [{ id: 'c1', name: 'Nour', share: 0 }]);
+  assert.deepEqual(plain(A.calSplitPlan(0, list)).map((p) => p.share), [0, 0]);
+
+  // one caller is the normal case at the start: no talk of splitting, and her name is on it
+  const alone = A.calSplitPlan(30, [{ id: 'c9', name: 'Vera', status: 'invited' }]);
+  assert.deepEqual(plain(alone), [{ id: 'c9', name: 'Vera', share: 30 }]);
+  const html = A.calSplitHTML(alone, 30);
+  assert.match(html, /All 30 leads go to Vera\./);
+  assert.ok(!/will split/i.test(html), 'with one caller he is never told about a split');
 });
+
+/* ═════════════════════════ 10. THE ONE-CLICK INVITE LINK ═════════════════════════
+   One URL he can send her on WhatsApp. She taps it and lands on her calling screen,
+   signed in: no email to type, no code to copy. The token is shown here once and
+   only its hash is kept, exactly like the access code. */
+
+test('a link is made from the token the database hands back, on our own domain', async () => {
+  reset();
+  rpcs.staff_link_new = (args) => {
+    assert.deepEqual(plain(args), { p_staff: 'c1', p_days: 14 }, 'fourteen days, and the caller it is for');
+    return { data: { ok: true, token: 'tok+en/with==junk', expires_at: '2026-12-09T00:00:00Z' }, error: null };
+  };
+  const r = await A.calLinkNew('c1');
+  assert.equal(r.ok, true, r.error || '');
+  assert.equal(r.data.url, 'https://aviance.store/go?k=tok%2Ben%2Fwith%3D%3Djunk',
+    'the token is escaped, and the link is an aviance.store one');
+  assert.equal(r.data.url.indexOf('supabase'), -1, 'she is never sent to a Supabase address');
+  assert.equal(A.CAL_LINK_BASE, 'https://aviance.store/go?k=');
+
+  // no caller, no link
+  assert.equal((await A.calLinkNew('')).ok, false);
+  // a reply with no token in it is a failure, not a broken link
+  rpcs.staff_link_new = () => ({ data: { ok: true }, error: null });
+  const empty = await A.calLinkNew('c1');
+  assert.equal(empty.ok, false);
+  assert.match(empty.error, /could not make a link/);
+});
+
+test('the link panel shows it once, says what it is, and is dropped on sign-out', async () => {
+  reset();
+  rpcs.staff_link_new = () => ({ data: { ok: true, token: 'abc123' }, error: null });
+  rpcs.callers_list = () => ({ data: CALLERS(), error: null });
+  await A.calLinkGo('c1');
+  assert.equal(A.cal.link.url, 'https://aviance.store/go?k=abc123');
+
+  const html = A.calLinkHTML(A.cal.link.url, { name: NASTY });
+  assert.match(html, /https:\/\/aviance\.store\/go\?k=abc123/);
+  assert.match(html, /shown once and will not be shown again/);
+  assert.match(html, /14 days/, 'he is told it runs out');
+  assert.match(html, /send it to her and nobody\s+else/, 'and that it is a key, not a page');
+  assert.doesNotMatch(html, /<script>/, "a caller's name is escaped here like everywhere else");
+  assert.match(html, /already signed in/, 'what she gets is spelled out');
+
+  // it never lingers: his own "done" button and a sign-out both clear it
+  A.calLinkHide();
+  assert.equal(A.cal.link, null);
+  A.cal.link = { staffId: 'c1', url: 'https://aviance.store/go?k=abc123' };
+  A.callersForget();
+  assert.equal(A.cal.link, null, 'a sign-out leaves no link on screen');
+  assert.equal(A.calLinkHTML('', { name: 'Nour' }), '', 'and with no link there is no panel');
+});
+
+test('a refused link says why, and leaves nothing half-shown', async () => {
+  reset();
+  /* a plpgsql `raise exception` arrives with code P0001, and its words are shown as they are */
+  rpcs.staff_link_new = () => ({ data: null, error: { code: 'P0001', message: 'Only the owner can make an invite link.' } });
+  await A.calLinkGo('c1');
+  assert.equal(A.cal.link, null);
+  assert.match(String(A.cal.codeErr), /owner/);
+  assert.ok(toasts.some((t) => /owner/.test(String(t))), 'he is told out loud, not just in the panel');
+});
+

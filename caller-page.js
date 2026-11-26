@@ -685,6 +685,79 @@ async function clSession(){
   } catch (e) { return clErr(e); }
 }
 
+/* ---- the one-click invite link --------------------------------------
+   The owner sends her one URL. The link checker (the caller-link function)
+   makes sure the invite is real and unexpired, then bounces her here with a
+   one-time sign-in token in the fragment: #k=...
+
+   A fragment, never a query string, because fragments are not sent to any
+   server or written into server logs. We swap it for a session and wipe it
+   from the address bar in the same breath, so a screenshot of her screen or a
+   glance at her history gives nothing away. The token is good for one use. */
+/* ---8<--- link-claim: the only place this page touches the address bar ---8<---
+   It reads the fragment, swaps it for a session and clears it. Nothing here
+   navigates anywhere: there is still no way off this page. The test in
+   tests/caller-page.test.mjs cuts this block out and then checks that the rest
+   of the file cannot read or change where the browser is. */
+const CL_LINK_BAD = 'That link has already been used or has run out. Ask Aviance for a new one, or sign in with your code below.';
+const CL_LINK_SAY = {
+  expired: 'That link has run out. Ask Aviance for a new one, or sign in with your code below.',
+  bad: CL_LINK_BAD,
+  team: 'That link belongs to an Aviance account, not a caller login.',
+  email: 'There is no email address on your record yet. Ask Aviance to add one.',
+  again: 'Something went wrong opening that link. Try it once more, or sign in with your code below.',
+  method: CL_LINK_BAD,
+};
+
+function clLinkToken(){
+  if (typeof window === 'undefined' || !window.location) return '';
+  const m = /[#&]k=([^&]+)/.exec(String(window.location.hash || ''));
+  if (!m) return '';
+  let t = m[1];
+  try { t = decodeURIComponent(m[1]); } catch (e) { /* take it as it came */ }
+  return String(t).trim();
+}
+
+/* Take the token out of the address bar without reloading the page. */
+function clForgetLinkToken(){
+  if (typeof window === 'undefined' || !window.location) return;
+  try {
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', String(window.location.pathname || '/') + String(window.location.search || ''));
+    } else {
+      window.location.hash = '';
+    }
+  } catch (e) { /* it stays in the bar; the token is one-use, so little is lost */ }
+}
+
+/* What the link checker said when it would not let her in. */
+function clLinkProblem(){
+  if (typeof window === 'undefined' || !window.location) return '';
+  const m = /[?&]link=([^&]+)/.exec(String(window.location.search || ''));
+  if (!m) return '';
+  let why = m[1];
+  try { why = decodeURIComponent(m[1]); } catch (e) { /* as it came */ }
+  return CL_LINK_SAY[String(why)] || CL_LINK_BAD;
+}
+
+/* Returns a session when the link worked, null when there was no link at all. */
+async function clClaimLink(){
+  const token = clLinkToken();
+  if (!token) return clOk(null);
+  clForgetLinkToken();
+  const sb = clClient();
+  if (!sb) return clErr(CL_OFFLINE);
+  if (!sb.auth || typeof sb.auth.verifyOtp !== 'function') return clErr(CL_LINK_BAD);
+  try {
+    const res = await sb.auth.verifyOtp({ token_hash: token, type: 'email' });
+    if (res && res.error) { const r = clErr(res.error); r.error = clSay(res.error, CL_LINK_BAD); return r; }
+    const session = (res && res.data && res.data.session) || null;
+    if (!session) return clErr(CL_LINK_BAD);
+    return clOk(session);
+  } catch (e) { const r = clErr(e); r.error = clSay(e, CL_LINK_BAD); return r; }
+}
+/* ---8<--- end link-claim ---8<--- */
+
 /* Tells the page when the login ends (he revoked it, or it ran out). */
 function clOnSignedOut(fn){
   const sb = clClient();
