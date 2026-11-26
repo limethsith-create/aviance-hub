@@ -104,7 +104,8 @@ vm.runInContext(SRC + `
   empForcePaint,empOpen,empCloseOpen,empForgetCode,empCodeHide,empCopyCode,empCodeGo,
   empIsOwner,EMP_NOT_READY,EMP_CODE_NOT_READY,EMP_FILES_NOT_READY,EMP_BUCKET,EMP_BODY_MAX,
   empMenuHTML,empHeadHTML,empPresence,empDotHTML,empDeleteMessage,empClearChannel,
-  empMenuToggle,empMenuClose,empDelGo,empClearGo};`,
+  empMenuToggle,empMenuClose,empDelGo,empClearGo,
+  empLinkNew,empLinkHTML,empLinkGo,empLinkHide,empCopyLink,empCopyCode,empPaint,empLoadMessages,empOnRender,EMP_LINK_BASE};`,
   sandbox, { filename: 'employees.js' });
 const A = sandbox.api;
 
@@ -720,4 +721,185 @@ test('a row in the strip is her name, her dot and her unread count — nothing e
   assert.match(row, /3/);
   assert.doesNotMatch(row, /v@example\.com/, 'the email belongs in the chat header, not the strip');
   assert.doesNotMatch(row, /Reset code|Revoke|Welcome page/, 'no actions loose in the strip');
+});
+
+/* ───────────── perfection pass: the one-click invite link ───────────── */
+
+test('Invite link: asks staff_link_new for 14 days and builds the aviance.store address', async () => {
+  reset();
+  rpcs.staff_link_new = () => ({ data: { ok: true, token: 'abc/123+x', kind: 'employee', expires_at: '2026-12-10T00:00:00Z' }, error: null });
+  const r = await A.empLinkNew('s1');
+  assert.equal(r.ok, true);
+  sameJson(calls.find((c) => c.rpc === 'staff_link_new').args, { p_staff: 's1', p_days: 14 });
+  assert.equal(A.EMP_LINK_BASE, 'https://aviance.store/go?k=');
+  assert.equal(r.data.url, 'https://aviance.store/go?k=abc%2F123%2Bx', 'the token is encoded into the address');
+  assert.equal(r.data.expires, '2026-12-10T00:00:00Z');
+  // nobody picked, no token back, a thrown error and a refusal: each one plain sentence, never a throw
+  assert.equal((await A.empLinkNew('')).ok, false);
+  rpcs.staff_link_new = () => ({ data: { ok: true }, error: null });
+  assert.match((await A.empLinkNew('s1')).error, /could not make a link/);
+  rpcs.staff_link_new = new Error('Failed to fetch');
+  assert.match((await A.empLinkNew('s1')).error, /Can't reach Aviance/);
+  rpcs.staff_link_new = () => ({ data: null, error: { code: 'PGRST202', message: 'Could not find the function public.staff_link_new' } });
+  const missing = await A.empLinkNew('s1');
+  assert.equal(missing.ok, false); assert.equal(missing.missing, true);
+  assert.doesNotMatch(missing.error, /function|PGRST|public\./);
+});
+
+test('the menu offers "Invite link", and not for someone whose access is taken away', async () => {
+  await loaded();
+  const s1 = A.emp.list.find((x) => x.id === 's1'), s3 = A.emp.list.find((x) => x.id === 's3');
+  const menu = A.empMenuHTML(s1, {});
+  assert.match(menu, /onclick="empLinkGo\(&quot;s1&quot;\)"[^>]*>Invite link</);
+  assert.doesNotMatch(menu.match(/empLinkGo[^>]*>/)[0], /disabled/);
+  assert.match(A.empMenuHTML(s3, {}).match(/empLinkGo[^>]*>/)[0], /disabled/, 'revoked: restore her first');
+  assert.match(A.empMenuHTML(s1, { busy: { s1: 'link' } }), /Making a link…/);
+});
+
+test('the link is shown once with a copy button, and is gone from the page afterwards', async () => {
+  await loaded();
+  A.empOpen('s1'); await tick();
+  rpcs.staff_link_new = () => ({ data: { ok: true, token: 'tok-abc' }, error: null });
+  A.empMenuToggle('s1');
+  await A.empLinkGo('s1'); await tick();
+  const URL_ = 'https://aviance.store/go?k=tok-abc';
+  let html = el('empRoot').innerHTML;
+  assert.equal(html.split(URL_).length - 1, 1, 'on screen exactly once');
+  assert.match(html, /id="empLinkVal"/);
+  assert.match(html, /onclick="empCopyLink\(\)"/);
+  assert.match(html, /<b>This link is shown once and will not be shown again\.<\/b>/);
+  assert.match(html, /14 days/);
+  assert.match(html, /nobody else/);
+  assert.equal(A.emp.menu, '', 'the menu closes behind it');
+  assert.ok(html.includes(sandbox.esc(NASTY) + '’s one-click link'), 'her name is escaped in the heading');
+
+  // copy: the link goes to the clipboard, and the link itself is never put in a toast
+  let copied = '';
+  sandbox.navigator = { clipboard: { writeText: (t) => { copied = t; return Promise.resolve(); } } };
+  A.empCopyLink(); await tick();
+  assert.equal(copied, URL_);
+  assert.ok(toasts.some((t) => /Link copied/.test(t)));
+  assert.ok(!toasts.some((t) => String(t).includes('tok-abc')));
+  sandbox.navigator = {};
+
+  // "Done" wipes it
+  A.empLinkHide();
+  assert.equal(A.emp.link, null);
+  assert.ok(!el('empRoot').innerHTML.includes('tok-abc'));
+
+  // opening somebody else, leaving the screen and signing out each drop it too
+  for (const close of [() => A.empOpen('s2'), () => A.empOnRender('home'), () => A.employeesForget()]) {
+    await loaded(); A.empOpen('s1'); await tick();
+    rpcs.staff_link_new = () => ({ data: { ok: true, token: 'tok-abc' }, error: null });
+    await A.empLinkGo('s1'); await tick();
+    assert.ok(el('empRoot').innerHTML.includes('tok-abc'));
+    close(); A.empForcePaint();
+    assert.equal(A.emp.link, null);
+    assert.ok(!el('empRoot').innerHTML.includes('tok-abc'), 'the link never survives the panel');
+  }
+  A.empCopyLink();   // nothing to copy: nothing happens
+});
+
+test('a link that finishes after he has opened someone else is never shown under the wrong name', async () => {
+  await loaded();
+  A.empOpen('s1'); await tick();
+  let land;
+  rpcs.staff_link_new = () => new Promise((r) => { land = () => r({ data: { ok: true, token: 'for-s1' }, error: null }); });
+  const p = A.empLinkGo('s1');
+  await tick();
+  assert.match(A.empMenuHTML(A.emp.list.find((x) => x.id === 's1'), A.empCtx()), /Making a link…/);
+  A.empLinkGo('s1');                                  // a second click while it is being made does nothing
+  A.empOpen('s2'); await tick();
+  land(); await p;
+  assert.equal(A.emp.link, null);
+  assert.ok(!el('empRoot').innerHTML.includes('for-s1'));
+  assert.equal(calls.filter((c) => c.rpc === 'staff_link_new').length, 1);
+});
+
+test('a refused link says why, in the panel and out loud', async () => {
+  await loaded();
+  A.empOpen('s1'); await tick();
+  rpcs.staff_link_new = () => ({ data: null, error: { code: 'P0001', message: 'That person is revoked. Restore them first.' } });
+  await A.empLinkGo('s1');
+  assert.equal(A.emp.link, null);
+  assert.match(el('empRoot').innerHTML, /role="alert">That person is revoked\. Restore them first\./);
+  assert.ok(toasts.some((t) => /revoked/.test(t)));
+});
+
+test('when the clipboard says no, the code or the link is selected instead of the copy silently failing', async () => {
+  await loaded();
+  A.empOpen('s1'); await tick();
+  await A.empCodeGo('s1'); await tick();
+  const picked = [];
+  sandbox.document.createRange = () => ({ selectNodeContents(n) { picked.push(n.id); } });
+  sandbox.getSelection = () => ({ removeAllRanges() {}, addRange() {} });
+  sandbox.navigator = { clipboard: { writeText: () => Promise.reject(new Error('NotAllowedError')) } };
+  A.empCopyCode(); await tick();
+  assert.deepEqual(picked, ['empCodeVal'], 'the code box is selected, whatever the clipboard error was');
+  assert.ok(toasts.some((t) => /The code is selected/.test(t)));
+  delete sandbox.document.createRange; delete sandbox.getSelection; sandbox.navigator = {};
+});
+
+/* ───────────── perfection pass: the chat while he is using it ───────────── */
+
+test('her new message appears while he is typing a reply, and his words are left alone', async () => {
+  await loaded();
+  tableAnswer = (st) => (st.table === 'channel_messages' ? { data: MSGS(), error: null } : { data: [], error: null });
+  A.empOpen('s1'); await tick();
+  sandbox.document.activeElement = el('empDraft');
+  const before = el('empRoot').innerHTML;
+  tableAnswer = (st) => (st.table === 'channel_messages'
+    ? { data: MSGS().concat([{ id: 'm4', author_user: 's1u', body: 'one more thing from her', created_at: '2026-11-24T09:20:00Z', msg_kind: 'chat' }]), error: null }
+    : { data: [], error: null });
+  await A.empLoadMessages(true); await tick();
+  assert.match(el('empLive').innerHTML, /one more thing from her/, 'the thread is redrawn');
+  assert.equal(el('empRoot').innerHTML, before, 'the send box and everything around it is not touched');
+});
+
+test('a refresh that changed nothing paints nothing, and one that did leaves him where he was reading', async () => {
+  await loaded();
+  tableAnswer = (st) => (st.table === 'channel_messages' ? { data: MSGS(), error: null } : { data: [], error: null });
+  A.empOpen('s1'); await tick();
+  const root = el('empRoot');
+  let writes = 0, html = root.innerHTML;
+  Object.defineProperty(root, 'innerHTML', { get: () => html, set: (v) => { writes++; html = v; }, configurable: true });
+  await A.empLoadMessages(true); await tick();
+  assert.equal(writes, 0, 'the 10-second tick does not redraw an unchanged chat');
+  // he has scrolled up to read; a new message must not drag him to the bottom
+  const thread = el('empThread'); thread.scrollHeight = 2000; thread.clientHeight = 400; thread.scrollTop = 300;
+  tableAnswer = (st) => (st.table === 'channel_messages'
+    ? { data: MSGS().concat([{ id: 'm5', author_user: 's1u', body: 'newer', created_at: '2026-11-24T09:30:00Z', msg_kind: 'chat' }]), error: null }
+    : { data: [], error: null });
+  await A.empLoadMessages(true); await tick();
+  assert.equal(writes, 1);
+  assert.equal(thread.scrollTop, 300, 'still where he was reading');
+  // at the bottom, he follows the conversation down
+  thread.scrollTop = 1600;
+  tableAnswer = (st) => (st.table === 'channel_messages'
+    ? { data: MSGS().concat([{ id: 'm6', author_user: 's1u', body: 'newest', created_at: '2026-11-24T09:40:00Z', msg_kind: 'chat' }]), error: null }
+    : { data: [], error: null });
+  await A.empLoadMessages(true); await tick();
+  assert.equal(thread.scrollTop, 2000);
+});
+
+test('the messages and her "Seen" time are asked for together, and the paint does not wait for mark-read', async () => {
+  await loaded();
+  let open = 0, most = 0;
+  tableAnswer = (st) => new Promise((r) => { open++; most = Math.max(most, open); setTimeout(() => { open--; r(st.table === 'channel_messages' ? { data: MSGS(), error: null } : { data: [], error: null }); }, 10); });
+  let markDone = false;
+  rpcs.staff_mark_read = () => new Promise((r) => setTimeout(() => { markDone = true; r({ data: null, error: null }); }, 60));
+  A.empOpen('s1');                                   // s1 has 3 unread
+  await tick(35);
+  assert.equal(most, 2, 'two lookups in flight at once');
+  assert.match(el('empRoot').innerHTML, /perfect/, 'the messages are on screen');
+  assert.equal(markDone, false, 'before mark-read has answered');
+  await tick(60);
+});
+
+test('signing out forgets a half-filled Add form too', async () => {
+  await loaded();
+  A.emp.adding = true; A.emp.addName = 'Half Typed'; A.emp.addEmail = 'half@typed.example';
+  A.employeesForget();
+  assert.equal(A.emp.addName, ''); assert.equal(A.emp.addEmail, '');
+  assert.equal(A.emp.link, null);
 });

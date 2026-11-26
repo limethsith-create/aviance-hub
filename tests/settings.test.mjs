@@ -130,3 +130,30 @@ test('the card loads into the page and Save reads the fields off the screen', as
   await stLoadBiz();
   assert.match(elements.stBiz.innerHTML, /Only the owner can see this\./);
 });
+
+/* ───────────── perfection pass ───────────── */
+test('errors read as plain sentences; the database\'s own plain messages pass through', async () => {
+  for (const raw of ['TypeError: Failed to fetch', 'JWT expired', 'permission denied for table biz_settings',
+    'Could not find the function public.biz_get in the schema cache', 'duplicate key value violates unique constraint "calendar_settings_pkey"']) {
+    rpcFail = { message: raw };
+    const r = await stBiz();
+    assert.equal(r.ok, false);
+    assert.doesNotMatch(r.error, /jwt|function|permission denied|fetch|schema|constraint|table|TypeError/i, raw);
+    assert.match(r.error, /^[A-Z].*\.$/s);
+  }
+  rpcFail = { message: 'Only the owner can change these.' };
+  assert.equal((await stSaveBiz({ address: 'x' })).error, 'Only the owner can change these.');
+});
+
+test('"What you can do" is in his words, and no longer points at a screen that is not there', async () => {
+  assert.equal(stRoleWord('admin'), 'Owner');
+  assert.equal(stRoleWord('employee'), 'Team member');
+  assert.equal(stRoleWord(undefined), 'Team member');
+  el('stMe');
+  const realFrom = fakeSb.from;
+  fakeSb.from = () => { const b = { select: () => b, eq: () => b, maybeSingle: async () => ({ data: { name: 'Limethsith', email: 'l@example.com', role: 'admin' }, error: null }) }; return b; };
+  try { await stLoadMe(); } finally { fakeSb.from = realFrom; }
+  const shown = text(elements.stMe.innerHTML);
+  assert.match(shown, /What you can do Only the owner can change this Owner/);
+  assert.doesNotMatch(shown, /Team screen|admin/);
+});

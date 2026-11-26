@@ -67,7 +67,7 @@ vm.runInContext(SRC + `
   clTallyHtml,clLeadHtml,clActionsHtml,clCallbackHtml,clBookHtml,clBookedHtml,clScriptHtml,
   clScriptItemHtml,clOk,clErr,clSay,clIsNotReady,clUseClient,clRpc,clSignIn,clSignOut,clSession,
   clOnSignedOut,clMe,clNext,clLog,clSlots,clBook,
-  clLinkToken,clForgetLinkToken,clLinkProblem,clClaimLink,CL_LINK_BAD,
+  clLinkToken,clForgetLinkToken,clLinkProblem,clClaimLink,CL_LINK_BAD,clTheirTime,
   CL_OUTCOMES,CL_SCRIPT,CL_OWNER,CL_URL,CL_KEY,CL_OFFLINE,CL_BAD_CODE,CL_NO_ACCOUNT,
   CL_NOT_READY,CL_NO_LEADS,CL_MAX_NOTE,CL_SLOT_DAYS};`,
   sandbox, { filename: 'caller-page.js' });
@@ -161,6 +161,11 @@ test('the link checker can also turn her away before she gets here', () => {
   assert.equal(A.clLinkProblem(), A.CL_LINK_BAD, 'anything we do not recognise reads as a dead link');
   reset(); atUrl('', '');
   assert.equal(A.clLinkProblem(), '', 'and nothing is said when she simply opened the page');
+  // a reason that happens to be the name of something built in is still just an unknown reason
+  for (const odd of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    reset(); atUrl('', '?link=' + odd);
+    assert.equal(A.clLinkProblem(), A.CL_LINK_BAD, odd + ' must read as a dead link, not as code');
+  }
 });
 
 test('without a browser around, the link code stays quiet instead of throwing', async () => {
@@ -803,4 +808,53 @@ test('an rpc that throws, or answers nothing at all, is still {ok,data,error}', 
     assert.equal(typeof out.ok, 'boolean', fn + ' answers {ok,...}');
     assert.ok('data' in out && 'error' in out, fn + ' answers {data,error}');
   }
+});
+
+/* ───────────── perfection pass ───────────── */
+
+/* She rings other countries. The slot she taps is drawn on HER clock; the time she must say out loud
+   is the PROSPECT'S. Both are on the chip, so she never reads a Cairo time to someone in New York. */
+test('each free time also shows the time on the prospect\'s clock', () => {
+  reset();
+  const at = new Date(Date.UTC(2026, 10, 26, 15, 0, 0));           // 15:00 UTC = 10:00 in New York (EST)
+  const hers = ('0' + at.getHours()).slice(-2) + ':' + ('0' + at.getMinutes()).slice(-2);
+  const theirs = A.clTheirTime(at, 'America/New_York');
+  if (hers !== '10:00') assert.equal(theirs, 'Thu 10:00');
+  assert.equal(A.clTheirTime(at, 'Asia/Tokyo'), 'Fri 00:00', 'the day is named, because it can be a different day for them');
+  assert.equal(A.clTheirTime(at, ''), '', 'no zone on the lead: nothing is guessed');
+  assert.equal(A.clTheirTime(at, 'Mars/Phobos'), '', 'a zone nobody knows: nothing is guessed');
+  assert.equal(A.clTheirTime('not a date', 'America/New_York'), '');
+  // her own zone: no second time, because it would only repeat the first
+  const mine = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  assert.equal(A.clTheirTime(at, mine), '');
+
+  const now = new Date(Date.UTC(2026, 10, 25, 9, 0, 0));
+  const html = A.clBookHtml({ lead: LEAD({ timezone: 'Asia/Tokyo' }), slots: [at.toISOString()], now });
+  assert.match(html, /<span class="cl-chip-their">Fri 00:00 for them<\/span>/);
+  assert.match(html, /time on their clock/, 'and she is told which one to read out');
+  const plainHtml = A.clBookHtml({ lead: LEAD({ timezone: '' }), slots: [at.toISOString()], now });
+  assert.doesNotMatch(plainHtml, /cl-chip-their|their clock/);
+  // and it is on the confirmation she reads back
+  const done = A.clBookedHtml({ starts_at: at.toISOString(), name: 'Steve', timezone: 'Asia/Tokyo' }, now);
+  assert.match(done, /On their clock: Fri 00:00/);
+  assert.doesNotMatch(A.clBookedHtml({ starts_at: at.toISOString(), name: 'Steve' }, now), /their clock/);
+  // a lead's timezone comes from a stranger's CSV: it is never put on the page raw
+  assert.doesNotMatch(A.clBookHtml({ lead: LEAD({ timezone: '<img src=x>' }), slots: [at.toISOString()], now }), /<img/);
+});
+
+test('clBook hands the prospect\'s zone on to the confirmation', async () => {
+  reset();
+  rpcs.caller_book = () => ({ data: { booking_id: 'b1', starts_at: '2026-11-26T15:00:00Z' }, error: null });
+  const r = await A.clBook({ lead_id: 'l1', start: '2026-11-26T15:00:00Z', name: 'Steve', email: 'steve@stone.example', timezone: 'Asia/Tokyo' });
+  assert.equal(r.ok, true);
+  assert.equal(r.data.timezone, 'Asia/Tokyo');
+});
+
+test('callers.html: the "Booked." panel stays until she taps Next call', () => {
+  // logging the booking brings up the next lead, but must not wipe the words she is reading out
+  const log = HTML.slice(HTML.indexOf('async function log('), HTML.indexOf('/* "Check again"'));
+  assert.match(log, /const keep = sheet === 'booked';/);
+  assert.match(log, /if \(!keep\) \{ sheet = ''; book = null; \}/);
+  assert.doesNotMatch(log, /lead = r\.data\.next;\s*sheet = '';/, 'the old unconditional clear is gone');
+  assert.match(HTML, /data-cl-onwards'\)\) \{ sheet = ''; booked = null; book = null; drawSheet\(\); return; \}/, 'Next call is what closes it');
 });

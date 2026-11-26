@@ -18,9 +18,7 @@
 
    Won goes through the database: plCloseWon calls the `close_won` rule, which makes the
    client, their channel, the agreement and the first invoice, and queues the email that
-   carries both. The panel's Won button opens a small plan picker first. plWon (the older
-   path that wrote the client row from here) is kept for anything that still calls it,
-   but no button does.
+   carries both. The panel's Won button opens a small plan picker first.
 
    The research engine stays. Nothing here writes to research_briefs or research_log; we
    read what it produced and lay it out. A brief is someone else's jsonb, so every
@@ -30,8 +28,7 @@
    `error` is plain words, safe to show a person. Every screen draws with zero rows.
    ================================================================================= */
 
-/* The booking's stage, in pipeline order. */
-const PL_STATUSES = ['new', 'held', 'no_show', 'contacted', 'agreement_sent', 'won', 'lost'];
+/* A booking's status: the pill colour and the words for it. */
 const PL_STATUS_WORDS = {
   new: ['blue', 'Call booked'], booked: ['blue', 'Call booked'], brief_sent: ['blue', 'Call booked'],
   cancelled: ['grey', 'Cancelled'], held: ['amber', 'Call done'], no_show: ['red', 'No-show'],
@@ -58,14 +55,9 @@ const PL_NEVER_HELD = ['no_show', 'ghosted'];
 const PL_RUNNING_MS = 30 * 60000;
 const PL_BRIEF_DEPTH = 3;
 
-/* The plans a new sale may be put on. The $300 Pilot is retired: it is no longer
-   offered anywhere, so it is not in this list. */
-const PL_PLANS = ['starter', 'growth', 'scale'];
-/* Every plan that has ever been sold, so a client already on a retired plan still
-   reads correctly (their label, their price, their guarantee wording). */
-const PL_PLAN_WORDS = { pilot: 'Pilot', starter: 'Starter', growth: 'Growth', scale: 'Scale' };
-/* Retired: still rendered from history, never offered and never coloured as its own. */
-const PL_RETIRED_PLANS = ['pilot'];
+/* The plans a sale may be put on: the three on offer (FN_PLANS, finance.js). A plan
+   code left on an old row is refused by plCloseWon and read as "Retired plan". */
+const PL_PLANS = FN_PLANS;
 
 const pl = { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30, winning: false };
 
@@ -101,7 +93,6 @@ function plRel(v, now) {
   const n = a < 90 ? '1 min' : a < 3600 ? Math.round(a / 60) + ' min' : a < 36 * 3600 ? Math.round(a / 3600) + ' h' : Math.round(a / 86400) + (Math.round(a / 86400) === 1 ? ' day' : ' days');
   return diff >= 0 ? n + ' ago' : 'in ' + n;
 }
-function plStatusWord(s) { const m = PL_STATUS_WORDS[s] || ['grey', String(s || '—')]; return m[1]; }
 function plStatusPill(s) { const m = PL_STATUS_WORDS[s] || ['grey', String(s || '—')]; return `<span class="pill ${m[0]}">${esc(m[1])}</span>`; }
 function plLossWord(r) { return PL_LOSS_WORDS[r] || String(r || ''); }
 function plIsOpen(b) { return Boolean(b) && !PL_CLOSED.includes(String(b.status)); }
@@ -338,57 +329,6 @@ function plResearchNow(bookingId) {
 
 /* ---- the outcome: won --------------------------------------------- */
 
-/* Won on the discovery call. The plan decides the number of calls and the fee — they come
-   from plan_prices and from nowhere else. One booking can only ever make one client. */
-async function plWon(bookingId, opts) {
-  const o = opts || {};
-  if (!bookingId) return plErr('No booking was asked for.');
-  if (!o.plan) return plErr('Pick the plan they bought first.');
-  /* the Pilot is retired: no new client may be put on it */
-  if (PL_RETIRED_PLANS.includes(String(o.plan))) return plErr('That plan is retired. Pick ' + PL_PLANS.map(plPlanWord).join(', ') + '.');
-
-  const got = await plRun(() => sb.from('discovery_bookings').select('*').eq('id', bookingId).maybeSingle(), null);
-  if (!got.ok) return got;
-  const b = got.data;
-  if (!b) return plErr('That booking is not here any more.');
-
-  /* already a client? never make a second one from the same booking */
-  const seen = await plRun(() => sb.from('clients').select('*').eq('booking_id', bookingId).limit(1), []);
-  if (!seen.ok) return seen;
-  if (Array.isArray(seen.data) && seen.data.length) {
-    return plErr(plWho(b) + ' is already a client from this booking, so nothing was changed.');
-  }
-
-  /* the price comes from plan_prices */
-  const price = await plRun(() => sb.from('plan_prices').select('*').eq('plan', o.plan).maybeSingle(), null);
-  if (!price.ok) return price;
-  const p = price.data;
-  if (!p) return plErr('That plan is not in the price list.');
-  const term = o.term === '3month' ? '3month' : 'monthly';
-  const fee = term === '3month' && p.three_month_fee ? p.three_month_fee : p.monthly_fee;
-
-  const made = await plRun(() => sb.from('clients').insert({
-    booking_id: bookingId,
-    company: b.company || plWho(b),
-    contact_name: b.name || '',
-    contact_email: b.email || '',
-    website: b.website || null,
-    plan: p.plan,
-    term,
-    calls_promised: p.calls_promised,
-    monthly_fee: fee,
-    stage: 'won',
-    owner_id: o.owner || o.ownerId || null,
-  }).select().single(), null);
-  if (!made.ok) return made;
-
-  const moved = await plRun(() => sb.from('discovery_bookings')
-    .update({ status: 'won' }).eq('id', bookingId).select().single(), null);
-  if (!moved.ok) return moved;
-
-  return plOk({ client: made.data, booking: moved.data });
-}
-
 /* Won, the whole way: one database rule makes the client, their channel, the agreement
    and the first invoice, and queues the email with both links in it. Its refusals are
    already plain words ('That call is already a client.'), so they are passed on as they are.
@@ -397,10 +337,10 @@ async function plCloseWon(bookingId, plan, term) {
   if (!bookingId) return plErr('No booking was asked for.');
   const p = String(plan || '');
   if (!p) return plErr('Pick the plan they bought first.');
-  if (PL_RETIRED_PLANS.includes(p)) return plErr('That plan is retired. Pick ' + PL_PLANS.map(plPlanWord).join(', ') + '.');
+  /* a plan code from before the three plans: refused in words, never mapped to another */
+  if (fnPlanRetired(p)) return plErr(FN_RETIRED_SAYS);
   if (!PL_PLANS.includes(p)) return plErr('That plan is not in the price list.');
-  /* a one-off plan has no term to choose */
-  const t = PL_RETIRED_PLANS.includes(p) ? 'monthly' : (term === '3month' ? '3month' : 'monthly');
+  const t = term === '3month' ? '3month' : 'monthly';
   return plRun(() => sb.rpc('close_won', { p_booking: bookingId, p_plan: p, p_term: t }), null);
 }
 
@@ -415,15 +355,12 @@ async function plLost(bookingId, reason) {
   if (!plIsLossReason(reason)) {
     return plErr('Pick why we lost them: ' + PL_LOSS_REASONS.map((r) => plLossWord(r).toLowerCase()).join(', ') + '.');
   }
-  // TODO: discovery_bookings needs `lost_reason text` and `lost_at timestamptz` for this
-  // (the loss reason has nowhere else to live). Until the migration is applied the
-  // database will refuse the write and the error below is shown as it is.
   return plRun(() => sb.from('discovery_bookings').update({
     status: 'lost', lost_reason: String(reason), lost_at: new Date().toISOString(),
   }).eq('id', bookingId).select().single(), null);
 }
 
-/* The call happened. Whether we won it is a separate answer (plWon / plLost). */
+/* The call happened. Whether we won it is a separate answer (plCloseWon / plLost). */
 async function plHeld(bookingId) {
   if (!bookingId) return plErr('No booking was asked for.');
   return plRun(() => sb.from('discovery_bookings').update({ status: 'held' })
@@ -488,11 +425,8 @@ function plRangeDays(days, now) {
 
 /* ---- what the Calendar asks about a booking ---------------------- */
 
-function plResearchPill(row) {
-  if (row && row.has_brief) return '<span class="pill green">Brief ready</span>';
-  return '<span class="pill grey">No brief yet</span>';
-}
-function plPlanWord(p) { return PL_PLAN_WORDS[String(p || '')] || ''; }
+/* "growth" → "Growth"; a plan code no longer on offer → "Retired plan" (finance.js). */
+function plPlanWord(p) { return fnPlanWord(p); }
 /* A booking whose call has been and gone with nothing recorded about it. It is "open"
    by plIsOpen — never by a list of open words, which once hid every real booking — and
    nobody has yet said the call was held or that no one came. */
@@ -534,9 +468,11 @@ function renderPlOutcome(d) {
   const b = d.booking, id = b.id, s = String(b.status);
   if (d.client) {
     const c = d.client, inv = d.invoice;
-    /* a one-off plan (the retired Pilot) promised its calls once, not every month */
-    const calls = String(c.calls_promised || 0) + (PL_RETIRED_PLANS.includes(String(c.plan)) ? ' calls' : ' calls a month');
-    return `<div class="card pl-pad pl-outcome"><b>Won — they are a client</b><p class="muted">${esc(c.company || '')} is on ${esc(plPlanWord(c.plan) || 'a plan')}${String(c.term) === '3month' ? ' · 3 months' : ''}, ${esc(calls)}. This booking cannot make a second client.</p>
+    /* an old client on a plan no longer on offer: said so, with none of its old terms */
+    const on = fnPlanRetired(c.plan)
+      ? 'a retired plan'
+      : (plPlanWord(c.plan) || 'a plan') + (String(c.term) === '3month' ? ' · 3 months' : '') + ', ' + String(c.calls_promised || 0) + ' calls a month';
+    return `<div class="card pl-pad pl-outcome"><b>Won — they are a client</b><p class="muted">${esc(c.company || '')} is on ${esc(on)}. This booking cannot make a second client.</p>
       ${inv ? `<p class="pl-small">${esc('Invoice ' + (inv.number || '') + ' · ' + plUsd(inv.amount) + ' ' + plInvoiceWord(inv))}</p>` : ''}
       <div class="pl-acts"><button type="button" class="btn" onclick="plOpenClient(${plAttr(c.id)})">Open client →</button></div></div>`;
   }
@@ -571,33 +507,32 @@ function plInvoiceWord(inv) {
   const s = String((inv && inv.status) || 'sent');
   return s === 'paid' ? 'paid' : s === 'void' ? 'cancelled' : s === 'draft' ? 'not sent yet' : s === 'overdue' ? 'sent, overdue' : 'sent';
 }
+/* Only a plan on offer has a price to say: anything else gets no words and no amount. */
 function plPrice(plan, prices) {
   const k = String(plan || '');
+  if (!PL_PLANS.includes(k)) return null;
   return (Array.isArray(prices) ? prices : []).find((p) => p && String(p.plan) === k) || null;
 }
-/* A one-off plan (the retired Pilot) has no term; a plan without a 3-month price is
-   monthly whatever was picked. Kept so an old Pilot client still reads correctly. */
+/* A plan without a 3-month price in the list is monthly whatever was picked. */
 function plTermOf(plan, term, prices) {
   const p = plPrice(plan, prices);
-  if (PL_RETIRED_PLANS.includes(String(plan)) || (p && (!p.is_recurring || !Number(p.three_month_fee)))) return 'monthly';
+  if (p && !Number(p.three_month_fee)) return 'monthly';
   return term === '3month' ? '3month' : 'monthly';
 }
-/* What the first invoice comes to: a month, the quarter, or a one-off once. */
+/* What the first invoice comes to: one month, or the three months billed up front. */
 function plFirstInvoice(plan, term, prices) {
   const p = plPrice(plan, prices); if (!p) return null;
-  const t = plTermOf(plan, term, prices);
-  return t === '3month' ? Number(p.three_month_fee) * 3 : Number(p.monthly_fee);
+  return plTermOf(plan, term, prices) === '3month' ? Number(p.three_month_fee) * 3 : Number(p.monthly_fee);
 }
-/* "Growth · monthly — 10 calls, $3,000 a month". '' when the price list is not loaded. */
+/* "Growth · monthly — 10 calls a month, $3,000 a month". '' when the price list is not loaded. */
 function plPriceWords(plan, term, prices) {
   const p = plPrice(plan, prices); if (!p) return '';
-  const name = plPlanWord(plan) || String(plan);
+  const name = plPlanWord(plan);
   const calls = Number(p.calls_promised) || 0;
-  if (PL_RETIRED_PLANS.includes(String(plan)) || !p.is_recurring) return name + ' — ' + plUsd(p.monthly_fee) + ' once, ' + calls + ' calls';
   if (plTermOf(plan, term, prices) === '3month') {
-    return name + ' · 3 months — ' + calls + ' calls a month, ' + plUsd(p.three_month_fee) + ' a month (' + plUsd(Number(p.three_month_fee) * 3) + ' for the quarter)';
+    return name + ' · 3 months — ' + calls + ' calls a month, ' + plUsd(p.three_month_fee) + ' a month (' + plUsd(Number(p.three_month_fee) * 3) + ' billed up front)';
   }
-  return name + ' · monthly — ' + calls + ' calls, ' + plUsd(p.monthly_fee) + ' a month';
+  return name + ' · monthly — ' + calls + ' calls a month, ' + plUsd(p.monthly_fee) + ' a month';
 }
 /* The one line asked before anything is sent. */
 function plWonConfirmWords(b, plan, term, prices) {
@@ -631,7 +566,7 @@ function renderPlWonPicker(b, meta) {
   const price = picked ? plPriceWords(picked, 'monthly', meta.prices) : '';
   return `<div id="plWonPick" class="pl-won-pick pl-outcome"${meta.open ? '' : ' style="display:none"'}>
     ${plNotHappened(b, meta.now) ? '<p class="pl-small pl-warn">This call hasn’t happened yet.</p>' : ''}
-    <div class="field"><label for="plPlan">Which plan did they buy</label><select id="plPlan" data-tk-form onchange="plWonTermShow()"><option value="">Pick the plan</option>${PL_PLANS.map((p) => `<option value="${esc(p)}"${p === picked ? ' selected' : ''}>${esc(plPlanWord(p))}</option>`).join('')}</select>${!b.plan && rec ? '<p class="muted pl-small">The brief recommends ' + esc(plPlanWord(rec)) + '.</p>' : ''}</div>
+    <div class="field"><label for="plPlan">Which plan did they buy</label><select id="plPlan" data-tk-form onchange="plWonTermShow()"><option value="">Pick the plan</option>${PL_PLANS.map((p) => `<option value="${esc(p)}"${p === picked ? ' selected' : ''}>${esc(plPlanWord(p))}</option>`).join('')}</select>${picked === rec && rec && String(b.plan) !== rec ? '<p class="muted pl-small">The brief recommends ' + esc(plPlanWord(rec)) + '.</p>' : ''}</div>
     <div class="field" id="plTermField"><label for="plTerm">Term</label><select id="plTerm" data-tk-form onchange="plWonTermShow()"><option value="monthly">Monthly</option><option value="3month">3 months</option></select></div>
     <p class="pl-small" id="plWonPrice">${esc(price)}</p>
     <div class="pl-acts" id="plWonAskRow"><button class="btn" id="plWonGo" onclick="plWonAsk(${plAttr(id)})">Mark won and send the pack</button></div>
@@ -733,7 +668,6 @@ async function plLoadFunnel(days) {
 
 /* ---- the buttons -------------------------------------------------- */
 
-function plOpenFunnel() { if (typeof render === 'function') render('funnel'); }
 /* After any outcome is written: read the booking again, then let the Calendar redraw
    itself and its panel (mtBookingChanged, meetings.js). */
 async function plChanged(id) {
@@ -754,17 +688,12 @@ function plOpenWon() {
   plWonTermShow();
   return show;
 }
-/* Every plan on offer has a term, so the term choice always shows. The price beside
-   the button follows the plan and term picked. */
+/* The plan or the term was changed: the price beside the button follows it, and a
+   confirmation already on show goes back a step. */
 function plWonTermShow() {
-  const doc = typeof document !== 'undefined' ? document : null;
-  const f = doc ? doc.getElementById('plTermField') : null;
-  if (!f) return;
+  const w = typeof document !== 'undefined' ? document.getElementById('plWonPrice') : null;
   const plan = plPick('plPlan');
-  f.style.display = '';
-  const prices = pl.one && pl.one.prices;
-  const w = doc.getElementById('plWonPrice');
-  if (w) w.textContent = plan ? plPriceWords(plan, plPick('plTerm'), prices) : '';
+  if (w) w.textContent = plan ? plPriceWords(plan, plPick('plTerm'), pl.one && pl.one.prices) : '';
   plWonBack();
 }
 /* "Mark won and send the pack" asks once, in one line, before anything is sent. */

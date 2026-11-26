@@ -15,8 +15,7 @@
 
    The money is not ours. Prices come from plan_prices and invoices come from
    finance.js (fnRaiseInvoice / fnInvoiceWork / fnInvoices / fnMarkInvoiceSent /
-   fnMarkInvoicePaid / fnStartSending / fnOpenMonth). The $300 Pilot credit is
-   spent once by the database (clients.pilot_credit_used) — we only show it.
+   fnMarkInvoicePaid / fnStartSending / fnOpenMonth).
 
    Every function returns {ok, data, error} and never throws (same shape as
    finance.js). `error` is plain words, safe to show a person.
@@ -322,6 +321,9 @@ async function obSignOff(clientId){
 
 /* ---- the agreement ------------------------------------------------ */
 
+/* "growth" -> "Growth"; a plan code no longer on offer -> "Retired plan" (finance.js). */
+function obPlanWord(plan){ return fnPlanWord(plan) || obText(plan) }
+
 /* Build the agreements row from the client and plan_prices. The fee is read,
    never worked out here: plan_prices is the only place a price lives. */
 async function obDraftAgreement(clientId){
@@ -334,7 +336,9 @@ async function obDraftAgreement(clientId){
   if (!existing.ok) return existing;
   if (existing.data.row) return obOk(existing.data.row);   // never draft twice
 
-  const plans = typeof fnPlans === 'function' ? await fnPlans() : obErr('The price list is not loaded.');
+  /* a client left on a plan that is no longer sold gets no new agreement */
+  if (fnPlanRetired(cl.plan)) return obErr('That plan is retired. They need to be on Starter, Growth or Scale before an agreement can be drafted.');
+  const plans = await fnPlans();
   if (!plans.ok) return obErr(plans.error);
   const p = (plans.data || []).find(x => x && x.plan === cl.plan);
   if (!p) return obErr('There is no price on file for that plan.');
@@ -432,7 +436,7 @@ function obRenderOnboarding(){
   const rows = ob.list.map(r => {
     const name = obText(r.client && r.client.company) || 'A client';
     const go = `obOpenClient(${obArg(r.clientId)})`;
-    return `<div class="ob-row"><button type="button" class="ob-who ob-go" onclick="${go}"><b>${obEsc(name)}</b><span class="muted">${obEsc(obText(r.client && r.client.plan))}</span></button>
+    return `<div class="ob-row"><button type="button" class="ob-who ob-go" onclick="${go}"><b>${obEsc(name)}</b><span class="muted">${obEsc(obPlanWord(r.client && r.client.plan))}</span></button>
       ${obTickRow(r.items)}
       <span class="ob-block${r.ready ? ' ready' : ''}">${obEsc(r.ready ? 'Ready to start' : (r.blocking || 'Something still to do'))}</span></div>`;
   }).join('');
@@ -476,7 +480,7 @@ function obRenderInputsForm(inputs){
 function obRenderAgreementCard(ag, clientId){
   const row = ag && ag.row;
   return `<div class="card ob-card"><div class="ob-card-head"><b>The agreement</b><span class="pill ${obAgreementState(row) === 'signed' ? 'green' : 'grey'}">${obEsc(obAgreementWords(row))}</span></div>
-    ${row ? `<p class="muted">${obEsc(obText(row.client_company))} · ${obEsc(obText(row.plan))} · ${obEsc(row.term === '3month' ? 'three-month term' : 'monthly')} · ${obEsc(obMoney(row.monthly_fee))} a month</p>`
+    ${row ? `<p class="muted">${obEsc(obText(row.client_company))} · ${obEsc(obPlanWord(row.plan))}${fnPlanRetired(row.plan) ? '' : ` · ${obEsc(row.term === '3month' ? '3-month term' : 'monthly')} · ${obEsc(obMoney(row.monthly_fee))} a month`}</p>`
           : `<p class="muted">No agreement has been drafted for them yet.</p>`}
     ${row ? '' : `<button type="button" class="btn" onclick="obDraftAgreementGo(${obArg(clientId)})">Draft the agreement</button>`}</div>`;
 }
@@ -512,13 +516,6 @@ function obOpenClient(clientId){
 
 /* ---- screen: billing ---------------------------------------------- */
 
-/* The Pilot's $300 is credited once, by the database. Where an invoice carries
-   it we say so on that invoice, and only there, so it is plain it was spent. */
-function obPilotLine(inv){
-  const credit = Number(inv && inv.pilot_credit) || 0;
-  if (credit <= 0) return '';
-  return `<span class="ob-credit">Pilot credit applied once: ${obEsc(obMoney(inv.gross_amount))} less ${obEsc(obMoney(credit))} = ${obEsc(obMoney(inv.amount))}</span>`;
-}
 function obInvoiceRow(inv){
   const st = obText(inv.status).toLowerCase();
   const btns = [];
@@ -526,7 +523,7 @@ function obInvoiceRow(inv){
   if (st !== 'paid' && st !== 'void' && st !== 'cancelled') btns.push(`<button type="button" class="btn ghost" onclick="obMarkPaidGo(${obArg(inv.id)})">Mark paid</button>`);
   return `<li class="ob-inv"><span class="ob-inv-no">${obEsc(obText(inv.number) || '—')}</span>
     <span class="ob-inv-who">${obEsc(obText(inv.client_name || inv.company) || '')}</span>
-    <span class="ob-inv-sum"><b>${obEsc(obMoney(inv.amount))}</b> ${obPilotLine(inv)}${inv.due_on ? ` <span class="muted">· due ${obEsc(obText(inv.due_on))}${Number(inv.days_overdue) > 0 ? ` · ${obEsc(String(inv.days_overdue))} days late` : ''}</span>` : ''}</span>
+    <span class="ob-inv-sum"><b>${obEsc(obMoney(inv.amount))}</b>${inv.due_on ? ` <span class="muted">· due ${obEsc(obText(inv.due_on))}${Number(inv.days_overdue) > 0 ? ` · ${obEsc(String(inv.days_overdue))} days late` : ''}</span>` : ''}</span>
     <span class="pill ${st === 'paid' ? 'green' : st === 'sent' ? 'amber' : 'grey'}">${obEsc(obText(inv.status) || 'draft')}</span>
     <span class="ob-inv-btns">${btns.join('')}</span></li>`;
 }

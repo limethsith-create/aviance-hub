@@ -12,7 +12,7 @@
 
 const PCT_ASK_MS = 30000;
 const PCT_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const pct = { open: false, drawn: '', at: 0, data: null, busy: false };
+const pct = { open: false, drawn: '', at: 0, data: null, busy: false, who: '' };
 
 function pctEsc(s){
   if (typeof pcEsc === 'function') return pcEsc(s);
@@ -174,6 +174,11 @@ async function pctMount(ctx){
   const el = typeof document !== 'undefined' && document.getElementById ? document.getElementById('pcTracker') : null;
   if (!el || !ctx || typeof ctx.rpc !== 'function') return;
   pctStyle();
+  /* A different client signing in on the same browser must not be shown the last client's launch plan,
+     not even for the moment before theirs loads. */
+  const h = ctx.home || {};
+  const who = String((h.person && h.person.id) || '') + '|' + String((h.channel && h.channel.id) || '');
+  if (who !== pct.who) { pct.who = who; pct.data = null; pct.at = 0; pct.drawn = ''; pct.open = false; el.innerHTML = ''; }
   if (!el.firstChild) pct.drawn = '';   /* the chat was drawn again from scratch */
   if (pct.data) pctPaint(el);
   if (pct.busy || (pct.at && Date.now() - pct.at < PCT_ASK_MS)) return;
@@ -181,6 +186,7 @@ async function pctMount(ctx){
   let r;
   try { r = await ctx.rpc('portal_journey', {}); } catch (e) { r = { ok: false }; }
   pct.busy = false;
+  if (who !== pct.who) return;          /* someone else signed in while this was on its way */
   pct.at = Date.now();
   if (r && r.ok) pct.data = r.data || null;
   pctPaint(document.getElementById('pcTracker') || el);

@@ -342,78 +342,6 @@ test('ptRaiseRequest, ptAnswerRequest, ptCloseRequest, and a dispute points at f
   assert.deepEqual(open.data.map((r) => r.subject).sort(), ['Hm', 'That call did not match']);
 });
 
-/* ───────────── the conversation ───────────── */
-test('ptChannelFor is idempotent: called twice, one channel, with our team and their people in it', async () => {
-  const cid = seedClient();
-  rows('profiles').push({ id: 'u-owner', role: 'admin', approved: true }, { id: 'u-emp', role: 'employee', approved: true },
-    { id: 'u-waiting', role: 'employee', approved: false }, { id: 'c-1', role: 'client', approved: true });
-  const dana = (await ptAddPerson(cid, { fullName: 'Dana', isPrimary: true })).data;
-
-  const first = shape(await ptChannelFor(cid));
-  assert.equal(first.ok, true);
-  assert.equal(first.data.kind, 'client'); assert.equal(first.data.client_id, cid); assert.equal(first.data.name, 'Stone Roofing');
-
-  const second = await ptChannelFor(cid);
-  assert.equal(second.data.id, first.data.id, 'the second call finds the first channel');
-  assert.equal(rows('channels').length, 1, 'one channel, not two');
-
-  const mem = (await ptMembers(first.data.id)).data;
-  assert.deepEqual(mem.filter((m) => m.user_id).map((m) => m.user_id).sort(), ['u-emp', 'u-owner'], 'our approved team');
-  assert.deepEqual(mem.filter((m) => m.person_id).map((m) => m.person_id), [dana.id], 'and their people');
-  assert.equal(mem.length, 3, 'calling twice did not double the members');
-  assert.equal(mem.find((m) => m.user_id === 'u-owner').member_role, 'owner');
-
-  // a person added later joins on the next call
-  const sam = (await ptAddPerson(cid, { fullName: 'Sam' })).data;
-  await ptChannelFor(cid);
-  assert.equal(rows('channels').length, 1);
-  assert.ok((await ptMembers(first.data.id)).data.some((m) => m.person_id === sam.id));
-
-  // a client with no company falls back to its id, and a channel still appears
-  const bare = 'no-name-co';
-  const b = await ptChannelFor(bare);
-  assert.equal(b.ok, true); assert.equal(b.data.name, bare);
-});
-
-test('ptPost writes as the signed-in person, ptMarkRead sets last_read_at, ptUnread counts what came after', async () => {
-  const cid = seedClient();
-  rows('profiles').push({ id: 'u-owner', role: 'admin', approved: true });
-  const dana = (await ptAddPerson(cid, { fullName: 'Dana' })).data;
-  const ch = (await ptChannelFor(cid)).data;
-
-  assert.equal((await ptUnread(ch.id)).data, 0, 'an empty channel has nothing unread');
-  assert.deepEqual((await ptMessages(ch.id)).data, []);
-
-  const mine = await ptPost(ch.id, '  Welcome aboard.  ');
-  assert.equal(mine.ok, true); assert.equal(mine.data.body, 'Welcome aboard.');
-  assert.equal(mine.data.author_user, 'u-owner'); assert.equal(mine.data.author_person, null);
-  assert.match((await ptPost(ch.id, '   ')).error, /Write a message/);
-  assert.match((await ptPost('', 'x')).error, /Pick a channel/);
-
-  const read = await ptMarkRead(ch.id);
-  assert.equal(read.ok, true); assert.ok(read.data.lastReadAt);
-  assert.ok(rows('channel_members').find((m) => m.user_id === 'u-owner' && m.channel_id === ch.id).last_read_at);
-  assert.equal((await ptUnread(ch.id)).data, 0, 'read up to here');
-
-  // they write two, we write one: only theirs are unread
-  const later = (s) => iso(Date.now() + s * 1000);
-  rows('channel_messages').push(
-    { id: 'm-a', channel_id: ch.id, author_person: dana.id, author_user: null, body: 'Question one', created_at: later(10), deleted_at: null },
-    { id: 'm-b', channel_id: ch.id, author_person: dana.id, author_user: null, body: 'And another', created_at: later(20), deleted_at: null },
-    { id: 'm-c', channel_id: ch.id, author_user: 'u-owner', author_person: null, body: 'On it', created_at: later(30), deleted_at: null },
-    { id: 'm-d', channel_id: ch.id, author_person: dana.id, author_user: null, body: 'Gone', created_at: later(40), deleted_at: later(50) },
-    { id: 'm-e', channel_id: 'other-channel', author_person: dana.id, author_user: null, body: 'Elsewhere', created_at: later(10), deleted_at: null });
-  assert.equal((await ptUnread(ch.id)).data, 2, 'theirs only, deleted and other channels left out');
-
-  const realNow = Date.now; Date.now = () => realNow() + 120000;   // they wrote a minute ago; we read now
-  try { await ptMarkRead(ch.id); } finally { Date.now = realNow; }
-  assert.equal((await ptUnread(ch.id)).data, 0, 'reading clears it');
-  assert.match((await ptUnread('')).error, /Pick a channel/);
-
-  const msgs = await ptMessages(ch.id);
-  assert.deepEqual(msgs.data.map((m) => m.body), ['Welcome aboard.', 'Question one', 'And another', 'On it'], 'oldest first, no deleted');
-});
-
 /* ───────────── who may see what ───────────── */
 test('ptCanSee: our team sees every client; a client is refused another client\'s data', async () => {
   globalThis.authUser = { ...OWNER };
@@ -445,14 +373,13 @@ test('every data function refuses a client another client\'s data in plain words
   globalThis.authUser = { uid: 'c-1', role: 'client', approved: true, clientId: 'stone-roofing', personId: 'p-1' };
   for (const r of [await ptPeople('other-co'), await ptAddPerson('other-co', { fullName: 'X' }), await ptSetPrimary('other-co', 'p-9'),
     await ptInvite('other-co', { email: 'x@y.test' }), await ptInvites('other-co'), await ptRequests('other-co', {}),
-    await ptRaiseRequest('other-co', { subject: 'Hi' }), await ptChannelFor('other-co')]) {
+    await ptRaiseRequest('other-co', { subject: 'Hi' })]) {
     shape(r);
     assert.equal(r.ok, false); assert.equal(r.data, null);
     assert.equal(r.error, 'You do not have access to that client.');
   }
   assert.equal(rows('client_people').length, 0); assert.equal(rows('portal_invites').length, 0);
   assert.equal(rows('client_requests').length, 0); assert.equal(rows('channels').length, 0);
-  assert.equal(await viewClientPeople('other-co'), await viewClientChannel('other-co'), 'both screens say the same thing');
   assert.match(await viewClientPeople('other-co'), /do not have access/);
   assert.equal((await ptPeople('stone-roofing')).ok, true, 'their own client is fine');
 });
@@ -468,10 +395,7 @@ test('every screen renders with zero rows in the database', async () => {
   const reqs = await viewRequests();
   assert.match(reqs, /Nothing open/);
 
-  const chan = await viewClientChannel(cid);
-  assert.match(chan, /No messages yet/); assert.match(chan, /Everything read/);
-  assert.match(chan, /id="ptPostBody"/, 'a box to write');
-  for (const h of [people, reqs, chan]) assert.ok(!/undefined|NaN|\[object/.test(h), h.slice(0, 200));
+  for (const h of [people, reqs]) assert.ok(!/undefined|NaN|\[object/.test(h), h.slice(0, 200));
 
   // and with rows
   rows('profiles').push({ id: 'u-owner', name: 'Owner', role: 'admin', approved: true });
@@ -490,10 +414,6 @@ test('every screen renders with zero rows in the database', async () => {
   assert.match(open, /A call that did not match/); assert.match(open, /Stone Roofing/);
   assert.match(open, /dispute/); assert.match(open, /Owner/);
 
-  const ch = (await ptChannelFor(cid)).data;
-  rows('channel_messages').push({ id: 'm1', channel_id: ch.id, author_person: dana.id, author_user: null, body: 'Hello there', created_at: iso(Date.now()), deleted_at: null });
-  const talk = await viewClientChannel(cid);
-  assert.match(talk, /Hello there/); assert.match(talk, /1 new message/); assert.match(talk, /New messages/);
 
   // the screens' own handlers
   el('ptInviteEmail').value = 'sam@stone.test'; el('ptInviteRole').value = 'manager';
@@ -507,10 +427,6 @@ test('every screen renders with zero rows in the database', async () => {
   const resent = await ptResendFromRow(rows('portal_invites')[0].id);
   assert.equal(resent.ok, true);
   assert.ok(el('ptInviteOnce').innerHTML.includes(resent.data.link) && !el('ptInviteOnce').innerHTML.includes(sent.data.link), 'only the newest link is on the screen');
-  el('ptPostBody').value = 'Writing back';
-  const posted = await ptPostFromForm(ch.id);
-  assert.equal(posted.ok, true); assert.equal(el('ptPostBody').value, '');
-  assert.equal((await ptUnread(ch.id)).data, 0, 'sending marks the channel read');
   el('ptInviteEmail').value = 'bad';
   assert.equal((await ptInviteFromForm(cid)).ok, false);
   assert.ok(toasts.some((t) => /email address/.test(t)), 'the person is told in plain words');
@@ -525,17 +441,15 @@ test('a screen whose database is down still renders, in plain words', async () =
   const people = await viewClientPeople(cid);
   assert.match(people, /role="alert"/); assert.equal(typeof people, 'string');
   assert.match(await viewRequests(), /role="alert"/);
-  assert.match(await viewClientChannel(cid), /role="alert"/);
   shape(await ptPeople(cid)); assert.equal((await ptPeople(cid)).ok, false);
 });
 
 /* ───────────── the house rules ───────────── */
 test('portal.js: {ok,data,error} from every data function even with no database, and no machine anywhere', async () => {
   const names = ['ptPeople', 'ptAddPerson', 'ptSetPrimary', 'ptInvite', 'ptInvites', 'ptRevokeInvite', 'ptResendInvite',
-    'ptRequests', 'ptRaiseRequest', 'ptAnswerRequest', 'ptCloseRequest', 'ptChannelFor', 'ptMembers', 'ptMessages',
-    'ptPost', 'ptMarkRead', 'ptLastRead', 'ptUnread'];
+    'ptRequests', 'ptRaiseRequest', 'ptAnswerRequest', 'ptCloseRequest'];
   for (const n of names) assert.equal(typeof globalThis[n], 'function', n);
-  for (const n of ['viewClientPeople', 'viewRequests', 'viewClientChannel', 'ptCanSee', 'ptInviteState', 'ptInviteLink']) assert.equal(typeof globalThis[n], 'function', n);
+  for (const n of ['viewClientPeople', 'viewRequests', 'ptCanSee', 'ptInviteState', 'ptInviteLink']) assert.equal(typeof globalThis[n], 'function', n);
 
   globalThis.sb = undefined; delete globalThis.sb;
   try {
@@ -545,7 +459,7 @@ test('portal.js: {ok,data,error} from every data function even with no database,
       assert.ok(typeof r.error === 'string' && r.error.length > 0, n);
       assert.ok(!/TypeError|undefined|null|\[object/.test(r.error), n + ': ' + r.error);
     }
-    for (const v of ['viewClientPeople', 'viewClientChannel']) assert.equal(typeof await globalThis[v]('stone-roofing'), 'string', v);
+    assert.equal(typeof await viewClientPeople('stone-roofing'), 'string');
     assert.equal(typeof await viewRequests(), 'string');
   } finally { globalThis.sb = fakeSb; }
 
@@ -553,9 +467,82 @@ test('portal.js: {ok,data,error} from every data function even with no database,
   assert.ok(!/\bimport\b|\brequire\(/.test(SRC), 'plain browser JavaScript, no build step');
   for (const m of SRC.match(/^\s*(?:async\s+)?function\s+[A-Za-z0-9_]+\s*\(/gm) || []) {
     const name = m.trim().replace(/^(async\s+)?function\s+/, '').replace('(', '').trim();
-    assert.ok(/^pt/.test(name) || /^view(ClientPeople|Requests|ClientChannel)$/.test(name), 'prefixed with pt: ' + name);
+    assert.ok(/^pt/.test(name) || /^view(ClientPeople|Requests)$/.test(name), 'prefixed with pt: ' + name);
   }
   assert.ok(fs.existsSync(path.join(root, 'portal.css')));
   const css = fs.readFileSync(path.join(root, 'portal.css'), 'utf8');
   assert.ok(!/#[0-9a-fA-F]{3,8}(?![0-9a-zA-Z])(?![^(]*\))/.test(css.replace(/var\([^)]*\)/g, '')), 'no new colours: every colour is a theme.css token');
+});
+
+/* ───────────── perfection pass ───────────── */
+
+test('the second chat is gone: the conversation with a client lives on Channels and nowhere else', () => {
+  for (const gone of ['viewClientChannel', 'ptChannelFor', 'ptSyncMembers', 'ptPost', 'ptMessages', 'ptMarkRead', 'ptUnread', 'ptPostFromForm'])
+    assert.equal(typeof globalThis[gone], 'undefined', gone + ' was dead code and is removed');
+  assert.ok(!/channel_members|channel_messages/.test(SRC), 'portal.js no longer writes to the chat tables');
+});
+
+test('the row buttons say what happened and redraw the screen, instead of changing the database in silence', async () => {
+  const cid = seedClient();
+  const drawn = [];
+  globalThis.render = (v) => drawn.push(v); globalThis.currentView = 'requests';
+  try {
+    const q = (await ptRaiseRequest(cid, { subject: 'Can we pause?' })).data;
+    const open = await viewRequests();
+    assert.match(open, /onclick="ptCloseFromRow\(/, 'the button goes through the handler that answers back');
+    assert.doesNotMatch(open, /onclick="ptCloseRequest\(/);
+    const r = await ptCloseFromRow(q.id);
+    assert.equal(r.ok, true);
+    assert.deepEqual(toasts, ['Request closed.']);
+    assert.deepEqual(drawn, ['requests'], 'and the list is drawn again without it');
+    assert.match(await viewRequests(), /Nothing open/);
+
+    // a failure is said out loud and nothing is redrawn
+    toasts = []; drawn.length = 0;
+    fails['client_requests.update'] = { message: 'That request is already closed.' };
+    assert.equal((await ptCloseFromRow(q.id)).ok, false);
+    assert.deepEqual(toasts, ['That request is already closed.']);
+    assert.deepEqual(drawn, []);
+    delete fails['client_requests.update'];
+
+    // people and invites: the same
+    globalThis.currentView = 'clientPeople';
+    const a = (await ptAddPerson(cid, { fullName: 'Dana', isPrimary: true })).data;
+    const b = (await ptAddPerson(cid, { fullName: 'Sam' })).data;
+    const page = await viewClientPeople(cid);
+    assert.match(page, /onclick="ptPrimaryFromRow\(/); assert.doesNotMatch(page, /onclick="ptSetPrimary\(/);
+    toasts = []; drawn.length = 0;
+    await ptPrimaryFromRow(cid, b.id);
+    assert.deepEqual(toasts, ['They are the primary contact now.']); assert.deepEqual(drawn, ['clientPeople']);
+    assert.equal((await ptPeople(cid)).data.filter((p) => p.is_primary).length, 1);
+    await ptInvite(cid, { email: 'dana@stone.test' });
+    assert.match(await viewClientPeople(cid), /onclick="ptRevokeFromRow\(/);
+    toasts = [];
+    await ptRevokeFromRow(rows('portal_invites')[0].id);
+    assert.match(toasts[0], /Invite revoked/);
+  } finally { delete globalThis.render; delete globalThis.currentView; }
+});
+
+test('a double click makes one invite, and closes a request once', async () => {
+  const cid = seedClient();
+  el('ptInviteEmail').value = 'dana@stone.test'; el('ptInviteRole').value = 'viewer';
+  const [a, b] = await Promise.all([ptInviteFromForm(cid), ptInviteFromForm(cid)]);
+  assert.equal([a, b].filter((r) => r.ok).length, 1);
+  assert.equal(rpcs.filter((c) => c.name === 'portal_invite_create').length, 1);
+  const q = (await ptRaiseRequest(cid, { subject: 'Hi' })).data;
+  const before = calls.filter((c) => c.table === 'client_requests' && c.op === 'update').length;
+  await Promise.all([ptCloseFromRow(q.id), ptCloseFromRow(q.id)]);
+  assert.equal(calls.filter((c) => c.table === 'client_requests' && c.op === 'update').length, before + 1);
+});
+
+test('the Requests screen asks its three questions together', async () => {
+  const cid = seedClient();
+  await ptRaiseRequest(cid, { subject: 'One' });
+  const at = calls.length;
+  await viewRequests();
+  const asked = calls.slice(at).filter((c) => c.op === 'select' || c.op == null).map((c) => c.table);
+  assert.deepEqual(asked.sort(), ['client_requests', 'clients', 'profiles']);
+  // with nothing open it still answers "Nothing open"
+  rows('client_requests').length = 0;
+  assert.match(await viewRequests(), /Nothing open/);
 });

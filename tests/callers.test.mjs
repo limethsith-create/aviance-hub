@@ -871,3 +871,52 @@ test('a refused link says why, and leaves nothing half-shown', async () => {
   assert.ok(toasts.some((t) => /owner/.test(String(t))), 'he is told out loud, not just in the panel');
 });
 
+
+/* ───────────── perfection pass ───────────── */
+
+test('the 30-second refresh paints nothing when nothing changed, so an open list and a selected link survive', async () => {
+  reset();
+  rpcs.callers_list = () => ({ data: CALLERS(), error: null });
+  el('calRoot').innerHTML = A.viewCallers();
+  await tick(); await tick();
+  const root = el('calRoot');
+  let writes = 0, html = root.innerHTML;
+  Object.defineProperty(root, 'innerHTML', { get: () => html, set: (v) => { writes++; html = v; }, configurable: true });
+  await A.calLoadBoard(true); await A.calLoad(true);
+  assert.equal(writes, 0, 'same data, no redraw');
+  rpcs.callers_list = () => ({ data: CALLERS().concat([{ id: 'c9', name: 'New Caller', email: 'n@example.com', status: 'active' }]), error: null });
+  rpcs.callers_board = () => ({ data: { bonus: 25, callers: [{ caller_id: 'c9', name: 'New Caller', dials: 4 }], feed: [] }, error: null });
+  await A.calLoadBoard(true);
+  assert.equal(writes, 1, 'changed data is drawn');
+  assert.match(html, /New Caller/);
+  A.callersForget();
+});
+
+test('leaving the Callers screen drops the invite link as well as the code', () => {
+  reset();
+  A.cal.link = { staffId: 'c1', url: 'https://aviance.store/go?k=abc123' };
+  A.cal.code = { staffId: 'c1', code: 'AVX-1' };
+  A.calOnRender('home');
+  assert.equal(A.cal.link, null, 'a link is a key: it does not wait behind another screen');
+  assert.equal(A.cal.code, null);
+});
+
+test('when the clipboard says no, the code is selected instead of the copy silently failing', async () => {
+  reset();
+  A.cal.code = { staffId: 'c1', code: 'AVX-4K7M-Q2ZP' };
+  const picked = [];
+  sandbox.document.createRange = () => ({ selectNodeContents(n) { picked.push(n.id); } });
+  sandbox.getSelection = () => ({ removeAllRanges() {}, addRange() {} });
+  sandbox.navigator = { clipboard: { writeText: () => Promise.reject(new Error('NotAllowedError: denied')) } };
+  A.calCopyCode(); await tick();
+  assert.deepEqual(picked, ['calCodeVal'], 'the error object is not mistaken for the name of a box');
+  assert.ok(toasts.some((t) => /The code is selected/.test(String(t))));
+  delete sandbox.document.createRange; delete sandbox.getSelection; sandbox.navigator = {};
+  A.callersForget();
+});
+
+test('the long invite link has its own style, so it wraps inside its card instead of running off it', () => {
+  const css = fs.readFileSync(path.join(root, 'callers.css'), 'utf8');
+  assert.match(css, /\.cal-code-url\{[^}]*overflow-wrap:anywhere/);
+  assert.match(A.calLinkHTML('https://aviance.store/go?k=abc', { name: 'Nour' }), /class="cal-code-val cal-code-url"/);
+});

@@ -73,20 +73,18 @@ const MT_FREES_TIME = ['cancelled'];
 const MT_DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const MT_ZONE_NAMES = {'Asia/Colombo':'Sri Lanka','America/New_York':'US Eastern','America/Chicago':'US Central','America/Denver':'US Mountain','America/Los_Angeles':'US Pacific','America/Phoenix':'Arizona'};
 const MT_NOSHOW_DAYS = 45;      /* how far back viewNoShows looks */
-/* Every plan that has ever been sold, each with an initial, so the colour is never the
-   only thing telling two plans apart. A plan on offer has its own calm colour in
-   meetings.css; a retired one (the $300 Pilot) keeps its name and initial but takes the
-   neutral colour, so old calls still read correctly without the Pilot being a choice. */
+/* The three plans on offer, each with an initial, so the colour is never the only
+   thing telling two plans apart. Each has its own calm colour in meetings.css. */
 const MT_PLANS = {
-  pilot:   {word:'Pilot',   tag:'P'},
   starter: {word:'Starter', tag:'S'},
   growth:  {word:'Growth',  tag:'G'},
   scale:   {word:'Scale',   tag:'Sc'}
 };
-/* Retired: never offered when a meeting is added, and drawn neutral. */
-const MT_RETIRED_PLANS = ['pilot'];
 /* The plans a meeting added by hand may be tagged with. */
-const MT_PLAN_CHOICES = Object.keys(MT_PLANS).filter(k => MT_RETIRED_PLANS.indexOf(k) < 0);
+const MT_PLAN_CHOICES = Object.keys(MT_PLANS);
+/* An old call whose plan is no longer on offer (fnPlanRetired, finance.js): it reads
+   "Retired plan" in the neutral colour, and can never be picked for a new meeting. */
+const MT_RETIRED = {key:'retired', word:FN_RETIRED_WORD, tag:'R'};
 const MT_NO_PLAN = {word:'No plan yet', tag:'–'};
 /* The short word on a chip that sets a call booked here apart from a website one. */
 const MT_KIND_SHORT = {discovery:'Discovery', strategy:'Strategy', onboarding:'Onboarding', qualified:'Booked sales call', review:'Review', check_in:'Check-in', other:'Call'};
@@ -462,6 +460,8 @@ async function mtAddOwn(a){
   const raw = o.minutes==null || o.minutes==='' ? 30 : Number(o.minutes);
   if(!Number.isInteger(raw) || raw < 15 || raw > 240) return mtErr('A meeting can be 15, 30, 45, 60 or 90 minutes long.');
   const planIn = String(o.plan==null?'':o.plan).trim();
+  /* a plan code from before the three plans: refused in words, never mapped to another */
+  if(fnPlanRetired(planIn)) return mtErr(FN_RETIRED_SAYS);
   if(planIn && MT_PLAN_CHOICES.indexOf(mtPlanKey(planIn)) < 0) return mtErr('That is not one of the plans. Pick Starter, Growth or Scale, or leave it empty.');
   const link = String(o.meetLink==null?'':o.meetLink).trim();
   if(link && !/^https:\/\/\S+$/i.test(link)) return mtErr('The Google Meet link has to start with https://');
@@ -722,11 +722,17 @@ async function mtMeetings(fromIso, toIso, opts){
 }
 /* ---- one shape for every call ---- */
 function mtText(v){ return v==null ? '' : String(v).trim() }
-function mtPlanKey(p){ const k = String(p==null?'':p).toLowerCase(); return Object.prototype.hasOwnProperty.call(MT_PLANS,k) ? k : '' }
-/* A retired plan has no colour of its own: it falls back to the neutral one. */
-function mtPlanClass(p){ const k = mtPlanKey(p); return 'mt-plan-'+(k && MT_RETIRED_PLANS.indexOf(k) < 0 ? k : 'none') }
-function mtPlanTag(p){ const k = mtPlanKey(p); return k ? MT_PLANS[k].tag : MT_NO_PLAN.tag }
-function mtPlanWord(p){ const k = mtPlanKey(p); return k ? MT_PLANS[k].word : MT_NO_PLAN.word }
+/* 'starter' | 'growth' | 'scale', 'retired' for a plan code no longer on offer, '' for none. */
+function mtPlanKey(p){
+  const k = String(p==null?'':p).toLowerCase();
+  if(k === MT_RETIRED.key || fnPlanRetired(k)) return MT_RETIRED.key;
+  return Object.prototype.hasOwnProperty.call(MT_PLANS,k) ? k : '';
+}
+function mtPlanInfo(p){ const k = mtPlanKey(p); return k === MT_RETIRED.key ? MT_RETIRED : k ? MT_PLANS[k] : MT_NO_PLAN }
+/* Only a plan on offer has a colour of its own: anything else takes the neutral one. */
+function mtPlanClass(p){ const k = mtPlanKey(p); return 'mt-plan-'+(k && k !== MT_RETIRED.key ? k : 'none') }
+function mtPlanTag(p){ return mtPlanInfo(p).tag }
+function mtPlanWord(p){ return mtPlanInfo(p).word }
 /* A call booked here that has been and gone and is still only "booked". */
 function mtMeetingNeedsOutcome(m, now){
   const d = mtParseDate(m && m.starts_at), s = String((m && m.status) || 'booked');

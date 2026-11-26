@@ -3,10 +3,11 @@
    Left: a slim strip of names — her name, a presence dot and an unread count, nothing else.
    Right: the chat with whoever is open — a header (her name, her email, when she was last here and a "⋯"
    menu), the thread (newest at the bottom, text + one file at a time) and the send box. Nothing else.
-   The "⋯" menu holds her access code, her welcome page, "Clear this chat", her access, and "Add an employee".
+   The "⋯" menu holds her access code, her one-click invite link, her welcome page, "Clear this chat", her
+   access, and "Add an employee".
    Deleting is always soft (deleted_at + an empty body) and always filtered by the open channel.
 
-   Data (database functions in 20261125_staff.sql, owner only; see /home/claude/staff/SPEC.md):
+   Data (database functions in 20261125_staff.sql, owner only):
      staff_list()                        -> [{id,name,email,status,last_seen_at,channel_id,unread,code_set,created_at}]
      staff_add(p_name,p_email)           -> {staff_id, channel_id}
      staff_set_status(p_staff,p_status)   staff_mark_read(p_channel)   staff_doc_token(p_staff) -> token
@@ -14,9 +15,10 @@
    and the `chat-files` bucket for attachments.
    The access code comes from the `staff-code` edge function, never from the database: it is returned once,
    held in emp.code only while that panel is open, never written to storage and never logged.
+   The invite link comes from staff_link_new(p_staff,p_days) -> {token}: shown once the same way (emp.link).
 
-   Nothing here is applied yet — agent A's migration and agent D's function land at the end — so every data
-   function says "not set up yet" in plain English instead of throwing when an RPC or the bucket is missing.
+   If a database function or the bucket is missing, every data function says "not set up yet" in plain English
+   instead of throwing.
 
    House rules: data functions (emp*) resolve to {ok, data, error} and never throw; render functions are pure
    (data in, HTML string out) so the tests can call them; every string goes through esc(); ids reach handlers
@@ -34,6 +36,9 @@ const EMP_RECENT_MS = 60 * 60 * 1000;      // amber: within the hour
 const EMP_DAY_MS = 24 * 60 * 60 * 1000;    // past a day a clock time alone would mislead
 const EMP_NOT_READY = "The Employees area isn't switched on yet. Once the database update is applied, your staff will show here.";
 const EMP_CODE_NOT_READY = "The access-code function isn't deployed yet, so there is no code to show. Try again once it is.";
+const EMP_LINK_BASE = 'https://aviance.store/go?k=';   // rewritten to the caller-link function, which sends her on to /team
+const EMP_LINK_DAYS = 14;
+const EMP_LINK_FAIL = 'Aviance could not make a link. Try again in a moment.';
 const EMP_FILES_NOT_READY = "File uploads aren't switched on yet. Send the message as text for now.";
 
 const emp = {
@@ -43,11 +48,13 @@ const emp = {
   draft: '', sending: false, file: null, fileErr: null,
   adding: false, addErr: null, addBusy: false, addName: '', addEmail: '',
   code: null,                      // {staffId, code} — lives only while the panel is open
-  codeBusy: '', codeErr: null,
+  link: null,                      // {staffId, url} — the one-click invite link, same rule
+  codeErr: null,
   ask: '',                         // inline "are you sure": 'reset:<id>' 'revoke:<id>' 'clear:<id>' 'del:<msgId>'
   menu: '',                        // the staff id whose "⋯" menu is open
   delBusy: '', clearBusy: false,   // the message being deleted / the chat being cleared
   busy: {}, timer: null, chatTimer: null, seq: 0, mseq: 0,
+  shown: null, shownLive: null,    // the HTML last painted (whole screen / thread only), so an unchanged tick paints nothing
 };
 
 /* ===================== 1. DATA ===================== */
@@ -282,6 +289,17 @@ async function empCode(staffId) {
   } catch (e) { return { ok: false, data: null, error: empPlain(e, "The code didn't come back. Try again."), missing: false }; }
 }
 
+/* The one-click invite link. staff_link_new stores only a hash of the token and hands the token back
+   once, so this is the only moment the real URL exists. Making a new one switches the old one off. */
+async function empLinkNew(staffId) {
+  if (!staffId) return { ok: false, data: null, error: 'Pick a person first.', missing: false };
+  const r = await empRpc('staff_link_new', { p_staff: staffId, p_days: EMP_LINK_DAYS }, EMP_LINK_FAIL);
+  if (!r.ok) return r;
+  const token = r.data && r.data.token ? String(r.data.token) : '';
+  if (!token) return { ok: false, data: null, error: EMP_LINK_FAIL, missing: false };
+  return { ok: true, data: { url: EMP_LINK_BASE + encodeURIComponent(token), expires: (r.data && r.data.expires_at) || null }, error: null, missing: false };
+}
+
 /* ---- deleting: always soft, always inside the open channel ----
    The row stays so her page can hide it (she filters on deleted_at); the words go for good.
    Both of these filter by channel_id as well as the id, so a slip can never reach another chat. */
@@ -351,8 +369,9 @@ function employeesForget() {
     list: [], loaded: false, loading: false, err: null, missing: false, count: 0,
     open: null, msgs: [], msgsLoaded: false, msgsErr: null, herReadAt: null,
     draft: '', sending: false, file: null, fileErr: null,
-    adding: false, addErr: null, addBusy: false, code: null, codeBusy: '', codeErr: null,
+    adding: false, addErr: null, addBusy: false, addName: '', addEmail: '', code: null, link: null, codeErr: null,
     ask: '', menu: '', delBusy: '', clearBusy: false, busy: {}, seq: emp.seq + 1, mseq: emp.mseq + 1,
+    shown: null, shownLive: null,
   });
 }
 
@@ -479,6 +498,25 @@ function empCodeHTML(code, staff) {
       she signs in at aviance.store/team with her email address and this code. If it gets lost, press “Reset code” and send her the new one.</p>
   </div>`;
 }
+/* The one-click invite link, shown once. Sending it is all she needs: it signs her in and lands her
+   on her own page, with no email to type and no code to copy. It runs out on its own. */
+function empLinkHTML(url, staff) {
+  const v = String(url == null ? '' : url);
+  const who = (staff && staff.name) || 'her';
+  if (!v) return '';
+  return `<div class="card emp-code" role="alert" aria-live="assertive">
+    <h3>${esc(who)}’s one-click link</h3>
+    <p class="emp-code-val emp-code-url" id="empLinkVal">${esc(v)}</p>
+    <div class="emp-acts">
+      <button type="button" class="btn" onclick="empCopyLink()">Copy link</button>
+      <button type="button" class="btn ghost" onclick="empLinkHide()">Done — I’ve copied it</button>
+    </div>
+    <p class="emp-code-warn"><b>This link is shown once and will not be shown again.</b> Send it to ${esc(who)} on
+      WhatsApp or by email. She taps it and lands on her own page, already signed in.</p>
+    <p class="emp-code-warn">It works for ${EMP_LINK_DAYS} days and anyone holding it can open her chat with you, so send it to her and
+      nobody else. Choose “Invite link” again to make a new one, which switches the old one off.</p>
+  </div>`;
+}
 /* Every destructive step asks here first, inline. confirm() is never used. */
 function empAskHTML(what, s) {
   const w = String(what || '');
@@ -508,6 +546,7 @@ function empMenuHTML(s, ctx) {
   return `<div class="emp-menu" role="menu" aria-label="${esc('More for ' + (s.name || 'her'))}">
     <button type="button" role="menuitem" class="emp-mi" onclick="${s.codeSet ? `empAskYes('reset',${empA(s.id)})` : `empCodeGo(${empA(s.id)})`}"${busy ? ' disabled' : ''}>
       ${busy === 'code' ? 'Making a code…' : (s.codeSet ? 'Reset code' : 'Generate access code')}</button>
+    <button type="button" role="menuitem" class="emp-mi" onclick="empLinkGo(${empA(s.id)})"${busy || revoked ? ' disabled' : ''}>${busy === 'link' ? 'Making a link…' : 'Invite link'}</button>
     <button type="button" role="menuitem" class="emp-mi" onclick="empWelcome(${empA(s.id)})"${busy ? ' disabled' : ''}>${busy === 'doc' ? 'Opening…' : 'Welcome page'}</button>
     <button type="button" role="menuitem" class="emp-mi" onclick="empAskYes('clear',${empA(s.id)})"${c.clearBusy ? ' disabled' : ''}>${c.clearBusy ? 'Clearing…' : 'Clear this chat'}</button>
     <button type="button" role="menuitem" class="emp-mi" onclick="${revoked ? `empRevokeGo(${empA(s.id)},'active')` : `empAskYes('revoke',${empA(s.id)})`}"${busy ? ' disabled' : ''}>
@@ -580,6 +619,7 @@ function empComposerHTML(ctx) {
 function empPanelHTML(s, ctx) {
   const c = ctx || {};
   const codeOn = !!(c.code && c.code.staffId === s.id && c.code.code);
+  const linkOn = !!(c.link && c.link.staffId === s.id && c.link.url);
   return `<div class="emp-panel">
     <section class="card emp-chat" aria-label="${esc('Chat with ' + (s.name || 'her'))}">
       ${empHeadHTML(s, c)}
@@ -588,7 +628,8 @@ function empPanelHTML(s, ctx) {
       ${c.ask === 'clear:' + s.id ? empAskHTML('clear', s) : ''}
       ${c.codeErr ? `<p class="emp-bad" role="alert">${esc(c.codeErr)}</p>` : ''}
       ${codeOn ? empCodeHTML(c.code.code, s) : ''}
-      ${empChatHTML(c.msgs, c)}
+      ${linkOn ? empLinkHTML(c.link.url, s) : ''}
+      <div class="emp-live" id="empLive">${empChatHTML(c.msgs, c)}</div>
       ${empComposerHTML(c)}
     </section>
   </div>`;
@@ -612,7 +653,7 @@ function empCtx() {
     openId: emp.open, ownerId: empOwnerId(), err: emp.err,
     adding: emp.adding, addErr: emp.addErr, addBusy: emp.addBusy,
     addName: emp.addName, addEmail: emp.addEmail,
-    busy: emp.busy, code: emp.code, codeErr: emp.codeErr, ask: emp.ask,
+    busy: emp.busy, code: emp.code, link: emp.link, codeErr: emp.codeErr, ask: emp.ask,
     menuOpen: emp.menu, delBusy: emp.delBusy, clearBusy: emp.clearBusy,
     msgs: emp.msgs, msgsLoaded: emp.msgsLoaded, msgsErr: emp.msgsErr, herReadAt: emp.herReadAt,
     draft: emp.draft, sending: emp.sending, fileName: emp.file ? emp.file.name : '', fileErr: emp.fileErr,
@@ -620,7 +661,9 @@ function empCtx() {
 }
 function viewEmployees() {
   empLoad(false);
-  return `<div class="emp" id="empRoot">${empBodyHTML()}</div>`;
+  const html = empBodyHTML();
+  emp.shown = html; emp.shownLive = null;
+  return `<div class="emp" id="empRoot">${html}</div>`;
 }
 function empBodyHTML() {
   if (!emp.loaded && emp.err) {
@@ -635,13 +678,33 @@ function empPaint() {
   if (!r) return;
   /* Don't wipe what he is typing: a repaint while a box has focus would lose the caret. */
   const a = typeof document !== 'undefined' ? document.activeElement : null;
-  if (a && a.id && (a.id === 'empDraft' || a.id === 'empAddName' || a.id === 'empAddEmail')) return;
-  r.innerHTML = empBodyHTML();
-  empScrollChat();
+  if (a && a.id && (a.id === 'empAddName' || a.id === 'empAddEmail')) return;
+  const stay = empReadingUp();
+  if (a && a.id === 'empDraft') {
+    /* He is typing a reply: leave the box alone, but her new messages still have to appear above it. */
+    const live = empEl('empLive'), open = empOpenRow();
+    if (!live || !open) return;
+    const html = empChatHTML(emp.msgs, empCtx());
+    if (html === emp.shownLive) return;
+    live.innerHTML = html; emp.shownLive = html;
+    emp.shown = null;                        // the page no longer matches the last full paint
+    if (!stay) empScrollChat();
+    return;
+  }
+  const html = empBodyHTML();
+  if (html === emp.shown) return;            // nothing changed: a tick must not disturb the page
+  r.innerHTML = html; emp.shown = html; emp.shownLive = null;
+  if (!stay) empScrollChat();
 }
 function empScrollChat() {
   const t = empEl('empThread');
   if (t && typeof t.scrollHeight === 'number') t.scrollTop = t.scrollHeight;
+}
+/* True when he has scrolled up to read older messages, so a background refresh must not drag him down. */
+function empReadingUp() {
+  const t = empEl('empThread');
+  if (!t || typeof t.scrollHeight !== 'number' || typeof t.clientHeight !== 'number') return false;
+  return t.scrollHeight - t.scrollTop - t.clientHeight > 120;
 }
 async function empLoad(force) {
   if (emp.loading && !force) return;
@@ -682,7 +745,7 @@ async function empAddSave(ev) {
   if (id) empOpen(id);
 }
 /* A repaint the focus guard must not skip (the form itself changed). */
-function empForcePaint() { const r = empEl('empRoot'); if (r) { r.innerHTML = empBodyHTML(); empScrollChat(); } }
+function empForcePaint() { const r = empEl('empRoot'); if (r) { const html = empBodyHTML(); r.innerHTML = html; emp.shown = html; emp.shownLive = null; empScrollChat(); } }
 
 /* ---- one person ---- */
 function empOpen(id) {
@@ -697,7 +760,7 @@ function empOpen(id) {
 }
 function empCloseOpen() { emp.open = null; empForgetCode(); empChatStop(); }
 /* The code never outlives its panel. */
-function empForgetCode() { emp.code = null; emp.codeErr = null; emp.codeBusy = ''; }
+function empForgetCode() { emp.code = null; emp.link = null; emp.codeErr = null; }
 function empCodeHide() { empForgetCode(); empForcePaint(); }
 function empFind(id) { return emp.list.find(s => s.id === id) || null; }
 function empOpenRow() { return empFind(emp.open); }
@@ -746,26 +809,49 @@ async function empCodeGo(id) {
   const v = empEl('empCodeVal'); if (v && v.focus) { try { v.setAttribute('tabindex', '-1'); v.focus(); } catch (e) { } }
   empLoad(true);                                     // status is 'invited' now
 }
+async function empLinkGo(id) {
+  const s = empFind(id); if (!s || emp.busy[id]) return;
+  emp.ask = ''; emp.menu = ''; emp.busy[id] = 'link'; emp.codeErr = null; empForcePaint();
+  const r = await empLinkNew(id);
+  delete emp.busy[id];
+  if (!r.ok) { emp.codeErr = r.error; empForcePaint(); if (typeof toast === 'function') toast(r.error); return; }
+  if (emp.open !== id) { empForcePaint(); return; }   // he moved on while it was being made: never show it under another name
+  emp.link = { staffId: id, url: r.data.url };       // on screen only, until empForgetCode()
+  empForcePaint();
+  const v = empEl('empLinkVal'); if (v && v.focus) { try { v.setAttribute('tabindex', '-1'); v.focus(); } catch (e) { } }
+}
+function empLinkHide() { emp.link = null; empForcePaint(); }
+function empCopyLink() {
+  const url = emp.link && emp.link.url;
+  if (!url) return;
+  const done = () => { if (typeof toast === 'function') toast('Link copied. Send it to her and nobody else.'); };
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(url).then(done, () => empCopyFallback('empLinkVal')); return; }
+  } catch (e) { }
+  empCopyFallback('empLinkVal');
+}
 function empCopyCode() {
   const code = emp.code && emp.code.code;
   if (!code) return;
   const done = () => { if (typeof toast === 'function') toast('Code copied. Paste it into your message to her.'); };
   try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, empCopyFallback); return; }
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(code).then(done, () => empCopyFallback()); return; }
   } catch (e) { }
   empCopyFallback();
 }
-function empCopyFallback() {
-  const v = empEl('empCodeVal');
+function empCopyFallback(which) {
+  const id = which === 'empLinkVal' ? 'empLinkVal' : 'empCodeVal';
+  const what = id === 'empLinkVal' ? 'link' : 'code';
+  const v = empEl(id);
   if (v && typeof document !== 'undefined' && document.createRange && typeof window !== 'undefined' && window.getSelection) {
     try {
       const r = document.createRange(); r.selectNodeContents(v);
       const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-      if (typeof toast === 'function') toast('The code is selected — press Ctrl+C to copy it.');
+      if (typeof toast === 'function') toast('The ' + what + ' is selected — press Ctrl+C to copy it.');
       return;
     } catch (e) { }
   }
-  if (typeof toast === 'function') toast('Copying did not work here. Select the code and copy it by hand.');
+  if (typeof toast === 'function') toast('Copying did not work here. Select the ' + what + ' and copy it by hand.');
 }
 async function empRevokeGo(id, to) {
   const s = empFind(id); if (!s || emp.busy[id]) return;
@@ -806,13 +892,15 @@ async function empLoadMessages(force) {
   if (!s) return;
   if (!s.channelId) { emp.msgsLoaded = true; emp.msgs = []; emp.msgsErr = 'Her channel is not ready yet.'; empPaint(); return; }
   const mseq = ++emp.mseq;
-  const r = await empMessages(s.channelId);
+  /* the messages and her "Seen" time are asked for together, not one after the other */
+  const both = await Promise.all([empMessages(s.channelId), empHerReadAt(s.channelId)]);
+  const r = both[0], h = both[1];
   if (mseq !== emp.mseq || emp.open !== s.id) return;
   if (r.ok) {
     emp.msgs = r.data; emp.msgsLoaded = true; emp.msgsErr = null;
-    const h = await empHerReadAt(s.channelId);
-    if (mseq === emp.mseq && h.ok) emp.herReadAt = h.data;
-    if (s.unread) { await empMarkRead(s.channelId); empLoad(true); }
+    if (h.ok) emp.herReadAt = h.data;
+    /* show the messages now; marking them read only moves the badge, so it must not hold the paint up */
+    if (s.unread) empMarkRead(s.channelId).then(() => empLoad(true));
   } else {
     emp.msgsErr = r.error;
     if (r.missing) emp.msgsLoaded = true;   // nothing to wait for: say so instead of spinning

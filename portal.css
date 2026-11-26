@@ -1,11 +1,10 @@
 /* ===================== AVIANCE OS — The client portal (portal.js) =====================
-   Their people, their way in, and the conversation. The same cards, rows, tags and
+   Their people, their way in, and their requests. The same cards, rows, tags and
    composer as the Channels screen. Every colour and size is a theme.css token; the
    fallbacks only matter if a token is missing. No new colours. */
 
 .pt-wrap{display:grid;gap:var(--s4,16px);font-size:var(--fs-base,14px);color:var(--text,#121314)}
 .pt-wrap button{font:inherit}
-.pt-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
 /* ---- cards ---- */
 .pt-card{background:var(--surface,#fff);border:1px solid var(--border,#E4E4E0);border-radius:var(--r,8px)}
@@ -55,14 +54,6 @@
   border-radius:var(--r-sm,6px);background:var(--surface,#fff);color:inherit;font:inherit}
 .pt-form textarea{flex:1 1 100%;resize:vertical;line-height:1.5}
 
-/* ---- the conversation ---- */
-.pt-thread{display:grid;gap:var(--s3,12px);padding:var(--s4,16px);max-height:420px;overflow-y:auto;overscroll-behavior:contain}
-.pt-msg{display:grid;grid-template-columns:auto 1fr;gap:0 var(--s2,8px)}
-.pt-mwho{font-weight:600}
-.pt-msg time{font-size:var(--fs-min,12px);color:var(--muted,#5B5E63);font-variant-numeric:tabular-nums}
-.pt-msg p{grid-column:1/-1;margin:2px 0 0;line-height:1.5;overflow-wrap:anywhere;white-space:pre-wrap}
-.pt-newline{display:flex;align-items:center;gap:var(--s3,12px);font-size:var(--fs-min,12px);font-weight:600;color:var(--brand,#E0290F)}
-.pt-newline::before,.pt-newline::after{content:"";flex:1;height:1px;background:var(--brand,#E0290F);opacity:.5}
 
 /* ---- phone ---- */
 @media(max-width:860px){
@@ -70,5 +61,4 @@
   .pt-acts{grid-row:auto;grid-column:1;justify-content:flex-start}
   .pt-btn,.pt-link{min-height:44px}
   .pt-form input,.pt-form select,.pt-form textarea{font-size:var(--fs-strong,16px)}
-  .pt-thread{max-height:none}
 }

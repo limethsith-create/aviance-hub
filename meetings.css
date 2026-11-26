@@ -9,8 +9,7 @@
 /* ── the plan colours: one soft tint, a darker bar, readable ink ──────────
    Calm on purpose: the brand red is kept for "needs an outcome" and today.
    Text on tint is 4.5:1 or better in both themes (tests/meetings.test.mjs).
-   The retired Pilot has no colour of its own any more: meetings.js draws it
-   with the neutral "none" colour. */
+   A call with no plan, or a plan no longer on offer, takes the neutral "none". */
 :root{
   --mt-starter-bg:#DFEAF4; --mt-starter-bar:#4A7BA6; --mt-starter-ink:#1D3A54;
   --mt-growth-bg:#DDEDE0;  --mt-growth-bar:#4F8A5B;  --mt-growth-ink:#1F4028;

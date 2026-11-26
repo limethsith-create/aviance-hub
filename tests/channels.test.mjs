@@ -456,3 +456,108 @@ test('bot drafts: discard, a failed send keeps the draft and says why, team chan
   assert.equal(calls('chBotDrafts').length, 0);
   noBot();
 });
+
+/* ───────────── perfection pass ───────────── */
+function slowSend() {
+  let go; const gate = new Promise((r) => { go = r; });
+  const real = globalThis.chSend;
+  globalThis.chSend = async (...a) => { await gate; return real(...a); };
+  return go;
+}
+test('send: the message is on screen and the box is empty before the network answers', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  const go = slowSend();
+  el('chvInput').value = 'on its way';
+  const p = chvSend();
+  await tick();
+  assert.match(el('chvThread').innerHTML, /chv-msg[^"]*sending[^>]*>[\s\S]*on its way/, 'drawn at once, marked as sending');
+  assert.equal(el('chvInput').value, '', 'the box is ready for the next message');
+  assert.doesNotMatch(el('chvThread').innerHTML, /chvEditStart\(&quot;chv-sending/, 'no Edit or Delete on a message that is not saved yet');
+  await chvSend();                                   // a second Enter while the first is in flight does nothing
+  go(); await p;
+  assert.equal(calls('chSend').length, 1);
+  const t = el('chvThread').innerHTML;
+  assert.equal(t.split('on its way').length - 1, 1, 'the real message replaces the placeholder, never both');
+  assert.doesNotMatch(t, /chv-sending-|chv-msg[^"]*sending/);
+  assert.equal(chv.sending, false);
+});
+test('send: what he types while a message is on its way is never wiped', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  const go = slowSend();
+  el('chvInput').value = 'first';
+  const p = chvSend(); await tick();
+  el('chvInput').value = 'second, typed during the round trip';
+  go(); await p;
+  assert.equal(el('chvInput').value, 'second, typed during the round trip');
+  assert.equal(chv.drafts.c1, 'second, typed during the round trip');
+  assert.equal(chvLeftover('first', 'first and more'), 'and more');
+  assert.equal(chvLeftover('first', 'first'), '');
+  assert.equal(chvLeftover('first', 'rewritten'), 'rewritten');
+});
+test('send: a failure takes the message back out of the thread and puts the words back in the box', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  be.fail.chSend = 'You are offline. Try again.';
+  const go = slowSend();
+  el('chvInput').value = 'will not go';
+  const p = chvSend(); await tick();
+  el('chvInput').value = 'more';
+  go(); await p;
+  assert.doesNotMatch(el('chvThread').innerHTML, /will not go/);
+  assert.equal(el('chvInput').value, 'will not go\nmore');
+  assert.equal(el('chvCErr').textContent, 'You are offline. Try again.');
+  // and if he had moved to another channel meanwhile, the words wait for him in the first one
+  reset(); asOwner(); await show({ c1: C1() });
+  be.fail.chSend = 'You are offline. Try again.';
+  const go2 = slowSend();
+  el('chvInput').value = 'for the client';
+  const p2 = chvSend(); await tick();
+  await chvOpen('t1');
+  go2(); await p2;
+  assert.equal(chv.drafts.c1, 'for the client');
+  assert.match(el('toast').innerHTML, /You are offline[\s\S]*back in the box in Stone Roofing/);
+});
+test('a live message that arrives before the send answers is not shown twice', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  let go; const gate = new Promise((r) => { go = r; });
+  globalThis.chSend = async (id, body) => { be.calls.push(['chSend', id, body]); await gate; return { ok: true, data: M('real1', 'u1', 'Owner', body, new Date().toISOString()), error: null }; };
+  el('chvInput').value = 'race';
+  const p = chvSend(); await tick();
+  be.subs.c1.onMessage(M('real1', 'u1', 'Owner', 'race', new Date().toISOString()));
+  go(); await p;
+  assert.equal(el('chvThread').innerHTML.split('chvM-real1').length - 1, 1);
+  assert.doesNotMatch(el('chvThread').innerHTML, /chv-sending-/);
+});
+test('a dropped live line: the next refresh fetches what was missed, once', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  // a message lands in the open channel but the live line never delivers it
+  const late = M('m9', 'u2', 'Sam', 'did you see this?', new Date(Date.now() + 1000).toISOString());
+  be.messages.c1.push(late);
+  be.channels[0].lastMessageAt = late.createdAt; be.channels[0].unread = 1;
+  const before = calls('chMessages').length;
+  await chvReload(); await tick();
+  assert.match(el('chvThread').innerHTML, /did you see this\?/);
+  assert.equal(calls('chMessages').length, before + 1);
+  await chvReload(); await tick();
+  assert.equal(calls('chMessages').length, before + 1, 'nothing newer: no second fetch');
+  assert.equal(chvFindCh('c1').unread, 0);
+});
+test('the unread counts are checked every 20 seconds, not once a minute', () => {
+  assert.equal(CHV_POLL_MS, 20000);
+});
+test('New channel: a double click makes one channel, and a failed staff lookup is not remembered', async () => {
+  reset(); asOwner(); await show({ c1: C1() });
+  await chvNewChannel();
+  el('chvNewName').value = 'Sales';
+  await Promise.all([chvCreate(0), chvCreate(0)]);
+  assert.equal(calls('chCreateChannel').length, 1);
+  // the staff list: an error is not cached as "nobody"
+  chv.staff = null; chv.loadStaff = null;
+  let n = 0;
+  const realFrom = fakeSb.from;
+  fakeSb.from = () => ({ select: async () => (++n === 1 ? { data: null, error: { message: 'down' } } : { data: [{ id: 'u2', name: 'Sam', role: 'employee', approved: true }], error: null }) });
+  try {
+    assert.deepEqual(await chvLoadStaffList(), []);
+    assert.equal(chv.staff, null);
+    assert.deepEqual((await chvLoadStaffList()).map((p) => p.name), ['Sam']);
+  } finally { fakeSb.from = realFrom; }
+});

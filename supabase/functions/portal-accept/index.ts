@@ -69,7 +69,10 @@ Deno.serve(async (req) => {
   const used = await sb.rpc("portal_invite_consume", { p_token: token, p_user: userId });
   if (used.error) {
     if (created) await sb.auth.admin.deleteUser(userId).catch(() => {});
-    return no(req, used.error.message || "This link has already been used or has expired.", 410);
+    // Only our own plain sentences go back to the browser, never a raw database error.
+    const said = String(used.error.message ?? "");
+    const known = ["That email belongs to the Aviance team.", "This link has already been used or has expired."];
+    return no(req, known.includes(said) ? said : "This link has already been used or has expired.", 410);
   }
   return json(req, { ok: true, email });
 });

@@ -391,3 +391,37 @@ test('chBotDrafts / chBotSend / chBotDiscard: filter to the channel, send the ed
   const denied = await chBotDrafts('ch1');
   assert.equal(denied.ok, false); assert.equal(denied.error, "You don't have access to do that.");
 });
+
+/* ───────────── perfection pass ───────────── */
+test('names: a lookup that failed is asked again next time, instead of "Someone" sticking for the whole visit', async () => {
+  tables[T + '.select'] = () => ({ data: [row({ id: 'm1', author_user: 'u-sam' })], error: null });
+  const real = rpcs.channel_people;
+  rpcs.channel_people = () => ({ data: null, error: { message: 'Failed to fetch' } });
+  const first = await chMessages('ch1');
+  assert.equal(first.ok, true, 'the thread still loads');
+  assert.equal(first.data[0].name, 'Someone');
+  rpcs.channel_people = real;
+  const again = await chMessages('ch1');
+  assert.equal(again.data[0].name, 'Person u-sam', 'the name is fetched once the lookup works again');
+  // a lookup that answered but did not know the id IS remembered, so it is not asked for on every message
+  tables[T + '.select'] = () => ({ data: [row({ id: 'm2', author_user: 'u-ghost' })], error: null });
+  await chMessages('ch1');
+  const before = calls.filter((c) => c.rpc === 'channel_people').length;
+  await chMessages('ch1');
+  assert.equal(calls.filter((c) => c.rpc === 'channel_people').length, before);
+});
+
+test('chSearch asks for the messages and the channel names at the same time', async () => {
+  let open = 0, most = 0;
+  const slow = (out) => new Promise((r) => { open++; most = Math.max(most, open); setTimeout(() => { open--; r(out); }, 15); });
+  tables[T + '.select'] = () => slow({ data: [row({ id: 'm1', body: 'the quote' })], error: null });
+  rpcs.my_channels = () => slow({ data: [{ id: 'ch1', name: 'General', kind: 'team' }], error: null });
+  const r = await chSearch('quote');
+  assert.equal(r.ok, true);
+  assert.equal(r.data[0].channelName, 'General');
+  assert.equal(most, 2, 'both lookups were in flight together');
+  // and the channel names stay optional
+  rpcs.my_channels = () => ({ data: null, error: { message: 'down' } });
+  const r2 = await chSearch('quote');
+  assert.equal(r2.ok, true); assert.equal(r2.data[0].channelName, '');
+});

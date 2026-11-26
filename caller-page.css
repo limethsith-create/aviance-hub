@@ -243,6 +243,9 @@ a.cl-phone::after{content:'Tap to ring';display:block;margin-top:6px;
   cursor:pointer;font-variant-numeric:tabular-nums;
   transition:background .12s linear,color .12s linear}
 .cl-chip:hover{background:var(--cl-wash)}
+/* the same slot on the prospect's clock, under her own time */
+.cl-chip-their{display:block;font-size:11px;line-height:1.3;font-weight:400;opacity:.75;white-space:nowrap}
+.cl-their{margin-top:4px;font-weight:700}
 .cl-chip-on{background:var(--cl-ink);border-color:var(--cl-ink);color:#fff}
 .cl-chip-on:hover{background:var(--cl-ink);color:#fff}
 .cl-slots{max-height:40vh;overflow-y:auto;overscroll-behavior:contain;margin:14px 0}

@@ -108,12 +108,9 @@ async function wuPauseSending(clientId){
     .update({status:'paused'}).eq('client_id', clientId).eq('status','running').select(), []);
   const accts = await wuRun(() => sb.from('outreach_accounts')
     .update({status:'paused'}).eq('client_id', clientId).eq('status','ok').select(), []);
-  /* TODO: tell the outreach provider to stop sending as well. The provider seam
-     is outreach-adapter.js and another agent owns it — when it grows a
-     `pauseAll(clientId)` method, call it here and report what it said. Until
-     then this pauses the hub's own rows ONLY, so somebody must also pause the
-     campaigns inside the provider's own tool. wuEndClient says so in its
-     result (`providerStillRunning: true`) and the Ending screen prints it. */
+  /* This pauses the hub's own rows ONLY: the hub has no line to the tool that
+     sends the email, so somebody must also pause the campaigns inside that
+     tool. wuEndClient says so in its result (`providerStillRunning: true`). */
   return wuOk({
     campaignsPaused: (camps.ok && camps.data ? camps.data.length : 0),
     accountsPaused:  (accts.ok && accts.data ? accts.data.length : 0),

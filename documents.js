@@ -1,10 +1,11 @@
 /* ===================== AVIANCE OS — Documents (everything a client receives) =====================
    One screen with a live preview of every email, document and chat message that goes out to a client:
    the discovery-call emails (confirmation + 3 reminders), the agreement / invoice / receipt for each of
-   the 3 plans on offer, the pack and welcome emails, and every bot / step message in the 14-day journey.
+   the 3 plans on offer (month to month and on a 3-month term), the pack and welcome emails, and every
+   bot / step message in the 14-day journey.
 
-   Data: documents_preview() (20261124_documents_screen.sql, owner only). It runs the real flow for a
-   sample client on each plan inside a rolled-back transaction, so what you see is exactly what the
+   Data: documents_preview() (20261129_no_pilot_and_agreement_v3.sql, owner only). It runs the real flow
+   for a sample client on each plan and term inside a rolled-back transaction, so what you see is exactly what the
    system would send today, with your current Settings and templates. Nothing is kept or sent.
    Returns [{group, key, type: email|agreement|invoice|chat|error, title, subject?, text?, html?, doc?, meta?}].
 
@@ -12,17 +13,16 @@
 
 /* ===================== 0. STATE ===================== */
 const dc={items:[],loaded:false,loading:false,err:null,pick:null,seq:0};
-const DC_GROUP_ORDER=['Discovery call','Emails — Starter (3 months)','Emails — Growth','Emails — Scale',
-  'Agreements','Invoices','Receipts','Chat messages','Problems'];
-/* The $300 Pilot is retired. documents_preview() still builds its pack while the
-   database says so, so it is dropped here: the owner is never shown a Pilot document
-   to choose from. (Nothing a real Pilot client already holds is touched.) */
-const DC_RETIRED=[/^Emails — Pilot$/i];
+const DC_GROUP_ORDER=['Discovery call','Emails — Starter','Emails — Starter (3 months)','Emails — Growth','Emails — Growth (3 months)',
+  'Emails — Scale','Emails — Scale (3 months)','Agreements','Invoices','Receipts','Chat messages','Problems'];
+/* Three plans are on offer: Starter, Growth, Scale. A database that has not had its
+   latest update may still send a pack for the retired one-off plan; anything that
+   names it (group, key, title or meta.plan) is left out, so the owner is never shown
+   a document that can no longer be sold. */
 function dcRetired(x){
-  const g=String((x&&x.group)||'');
-  if(DC_RETIRED.some(re=>re.test(g)))return true;
-  const plan=String((x&&x.meta&&x.meta.plan)||'').toLowerCase();
-  return plan==='pilot';
+  const o=x||{};
+  if(String((o.meta&&o.meta.plan)||'').toLowerCase()==='pilot')return true;
+  return /(^|[^a-z])pilot([^a-z]|$)/i.test([o.group,o.title].join(' | '))||/(^|_)pilot(_|$)/i.test(String(o.key||''));
 }
 /* the order a client meets the chat messages in */
 const DC_CHAT_ORDER=['welcome','offer:kickoff','form','step:kickoff','approval:icp','step:testing:doing','update','step:testing:done','approval:copy','offer:onboarding','step:onboarding','step:launch'];

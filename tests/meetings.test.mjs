@@ -137,6 +137,8 @@ globalThis.supabase = { createClient: () => fakeSb };
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const shell = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="finance.js">'));
 vm.runInThisContext(shell, { filename: 'index.html (inline script)' });
+/* the browser's order: finance.js (the plans on offer, the one legacy guard), then pipeline.js */
+vm.runInThisContext(fs.readFileSync(path.join(root, 'finance.js'), 'utf8'), { filename: 'finance.js' });
 vm.runInThisContext(fs.readFileSync(path.join(root, 'pipeline.js'), 'utf8'), { filename: 'pipeline.js' });
 const SRC = fs.readFileSync(path.join(root, 'meetings.js'), 'utf8');
 vm.runInThisContext(SRC, { filename: 'meetings.js' });
@@ -448,7 +450,6 @@ test('every screen draws with zero rows in the database', async () => {
 /* ───────────── the calendar: every call, from both tables ───────────── */
 const bk = (o) => Object.assign({ id: 'bk-' + (++seq), created_at: '2026-11-20T09:00:00Z', name: 'Dana Smith', email: 'dana@acme.test', role: 'Founder', company: 'Acme Roofing', website: 'acme.test', industry: 'Roofing', budget: '$20k a job', goal: 'More booked calls', current_lead_gen: 'Referrals', capacity: '5 more a week', phone: '+1 555 0100', sells: 'Commercial roofs', tried_outbound: true, plan: null, call_at: '2026-11-27T16:00:00.000Z', minutes: 30, timezone: 'America/Chicago', source: 'website', status: 'booked', score: 72, meet_link: 'https://meet.google.com/abc-defg-hij', calendar_event_id: null, lost_reason: null, lost_at: null }, o);
 const PRICES = [
-  { plan: 'pilot', label: 'Pilot', calls_promised: 2, monthly_fee: 300, three_month_fee: null, is_recurring: false },
   { plan: 'starter', label: 'Starter', calls_promised: 5, monthly_fee: 1500, three_month_fee: 1200, is_recurring: true },
   { plan: 'growth', label: 'Growth', calls_promised: 10, monthly_fee: 3000, three_month_fee: 2400, is_recurring: true },
   { plan: 'scale', label: 'Scale', calls_promised: 15, monthly_fee: 4500, three_month_fee: 3600, is_recurring: true },
@@ -480,7 +481,7 @@ test('a website booking and a meeting both land on the calendar; booked and brie
   for (const e of r.data.events) for (const f of ['key', 'source', 'id', 'startsAt', 'minutes', 'title', 'who', 'company', 'plan', 'status', 'meetLink', 'needsOutcome'])
     assert.ok(f in e, e.key + ' has ' + f);
   assert.deepEqual([a.source, a.title, a.plan, a.status, a.minutes], ['booking', 'Booked Co', '', 'booked', 30]);
-  assert.deepEqual([b.source, b.title, b.plan, b.status, b.hasBrief], ['booking', 'Brief Co', 'pilot', 'brief_sent', true]);
+  assert.deepEqual([b.source, b.title, b.plan, b.status, b.hasBrief], ['booking', 'Brief Co', 'retired', 'brief_sent', true]);
   assert.deepEqual([m.source, m.title, m.who, m.plan, m.kindWord, m.minutes], ['meeting', 'Northwind', 'Ravi Perera', 'growth', 'Strategy', 45]);
   assert.equal(a.meetLink, 'https://meet.google.com/abc-defg-hij');
 
@@ -623,22 +624,25 @@ test('the month grid: November 2026 starts on Monday 26 October and is whole wee
   assert.match(visible(host('mtCalHost')), /30 Nov – 6 Dec 2026/);
 });
 
-test('each plan on offer has its own colour class and its own initial; no plan and the retired Pilot are neutral grey; a meeting takes its client\'s plan', async () => {
+test('each plan on offer has its own colour class and its own initial; no plan and a withdrawn plan are neutral grey; a meeting takes its client\'s plan', async () => {
   const classes = ['starter', 'growth', 'scale'].map(mtPlanClass);
   assert.deepEqual(classes, ['mt-plan-starter', 'mt-plan-growth', 'mt-plan-scale']);
   assert.equal(new Set(classes).size, 3);
-  /* the retired Pilot keeps its name and initial, so an old call still reads, but it has
-     no colour of its own any more: it falls back to the neutral one */
+  /* an old call on the withdrawn plan still reads, as "Retired plan" in the neutral colour:
+     the old name is never shown and the code is never mapped to one of the three */
   assert.equal(mtPlanClass('pilot'), 'mt-plan-none');
-  assert.equal(mtPlanWord('pilot'), 'Pilot');
-  assert.deepEqual(['pilot', 'starter', 'growth', 'scale'].map(mtPlanTag), ['P', 'S', 'G', 'Sc'], 'the initial tells them apart without colour');
+  assert.equal(mtPlanWord('pilot'), 'Retired plan');
+  assert.equal(mtPlanKey('pilot'), 'retired'); assert.equal(mtPlanKey('retired'), 'retired'); assert.equal(mtPlanWord('retired'), 'Retired plan');
+  assert.deepEqual(Object.keys(MT_PLANS), ['starter', 'growth', 'scale'], 'three plans, no more');
+  assert.deepEqual(MT_PLAN_CHOICES, ['starter', 'growth', 'scale']);
+  assert.deepEqual(['pilot', 'starter', 'growth', 'scale'].map(mtPlanTag), ['R', 'S', 'G', 'Sc'], 'the initial tells them apart without colour');
   for (const none of [null, undefined, '', 'enterprise', 'constructor']) assert.equal(mtPlanClass(none), 'mt-plan-none', String(none));
   assert.equal(mtPlanClass('Growth'), 'mt-plan-growth');
   assert.equal(mtPlanWord(null), 'No plan yet');
 
   settingsRow(); at('2026-11-24T06:00:00.000Z');
   db.clients.push({ id: 'c1', company: 'Scale Client', plan: 'scale' }, { id: 'c2', company: 'Planless Client', plan: null });
-  db.discovery_bookings.push(bk({ id: 'p', company: 'Pilot Co', plan: 'pilot', call_at: '2026-11-25T15:00:00.000Z' }), bk({ id: 'n', company: 'Undecided Co', plan: null, call_at: '2026-11-25T16:00:00.000Z' }));
+  db.discovery_bookings.push(bk({ id: 'p', company: 'Oldplan Co', plan: 'pilot', call_at: '2026-11-25T15:00:00.000Z' }), bk({ id: 'n', company: 'Undecided Co', plan: null, call_at: '2026-11-25T16:00:00.000Z' }));
   db.meetings.push(
     { id: 'm1', client_id: 'c1', kind: 'onboarding', starts_at: '2026-11-26T15:00:00.000Z', minutes: 30, status: 'booked' },
     { id: 'm2', client_id: 'c2', kind: 'review', starts_at: '2026-11-26T16:00:00.000Z', minutes: 30, status: 'booked' },
@@ -651,7 +655,8 @@ test('each plan on offer has its own colour class and its own initial; no plan a
   assert.deepEqual([by('m1').kindWord, by('m2').kindWord, by('m3').kindWord, by('p').kindWord], ['Onboarding', 'Review', 'Booked sales call', ''], 'a meeting carries its kind; a discovery call does not need one');
   mt.day = '2026-11-24'; await mtLoadCal();
   const h = host('mtCalHost');
-  assert.match(h, /class="mt-chip mt-plan-none is-booking"[^>]*>.*?Pilot Co.*?<span class="mt-tagp" title="Pilot">P<\/span>/);
+  assert.match(h, /class="mt-chip mt-plan-none is-booking"[^>]*>.*?Oldplan Co.*?<span class="mt-tagp" title="Retired plan">R<\/span>/);
+  assert.ok(!/pilot/i.test(h), 'the withdrawn plan is never named on the calendar');
   assert.match(h, /class="mt-chip mt-plan-scale is-meeting"[^>]*>.*?Scale Client.*?<span class="mt-chip-k">Onboarding<\/span><span class="mt-tagp" title="Scale">Sc<\/span>/);
   assert.match(h, /class="mt-chip mt-plan-none is-booking"[^>]*>.*?Undecided Co/);
 
@@ -676,7 +681,8 @@ test('each plan on offer has its own colour class and its own initial; no plan a
     }
   }
   for (const p2 of ['starter', 'growth', 'scale', 'none']) assert.ok(css.includes('.mt-plan-' + p2 + '{'), 'a class for ' + p2);
-  assert.equal((css.match(/--mt-pilot-/g) || []).length, 0, 'the retired Pilot has no colour of its own');
+  assert.ok(!/pilot/i.test(fs.readFileSync(path.join(root, 'meetings.css'), 'utf8')), 'the withdrawn plan has no colour and no mention in the stylesheet');
+  assert.equal((SRC.match(/pilot/gi) || []).length, 0, 'meetings.js does not name it either: finance.js holds the one guard');
   assert.equal((css.match(/--mt-starter-bg:/g) || []).length, 2, 'defined once per theme, nowhere else');
 });
 
@@ -977,7 +983,7 @@ test('the panel\'s buttons go through pipeline.js, and the calendar and the pane
   assert.equal(db.discovery_bookings[0].status, 'won');
   assert.match(visible(host('modal')), /Won — they are a client/);
   assert.ok(!host('modal').includes('plMarkWon('), 'a won booking offers no second client');
-  r = await plWon('b1', { plan: 'scale' });
+  r = await plCloseWon('b1', 'scale');
   assert.equal(r.ok, false); assert.match(r.error, /already a client/); assert.equal(db.clients.length, 1);
   assert.equal(mt.cal.events.find((e) => e.id === 'b1').statusWord, 'Won');
 
@@ -1184,7 +1190,7 @@ test('the colour key is not drawn until the three-dots button is pressed; outsid
     h = host('mtCalHost');
     assert.match(h, /aria-expanded="true"/);
     assert.match(visible(h.slice(h.indexOf('id="mtKey"'), h.indexOf('class="mt-nav"'))), /S Starter G Growth Sc Scale – No plan yet Red outline — needs an outcome Hatched band — blocked time/);
-    assert.ok(!h.includes('mt-plan-pilot'), 'the retired Pilot is not in the key');
+    assert.ok(!/pilot|Retired/i.test(h.slice(h.indexOf('id="mtKey"'), h.indexOf('class="mt-nav"'))), 'only the three plans and "No plan yet" are in the key');
     for (const k of ['starter', 'growth', 'scale', 'none']) assert.ok(h.includes('class="mt-sw mt-plan-' + k + '"'), 'a swatch for ' + k);
     assert.equal(mtToggleLegend(), false);
     assert.ok(!host('mtCalHost').includes('mt-legend'));
@@ -1220,6 +1226,9 @@ test('mtAddOwn: a title is required, the email and the link are checked, and a t
   await no({ startsAt: 'whenever' }, /Pick the day and the time/);
   await no({ minutes: 10 }, /15, 30, 45, 60 or 90/);
   await no({ plan: 'enterprise' }, /not one of the plans/);
+  /* a plan code from before the three plans: refused in a plain sentence, never saved as another plan */
+  for (const old of ['pilot', 'Pilot', 'retired']) await no({ plan: old }, old === 'retired' ? /not one of the plans/ : /^That plan is retired\. Pick Starter, Growth or Scale\.$/);
+  assert.equal(db.meetings.length, 1, 'nothing was written');
   // taken by a website booking — the same start, or only overlapping it — or by another meeting
   await no({ startsAt: '2026-11-27T16:00:00.000Z' }, /^There is already a call at that time\.$/);
   await no({ startsAt: '2026-11-27T15:45:00.000Z' }, /^There is already a call at that time\.$/);

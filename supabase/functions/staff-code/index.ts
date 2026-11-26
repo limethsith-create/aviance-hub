@@ -34,8 +34,8 @@ const no = (req: Request, error: string, status = 400) => json(req, { ok: false,
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// No O, 0, I, 1, L or 5/S lookalikes read wrongly over a phone: exactly 32
-// characters, so one random byte picks one character with no bias at all.
+// No O, 0, I, 1, L or 5/S lookalikes read wrongly over a phone. 29 characters;
+// makeCode() throws away the top of the byte range so each one stays equally likely.
 const ALPHABET = "ABCDEFGHJKMNPQRTUVWXYZ2346789";
 const PICKABLE = ALPHABET.length; // 29
 

@@ -59,7 +59,7 @@ function pcSafeUrl(u){
   return s;
 }
 
-/* Whole dollars in, '$2,497.00' out. Credits read '−$300.00'. */
+/* Whole dollars in, '$3,000.00' out. A negative amount reads '−$300.00'. */
 function pcMoney(amount, currency){
   const n = Number(amount);
   if (amount == null || amount === '' || !isFinite(n)) return '';
@@ -133,20 +133,37 @@ function pcCleanBody(text){
   return String(text == null ? '' : text).replace(/\r\n?/g, '\n').trim().slice(0, PC_MAX_BODY);
 }
 
-/* The invoice's lines, with the pilot credit always its own negative line, and
-   a check that they add up to what the database says is owed. The database's
-   `amount` is the total shown; `matches` says whether the lines agree. */
+/* The guarantee in one line, for the foot of every invoice and receipt. */
+const PC_GUARANTEE = 'Miss your agreed number of calls in month one and we refund twice that month’s fee. Miss it in any later month and we refund that month in full. Money back, not credit.';
+
+/* '3 months × $1,200.00 a month · 20% off the $1,500.00 monthly price', or '' when
+   the line is not priced by the month. A one-month line says nothing: its amount
+   is already the month's price. */
+function pcLineDetail(line, currency){
+  const l = line || {};
+  const months = Number(l.months);
+  const unit = Number(l.unit);
+  if (!Number.isInteger(months) || months < 2 || !isFinite(unit) || unit <= 0) return '';
+  let out = months + ' months × ' + pcMoney(unit, currency) + ' a month';
+  const list = Number(l.list_unit);
+  if (isFinite(list) && list > unit) out += ' · ' + Math.round((1 - unit / list) * 100) + '% off the ' + pcMoney(list, currency) + ' monthly price';
+  return out;
+}
+
+/* The invoice's lines, and a check that they add up to what the database says
+   is owed. The database's `amount` is the total shown; `matches` says whether
+   the lines agree. A document made before the one-off trial plan was retired
+   may still carry its credit: that field and that line are ignored. */
 function pcInvoiceLines(inv){
   const d = inv || {};
   const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
   let lines = (Array.isArray(d.lines) ? d.lines : [])
-    .filter((l) => l && isFinite(Number(l.amount)))
-    .map((l) => ({ label: String(l.label == null ? '' : l.label), amount: Number(l.amount), credit: Number(l.amount) < 0 }));
-  const credit = Math.abs(num(d.pilot_credit));
-  if (!lines.length && d.gross != null) lines = [{ label: 'Services', amount: num(d.gross), credit: false }];
-  if (credit > 0 && !lines.some((l) => l.credit)) lines.push({ label: 'Pilot credit', amount: -credit, credit: true });
+    .filter((l) => l && l.amount != null && l.amount !== '' && isFinite(Number(l.amount)))
+    .map((l) => ({ label: String(l.label == null ? '' : l.label), amount: Number(l.amount), credit: Number(l.amount) < 0, detail: pcLineDetail(l, d.currency) }))
+    .filter((l) => !(l.credit && /pilot/i.test(l.label)));
+  if (!lines.length && d.gross != null) lines = [{ label: 'Services', amount: num(d.gross), credit: false, detail: '' }];
   const sum = lines.reduce((t, l) => t + l.amount, 0);
-  const total = d.amount == null || !isFinite(Number(d.amount)) ? sum : Number(d.amount);
+  const total = d.amount == null || d.amount === '' || !isFinite(Number(d.amount)) ? sum : Number(d.amount);
   return { lines, sum, total, matches: sum === total };
 }
 
@@ -372,33 +389,51 @@ function pcStatusWord(inv){
   return { paid: 'Paid', void: 'Void', draft: 'Draft', overdue: 'Overdue' }[d.status] || 'Unpaid';
 }
 
+/* One page, two documents. Unpaid it is an invoice: what is owed, by when, and
+   how to pay. Once paid it is a receipt: what was paid and when, nothing to do. */
 function pcInvoiceHtml(doc){
   const d = doc || {};
   const from = d.from || {};
   const to = d.bill_to || {};
-  const cur = d.currency || 'USD';
+  const cur = String(d.currency || 'USD').toUpperCase();
   const built = pcInvoiceLines(d);
   const paid = d.status === 'paid';
   const dead = d.status === 'void';
   const word = pcStatusWord(d);
   const pay = pcPayDetails(d.pay);
-  const rows = built.lines.map((l) => `<tr${l.credit ? ' class="pc-credit"' : ''}><td>${pcEsc(l.label)}</td><td class="pc-amt">${pcEsc(pcMoney(l.amount, cur))}</td></tr>`).join('');
+  const kind = paid ? 'Receipt' : 'Invoice';
+  const period = typeof d.period === 'string' ? d.period.trim() : '';
+  const rows = built.lines.map((l, i) => `<tr${l.credit ? ' class="pc-credit"' : ''}><td><span class="pc-line-t">${pcEsc(l.label)}</span>${l.detail ? `<span class="pc-line-d">${pcEsc(l.detail)}</span>` : ''}${!i && period ? `<span class="pc-line-d">${pcEsc(period)}</span>` : ''}</td><td class="pc-amt">${pcEsc(pcMoney(l.amount, cur))}</td></tr>`).join('');
   let stamp = '';
   if (paid) stamp = `<p class="pc-stamp pc-stamp-paid"><strong>Paid</strong>${d.paid_at ? `<span>${pcEsc(pcDate(d.paid_at))}</span>` : ''}</p>`;
   else if (word === 'Void' || word === 'Overdue' || word === 'Draft') stamp = `<p class="pc-stamp"><strong>${pcEsc(word)}</strong></p>`;
   const meta = [
-    ['Number', d.number],
+    ['Invoice no.', d.number],
     ['Issued', pcDate(d.issued_on)],
-    [paid ? 'Paid' : 'Due', paid ? pcDate(d.paid_at) : pcDate(d.due_on)],
-    ['Status', word],
-    ['Terms', paid ? '' : d.terms],
+    [paid ? 'Paid on' : 'Due', paid ? pcDate(d.paid_at) : pcDate(d.due_on)],
+    ['Status', paid ? '' : word],   /* a receipt carries the red Paid stamp instead */
+    ['Terms', paid || dead ? '' : d.terms],
   ].filter((m) => m[1]).map((m) => `<div><dt class="pc-tag">${m[0]}</dt><dd>${pcEsc(m[1])}</dd></div>`).join('');
   /* until the owner fills in the company details, a client sees just 'Aviance' */
   const fromKeys = from.ready === false ? ['legal_name', 'email', 'phone'] : ['legal_name', 'address', 'email', 'phone'];
   const fromVals = Object.assign({}, from, from.ready === false ? { legal_name: 'Aviance' } : {});
   const addr = (o, keys) => keys.map((k) => o[k]).filter(Boolean).map((v, i) => `<p${i ? '' : ' class="pc-strong"'}>${pcFillHtml(v)}</p>`).join('');
+  const fromHtml = addr(fromVals, fromKeys) || '<p class="pc-strong">Aviance</p>';
+  const toHtml = addr(to, ['company', 'contact_name', 'contact_email']);
+  /* the service line is only said twice when it adds something the table does not already say */
+  const service = typeof d.service === 'string' && d.service.trim() && !built.lines.some((l) => l.label === d.service) ? d.service : '';
   let how = '';
-  if (!paid && !dead) {
+  if (paid) {
+    how = `<section class="pc-pay pc-paidnote" aria-label="Payment received">
+      <p class="pc-tag pc-red">Payment received</p>
+      <p class="pc-pay-lede">Paid in full${d.paid_at ? ' on ' + pcEsc(pcDate(d.paid_at)) : ''}. Nothing more is owed on this invoice. Thank you.</p>
+    </section>`;
+  } else if (dead) {
+    how = `<section class="pc-pay" aria-label="Cancelled">
+      <p class="pc-tag">Cancelled</p>
+      <p class="pc-pay-lede">This invoice has been cancelled. Nothing is owed on it.</p>
+    </section>`;
+  } else {
     how = pay.ready
       ? `<section class="pc-pay" aria-labelledby="pcPayH">
       <h2 class="pc-tag pc-red" id="pcPayH">How to pay</h2>
@@ -411,18 +446,20 @@ function pcInvoiceHtml(doc){
       <p class="pc-pay-lede">We’ll send these to you directly. Reply to our email if you need them now.</p>
     </section>`;
   }
-  return `<main class="pc-wrap pc-doc pc-invoice">
-    <header class="pc-dochead">${pcLogoHtml()}<p class="pc-tag">${paid ? 'Receipt' : 'Invoice'}</p></header>
-    <div class="pc-invtop"><h1 class="pc-h1" tabindex="-1">${paid ? 'Receipt' : 'Invoice'}</h1>${stamp}</div>
+  const totalLabel = paid ? 'Total paid' : (dead ? 'Total' : 'Total due');
+  return `<main class="pc-wrap pc-doc pc-invoice${paid ? ' pc-receipt' : ''}">
+    <header class="pc-dochead">${pcLogoHtml()}<p class="pc-tag">${kind}</p></header>
+    <div class="pc-invtop"><h1 class="pc-h1" tabindex="-1">${kind}</h1>${stamp}</div>
     <dl class="pc-meta">${meta}</dl>
     <div class="pc-two">
-      <div><p class="pc-tag">From</p>${addr(fromVals, fromKeys)}</div>
-      <div><p class="pc-tag">Bill to</p>${addr(to, ['company', 'contact_name', 'contact_email'])}</div>
+      <div><p class="pc-tag">From</p>${fromHtml}</div>
+      ${toHtml ? `<div><p class="pc-tag">${paid ? 'Received from' : 'Bill to'}</p>${toHtml}</div>` : ''}
     </div>
-    ${d.service ? `<p class="pc-service"><span class="pc-tag">Service</span><span class="pc-service-t">${pcEsc(d.service)}</span></p>` : ''}
+    ${service ? `<p class="pc-service"><span class="pc-tag">Service</span><span class="pc-service-t">${pcEsc(service)}</span></p>` : ''}
     <table class="pc-lines"><thead><tr><th scope="col" class="pc-tag">Description</th><th scope="col" class="pc-tag pc-amt">Amount</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="pc-total"><p class="pc-tag">${paid ? 'Total paid' : 'Total due'}${cur ? ' · ' + pcEsc(String(cur).toUpperCase()) : ''}</p><p class="pc-total-n">${pcEsc(pcMoney(built.total, cur))}</p></div>
+    <div class="pc-total"><p class="pc-tag">${totalLabel} · ${pcEsc(cur)}</p><p class="pc-total-n">${pcEsc(pcMoney(built.total, cur))}</p></div>
     ${how}
+    ${dead ? '' : `<p class="pc-guarantee"><span class="pc-tag">Our guarantee</span> ${pcEsc(PC_GUARANTEE)}</p>`}
     ${pcPrintHtml()}
   </main>`;
 }

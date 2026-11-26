@@ -45,7 +45,8 @@ test('the three cards are registered on PC', () => {
 test('an approval card escapes the title, body and name and shows both buttons while pending', () => {
   const html = P('pstApprovalHtml')({ id: 'm1', meta: { approval_id: 'a1', kind: 'icp', title: EVIL, body: EVIL + '\nline 2' } }, undefined, {}, { person: { name: EVIL } });
   assert.ok(clean(html), html);
-  assert.match(html, /For your approval · ICP/);
+  assert.match(html, /For your approval · Target profile/);   // was "ICP": changed on purpose, a client does not use that word
+  assert.doesNotMatch(html.replace(/<[^>]+>/g, ' '), /\bICP\b/);
   assert.match(html, /data-pc-act="pstApprove" data-pst-id="a1"/);
   assert.match(html, /data-pc-act="pstAskChanges"/);
   assert.match(html, /line 2/);
@@ -175,4 +176,58 @@ test('every bot line is casual: lowercase, at most one emoji', () => {
     assert.ok((text.match(/\p{Extended_Pictographic}/gu) || []).length <= 1, s);
   }
   assert.ok(lines.length > 0);
+});
+
+/* ───────────── perfection pass ───────────── */
+
+/* a document with just enough to run the mount: which cards are on screen, and nothing to redraw */
+function withCards(sel, fn) {
+  const had = globalThis.document;
+  globalThis.document = { querySelector: (q) => (sel.some((x) => q.includes(x)) ? {} : null), querySelectorAll: () => [] };
+  return Promise.resolve().then(fn).finally(() => { globalThis.document = had; });
+}
+const theMount = () => P('PC').mounts[P('PC').mounts.length - 1];
+const homeOf = (id) => ({ person: { id, name: 'Person ' + id }, channel: { id: 'ch-' + id } });
+
+test('a second person signing in on the same browser never sees the first person\'s answers', async () => {
+  const st = P('pstState');
+  const ctxA = Object.assign(fakeCtx((name) => name === 'portal_precall_get'
+    ? { ok: true, data: { offer: 'SECRET of client A', best_customers: 'a', deal_size: 'a', avoid: 'a' }, error: '' }
+    : { ok: true, data: [{ id: 'a1', status: 'approved', decided_name: 'Client A' }], error: '' }), { home: homeOf('pA') });
+  P('PC').cards.form({ id: 'm1', meta: { form: 'precall' } });
+  await withCards(['a:', 'f:'], () => theMount()(ctxA));
+  P('pstUi')('f').values = { offer: 'half typed by A' };
+  assert.equal(st.form.offer, 'SECRET of client A');
+  assert.match(P('PC').cards.form({ id: 'm1', meta: {} }), /half typed by A/);
+
+  /* A signs out, B signs in: the page calls the mounts with B's home */
+  const ctxB = Object.assign(fakeCtx(() => ({ ok: false, data: null, error: 'offline' })), { home: homeOf('pB') });
+  await withCards(['f:'], () => theMount()(ctxB));
+  const card = P('PC').cards.form({ id: 'm1', meta: {} });
+  assert.doesNotMatch(card, /SECRET of client A|half typed by A/);
+  assert.deepEqual(st.approvals, {});
+  assert.equal(st.home.person.id, 'pB');
+});
+
+test('the cards\' state is not asked for again on every refresh, and both lookups go out together', async () => {
+  P('pstReset')(); P('pstState').who = '';
+  let open = 0, most = 0;
+  const ctx = Object.assign(fakeCtx(() => new Promise((r) => { open++; most = Math.max(most, open); setTimeout(() => { open--; r({ ok: true, data: [], error: '' }); }, 10); })), { home: homeOf('pC') });
+  await withCards(['a:', 'f:'], () => theMount()(ctx));     // first time: nothing known yet
+  P('PC').cards.approval({ id: 'm1', meta: { approval_id: 'a1' } });
+  await withCards(['a:', 'f:'], () => theMount()(ctx));     // a card arrived: ask
+  const asked = ctx.calls.length;
+  assert.equal(most, 2, 'approvals and the form are asked for at the same time');
+  await withCards(['a:', 'f:'], () => theMount()(ctx));     // the 20-second refresh: same cards, nothing to ask
+  await withCards(['a:', 'f:'], () => theMount()(ctx));
+  assert.equal(ctx.calls.length, asked);
+  P('PC').cards.approval({ id: 'm2', meta: { approval_id: 'a2' } });
+  await withCards(['a:', 'f:'], () => theMount()(ctx));     // a new card: ask again
+  assert.ok(ctx.calls.length > asked);
+});
+
+test('an answer she has cleared stays cleared when the card is drawn again', () => {
+  const h = P('pstFormHtml')({ id: 'm9' }, { offer: 'what the database had' }, { values: { offer: '' } });
+  assert.doesNotMatch(h, /what the database had/);
+  assert.match(P('pstFormHtml')({ id: 'm9' }, { offer: 'what the database had' }, {}), /what the database had/);
 });

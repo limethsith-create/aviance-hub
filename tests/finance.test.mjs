@@ -54,10 +54,11 @@ function reset() {
   calls = []; rpcs = []; failWith = null; rpcAnswer = null;
   tables = {
     plan_prices: [
-      { plan: 'pilot',   label: 'The Pilot', calls_promised: 2,  monthly_fee: 300,  three_month_fee: 0,     is_recurring: false },
-      { plan: 'starter', label: 'Starter',   calls_promised: 10, monthly_fee: 2497, three_month_fee: 2247,  is_recurring: true },
-      { plan: 'growth',  label: 'Growth',    calls_promised: 20, monthly_fee: 3997, three_month_fee: 3597,  is_recurring: true },
-      { plan: 'scale',   label: 'Scale',     calls_promised: 50, monthly_fee: 8497, three_month_fee: 7647,  is_recurring: true },
+      /* a row left over from a withdrawn plan: finance.js must never hand it on */
+      { plan: 'pilot',   label: 'Old plan',  calls_promised: 2,  monthly_fee: 300,  three_month_fee: null,  is_recurring: false },
+      { plan: 'starter', label: 'Starter',   calls_promised: 5,  monthly_fee: 1500, three_month_fee: 1200,  is_recurring: true },
+      { plan: 'growth',  label: 'Growth',    calls_promised: 10, monthly_fee: 3000, three_month_fee: 2400,  is_recurring: true },
+      { plan: 'scale',   label: 'Scale',     calls_promised: 15, monthly_fee: 4500, three_month_fee: 3600,  is_recurring: true },
     ],
     clients: [{ id: 'c1', company: 'Acme', stage: 'won' }],
     client_months: [{ id: 'm1', client_id: 'c1', month_no: 1 }],
@@ -116,47 +117,51 @@ test('nothing in the database reads as empty, not as a crash', async () => {
   }
 });
 
-/* ───────────── the price never comes from the code ───────────── */
+/* ───────────── the offer: three plans, priced by the database ───────────── */
 
-test('a new client takes its price and its promise from plan_prices', async () => {
-  reset();
-  const r = await F('fnAddClient')({ company: 'Beta', contactName: 'Sam', contactEmail: 's@beta.com', plan: 'growth', term: 'monthly' });
-  assert.equal(r.ok, true, r.error);
-  const ins = find('clients', 'insert');
-  assert.equal(ins.payload.monthly_fee, 3997);
-  assert.equal(ins.payload.calls_promised, 20);
-  assert.equal(ins.payload.plan, 'growth');
-});
-
-test('a three-month term takes the lower three-month price', async () => {
-  reset();
-  await F('fnAddClient')({ company: 'Beta', contactName: 'Sam', contactEmail: 's@beta.com', plan: 'growth', term: '3month' });
-  const ins = find('clients', 'insert');
-  assert.equal(ins.payload.monthly_fee, 3597);
-  assert.equal(ins.payload.term, '3month');
-});
-
-test('a plan that does not exist is refused in words', async () => {
-  reset();
-  const r = await F('fnAddClient')({ company: 'Beta', contactName: 'Sam', contactEmail: 's@beta.com', plan: 'platinum', term: 'monthly' });
-  assert.equal(r.ok, false);
-  assert.match(r.error, /does not exist/i);
-  assert.equal(find('clients', 'insert'), undefined, 'nothing should have been written');
-});
-
-test('the pilot is 2 calls for $300 and does not recur', async () => {
+test('the price list is the three plans on offer, at the offer\'s prices, cheapest first', async () => {
   reset();
   const r = await F('fnPlans')();
-  const p = r.data.find((x) => x.plan === 'pilot');
-  assert.equal(p.monthly_fee, 300);
-  assert.equal(p.calls_promised, 2);
-  assert.equal(p.is_recurring, false);
+  assert.equal(r.ok, true, r.error);
+  assert.deepEqual(r.data.map((p) => [p.plan, p.calls_promised, p.monthly_fee, p.three_month_fee, p.three_month_fee * 3]), [
+    ['starter', 5, 1500, 1200, 3600],
+    ['growth', 10, 3000, 2400, 7200],
+    ['scale', 15, 4500, 3600, 10800],
+  ]);
+  assert.deepEqual(F('FN_PLANS'), ['starter', 'growth', 'scale']);
+  for (const p of r.data) assert.equal(p.three_month_fee, p.monthly_fee * 0.8, p.plan + ': the 3-month term is 20% off');
+});
+
+test('a withdrawn plan code is never priced, offered or named, and a row for it is left out of the price list', async () => {
+  reset();
+  const r = await F('fnPlans')();
+  assert.ok(!r.data.some((p) => p.plan === 'pilot'), 'the leftover row is not handed on');
+  assert.equal(F('fnPlanRetired')('pilot'), true);
+  assert.equal(F('fnPlanRetired')('PILOT'), true);
+  for (const p of ['starter', 'growth', 'scale', '', null, undefined, 'platinum']) assert.equal(F('fnPlanRetired')(p), false, String(p));
+  assert.equal(F('fnPlanOffered')('pilot'), false);
+  assert.equal(F('fnPlanOffered')('Growth'), true);
+  assert.equal(F('fnPlanOffered')('platinum'), false);
+  assert.equal(F('fnPlanWord')('pilot'), 'Retired plan', 'old data reads safely, without the old name');
+  assert.deepEqual(['starter', 'growth', 'scale', 'platinum', null].map(F('fnPlanWord')), ['Starter', 'Growth', 'Scale', '', '']);
+  assert.equal(F('FN_RETIRED_SAYS'), 'That plan is retired. Pick Starter, Growth or Scale.');
+  /* a price list that fails still fails in words */
+  failWith = { message: 'connection refused' };
+  assert.deepEqual(await F('fnPlans')(), { ok: false, data: null, error: 'connection refused' });
+});
+
+test('finance.js knows the withdrawn code in exactly one place, and carries no credit for it', () => {
+  const src = fs.readFileSync(path.join(root, 'finance.js'), 'utf8');
+  assert.equal((src.match(/pilot/gi) || []).length, 1, 'one guard, nothing else');
+  assert.ok(src.includes("const FN_RETIRED_PLANS = ['pilot'];"));
+  assert.ok(!/credit/i.test(src), 'no credit of any kind');
+  assert.equal(typeof globalThis.fnAddClient, 'undefined', 'the unused add-a-client path is gone; close_won makes clients');
 });
 
 test('finance.js contains no hard-coded plan price', () => {
   const src = fs.readFileSync(path.join(root, 'finance.js'), 'utf8');
-  for (const n of ['2497', '3997', '8497', '2247', '3597', '7647']) {
-    assert.ok(!src.includes(n), 'finance.js hard-codes the price ' + n);
+  for (const n of ['300', '1500', '3000', '4500', '1200', '2400', '3600', '7200', '10800', '1,500', '3,000', '4,500']) {
+    assert.ok(!new RegExp('(^|[^0-9])' + n + '([^0-9]|$)').test(src), 'finance.js hard-codes the price ' + n);
   }
 });
 
@@ -229,7 +234,21 @@ test('starting a client sets day one and opens month one together', async () => 
   const up = find('clients', 'update');
   assert.equal(up.payload.day1_on, '2026-12-01');
   assert.equal(up.payload.stage, 'live');
-  assert.equal(rpcs.at(-1).name, 'open_next_month', 'month one must open in the same breath');
+  /* The database opens month one itself when day one is first saved (clients_first_month). The browser
+     reads it back and must NOT call open_next_month as well: that always opens the month AFTER the
+     last one, so a second call would open month two on launch day. */
+  assert.equal(r.data.month.id, 'm1', 'month one is the one the database opened');
+  assert.equal(rpcs.length, 0, 'no second month is opened from the browser');
+});
+
+test('on a database that did not open month one, the browser still does', async () => {
+  reset();
+  tables.client_months = [];
+  const r = await F('fnStartSending')('c1', '2026-12-01');
+  assert.equal(r.ok, true, r.error);
+  assert.equal(rpcs.length, 1);
+  assert.equal(rpcs[0].name, 'open_next_month');
+  assert.equal(r.data.month.id, 'm-new');
 });
 
 test('if day one cannot be saved, no month is opened', async () => {

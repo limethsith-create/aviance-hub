@@ -57,3 +57,194 @@ test('head: manifest, apple-touch-icon, home-screen app tags, theme colour', () 
   ]) assert.ok(html.includes(tag), tag);
   assert.ok(!html.includes('push.js') && !fs.existsSync(path.join(root, 'sw.js')), 'no phone-alert script or service worker any more');
 });
+
+/* ───────────── the shell: routes, the sidebar, the phone's tab bar ─────────────
+   The inline script from index.html runs in its own vm context with a tiny fake page, so
+   the tests below see exactly what the browser runs. No screen file is loaded: where a test
+   needs a screen it puts a stand-in function on the context. */
+const shellSrc = html.slice(html.indexOf('<script>\n') + 9, html.indexOf('</script>\n<script src="finance.js">'));
+const loaded = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]).filter((p) => !p.startsWith('http'));
+const sheets = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map((m) => m[1]).filter((p) => !p.startsWith('http'));
+const screenCode = loaded.map((f) => read(f).toString()).join('\n');
+
+function shell(role = 'admin') {
+  const els = {};
+  const fakeEl = (id) => {
+    const e = { id, value: '', innerHTML: '', textContent: '', style: {}, _c: new Set(), scrollTop: 0,
+      addEventListener() {}, focus() {}, setAttribute() {}, querySelectorAll: () => [], closest: () => null };
+    e.classList = { add: (c) => e._c.add(c), remove: (c) => e._c.delete(c), contains: (c) => e._c.has(c),
+      toggle(c, f) { const on = f === undefined ? !e._c.has(c) : !!f; on ? e._c.add(c) : e._c.delete(c); return on; } };
+    return e;
+  };
+  const el = (id) => (els[id] ||= fakeEl(id));
+  const ctx = {
+    console, setTimeout, clearTimeout, Promise, URLSearchParams,
+    document: { body: fakeEl('body'), documentElement: fakeEl('html'), getElementById: el, querySelectorAll: () => [], addEventListener() {} },
+    localStorage: { getItem: () => null, setItem() {} }, sessionStorage: { removeItem() {} },
+    navigator: {}, location: { hash: '', origin: 'https://aviance.store', pathname: '/', search: '', replace() {} }, history: { replaceState() {} },
+    supabase: { createClient: () => ({ auth: { getSession: async () => ({ data: { session: null } }), signOut: async () => {} } }) },
+  };
+  ctx.window = ctx; ctx.addEventListener = () => {};
+  vm.createContext(ctx);
+  vm.runInContext(shellSrc, ctx, { filename: 'index.html (inline script)' });
+  const run = (code) => vm.runInContext(code, ctx);
+  if (role) run(`authUser={uid:'u1',name:'Owner',role:${JSON.stringify(role)},email:'o@example.com'}`);
+  return { ctx, run, el };
+}
+
+test('every route names a screen function that one of the loaded files defines', () => {
+  const { run } = shell();
+  const routes = plain(run('Object.keys(views).map(v=>[v,String(views[v].fn)])'));
+  assert.ok(routes.length >= 20);
+  for (const [v, fn] of routes) {
+    const name = /V\('(\w+)'/.exec(fn)[1];
+    assert.ok(new RegExp('function\\s+' + name + '\\s*\\(').test(screenCode), `route ${v} calls ${name}, which no loaded file defines`);
+  }
+  for (const gone of ['calling', 'callTargets', 'dnc', 'outreach', 'outreachClient', 'outreachThread', 'myWork', 'finalStatement'])
+    assert.equal(run(`views[${JSON.stringify(gone)}]`), undefined, gone + ' is not a route any more');
+});
+
+test('nothing the shell calls by name is missing: every hook is defined in a loaded file', () => {
+  const { run } = shell();
+  const hooks = [...plain(run('RENDER_HOOKS.concat(FORGET_HOOKS)')),
+    ...[...shellSrc.matchAll(/typeof (\w+)==='function'/g)].map((m) => m[1]),
+    ...[...shellSrc.matchAll(/\bn\('(\w+)'\)/g)].map((m) => m[1])];
+  assert.ok(hooks.length > 15);
+  for (const h of new Set(hooks)) {
+    if (['f', 'render'].includes(h) || /^window\b/.test(h)) continue;
+    assert.ok(new RegExp('function\\s+' + h + '\\s*\\(').test(screenCode + shellSrc), `the shell asks for ${h}(), which no loaded file defines`);
+  }
+  for (const stale of ['trialsOnRender', 'numbersOnRender', 'peopleSignedIn', 'openNewPayingClient', 'googleReturn', 'calendarCmdkActions', 'closeSidebar'])
+    assert.ok(!shellSrc.includes(stale), stale + ' is gone');
+});
+
+test('index.html loads no file twice, none for a removed screen, and npm run check covers exactly the files that exist', () => {
+  assert.equal(new Set(loaded).size, loaded.length); assert.equal(new Set(sheets).size, sheets.length);
+  for (const f of [...loaded, ...sheets]) {
+    assert.ok(fs.existsSync(path.join(root, f)), f + ' exists');
+    assert.ok(!/^(calling|outreach)/.test(f), f + ' belonged to a removed screen');
+  }
+  const pkg = JSON.parse(read('package.json').toString());
+  const checked = pkg.scripts.check.split(' && ').map((c) => c.replace('node --check ', '')).sort();
+  const onDisk = fs.readdirSync(root).filter((f) => f.endsWith('.js')).sort();
+  assert.deepEqual(checked, onDisk);
+  // the shell's own script still sits straight after the two it needs, and before every screen
+  assert.ok(html.indexOf('supabase-js@') < html.indexOf('<script src="channels-api.js">'));
+  assert.ok(html.indexOf('<script src="channels-api.js">') < html.indexOf('<script>\n'));
+  assert.ok(html.indexOf('<script src="channels-api.js">') > html.indexOf('<body>'), 'nothing from another site holds up the first paint');
+  assert.ok(!/<link[^>]+fonts\.googleapis\.com\/css2[^>]+rel="stylesheet">/.test(html), 'the web fonts do not block the first paint');
+});
+
+test('the sidebar: eleven plain places for the owner, each with its own icon, most used first', () => {
+  const { run } = shell('admin');
+  const items = plain(run('navItems()'));
+  assert.deepEqual(items.map((i) => i.label), ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Callers', 'Employees', 'Onboarding', 'Invoices', 'Documents', 'Settings']);
+  assert.equal(new Set(items.map((i) => i.icon)).size, items.length, 'no two places share an icon');
+  for (const i of items) { assert.ok(i.icon.startsWith('<svg'), i.label + ' has an icon'); assert.match(i.label, /^[A-Z][a-z]+$/); }
+  // every screen that is not a place sits under one, with a way back
+  const inNav = new Set(items.flatMap((i) => [i.view, ...(i.also || [])]));
+  for (const [v, hasBack] of plain(run('Object.keys(views).map(v=>[v,!!views[v].back])'))) {
+    assert.ok(inNav.has(v), v + ' lights a place in the sidebar');
+    assert.equal(hasBack, !items.some((i) => i.view === v), v + (hasBack ? ' is a place and needs no Back' : ' is a page inside a place and needs Back'));
+  }
+});
+
+test('a team member who is not the owner is offered no owner-only place, in the sidebar or in ⌘K', () => {
+  const { run } = shell('employee');
+  const labels = plain(run('navItems().map(i=>i.label)'));
+  assert.deepEqual(labels, ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Onboarding', 'Invoices']);
+  const found = plain(run("cmdkEntities().filter(x=>x.type==='Screens').map(x=>x.label)"));
+  for (const l of ['Callers', 'Employees', 'Documents', 'Settings']) assert.ok(!found.includes(l), l);
+  assert.ok(found.includes('Calendar') && found.includes('Team'));
+  const owner = shell('admin');
+  const all = plain(owner.run("cmdkEntities().filter(x=>x.type==='Screens').map(x=>x.label)"));
+  for (const l of ['Callers', 'Employees', 'Documents', 'Settings', 'Replies', 'Onboarding', 'No-shows']) assert.ok(all.includes(l), l);
+  for (const l of ['Outreach', 'Calling']) assert.ok(!all.includes(l), l + ' is gone from ⌘K');
+});
+
+test('badges say what they count, in the singular and the plural', () => {
+  const { ctx, run } = shell();
+  ctx.dgNavCount = () => '1'; ctx.mtNavCount = () => 2; ctx.drCount = () => 1; ctx.empCount = () => 0; ctx.jyLateCount = () => 3; ctx.chvNavCount = () => '9+';
+  const by = Object.fromEntries(plain(run('navItems()')).map((i) => [i.label, i]));
+  assert.equal(by.Today.badgeTitle, '1 thing needs you');
+  assert.equal(by.Calendar.badgeTitle, '2 calls need an outcome');
+  assert.equal(by.Replies.badgeTitle, '1 reply the bot drafted is waiting for you');
+  assert.equal(by.Employees.badge, ''); assert.equal(by.Employees.badgeTitle, '');
+  assert.equal(by.Onboarding.badgeTitle, '3 steps are running late');
+  assert.equal(by.Channels.badgeTitle, '9+ unread');
+  assert.equal(by.Invoices.badge, '', 'no count is invented where no screen gives one');
+});
+
+test('the phone tab bar never holds more than five: four places and More, which opens the rest', () => {
+  for (const role of ['admin', 'employee']) {
+    const { ctx, run, el } = shell(role);
+    ctx.empCount = () => 4; ctx.jyLateCount = () => 2;
+    run("currentView='journey';renderNav()");
+    const tabs = el('tabBar').innerHTML.split('<button class="tab').slice(1);
+    assert.equal(tabs.length, 5, role);
+    assert.deepEqual(tabs.map((t) => />([A-Za-z]+)<\/span><\/button>$/.exec(t)[1]), ['Today', 'Calendar', 'Replies', 'Clients', 'More']);
+    assert.ok(tabs[4].startsWith(' active') && tabs[4].includes('aria-current="page"'), 'More is lit when the open screen is behind it');
+    assert.ok(tabs[4].includes('onclick="openMore()"'));
+    if (role === 'admin') assert.match(tabs[4], /class="badge red" title="something is waiting in Employees, Onboarding"[^>]*>2</);
+    else assert.match(tabs[4], /class="badge amber" title="something is waiting in Onboarding"[^>]*>1</);
+    // the sidebar still lists every place
+    assert.equal(el('navArea').innerHTML.split('<button class="nav-item').length - 1, role === 'admin' ? 11 : 7);
+    run('openMore()');
+    const sheet = el('modal').innerHTML;
+    const rows = [...sheet.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]);
+    assert.deepEqual(rows, [...(role === 'admin' ? ['Channels', 'Callers', 'Employees', 'Onboarding', 'Invoices', 'Documents', 'Settings'] : ['Channels', 'Onboarding', 'Invoices']),
+      'Find a client or a screen', 'Switch light / dark', 'Sign out']);
+    assert.ok(sheet.includes(`onclick="closeModal();render('journey')" aria-current="page"`));
+    assert.ok(sheet.includes('onclick="closeModal();logout()"'), 'a phone can sign out');
+  }
+  assert.ok(html.includes('class="who-out" onclick="logout()"'), 'and so can a computer, beside your name');
+});
+
+test('a screen that reads before it draws shows Loading, then itself — never a raw promise', async () => {
+  const { ctx, run, el } = shell();
+  let done; ctx.viewRequests = () => new Promise((r) => { done = r; });
+  run("render('requests')");
+  assert.ok(el('content').innerHTML.includes('Loading') && !el('content').innerHTML.includes('[object'));
+  done('<p>3 open</p>'); await new Promise((r) => setTimeout(r, 0));
+  assert.ok(el('content').innerHTML.includes('<p>3 open</p>'));
+  assert.equal(el('backBtn').style.display, 'grid', 'and it has a way back');
+  // they moved on before it answered: the answer is dropped
+  ctx.viewHome = () => '<p>today</p>';
+  run("render('requests')"); const late = done; run("render('home')"); late('<p>late</p>'); await new Promise((r) => setTimeout(r, 0));
+  assert.ok(el('content').innerHTML.includes('today') && !el('content').innerHTML.includes('late'));
+  // one that fails says so in plain words
+  ctx.viewRequests = async () => { throw new Error('The database is not answering.'); };
+  run("render('requests')"); await new Promise((r) => setTimeout(r, 0));
+  assert.ok(el('content').innerHTML.includes('The database is not answering.'));
+  // the two screens that do this today really are async
+  assert.match(read('portal.js').toString(), /async function viewRequests\(/);
+});
+
+test('deep links: the ones in use still land, and a link to a screen that is gone opens Today instead of a blank page', () => {
+  const { ctx, run } = shell();
+  const p = (h) => plain(run(`parseDeepLink(${JSON.stringify(h)})`));
+  assert.deepEqual(p('#clients'), { view: 'clients' }); assert.deepEqual(p('#trials'), { view: 'clients' });
+  assert.deepEqual(p('#onboarding'), { view: 'journey' }); assert.deepEqual(p('#drafts'), { view: 'drafts' });
+  assert.deepEqual(p('#callers'), { view: 'callers' }); assert.deepEqual(p('#settings/keys'), { view: 'settings' });
+  assert.deepEqual(p('#inquiries'), { view: 'calendar' }); assert.deepEqual(p('#calendar/m-1'), { view: 'calendar', id: 'm-1' });
+  assert.deepEqual(p('#inquiry/b-1'), { view: 'inquiry', id: 'b-1' });
+  for (const old of ['#numbers', '#system/abc', '#system/abc/inboxes', '#trial/abc', '#nothing']) assert.equal(p(old), null, old);
+  ctx.viewHome = () => 'today';
+  assert.equal(run("goDeepLink({view:'numbers'})"), true);
+  assert.equal(run('currentView'), 'home');
+});
+
+test('signing out clears what every screen was holding, and boot waits for the screens to load', async () => {
+  const { ctx, run } = shell();
+  const cleared = [];
+  for (const h of plain(run('FORGET_HOOKS'))) ctx[h] = () => cleared.push(h);
+  await run('logout()');
+  assert.deepEqual(cleared.sort(), plain(run('FORGET_HOOKS')).sort());
+  assert.equal(run('authUser'), null);
+  assert.match(shellSrc, /getSession\(\);await pageReady\(\);if\(session\)await routeUser/);
+});
+
+test('the sign-in page states the offer as agreed', () => {
+  assert.ok(html.includes('Live within 2 weeks of kickoff, or the next month is <b>free</b>'));
+  assert.ok(!/3 weeks/.test(html) && !/pilot/i.test(html));
+});

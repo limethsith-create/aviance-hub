@@ -18,12 +18,30 @@ const PST_FIELDS = [
   { key: 'deal_size', arg: 'p_deal', label: 'What is a typical deal worth?', hint: 'a rough number is fine' },
   { key: 'avoid', arg: 'p_avoid', label: 'Anyone we should never email?', hint: 'competitors, current clients, industries. "none" is fine' },
 ];
-const PST_KINDS = { icp: 'ICP', angles: 'Angles', copy: 'Copy' };
+const PST_KINDS = { icp: 'Target profile', angles: 'Angles', copy: 'Email copy' };   /* a client does not say "ICP" */
+const PST_RELOAD_MS = 60000;        /* the cards' state is asked for again at most this often, unless the cards changed */
 const PST_MAX_NOTE = 4000;
 const PST_MAX_ANSWER = 2000;
 
 /* what the cards draw from: the database's answers and what the person has typed */
-const pstState = { approvals: {}, form: null, loaded: false, home: null, ui: {}, items: {}, busy: false };
+const pstState = { approvals: {}, form: null, loaded: false, home: null, ui: {}, items: {}, busy: false, who: '', at: 0, seen: '' };
+
+/* Who the state belongs to. A different person signing in on the same browser must never be shown the
+   last person's answers, approvals or half-typed notes, so everything is dropped when this changes. */
+function pstWho(home){
+  const h = home || {};
+  return String((h.person && h.person.id) || '') + '|' + String((h.channel && h.channel.id) || '');
+}
+function pstReset(){
+  pstState.approvals = {}; pstState.form = null; pstState.loaded = false; pstState.ui = {}; pstState.items = {};
+  pstState.at = 0; pstState.seen = '';
+}
+function pstUse(home){
+  if (!home) return;
+  const who = pstWho(home);
+  if (who !== pstState.who) { pstReset(); pstState.who = who; }
+  pstState.home = home;
+}
 
 /* ---- pure helpers -------------------------------------------------------------------------- */
 
@@ -127,7 +145,7 @@ function pstFormHtml(m, form, ui){
   return `<section class="pst-card" data-pst-card="${pcEsc(key)}" aria-label="Pre-call form">
     <p class="pc-tag pc-red">Pre-call form · 4 questions</p>
     ${PST_FIELDS.map((q, i) => `<div class="pst-field"><label class="pc-label" for="${fid}-${i}">${i + 1}. ${pcEsc(q.label)}</label>
-      <textarea class="pc-input pst-area pst-area-s" id="${fid}-${i}" maxlength="${PST_MAX_ANSWER}" data-pst-in="${pcEsc(q.key)}" placeholder="${pcEsc(q.hint)}">${pcEsc(vals[q.key] || f[q.key] || '')}</textarea></div>`).join('')}
+      <textarea class="pc-input pst-area pst-area-s" id="${fid}-${i}" maxlength="${PST_MAX_ANSWER}" data-pst-in="${pcEsc(q.key)}" placeholder="${pcEsc(q.hint)}">${pcEsc(vals[q.key] != null ? vals[q.key] : (f[q.key] || ''))}</textarea></div>`).join('')}
     <p class="pc-err" role="alert">${pcEsc(u.error || '')}</p>
     <div class="pst-row"><button type="button" class="pc-btn" data-pc-act="pstPrecall"${u.busy ? ' disabled' : ''}>${u.busy ? 'Sending…' : 'Send answers'}</button></div>
   </section>`;
@@ -164,16 +182,15 @@ async function pstCall(ctx, name, args){
 async function pstLoad(ctx, want){
   const w = want || { approvals: true, form: true };
   const out = { approvals: null, form: null };
-  if (w.approvals) {
-    const a = await pstCall(ctx, 'portal_approvals', {});
-    if (!a.ok) return a;
-    out.approvals = Array.isArray(a.data) ? a.data : [];
-  }
-  if (w.form) {
-    const f = await pstCall(ctx, 'portal_precall_get', {});
-    if (!f.ok) return f;
-    out.form = f.data && typeof f.data === 'object' ? f.data : {};
-  }
+  /* asked together, not one after the other: this runs every time the thread refreshes */
+  const [a, f] = await Promise.all([
+    w.approvals ? pstCall(ctx, 'portal_approvals', {}) : null,
+    w.form ? pstCall(ctx, 'portal_precall_get', {}) : null,
+  ]);
+  if (a && !a.ok) return a;
+  if (f && !f.ok) return f;
+  if (a) out.approvals = Array.isArray(a.data) ? a.data : [];
+  if (f) out.form = f.data && typeof f.data === 'object' ? f.data : {};
   return pstOk(out);
 }
 async function pstDecide(ctx, id, name, decision, note){
@@ -241,6 +258,7 @@ if (typeof PC !== 'undefined' && PC) {
   const decide = async function(el, ctx, decision){
     const id = idOf(el), key = 'a:' + id, u = pstUi(key);
     if (u.busy) return;
+    pstUse(ctx && ctx.home);
     if (u.name == null) u.name = (pstState.home && pstState.home.person && pstState.home.person.name) || '';
     u.busy = true; u.error = ''; pstRedraw(key);
     const r = await pstDecide(ctx, id, u.name, decision, u.note);
@@ -274,14 +292,21 @@ if (typeof PC !== 'undefined' && PC) {
 
   /* after every refresh: learn who is signed in, then load the state the cards on screen need */
   PC.mounts.push(async function(ctx){
-    pstState.home = (ctx && ctx.home) || pstState.home;
+    pstUse(ctx && ctx.home);
     if (typeof document === 'undefined' || pstState.busy) return;
     const want = { approvals: !!document.querySelector('[data-pst-card^="a:"]'), form: !!document.querySelector('[data-pst-card^="f:"]') };
     if (!want.approvals && !want.form) return;
+    /* The thread refreshes every few seconds. The cards' state only changes when a new card arrives or
+       this person presses a button (which updates it here), so do not ask the database on every refresh. */
+    const seen = Object.keys(pstState.items).sort().join(',');
+    if (pstState.loaded && seen === pstState.seen && Date.now() - pstState.at < PST_RELOAD_MS) return;
+    const who = pstState.who;
     pstState.busy = true;
     const r = await pstLoad(ctx, want);
     pstState.busy = false;
+    if (who !== pstState.who) return; /* someone else signed in while this was on its way */
     if (!r.ok) return; /* the cards still work; the database refuses anything already decided */
+    pstState.at = Date.now(); pstState.seen = seen;
     const before = JSON.stringify([pstState.approvals, pstState.form]);
     if (r.data.approvals) { const map = {}; r.data.approvals.forEach((a) => { if (a && a.id) map[a.id] = a; }); pstState.approvals = map; }
     if (r.data.form) pstState.form = r.data.form;

@@ -10,8 +10,20 @@
    Every data function returns {ok, data, error} and never throws. Prefix: st. */
 
 function stOk(data){ return {ok:true, data, error:''} }
-function stErr(e){ const m=(e&&(e.message||e.error_description||e.msg))||String(e||'Something went wrong.'); return {ok:false,data:null,error:m} }
-function stWrap(res,whenEmpty){ if(!res)return stErr('No answer from the database.'); if(res.error)return stErr(res.error); return stOk(res.data==null?whenEmpty:res.data) }
+/* What went wrong, in words the owner can act on. Our own sentences and the database's own plain messages
+   pass through; the plumbing's wording never reaches the screen. */
+function stPlain(m){
+  const s=String(m||'');
+  if(/failed to fetch|networkerror|network request|load failed|fetch failed/i.test(s))return "Can't reach Aviance right now. Check your connection and try again.";
+  if(/jwt|not authenticated/i.test(s))return 'Your sign-in has run out. Please sign in again.';
+  if(/permission denied|row-level security|not authorized|unauthorized/i.test(s))return "You don't have access to change that.";
+  if(/could not find the function|does not exist|schema cache|PGRST\d+|violates|duplicate key/i.test(s))return "That didn't work. Try again. If it keeps happening, the database needs its latest update.";
+  return s;
+}
+function stErr(e){ const m=(e&&(e.message||e.error_description||e.msg))||String(e||'Something went wrong.'); return {ok:false,data:null,error:stPlain(m)} }
+/* 'admin' and 'employee' are the database's words, not his. */
+function stRoleWord(role){ return ({admin:'Owner',employee:'Team member'})[String(role||'')]||'Team member' }
+function stWrap(res,whenEmpty){ if(!res)return stErr('No answer from Aviance. Try again.'); if(res.error)return stErr(res.error); return stOk(res.data==null?whenEmpty:res.data) }
 async function stRun(fn,whenEmpty){ try{ return stWrap(await fn(),whenEmpty) }catch(e){ return stErr(e) } }
 
 /* ---- You ---- */
@@ -102,7 +114,7 @@ function stValidBiz(f){
   }
   return '';
 }
-/* Saves only the six fields on this card; anything else the database holds is left alone. */
+/* Saves only the fields on this card; anything else the database holds is left alone. */
 async function stSaveBiz(fields){
   if(!stIsAdmin())return stErr('Only the owner can change the payment details.');
   const f=fields||{};
@@ -177,7 +189,7 @@ async function stLoadMe(){
     +stRow('Where you are',`<input id="stLoc" value="${esc(m.loc||'')}">`)
     +stRow('Phone',`<input id="stPhone" value="${esc(m.phone||'')}">`)
     +stRow('Email',`<span class="st-ro">${esc(m.email||'—')}</span>`,'Set when you signed up')
-    +stRow('What you can do',`<span class="st-ro">${esc(m.role||'staff')}</span>`,'Only an admin can change this, on the Team screen')
+    +stRow('What you can do',`<span class="st-ro">${esc(stRoleWord(m.role))}</span>`,'Only the owner can change this')
     +`<div class="st-act"><button class="btn" onclick="stSubmitMe()">Save</button><span id="stMeMsg" class="st-msg"></span></div>`;
 }
 async function stSubmitMe(){
