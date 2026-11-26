@@ -288,9 +288,19 @@ test('the campaign tab with no data at all explains what is coming and when', ()
   assert.match(t, /money back, not credit/i);  /* the guarantee block */
   assert.ok(!/\b0\b\s*(SENT|Sent)/.test(t), 'no zeroed figures and no empty chart');
   assert.ok(!/<svg/.test(h));
-  /* and once it is live but today has no numbers yet, it says so instead */
+  /* and once it is live but today has no numbers yet, it says so instead — without
+     putting a clock on it. The copy used to promise "the first numbers land this
+     evening"; nothing we control guarantees that. The provider reports when it
+     reports, and on a client with no provider key configured at all the numbers
+     never arrive, so the promise was simply false. It must say that sending has
+     started and that the page fills in as the tool reports back, and it must not
+     name an hour, an evening or a day. */
   const live = pctMonthNorm(month({calls_delivered:0}), journey(), NOWD(2026, 12, 10));
-  assert.match(text(pctCampaignHtml(null, live)), /first numbers land this evening/i);
+  const liveText = text(pctCampaignHtml(null, live));
+  assert.match(liveText, /sending has started/i);
+  assert.match(liveText, /as the sending tool reports back/i);
+  assert.doesNotMatch(liveText, /this evening|within a few hours|the same evening/i,
+    'the campaign card must not promise numbers by a time we do not control');
 });
 
 /* ───────────── the calls tab ───────────── */

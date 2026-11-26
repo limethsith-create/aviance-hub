@@ -380,9 +380,10 @@ test('pcMessages reads only this channel, oldest first', async () => {
   tableAnswer = () => ({ data: null, error: { message: 'permission denied' } });
   const e = await P('pcMessages')('c1');
   /* a client never reads the database's own words: "permission denied" told them
-     nothing they could act on and named our plumbing */
+     nothing they could act on and named our plumbing. It must also not be dressed up
+     as an expired session — that sends them round a sign-in loop that cannot end. */
   assert.equal(e.ok, false);
-  assert.equal(e.error, 'Your sign-in has run out. Please sign in again.');
+  assert.equal(e.error, 'This part of your portal is not open to your login. Tell us in Chat and we will sort it out — signing in again will not change it.');
 });
 test('pcSend writes as the client person, never as a team user, and never an empty message', async () => {
   reset();
@@ -1023,8 +1024,14 @@ test('no client is ever shown the database\'s own words', () => {
     /* it ends like a sentence, and tells them something to do */
     assert.match(r.error, /[.!]$/, 'reads as a sentence: ' + r.error);
   }
-  /* the four sentences it does use are the ones a person can act on */
-  assert.match(plain('permission denied'), /sign in again/i);
+  /* the sentences it does use are the ones a person can act on — and crucially a
+     REFUSAL and an EXPIRED SESSION must not give the same advice. Telling a client
+     whose read was refused by a policy to sign in again sends them round a loop that
+     cannot end: they sign out, sign back in, meet the same rule, and conclude the
+     portal is broken. Signing in does not grant a policy. */
+  assert.match(plain('permission denied'), /not open to your login/i);
+  assert.doesNotMatch(plain('permission denied'), /^Your sign-in has run out/,
+    'a refusal must never be reported as an expired session');
   assert.match(plain('JWT expired'), /sign in again/i);
   assert.match(plain('Failed to fetch'), /connection/i);
   assert.match(plain('relation "x" does not exist'), /try again|tell us/i);

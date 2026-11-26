@@ -759,6 +759,14 @@ const pcOk = coreOk;
    the ceiling is the last catch, not the first. */
 const PC_WAIT = 'Something went wrong at our end. Nothing you have done has been lost. Please try again in a moment, or tell us in Chat.';
 const PC_SIGNED_OUT = 'Your sign-in has run out. Please sign in again.';
+/* A refused read is NOT an expired session, and telling a client it is sends them
+   round a loop that cannot end: they sign out, sign back in, hit the same rule and
+   decide the portal is broken. A policy is not granted by signing in. This is live
+   today rather than hypothetical — portal_client_id() and the outreach_* client-read
+   policies are not in the database yet, so a client who opens the Campaign tab lands
+   here. core.js is the model: it matches permission on Postgres's words, never on a
+   session, and says so. */
+const PC_NO_ACCESS = 'This part of your portal is not open to your login. Tell us in Chat and we will sort it out — signing in again will not change it.';
 /* Past this, it is not a sentence, it is a dump. Same number as core.js. */
 const PC_MAX_SAY = 400;
 function pcPlain(m, code){
@@ -766,7 +774,7 @@ function pcPlain(m, code){
   if (!s.trim() || /^(undefined|null|\[object object\]|error)$/i.test(s.trim())) return PC_WAIT;
   if (/failed to fetch|networkerror|load failed|network request failed|fetch failed|timeout|timed out/i.test(s)) return PC_OFFLINE;
   if (c === 'PGRST301' || /jwt|not authenticated|invalid.*session|session.*expired|refresh token/i.test(s)) return PC_SIGNED_OUT;
-  if (c === '42501' || /permission denied|row-level security|not authorized|unauthorized/i.test(s)) return PC_SIGNED_OUT;
+  if (c === '42501' || /permission denied|row-level security|not authorized|unauthorized/i.test(s)) return PC_NO_ACCESS;
   if (c === 'P0001' || c === 'ZS001') return s;  /* written for the client already */
   /* anything that smells of the machine room: a code, a relation, a constraint, a
      stack, a bare HTTP status, or a sentence too long to be ours */
