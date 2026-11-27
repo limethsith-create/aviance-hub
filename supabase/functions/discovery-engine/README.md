@@ -1,18 +1,31 @@
-# discovery-engine — RECOVERED FROM PRODUCTION
+# discovery-engine — RECOVERED FROM PRODUCTION, COPY VERIFIED 2026-11-27
 
 This function was **live in production but had no source in this repository.** It was
 recovered from the Supabase deployment on 2026-11-27 (deployed version 2, last updated
 2026-11-21) and committed here with no intentional changes.
 
-**One caveat, stated plainly.** The source was read out of the deployment and written
-back out here by hand, then syntax-checked (all four files parse). That is not the same
-as a verified byte-for-byte copy. Before you treat these files as authoritative, or
-before you ever redeploy from them, run a real diff against the deployment:
+**Verified on 2026-11-27 (round 3): all four files match the deployment byte for byte.**
+Nothing had to be corrected.
+
+| file        | bytes  | sha256 of both copies |
+|-------------|-------:|-----------------------|
+| index.ts    |  2,433 | `4fcaa45f554f2ab5e48a02cd31ef35ff257f8d47693e8f0efb547a650d65c067` |
+| pipeline.js |  3,760 | `47dee8c0261aacaa0171103920ff88a4874db63d4712269c19bb3000dca88b16` |
+| deliver.js  |  7,982 | `973713c75708b59b076fa94f8a00968b2e941316a61c2f68628f706275596757` |
+| research.js | 29,052 | `c9c862c09c492f2a0e2ea332607a2042798fda7ba980c418ff007b2afece4141` |
+
+How it was checked, so you know exactly how far to trust it. The deployed source was
+fetched again from Supabase (version 2, still the live one). Each file was saved in the
+escaped form Supabase returns it in, decoded by a program, and compared with `cmp`
+against the file here. That is a second, independent reading of the deployment, and it
+agrees with the first one on every byte. What it is not: a file downloaded straight to
+disk by the Supabase CLI, because the CLI is not signed in on the machine that did this.
+If you ever want that last inch, it is two commands:
 
     supabase functions download discovery-engine
     diff -r supabase/functions/discovery-engine <downloaded copy>
 
-Until that diff is clean, trust the deployment over this copy.
+Re-verify before any redeploy if the deployed version is no longer 2.
 
 ## Why that mattered
 
@@ -43,12 +56,16 @@ checked against the `x-aviance-secret` header, and is deployed with `verify_jwt:
 
 ## Not deployed from here yet
 
-This commit only puts the source under version control. The deployed copy is unchanged
-and still serving. Before ever redeploying it, diff it against the deployment first —
-these files are the record of what is running today, not a new version.
+This folder only puts the source under version control. The deployed copy is unchanged
+and still serving. Nothing was deployed in round 3 either. These files are the record of
+what is running today, not a new version.
 
 ## See also
 
-`send-agreement` is in the same position: deployed, `verify_jwt: false`, and absent from
-this repo. Nothing in the repo or in pg_cron appears to call it, so it may simply be
-retired — but it is still publicly reachable and still unversioned.
+`send-agreement` is deployed (version 4, `verify_jwt: false`) and is not in this repo.
+Checked on 2026-11-27: nothing in this repository calls it, no database function or
+trigger mentions it, and none of the three scheduled jobs calls it (`aviance-day-before`
+`5 * * * *`, `aviance-mail-tick` `* * * * *`, `aviance-journey-hourly` `17 * * * *`).
+The `agreements` table it would write to has no rows. The one thing that cannot be seen
+from here is the marketing site, which is a separate codebase. If the site does not call
+it either, it is retired and should be deleted, because it is still publicly reachable.

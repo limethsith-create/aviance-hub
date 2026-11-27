@@ -2,11 +2,12 @@
    Same brand as the booking emails: white, black, one red, one grey;
    heavy tight headlines; mono uppercase tags; square corners; room to breathe. */
 @font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url("/fonts/inter-latin.woff2") format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:100 800;font-display:swap;src:url("/fonts/jetbrains-mono-latin.woff2") format("woff2")}
 :root{
   --pc-ink:#0A0A0C;--pc-paper:#FFFFFF;--pc-red:#E0290F;--pc-red-text:#C42408;--pc-grey:#63636A;--pc-line:#DCDCE0;--pc-wash:#F6F7F9;
   --pc-sand:#F4EFE9;
   --pc-sans:'Inter Tight','Inter',Arial,Helvetica,sans-serif;
-  --pc-mono:'JetBrains Mono','Courier New',monospace;
+  --pc-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
   --pc-clause:52px;   /* the clause-number column: one width for the heading and every line under it */
 }
 *,*::before,*::after{box-sizing:border-box}
