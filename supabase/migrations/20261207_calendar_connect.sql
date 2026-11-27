@@ -56,11 +56,14 @@ create unique index if not exists calendar_connections_one_live_per_provider
 
 alter table public.calendar_connections enable row level security;
 
+drop policy if exists "team reads calendar connections" on public.calendar_connections;
 create policy "team reads calendar connections" on public.calendar_connections
   for select using (public.is_approved());
+drop policy if exists "team writes calendar connections" on public.calendar_connections;
 create policy "team writes calendar connections" on public.calendar_connections
   for all using (public.is_approved()) with check (public.is_approved());
 -- a signed-in client sees their OWN company's connections and nobody else's
+drop policy if exists "their own people read calendar connections" on public.calendar_connections;
 create policy "their own people read calendar connections" on public.calendar_connections
   for select using (exists (
     select 1 from public.client_people p
@@ -112,10 +115,13 @@ comment on table public.calendar_busy is
 create index if not exists calendar_busy_window on public.calendar_busy(client_id, starts_at, ends_at);
 
 alter table public.calendar_busy enable row level security;
+drop policy if exists "team reads calendar busy" on public.calendar_busy;
 create policy "team reads calendar busy" on public.calendar_busy
   for select using (public.is_approved());
+drop policy if exists "team writes calendar busy" on public.calendar_busy;
 create policy "team writes calendar busy" on public.calendar_busy
   for all using (public.is_approved()) with check (public.is_approved());
+drop policy if exists "their own people read calendar busy" on public.calendar_busy;
 create policy "their own people read calendar busy" on public.calendar_busy
   for select using (exists (
     select 1 from public.client_people p

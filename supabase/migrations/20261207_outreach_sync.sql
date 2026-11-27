@@ -96,15 +96,29 @@ begin
     return;
   end if;
 
-  -- the gateway key, taken from the job that already carries it. Never written in this repo.
-  select (regexp_match(j.command, 'Bearer\s+([A-Za-z0-9._\-]+)'))[1]
+  -- the gateway key, taken from the job that already carries it. Never written in this repo,
+  -- and never put in a NOTICE, an exception or a result: the only places it goes are v_auth and
+  -- the new job's own command, which is where the existing job already keeps it.
+  --
+  -- ROUND 3: the key must be the WHOLE of what sits between `Bearer ` and the closing quote.
+  -- The pattern used to stop at the first character it did not know, so a key holding a `+`,
+  -- a `/` or an `=` was cut short, the job was scheduled with the stump, said "scheduled", and
+  -- then failed with a 401 every fifteen minutes with nobody told. (Tried on a local copy with
+  -- a made-up key.) The `(?=[''"])` insists the next character is the closing quote; a key it
+  -- cannot read whole is not used at all.
+  if not exists (select 1 from cron.job j where j.jobname = 'aviance-mail-tick') then
+    raise notice 'outreach-sync not scheduled: there is no aviance-mail-tick job to take the gateway key from. Schedule it by hand in the dashboard.';
+    return;
+  end if;
+
+  select (regexp_match(j.command, 'Bearer\s+([A-Za-z0-9._\-]+)(?=[''"])'))[1]
     into v_auth
     from cron.job j
    where j.jobname = 'aviance-mail-tick'
    limit 1;
 
   if v_auth is null then
-    raise notice 'outreach-sync not scheduled: no aviance-mail-tick job to take the gateway key from. Schedule it by hand in the dashboard.';
+    raise notice 'outreach-sync not scheduled: the aviance-mail-tick job is there, but its gateway key could not be read whole out of its command. Schedule it by hand in the dashboard.';
     return;
   end if;
 
