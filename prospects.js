@@ -286,7 +286,8 @@ async function prLoadList(){
   if (prS.sync === null) {
     const y = await prSync();
     if (prS.seq !== mine) return;
-    prS.sync = y.ok ? y.data : [];
+    /* a read that failed is asked again on the next load, not remembered as "nothing connected" */
+    prS.sync = y.ok ? y.data : null;
   }
   const r = await prThreads({page:prS.page, client:prS.f.client, campaign:prS.f.campaign,
                              sentiment:prS.f.sentiment, booked:prS.f.booked, q:prS.f.q});
