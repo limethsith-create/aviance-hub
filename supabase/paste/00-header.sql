@@ -1,0 +1,41 @@
+-- ════════════════════════════════════════════════════════════════════════════
+--  AVIANCE OS — RUN THIS IN THE SUPABASE SQL EDITOR
+--  Dashboard → SQL Editor → New query → paste the whole file → Run
+--
+--  WHY YOU AND NOT ME: your Supabase client refuses my schema changes. I tried
+--  once and did not route around the refusal. Nothing in this file is live yet.
+--
+--  WHAT WAS DONE BEFORE YOU WERE ASKED TO RUN IT (round 3)
+--  The live `public` schema was rebuilt on a local Postgres from the live
+--  catalogue (tables, constraints, indexes, all 100 policies, all 18 triggers,
+--  the real lock_month / recount_month / free_slots), and this exact file was
+--  run on it twice, the way the SQL editor sends it. Both runs were clean. The
+--  grants, the client's Campaign tab and the month-end job were then tested on
+--  that copy as an owner, an employee, a client and a stranger. What that
+--  found and fixed is in round3/3-findings.md.
+--
+--  RUN THE WHOLE FILE IN ONE GO, top to bottom.
+--
+--  IT IS ALL OR NOTHING. The editor sends the file as one request, so if any
+--  statement fails, NOTHING in the file is applied — you will see one error,
+--  with a line number, and the database is exactly as it was. Fix or send me
+--  the error, and run it again. It is safe to run twice.
+--
+--  WHEN IT FINISHES you get a ten-row table, one row per part, each saying
+--  `done` or what is missing. That table is the answer; "Success" is not.
+--
+--  PART 1   a lost booking gives its half hour back        ← costs bookings today
+--  PART 2   a recount never moves a locked month
+--  PART 3   prospect grants + closes the cross-client prospect leak
+--  PART 4   the portal's Campaign tab: a client reads their own campaign
+--  PART 5   calendar connect
+--  PART 6   the month-end engine (and its hourly job, aviance-month-end)
+--  PART 7   refunds: paid, how, and what the client can see
+--  PART 8   the outreach sync job (reads your own gateway key; never prints it)
+--  PART 9   the commitment board's views
+--  PART 10  remove the caller role   ← the only part that DELETES anything:
+--           the leads, dnc, call_targets and call_log tables, the caller
+--           functions, discovery_bookings.caller_id, and caller staff rows
+--
+--  The test data is NOT touched here. That is AVIANCE-cleanup.sql, separately.
+-- ════════════════════════════════════════════════════════════════════════════
