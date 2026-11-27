@@ -171,7 +171,7 @@ async function drSendClick(id){
   dr.busy[id]='send';drPaint();
   const r=await drSend(id,body);
   delete dr.busy[id];
-  if(!r.ok){dr.err=r.error;drPaint();if(typeof toast==='function')toast(r.error);return;}
+  if(!r.ok){drRefused(r.error);return;}
   dr.err=null;drDrop(id);
   if(typeof toast==='function')toast('Sent to '+(d.company||'the client'));
 }
@@ -180,9 +180,21 @@ async function drDiscardClick(id){
   dr.busy[id]='discard';drPaint();
   const r=await drDiscard(id);
   delete dr.busy[id];
-  if(!r.ok){dr.err=r.error;drPaint();if(typeof toast==='function')toast(r.error);return;}
+  if(!r.ok){drRefused(r.error);return;}
   dr.err=null;drDrop(id);
   if(typeof toast==='function')toast('Draft discarded');
+}
+/* A send or a discard that was refused. The commonest reason on a second tab or
+   a second device is that the draft has already been dealt with ("That draft
+   was already sent."), and then the card must not sit there offering Send
+   again. So say why, and read the list again at once rather than waiting for
+   the half-minute refresh: a draft that is gone leaves, one that is still
+   waiting stays with whatever was typed in it. If the re-read fails too (the
+   connection), the card and the text stay where they are. */
+function drRefused(error){
+  dr.err=error;drPaint();
+  if(typeof toast==='function')toast(error);
+  return drLoad(true).then(()=>{if(!dr.err)dr.err=error;drPaint();});
 }
 function drDrop(id){
   dr.list=dr.list.filter(d=>d.id!==id);delete dr.edits[id];

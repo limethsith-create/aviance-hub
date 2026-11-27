@@ -713,7 +713,7 @@ function chvEditKey(e){
   if(e.key==='Escape'){e.preventDefault();chvEditCancel();}
   else if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();chvEditSave();}
 }
-async function chvEditSave(){
+function chvEditSave(){ return coreOnce('chv:edit', async () => {
   const id=chv.editing;if(!id)return;
   const m=chv.msgs.find(x=>x.id===id);if(!m)return;
   const e=chvEl('chvEdit');const body=String(e?e.value:m.body||'').trim();
@@ -725,19 +725,19 @@ async function chvEditSave(){
   const i=chv.msgs.findIndex(x=>x.id===id);
   if(i>=0)chv.msgs[i]=Object.assign({},chv.msgs[i],{body,editedAt:(r.data&&r.data.editedAt)||new Date(chvNow()).toISOString()});
   chvPaintThread(true);
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 function chvDelete(id){
   const m=chv.msgs.find(x=>x.id===id);if(!m||m.userId!==chvMe())return;
   openModal(`<div class="modal-head"><div><h3>Delete this message?</h3><p>It will show as deleted for everyone in the channel.</p></div></div>
     <div class="modal-foot"><button class="btn ghost" type="button" onclick="closeModal()">Cancel</button><button class="btn" type="button" onclick="chvDoDelete(${chvA(id)})">Delete</button></div>`);
 }
-async function chvDoDelete(id){
+function chvDoDelete(id){ return coreOnce('chv:delete:'+id, async () => {
   closeModal();
   const r=await chvCall('chDelete',id);
   if(!r.ok){toast(r.error||"The message wasn't deleted. Try again.");return;}
   const i=chv.msgs.findIndex(x=>x.id===id);
   if(i>=0){chv.msgs[i]=Object.assign({},chv.msgs[i],{deleted:true,body:'',attachments:[]});chvPaintThread(true);}
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 /* ===================== 8. CHANNEL ADMIN (staff) ===================== */
 async function chvLoadStaffList(){
@@ -789,26 +789,26 @@ function chvRename(){
     <div class="modal-foot"><button class="btn ghost" type="button" onclick="closeModal()">Cancel</button><button class="btn" type="button" onclick="chvDoRename()">Save</button></div>`);
   const n=chvEl('chvRenameName');if(n&&n.focus)n.focus();
 }
-async function chvDoRename(){
+function chvDoRename(){ return coreOnce('chv:rename', async () => {
   const c=chvFindCh(chv.cur);if(!c)return;
   const name=String((chvEl('chvRenameName')||{}).value||'').trim();
   if(!name)return chvModalErr('Give the channel a name.');
   const r=await chvCall('chRename',c.id,name);
   if(!r.ok)return chvModalErr(r.error||"The name didn't change. Try again.");
   c.name=name;closeModal();chvPaintHead();chvPaintList();
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 function chvArchive(){
   const c=chvFindCh(chv.cur);if(!c||!chvIsStaff())return;
   openModal(`<div class="modal-head"><div><h3>Archive ${esc(c.name||'this channel')}?</h3><p>It moves to Archived. People can still read it, but no one can write in it${c.kind==='client'?'. The client will no longer see it':''}.</p></div></div>
     <div class="modal-foot"><button class="btn ghost" type="button" onclick="closeModal()">Cancel</button><button class="btn" type="button" onclick="chvDoArchive()">Archive channel</button></div>`);
 }
-async function chvDoArchive(){
+function chvDoArchive(){ return coreOnce('chv:archive', async () => {
   const c=chvFindCh(chv.cur);if(!c)return;
   const r=await chvCall('chArchive',c.id);
   closeModal();
   if(!r.ok){toast(r.error||"The channel wasn't archived. Try again.");return;}
   c.archived=true;c.unread=0;chvUpdateTotal();chvPaintAll();toast('Channel archived');
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 async function chvMembers(){
   const c=chvFindCh(chv.cur);if(!c||!chvIsStaff())return;
   openModal(`<div class="modal-head"><div><h3>Members of ${esc(c.name||'channel')}</h3></div></div><div class="modal-body" id="chvMemBody"><div class="chv-skel"></div></div>
@@ -829,18 +829,18 @@ async function chvPaintMembers(){
     ${addable.length?`<div class="field"><label for="chvAddSel">Add a team member</label><div class="chv-addrow"><select id="chvAddSel">${addable.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><button type="button" class="btn" onclick="chvAddMember()">Add</button></div></div>`:''}
     <div id="chvModalErr" class="chv-err" role="alert" hidden></div>`;
 }
-async function chvAddMember(){
+function chvAddMember(){ return coreOnce('chv:member', async () => {
   const c=chvFindCh(chv.cur);const sel=chvEl('chvAddSel');if(!c||!sel||!sel.value)return;
   const r=await chvCall('chAddMember',c.id,sel.value);
   if(!r.ok)return chvModalErr(r.error||"That person wasn't added. Try again.");
   chvPaintMembers();
-}
-async function chvRemoveMember(uid){
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function chvRemoveMember(uid){ return coreOnce('chv:member', async () => {
   const c=chvFindCh(chv.cur);if(!c)return;
   const r=await chvCall('chRemoveMember',c.id,uid);
   if(!r.ok)return chvModalErr(r.error||"That person wasn't removed. Try again.");
   chvPaintMembers();
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 /* ===================== 8b. THE BOT'S DRAFTS (staff, client channels) =====================
    Pending drafts for the open channel sit just above the composer: edit, Send or Discard. Nothing reaches the client
