@@ -169,6 +169,8 @@ test('Settings: two presses on Save are one write, on every card', async () => {
     const { A, ctl } = load('settings.js', {}, ST);
     ctl.wait = 10;
     ctl.els.stName = { value: 'Dinuka' };
+    ctl.els.stBiz_legal_name = { value: 'Aviance' }; ctl.els.stBiz_email = { value: 'a@b.co' };
+    ctl.els.stBizMsg = { textContent: '' };
     ctl.els.stOpen = { value: '07:00' }; ctl.els.stClose = { value: '21:00' }; ctl.els.stSlot = { value: '30' };
     ctl.els.stNotice = { value: '12' }; ctl.els.stAhead = { value: '21' };
     ctl.els.stUsZone = { value: 'America/New_York' }; ctl.els.stOwnZone = { value: 'Asia/Colombo' }; ctl.els.stLink = { value: '' };
