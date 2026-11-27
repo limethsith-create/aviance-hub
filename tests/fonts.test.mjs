@@ -63,6 +63,18 @@ test('the site policy lets the font through and lets the browser keep it', () =>
   assert.match(fonts.headers[0].value, /max-age=31536000/);
 });
 
+test('a sandboxed document preview may load the fonts too', () => {
+  /* Documents and Settings show each document in <iframe sandbox srcdoc>. That frame has
+     no origin of its own, so the browser fetches /fonts/* as a cross-origin request and
+     drops it unless the font says anyone may use it. Measured in Chrome before this
+     header: both fonts blocked, preview drawn in Arial and the system monospace. */
+  const cfg = JSON.parse(read('vercel.json'));
+  const fonts = cfg.headers.find((h) => h.source === '/fonts/(.*)');
+  const acao = fonts.headers.find((h) => h.key === 'Access-Control-Allow-Origin');
+  assert.ok(acao && acao.value === '*');
+  assert.match(read('documents.js'), /<iframe class="dc-frame[^"]*"[^>]*sandbox=/, 'the previews are still sandboxed frames');
+});
+
 test('discovery-engine: the README says the copy is verified, with the date and a hash per file', () => {
   const md = read('supabase/functions/discovery-engine/README.md');
   assert.match(md, /COPY VERIFIED 2026-11-27/);
