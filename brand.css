@@ -262,9 +262,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:ins
 /* sign in: black panel, red eyebrow, big tight title */
 .login-screen{background:var(--surface)}
 .login-wrap{border:1px solid var(--line);box-shadow:var(--sh-lg)}
-.login-aside,body.dark .login-aside{background:var(--sidebar);border-right:1px solid var(--line);color:#fff}
-.la-hero h2{font-size:34px;font-weight:800;letter-spacing:-.035em;line-height:1.04}
-.la-hero h2 .accent,.la-guarantee b{color:var(--red-bright)}
+/* The mark is the subject here, so it carries no box: no border, no white tile. */
+.login-mark .logo{border:0!important;background-color:transparent!important;box-shadow:none}
 .login-eyebrow{color:var(--brand)}
 .login-title{font-size:30px;font-weight:800;letter-spacing:-.035em;line-height:1.05}
 .login-app-note{border-left:3px solid var(--brand)}
@@ -382,3 +381,8 @@ body.dark .btn.ghost:focus-visible,body.dark .tb-btn:focus-visible{outline-color
 .tmc-clip{min-width:44px;min-height:44px;border:1px solid var(--line)}
 .tmc-clip:hover{background:var(--text);color:#fff}
 .tmc-err:not(:empty){border:1px solid var(--red);background:var(--red-bg);color:var(--red)}
+
+/* A heading that is focused only to move the reader to it should not draw a
+   ring: the ring is a cue for someone who tabbed there, and nobody did. The
+   sign-in pages were drawing a box around "Sign in." on load. */
+h1[tabindex="-1"]:focus-visible,h2[tabindex="-1"]:focus-visible{outline:none!important}

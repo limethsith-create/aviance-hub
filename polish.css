@@ -93,7 +93,7 @@ h1,h2,h3,h4{letter-spacing:-.011em;color:var(--text)}
 
 /* ---- sign in ---- */
 .login-wrap{border-radius:14px;overflow:hidden}
-.login-aside,body.dark .login-aside{background:linear-gradient(180deg,var(--sidebar) 0%,var(--sidebar-2) 100%)}
+.login-mark .logo{box-shadow:none}
 .login-eyebrow{text-transform:none;letter-spacing:0;font-size:var(--fs-small)}
 
 /* ---- phone tab bar ---- */

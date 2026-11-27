@@ -199,15 +199,7 @@ body.dark .btn{background:var(--brand);color:var(--brand-ink);border-color:var(-
 
 /* ---- sign in: ink panel on the left, the form on the right ---- */
 .login-screen{background:var(--bg)}
-.login-wrap{border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-lg);width:880px}
-.login-aside,body.dark .login-aside{background:var(--sidebar);color:#fff;border-right:1px solid var(--sidebar-line)}
-.la-name{font-weight:650}
-.la-hero h2{font-size:28px;font-weight:650;letter-spacing:-.015em;line-height:1.15}
-.la-hero h2 .accent{color:var(--red-bright)}
-.la-hero p,.la-point{color:var(--sidebar-text)}
-.la-point svg{border-radius:var(--r-xs);border-color:rgba(255,255,255,.2);color:var(--red-bright)}
-.la-guarantee{border-top-color:var(--sidebar-line);color:var(--sidebar-text)}
-.la-guarantee b{color:var(--red-bright)}
+.login-wrap{border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-lg)}
 .login-eyebrow{color:var(--brand);text-transform:uppercase;letter-spacing:.04em}
 .login-title{font-size:var(--fs-title);font-weight:650;letter-spacing:-.01em}
 .login-desc{font-size:var(--fs-base)}

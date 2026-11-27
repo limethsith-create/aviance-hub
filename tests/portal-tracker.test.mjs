@@ -35,7 +35,7 @@ const journey = (o={}) => ({client_id:'c1', company:'Stone', paid_on:'2026-11-18
     {step:'research', title:'Research: your market, ICP, angles', position:2, planned_on:'2026-11-22', status:'doing'},
     {step:'testing', title:'Market testing', position:3, planned_on:'2026-11-29', status:'todo'},
     {step:'build', title:'Build the real campaign', position:4, planned_on:'2026-12-01', status:'todo'},
-    {step:'onboarding', title:'Onboarding call', position:5, planned_on:'2026-12-01', status:'todo'},
+    {step:'onboarding', title:'Launch call', position:5, planned_on:'2026-12-01', status:'todo'},
     {step:'launch', title:'Launch — month one starts', position:6, planned_on:'2026-12-02', status:'todo'},
   ], ...o});
 const text = (h) => String(h).replace(/<[^>]*>/g,' ').replace(/&amp;/g,'&').replace(/&#?[a-z0-9]+;/gi,' ').replace(/\s+/g,' ').trim();

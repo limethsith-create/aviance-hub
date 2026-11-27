@@ -17,7 +17,7 @@ const STEPS = [
   { step: 'research', title: 'Research', position: 2, planned_on: '2026-11-28', status: 'doing' },
   { step: 'testing', title: 'Market testing', position: 3, planned_on: '2026-12-05', status: 'todo' },
   { step: 'build', title: 'Build', position: 4, planned_on: '2026-12-07', status: 'todo' },
-  { step: 'onboarding', title: 'Onboarding call', position: 5, planned_on: '2026-12-07', status: 'todo' },
+  { step: 'onboarding', title: 'Launch call', position: 5, planned_on: '2026-12-07', status: 'todo' },
   { step: 'launch', title: 'Launch', position: 6, planned_on: '2026-12-08', status: 'todo' },
 ];
 const base = (over = {}) => ({

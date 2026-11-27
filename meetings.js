@@ -57,7 +57,7 @@ const MT_FALLBACK = CORE_HOURS_FALLBACK;
 const MT_KINDS = {
   discovery:  'Discovery call',
   strategy:   'Strategy call',
-  onboarding: 'Onboarding call',
+  onboarding: 'Launch call',   /* stored key stays 'onboarding'; the three calls a person sees are Discovery, Kickoff, Launch */
   qualified:  'Booked sales call',
   review:     'Review call'
 };

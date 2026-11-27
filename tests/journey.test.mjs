@@ -35,7 +35,7 @@ const steps = (over={}) => [
   ['research','Research: your market, ICP, angles','2026-11-22','doing'],
   ['testing','Market testing (message-market fit)','2026-11-29','todo'],
   ['build','Build the real campaign','2026-12-01','todo'],
-  ['onboarding','Onboarding call','2026-12-01','todo'],
+  ['onboarding','Launch call','2026-12-01','todo'],
   ['launch','Launch — month one starts','2026-12-02','todo'],
 ].map(([step,title,planned_on,status],i) => ({step,title,position:i+1,planned_on,status,done_at:status==='done'?'2026-11-20T15:00:00Z':null,note:null,...(over[step]||{})}));
 const journey = (o={}) => ({client_id:'c1', company:'Stone Roofing', paid_on:'2026-11-18', launch_on:'2026-12-02', days_to_launch:8,
@@ -132,7 +132,7 @@ test('the client tracker: per-step controls and the right action per step', () =
   assert.equal((h.match(/class="jy-step /g) || []).length, 6);
   assert.ok(!/jyOffer\(&quot;c1&quot;,&quot;kickoff&quot;\)/.test(h), 'kickoff is done, so no times are offered for it');
   assert.match(h, /jyOffer\(&quot;c1&quot;,&quot;onboarding&quot;\)/);
-  assert.match(h, /Offer onboarding call times/);
+  assert.match(h, /Offer launch call times/);
   assert.match(h, /Send ICP \+ angles for approval/);
   assert.match(h, /Log today(?:&#39;|')s numbers/);
   assert.match(h, /Send copy for approval/);
@@ -149,7 +149,9 @@ test('the client tracker: per-step controls and the right action per step', () =
 
 test('jyActionFor names the other builders’ actions', () => {
   assert.deepEqual(jyActionFor('kickoff'), ['Offer kickoff times', 'jyOffer', 'kickoff']);
-  assert.deepEqual(jyActionFor('onboarding'), ['Offer onboarding call times', 'jyOffer', 'onboarding']);
+  /* the stored key is still 'onboarding'; a person reads 'Launch call'. The three
+     calls are Discovery, Kickoff, Launch, and day 14 — going live — is 'Live'. */
+  assert.deepEqual(jyActionFor('onboarding'), ['Offer launch call times', 'jyOffer', 'onboarding']);
   assert.equal(jyActionFor('research')[2], 'icp');
   assert.equal(jyActionFor('build')[2], 'copy');
   assert.equal(jyActionFor('launch'), null);
