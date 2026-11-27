@@ -30,7 +30,7 @@ const TMC_OWNER = 'Limethsith';
 const TMC_MAX_BODY = 4000;
 const TMC_POLL_MS = 8000;          /* only while the tab is visible */
 const TMC_BUCKET = 'chat-files';
-const TMC_MAX_FILE = 10 * 1024 * 1024;
+const TMC_MAX_FILE = CORE_FILE_MAX;       /* one copy, in core.js, shared with the owner's screen */
 const TMC_SIGN_SECONDS = 600;
 const TMC_HISTORY_NOTE = 'This is your private line to ' + TMC_OWNER + '. Anything you need, write it here.';
 const TMC_OFFLINE = 'We could not reach Aviance. Check your connection and try again.';
@@ -40,9 +40,9 @@ const TMC_NOT_READY = 'Your channel is not ready yet. ' + TMC_OWNER + ' will let
 const TMC_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const TMC_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-/* What may go in the bucket. Kept here as well as in the database policy so
-   she hears "that kind of file" before a 10 MB upload, not after. */
-const TMC_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'pdf', 'docx', 'csv'];
+/* What may go in the bucket. Kept in the browser as well as in the database
+   policy so she hears "that kind of file" before a 10 MB upload, not after. */
+const TMC_EXTS = CORE_FILE_EXTS;
 const TMC_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic'];
 
 /* ---- pure helpers --------------------------------------------------- */

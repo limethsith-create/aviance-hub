@@ -353,3 +353,36 @@ test('a refresh that fails after an empty load says so, instead of "Nothing to a
   await drLoad(true);
   assert.match(drBodyHTML(), /Nothing to approve/);
 });
+
+/* Round three. The Replies screen open in two tabs: a draft sent in one is still
+   on the other with its Send button. The database refuses the second send in a
+   sentence; the card must then leave, not sit there to be tried again. */
+test('a draft already sent from another tab leaves this one as soon as the send is refused', async () => {
+  setup();
+  fakeEl('drRoot').innerHTML = viewDrafts(); await tick();
+  assert.equal(dr.list.length, 2);
+  /* the other tab sent d1: it is gone from the database, and the send is refused */
+  const pending = rpcs.drafts_pending;
+  rpcs.drafts_pending = () => { const r = pending(); return { data: r.data.filter((d) => d.id !== 'd1'), error: null }; };
+  rpcs.draft_send = () => ({ data: null, error: { code: 'P0001', message: 'That draft was already sent.' } });
+  await drSendClick('d1'); await tick();
+  assert.deepEqual(rpcCalls.filter((c) => c[0] === 'draft_send').length, 1, 'one attempt, not retried');
+  assert.deepEqual(dr.list.map((d) => d.id), ['d2'], 'the dealt-with draft is gone from this tab');
+  assert.doesNotMatch(fakeEl('drRoot').innerHTML, /drBody-d1/);
+  assert.match(fakeEl('drRoot').innerHTML, /That draft was already sent\./, 'and the reason is still on the screen');
+  assert.ok(toasts.includes('That draft was already sent.'));
+  assert.ok(!toasts.some((t) => /^Sent to/.test(t)), 'nothing claims it was sent from here');
+  assert.equal(drCount(), 1);
+});
+
+test('a send that fails because the connection is down keeps the card and the text typed in it', async () => {
+  setup();
+  fakeEl('drRoot').innerHTML = viewDrafts(); await tick();
+  drEdit('d1', 'typed and not to be lost');
+  rpcs.draft_send = () => { throw new TypeError('Failed to fetch'); };
+  rpcs.drafts_pending = () => { throw new TypeError('Failed to fetch'); };
+  await drSendClick('d1'); await tick();
+  assert.equal(dr.list.length, 2);
+  assert.match(fakeEl('drRoot').innerHTML, /typed and not to be lost/);
+  assert.ok(!toasts.some((t) => /^Sent to/.test(t)));
+});

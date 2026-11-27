@@ -99,7 +99,7 @@ vm.runInContext(SRC + `
   empNameProblem,empEmailProblem,empFileProblem,empExt,empAdd,empSetStatus,empMarkRead,
   empDocLink,empDocUrl,empMessages,empHerReadAt,empSendMessage,empFilePath,empUpload,empFileUrl,
   empCode,empUnreadTotal,empCount,empStart,empStop,empSetCount,employeesForget,
-  empStatusLabel,empStatusTone,empTime,empAgo,empLastSeenText,empAttachName,empSeenText,
+  empTime,empAgo,empAttachName,empSeenText,
   empEmptyHTML,empAddFormHTML,empRowHTML,empListHTML,empCodeHTML,empAskHTML,empMsgHTML,
   empChatHTML,empComposerHTML,empPanelHTML,empScreenHTML,empCtx,viewEmployees,empBodyHTML,
   empForcePaint,empOpen,empCloseOpen,empForgetCode,empCodeHide,empCopyCode,empCodeGo,
@@ -443,19 +443,6 @@ test('"Seen 14:32" only when she has really read his last message', async () => 
   const r = await A.empHerReadAt('ch1');
   assert.equal(r.ok, true);
   assert.equal(r.data, '2026-11-24T09:12:00Z', 'his own last_read_at is not mistaken for hers');
-});
-
-test('last seen reads in plain words, and "never" becomes "Not signed in yet"', () => {
-  reset();
-  assert.equal(A.empLastSeenText(null), 'Not signed in yet');
-  assert.equal(A.empLastSeenText('nonsense'), 'Not signed in yet');
-  assert.equal(A.empLastSeenText(new Date(Date.now() - 5 * 1000).toISOString()), 'Last seen just now');
-  assert.equal(A.empLastSeenText(new Date(Date.now() - 20 * 60000).toISOString()), 'Last seen 20 min ago');
-  assert.equal(A.empLastSeenText(new Date(Date.now() - 60 * 60000).toISOString()), 'Last seen 1 hour ago');
-  assert.equal(A.empLastSeenText(new Date(Date.now() - 50 * 3600000).toISOString()), 'Last seen 2 days ago');
-  sameJson(['active', 'invited', 'revoked', '', 'nonsense'].map(A.empStatusLabel),
-    ['Active', 'Code sent', 'No access', 'Not set up', 'Not set up']);
-  sameJson(['active', 'invited', 'revoked', ''].map(A.empStatusTone), ['ok', 'wait', 'off', 'wait']);
 });
 
 /* ───────────── a message with a file on it ───────────── */

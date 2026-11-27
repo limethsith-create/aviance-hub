@@ -49,6 +49,7 @@ const prS = {
   campaigns:null,          /* [{id, name, status, client_id}] */
   rows:null, total:0, page:0,
   f:{client:'', campaign:'', sentiment:'', booked:'any', q:''},
+  sync:null,               /* [{client_id, status, last_synced_at}] — when each account was last read */
   err:'', clientsErr:'', campaignsErr:'', seq:0, busy:false,
   thread:null, threadId:'', threadErr:''
 };
@@ -229,6 +230,38 @@ function prSequence(messages){
   };
 }
 
+/* ================= how old is all this ==============================
+   Every row on these screens is a copy the sync made from the sending tool.
+   When the sync stops — the tool is down, a key has expired, the timer has
+   died — the copy stays exactly as it was and nothing on the screen moved, so
+   three-day-old replies read as today's. This reads when each connected
+   account was last read and says so above the table.
+
+   Only the team can read outreach_accounts. For anybody else (a prospect
+   seat) the read comes back empty or refused, and then nothing is said:
+   no line is better than a guess. */
+async function prSync(){
+  return prRun(() => sb.from('outreach_accounts').select('client_id,status,last_synced_at,last_error'), []);
+}
+/* The one sentence, or '' when everything in view was read recently.
+   `client` narrows it to the client the filter is on. */
+function prSyncNote(accounts, client, now){
+  const all = (Array.isArray(accounts) ? accounts : [])
+    .filter(a => a && a.status !== 'paused' && (!client || String(a.client_id) === String(client)));
+  if (!all.length) return '';
+  const fresh = all.map(a => ({a, f: coreFresh(a.last_synced_at, now)}));
+  const bad = fresh.filter(x => x.f.stale || x.a.status === 'error' || x.a.status === 'needs_key');
+  if (!bad.length) return '';
+  /* the newest successful read among the ones that have stopped */
+  const read = bad.filter(x => x.f.known).sort((x, y) => x.f.minutes - y.f.minutes)[0];
+  const n = bad.length, of = all.length, one = of === 1 || n === 1;
+  const who = of === 1 ? 'The sending tool' : n === of ? 'All ' + of + ' sending accounts' : n + ' of the ' + of + ' sending accounts';
+  const what = !read ? (one ? ' has' : ' have') + ' never been read'
+    : of === 1 ? ' was last read ' + read.f.ago
+    : (one ? ' has' : ' have') + ' stopped being read; the most recent read was ' + read.f.ago;
+  return who + what + '. What is below is as it stood then, not as it stands now. The reason is on each account in Settings.';
+}
+
 /* ================= the list ======================================== */
 
 async function prLoadList(){
@@ -249,6 +282,12 @@ async function prLoadList(){
     if (prS.seq !== mine) return;
     prS.campaigns = g.ok ? g.data : [];
     prS.campaignsErr = g.ok ? '' : g.error;
+  }
+  if (prS.sync === null) {
+    const y = await prSync();
+    if (prS.seq !== mine) return;
+    /* a read that failed is asked again on the next load, not remembered as "nothing connected" */
+    prS.sync = y.ok ? y.data : null;
   }
   const r = await prThreads({page:prS.page, client:prS.f.client, campaign:prS.f.campaign,
                              sentiment:prS.f.sentiment, booked:prS.f.booked, q:prS.f.q});
@@ -344,7 +383,9 @@ function prRow(t, now){
 function prRenderList(now){
   if (prS.rows === null) return prRenderFilters() + prLoading('the prospects');
   const rows = prS.rows || [];
-  const err = prS.err ? prErrorCard(prS.err, 'prLoadList()') : '';
+  const old = prSyncNote(prS.sync, prS.f.client, now);
+  const err = (old ? `<div class="card pr-pad" role="status"><p class="pr-note pr-err">${prX(old)}</p></div>` : '') +
+    (prS.err ? prErrorCard(prS.err, 'prLoadList()') : '');
   /* No heading of its own: the shell's page title already says what this is, and
      this screen is worked rather than admired. The filter bar leads. */
   const head = '';
@@ -527,7 +568,7 @@ function viewProspect(id){
 
 /* Forget everything on sign-out: the next person on this device starts clean. */
 function prForget(){
-  prS.clients = null; prS.campaigns = null; prS.rows = null; prS.total = 0; prS.page = 0;
+  prS.clients = null; prS.campaigns = null; prS.sync = null; prS.rows = null; prS.total = 0; prS.page = 0;
   prS.f = {client:'', campaign:'', sentiment:'', booked:'any', q:''};
   prS.err = ''; prS.clientsErr = ''; prS.campaignsErr = '';
   prS.thread = null; prS.threadId = ''; prS.threadErr = '';

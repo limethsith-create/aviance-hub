@@ -426,3 +426,85 @@ var CORE_HOURS_FALLBACK = {
   us_zone: 'America/New_York', owner_zone: 'Asia/Colombo',
   meeting_link: null
 };
+
+/* ===================== 7. ONE PRESS, ONE WRITE =====================
+   A button that writes must write once per press. A double click, an impatient
+   second tap on a slow connection, or Enter held down all arrive as two calls
+   to the same handler before the first has answered — and two calls were two
+   writes: two saves of the calendar, two approvals, two grants of the same
+   client, two "start them" racing each other to set day one.
+
+   coreOnce(key, fn) runs fn and remembers the promise under `key` until it
+   settles. A second call with the same key while the first is still out does
+   NOT run fn again: it is handed the first call's promise, so both presses
+   get the one answer and the screen says one thing, once.
+
+   `btn` is optional: the button that was pressed, handed in by the caller
+   (this file is leaf code and never looks at the page itself). It is switched
+   off for as long as the write is out, and marked aria-busy, so a person on a
+   connection that takes a minute can see that the press was taken. Anything
+   that is not an enabled button is ignored, so a handler called from a test,
+   a timer or a key press in a field switches nothing off.
+
+   Like everything here it never throws: fn throwing, or rejecting, comes back
+   as {ok:false, error} in plain words. */
+var CORE_BUSY = {};
+function coreOnce(key, fn, btn){
+  var k = String(key);
+  if (CORE_BUSY[k]) return CORE_BUSY[k];
+  var b = null;
+  try {
+    if (btn && btn.tagName === 'BUTTON' && !btn.disabled) { b = btn; b.disabled = true; b.setAttribute('aria-busy', 'true'); }
+  } catch (e) { b = null; }
+  function done(){
+    delete CORE_BUSY[k];
+    if (!b) return;
+    try {
+      b.disabled = false; b.removeAttribute('aria-busy');
+      /* switching a focused button off drops focus to the page; hand it back
+         if the button is still on the screen and nothing else has taken it */
+      var d = b.ownerDocument;
+      if (b.isConnected && d && d.activeElement === d.body) b.focus();
+    } catch (e) { /* the screen was redrawn under us; nothing to restore */ }
+  }
+  var p;
+  try { p = Promise.resolve(fn()); } catch (e) { p = Promise.resolve(coreErr(e)); }
+  p = p.then(function(v){ done(); return v; }, function(e){ done(); return coreErr(e); });
+  CORE_BUSY[k] = p;
+  return p;
+}
+
+/* ===================== 8. IS A COPY STILL FRESH =====================
+   Some of what the hub shows is a copy of something kept elsewhere, refreshed
+   on a timer. When the refreshing stops, the copy goes on looking exactly as
+   it did on the day it stopped — a screen full of ordinary-looking rows that
+   are three days old. The only honest thing a screen can do is say WHEN the
+   copy was last refreshed and whether that is too long ago.
+
+   coreFresh(lastAt, now, maxMinutes) answers that, once, so the screen that
+   configures a feed and the screen that shows its rows cannot disagree:
+     known    there is a last-refreshed time at all
+     stale    it is missing, or older than maxMinutes
+     minutes  how old, or null
+     ago      'just now' / '5 min ago' / '3 days ago', or ''
+   The default limit is three missed refreshes of a fifteen-minute timer. */
+var CORE_FRESH_MAX_MIN = 45;
+function coreFresh(lastAt, now, maxMinutes){
+  var d = coreToDate(lastAt), t = now == null ? Date.now() : now;
+  var max = Number(maxMinutes) > 0 ? Number(maxMinutes) : CORE_FRESH_MAX_MIN;
+  if (!d) return { known: false, stale: true, minutes: null, ago: '' };
+  var mins = Math.max(0, Math.round((t - d.getTime()) / 60000));
+  return { known: true, stale: mins > max, minutes: mins, ago: coreAgo(d, '', t) };
+}
+
+/* ===================== 9. WHAT MAY BE ATTACHED =====================
+   The kinds of file a chat will take and the size limit, said once. The owner's
+   Employees screen and the team member's own page each carried a copy of the
+   same nine extensions and the same 10 MB; they upload into the same bucket
+   under the same database rule, so a tenth kind added to one and not the other
+   would have meant she could send him a file he could not send back.
+
+   This is the browser's early word ("that kind of file", "that is too big")
+   before an upload starts. The bucket's own policy is still the rule. */
+var CORE_FILE_MAX  = 10 * 1024 * 1024;
+var CORE_FILE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'pdf', 'docx', 'csv'];

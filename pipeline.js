@@ -818,23 +818,23 @@ async function plMarkWon(id) {
   if (r.ok) await plChanged(id);
   return r;
 }
-async function plMarkLost(id) {
+function plMarkLost(id){ return coreOnce('pl:mark:'+id, async () => {
   const reason = plPick('plLossReason');
   const r = await plLost(id, reason);
   plSay(r, 'Marked lost.');
   if (r.ok) await plChanged(id);
   return r;
-}
-async function plMarkNoShow(id) {
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function plMarkNoShow(id){ return coreOnce('pl:mark:'+id, async () => {
   const r = await plNoShow(id);
   plSay(r, 'Marked as nobody came.');
   if (r.ok) await plChanged(id);
   return r;
-}
-async function plMarkHeld(id) {
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function plMarkHeld(id){ return coreOnce('pl:mark:'+id, async () => {
   const r = await plHeld(id);
   plSay(r, 'Marked: the call happened.');
   if (r.ok) await plChanged(id);
   return r;
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 function plForget() { Object.assign(pl, { one: null, oneId: null, oneErr: null, funnel: null, funnelErr: null, days: 30, winning: false }); }
