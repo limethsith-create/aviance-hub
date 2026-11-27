@@ -29,6 +29,47 @@ async function fnRun(fn, whenEmpty){
   catch (e) { return fnErr(e); }
 }
 
+/* A TABLE THAT GROWS FOR EVER IS READ A PAGE AT A TIME. The database answers a
+   read with no range out of one page (1,000 rows) and says nothing when there
+   was more: the rows past the page simply are not there, and whatever the
+   screen adds up comes out smaller with no sign that it did. So: read page
+   after page until a short one, and if the table outgrows the ceiling FAIL in
+   words. A read that came back short is never handed on as the whole answer.
+   `build(from, to)` returns the query for that range, already ordered by
+   something unique so a page cannot repeat or skip a row. */
+const FN_PAGE = 1000;
+const FN_MAX_PAGES = 20;
+async function fnPaged(build, what){
+  const all = [];
+  try {
+    for (let i = 0; i < FN_MAX_PAGES; i++) {
+      const q = build(i * FN_PAGE, i * FN_PAGE + FN_PAGE - 1);
+      const r = fnWrap(await q, []);
+      if (!r.ok) return r;
+      const rows = Array.isArray(r.data) ? r.data : [];
+      for (const row of rows) all.push(row);
+      if (rows.length < FN_PAGE) return fnOk(all);
+    }
+    return fnErr('There are more ' + (what || 'rows') + ' on the books than this screen can read in one go, so it is not showing a part of them as the whole. Tell whoever looks after Aviance OS.');
+  } catch (e) { return fnErr(e); }
+}
+/* `.range()` and a second `.order()` where the client has them. (A test double
+   may not; the real client always does.) */
+function fnRange(q, from, to){ return q && typeof q.range === 'function' ? q.range(from, to) : q }
+
+/* TWO SCREENS ASKING THE SAME QUESTION AT THE SAME MOMENT SHARE ONE ANSWER.
+   Today draws the commitment board and the digest side by side and each asked
+   for every month on the books; Money asked for every invoice, every refund and
+   every client twice over. Nothing is kept: the answer is shared only while the
+   read is in the air, so there is no copy that can go stale. */
+const fnFlying = {};
+function fnShared(key, run){
+  if (fnFlying[key]) return fnFlying[key];
+  const p = Promise.resolve().then(run).finally(() => { delete fnFlying[key]; });
+  fnFlying[key] = p;
+  return p;
+}
+
 /* ---- money, at a glance ------------------------------------------ */
 
 /* The four numbers: invoiced and unpaid, paid this month, paid ever, refunds owed. */
@@ -38,8 +79,8 @@ async function fnMoney(){
 
 /* What we would owe if every open month ended today and missed. No cap is
    enforced — this only tells the truth about the risk. */
-async function fnExposure(){
-  return fnRun(() => sb.from('v_exposure').select('*').maybeSingle(), null);
+function fnExposure(){
+  return fnShared('exposure', () => fnRun(() => sb.from('v_exposure').select('*').maybeSingle(), null));
 }
 
 /* ---- the plans on offer ------------------------------------------- */
@@ -74,12 +115,12 @@ async function fnPlans(){
   return fnOk((Array.isArray(r.data) ? r.data : []).filter(p => p && fnPlanOffered(p.plan)));
 }
 
-async function fnClients(stage){
-  return fnRun(() => {
+function fnClients(stage){
+  return fnShared('clients:' + (stage || ''), () => fnPaged((from, to) => {
     let q = sb.from('clients').select('*').order('created_at', {ascending:false});
     if (stage) q = q.eq('stage', stage);
-    return q;
-  }, []);
+    return fnRange(q, from, to);
+  }, 'clients'));
 }
 
 /* Every month of every client: promised, delivered, days left, what is at risk. */
@@ -89,27 +130,19 @@ async function fnClients(stage){
    — the commitment board, the money screen — would quietly go down. So it is read a
    page at a time until a short page, and if the book ever outgrows the ceiling it
    FAILS with a sentence rather than returning part of the answer as the whole. */
-const FN_STANDING_PAGE = 1000;
-const FN_STANDING_MAX_PAGES = 20;
-async function fnStanding(opts){
+function fnStanding(opts){
   const o = opts || {};
-  const all = [];
-  try {
-    for (let i = 0; i < FN_STANDING_MAX_PAGES; i++) {
-      let q = sb.from('v_month_standing').select('*');
-      if (o.clientId) q = q.eq('client_id', o.clientId);
-      if (o.openOnly) q = q.eq('verdict', 'open');
-      q = q.order('ends_on');
-      const canPage = q && typeof q.range === 'function';
-      if (canPage) q = q.range(i * FN_STANDING_PAGE, i * FN_STANDING_PAGE + FN_STANDING_PAGE - 1);
-      const r = fnWrap(await q, []);
-      if (!r.ok) return r;
-      const rows = Array.isArray(r.data) ? r.data : [];
-      for (const row of rows) all.push(row);
-      if (!canPage || rows.length < FN_STANDING_PAGE) return fnWrap({ data: all, error: null }, []);
-    }
-    return fnErr('There are more months on the books than this screen can read in one go, so it is not showing a part of them as the whole. Tell whoever looks after Aviance OS.');
-  } catch (e) { return fnErr(e); }
+  return fnShared('standing:' + (o.clientId || '') + ':' + (o.openOnly ? 'open' : 'all'), () => fnPaged((from, to) => {
+    let q = sb.from('v_month_standing').select('*');
+    if (o.clientId) q = q.eq('client_id', o.clientId);
+    if (o.openOnly) q = q.eq('verdict', 'open');
+    /* ends_on is shared by many months, and a page boundary inside a run of
+       equal dates can hand the same row to two pages and drop another. The
+       month's own id breaks the tie. */
+    q = q.order('ends_on');
+    if (typeof q.order === 'function') q = q.order('month_id');
+    return fnRange(q, from, to);
+  }, 'months'));
 }
 
 /* ---- the month clock --------------------------------------------- */
@@ -233,16 +266,20 @@ async function fnRaiseInvoice(monthId, dueDays){
 }
 
 /* Invoices to send, and payments to chase. */
-async function fnInvoiceWork(){
-  return fnRun(() => sb.from('v_invoice_work').select('*').order('issued_on'), []);
+function fnInvoiceWork(){
+  return fnPaged((from, to) => fnRange(sb.from('v_invoice_work').select('*').order('issued_on'), from, to), 'invoices to send or chase');
 }
 
-async function fnInvoices(clientId){
-  return fnRun(() => {
+/* Every invoice, or one client's. With no client this is the whole table, read
+   by Today, Money (twice), the onboarding checklist and Invoices — and one page
+   of it was being shown as all of it. Paged, newest first, id to break ties. */
+function fnInvoices(clientId){
+  return fnShared('invoices:' + (clientId || ''), () => fnPaged((from, to) => {
     let q = sb.from('invoices').select('*').order('issued_on', {ascending:false});
+    if (typeof q.order === 'function') q = q.order('id');
     if (clientId) q = q.eq('client_id', clientId);
-    return q;
-  }, []);
+    return fnRange(q, from, to);
+  }, 'invoices'));
 }
 
 async function fnMarkInvoiceSent(invoiceId){
@@ -437,9 +474,14 @@ function fnRefundLine(row){
 function fnRefundProblem(row, entry){
   const r = row || {}, e = entry || {};
   if (!r.id) return 'Pick the refund first.';
-  if (fnRefundState(r) === 'paid') return 'That refund is already marked paid.';
+  /* A refund paid IN PART is still owed the rest, and the rest has to be
+     payable: refusing every row whose word is 'paid' left the remainder of a
+     part-paid refund with no way to record it, ever. Only a row with nothing
+     left is finished. What can be sent now is what is still owed, not the
+     figure the guarantee first raised. */
+  if (fnRefundState(r) === 'paid' && fnRefundStillOwed(r) <= 0) return 'That refund is already marked paid.';
   if (fnRefundState(r) === 'waived') return 'That refund was set aside, so it cannot be paid.';
-  const owed = fnCount(r.amount);
+  const owed = fnRefundStillOwed(r);
   const raw = e.amount === '' || e.amount == null ? owed : Number(e.amount);
   if (!Number.isFinite(raw)) return 'Write the amount you sent as a number.';
   const amount = Math.round(raw);
@@ -452,12 +494,13 @@ function fnRefundProblem(row, entry){
   return '';
 }
 
-async function fnRefunds(status){
-  return fnRun(() => {
+function fnRefunds(status){
+  return fnShared('refunds:' + (status || ''), () => fnPaged((from, to) => {
     let q = sb.from('refunds').select('*').order('created_at', {ascending:false});
+    if (typeof q.order === 'function') q = q.order('id');
     if (status) q = q.eq('status', status);
-    return q;
-  }, []);
+    return fnRange(q, from, to);
+  }, 'refunds'));
 }
 
 /* Every refund with the client's name and the month beside it, because a row
@@ -506,7 +549,7 @@ async function fnMarkRefundPaid(refundId, opts){
   const bad = fnRefundProblem(got.data, e);
   if (bad) return fnErr(bad);
 
-  const amount = Math.round(e.amount === '' || e.amount == null ? fnCount(got.data.amount) : Number(e.amount));
+  const amount = Math.round(e.amount === '' || e.amount == null ? fnRefundStillOwed(got.data) : Number(e.amount));
   const via = String(e.via || '').trim().slice(0, FN_REFUND_MAX_VIA);
   const ref = String(e.reference || '').trim().slice(0, FN_REFUND_MAX_REF);
   const when = e.on ? coreToDate(e.on) : null;
@@ -519,20 +562,45 @@ async function fnMarkRefundPaid(refundId, opts){
   if (coreFamily(viaRpc.error) !== 'not-ready') return viaRpc;
 
   /* no rule in this database yet — write the row, keep every fact */
-  const note = [String(got.data.notes || '').trim(),
-    `Paid ${fnUsd(amount)}${via ? ' by ' + via : ''}${ref ? ' (ref ' + ref + ')' : ''}.`,
-    amount < fnCount(got.data.amount) ? `${fnUsd(fnCount(got.data.amount) - amount)} of it is still owed.` : '',
-  ].filter(Boolean).join(' ').slice(0, 2000);
+  if (fnRefundState(got.data) !== 'owed') return fnErr('That refund is already marked paid.');
+  const owedAll = fnCount(got.data.amount);
+  const day = when ? coreDayKey(when) : coreTodayKey();
+  const fact = `${fnUsd(amount)}${via ? ' by ' + via : ''} on ${day}${ref ? ' (ref ' + ref + ')' : ''}`;
+  if (amount < owedAll) {
+    /* A PART PAYMENT, IN A DATABASE WITH NOWHERE TO PUT ONE. Without the
+       paid_amount column a row is either owed or paid, and "paid" reads as paid
+       in full on every screen. Marking it paid here made a third of a refund
+       sent read "settled", "We owe $0" — and the other two thirds of a client's
+       money left the screen for good. So the row STAYS OWED, at its full figure,
+       and the transfer is written into its notes where the Money screen shows
+       it. Overstating what we owe is the safe mistake; understating it is not. */
+    const left = owedAll - amount;
+    const note = [String(got.data.notes || '').trim(), `Part sent: ${fact}. ${fnUsd(left)} still to send.`]
+      .filter(Boolean).join(' ').slice(0, 2000);
+    const kept = await fnRun(() => sb.from('refunds').update({notes: note})
+      .eq('id', refundId).eq('status', 'owed').select().single(), null);
+    if (!kept.ok) return kept;
+    return fnOk(Object.assign({}, kept.data, {part_noted: true, part_amount: amount, part_left: left}));
+  }
+  const note = [String(got.data.notes || '').trim(), `Paid ${fact}.`].filter(Boolean).join(' ').slice(0, 2000);
+  /* `.eq('status','owed')`: a second click that lands after the first has written
+     finds no row to write, instead of writing the note a second time.
+     The day is stored at noon UTC so it is the same calendar day for the owner in
+     Colombo and the client in New York; midnight local was the day before in UTC. */
   const wrote = await fnRun(() => sb.from('refunds').update({
-    status: 'paid', paid_at: (when || new Date()).toISOString(), paid_via: via, notes: note,
-  }).eq('id', refundId).select().single(), null);
+    status: 'paid', paid_at: day + 'T12:00:00.000Z', paid_via: via, notes: note,
+  }).eq('id', refundId).eq('status', 'owed').select().maybeSingle(), null);
   if (!wrote.ok) return wrote;
+  if (!wrote.data) return fnErr('That refund is already marked paid.');
   return fnOk(Object.assign({}, wrote.data, {partial_record: true}));
 }
 
 /* What to tell the person who clicked it. */
 function fnRefundPaidWords(data){
   const d = data || {};
+  if (d.part_noted) return `Noted: ${fnUsd(d.part_amount)} sent, ${fnUsd(d.part_left)} still to send. `
+    + 'The refund still shows as owed in full, because this database cannot hold a part payment until its update is applied. '
+    + 'When the rest has gone, record the whole amount.';
   const rest = fnRefundStillOwed(d);
   return (rest > 0 ? `Recorded. ${fnUsd(rest)} of it is still owed.` : 'Recorded. That refund is settled.')
     + (d.partial_record ? ' The amount and reference are in the notes until the database update is applied.' : '');
@@ -592,11 +660,14 @@ function fnRefundGaps(months, refunds){
   return (Array.isArray(months) ? months : []).filter(m => {
     if (!m || !m.month_id && !m.id) return false;
     if (String(m.verdict || '') !== 'missed') return false;
-    if (fnCount(m.refund_due) <= 0) return false;
+    /* the months come from v_month_standing, which carries the locked refund as
+       `at_risk` and has no refund_due at all — so reading refund_due alone found
+       nothing, ever, on the live database */
+    if (fnCount(fnRefundOnMonth(m)) <= 0) return false;
     return !byMonth[m.month_id || m.id];
   }).map(m => ({
     monthId: m.month_id || m.id, clientId: m.client_id || null, company: m.company || '',
-    monthNo: fnCount(m.month_no), amount: fnCount(m.refund_due),
+    monthNo: fnCount(m.month_no), amount: fnCount(fnRefundOnMonth(m)),
   }));
 }
 
@@ -651,8 +722,22 @@ function fnRenewalDecision(client, nextMonthNo){
    invoice if that month bills. Every step is the database's; this only puts
    them in order and stops where the answer is not known.
    -> {month, opened, invoice, decide, says} */
-async function fnCloseMonth(monthId){
-  if (!monthId) return fnErr('Pick the month first.');
+/* ONE CLOSE PER MONTH AT A TIME. lock_month is safe to run twice; open_next_month
+   is NOT — it opens the month after the LAST one, whatever that is. Two clicks on
+   "Lock month" both checked for month two before either had opened it, so both
+   opened a month: the client got month two AND a month three nobody sold, with a
+   guarantee on it and no invoice. Seen in a real browser with a double click. A
+   second call while the first is still going is handed the first one's answer. */
+const fnClosing = {};
+function fnCloseMonth(monthId){
+  if (!monthId) return Promise.resolve(fnErr('Pick the month first.'));
+  const key = String(monthId);
+  if (fnClosing[key]) return fnClosing[key];
+  const run = fnCloseMonthOnce(monthId).finally(() => { delete fnClosing[key]; });
+  fnClosing[key] = run;
+  return run;
+}
+async function fnCloseMonthOnce(monthId){
   const locked = await fnLockMonth(monthId);
   if (!locked.ok) return locked;
   const m = locked.data || {};
@@ -735,11 +820,32 @@ const fnUsd = coreUsd;
    A number the view did not send is read as 0, and a missing day count says so
    in words: a client must never read "undefined of undefined" or "null days left". */
 const fnCount = n => (Number.isFinite(Number(n)) ? Math.round(Number(n)) : 0);
+/* What a LOCKED month owes back, off whichever column the row carries: a
+   client_months row has refund_due, a v_month_standing row has at_risk (which
+   the view sets to refund_due once the verdict is in). null when neither is
+   there — which is not $0. */
+function fnRefundOnMonth(row){
+  const r = row || {};
+  for (const k of ['refund_due', 'at_risk']) {
+    const v = r[k];
+    if (v === null || v === undefined || v === '') continue;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
 function fnMonthLine(row){
   if (!row) return '';
   const no = fnCount(row.month_no), got = fnCount(row.calls_delivered), want = fnCount(row.calls_promised);
   if (row.verdict === 'hit')    return `Month ${no}: hit — ${got} of ${want} calls.`;
-  if (row.verdict === 'missed') return `Month ${no}: missed — ${got} of ${want}. ${fnUsd(row.refund_due)} refunded.`;
+  if (row.verdict === 'missed') {
+    /* v_month_standing has no refund_due column (checked live 2026-11-27): for a
+       locked month its `at_risk` IS the refund the lock raised. Reading only
+       refund_due printed "$0 refunded" on every missed month on a client's page.
+       And a figure neither column carried is left out, not shown as $0. */
+    const due = fnRefundOnMonth(row);
+    return `Month ${no}: missed — ${got} of ${want}.` + (due === null ? '' : ` ${fnUsd(due)} refunded.`);
+  }
   if (row.verdict === 'waived') return `Month ${no}: set aside.`;
   const left = Number(row.days_left);
   const when = !Number.isFinite(left) ? 'the month is still running'

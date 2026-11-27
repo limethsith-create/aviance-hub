@@ -47,10 +47,26 @@ const cb = {
   cal: {}, calErr: {},           /* their connected calendars, by client id */
   busy: {},
 };
+/* SOMETHING ELSE CHANGED A CLIENT. This file keeps what it read — one copy of
+   the list, one of each client's page — and until round 3 nothing outside it
+   could say that copy was old. So a call marked "they showed" on the Calendar, a
+   month locked on Month end, an invoice marked paid on Money and a login handed
+   out on Their people all left the client's own page showing the figure from
+   before, for the rest of the session: "4 of 10" beside a commitment board that
+   said 5. The other screens call this after a write. With an id, that client's
+   page; with none, every page. The list is always marked, because its row for
+   that client is built from the same rows. */
+function cbStale(clientId){
+  const id = cbTrim(clientId);
+  cb.listStale = true;
+  if (id) { if (cb.one[id]) cb.one[id].stale = true; }
+  else Object.keys(cb.one).forEach(k => { if (cb.one[k]) cb.one[k].stale = true; });
+  return true;
+}
 function cbForget(){
   cb.clients = null; cb.at = 0; cb.err = ''; cb.tried = false;
   cb.standing = []; cb.owners = {}; cb.history = {}; cb.requests = []; cb.profiles = {};
-  cb.one = {}; cb.oneErr = {}; cb.busy = {};
+  cb.one = {}; cb.oneErr = {}; cb.busy = {}; cb.endSaid = null; cb.listStale = false;
   cb.agreements = {}; cb.firstInv = {};
   cb.seats = {}; cb.seatsErr = {}; cb.cal = {}; cb.calErr = {};
 }
@@ -223,14 +239,19 @@ async function cbEvents(clientId, opts){
   }, []);
 }
 /* The months and where each one stands. finance.js owns the rules; we only read. */
+/* THROUGH finance.js, WHICH READS IT A PAGE AT A TIME. This used to read the view
+   whole, oldest month first. The database answers one page (1,000 rows) and says
+   nothing about the rest, so from the 1,001st month on the books the rows that
+   fell off were the NEWEST — the months that are open today. Measured at 100
+   clients and 13 months: "$0 at stake" against a true $214,500, and "What needs
+   you (20)" against 80. fnStanding pages, and refuses in words at its ceiling.
+   Without finance.js loaded this refuses too: a part of the months is not shown
+   as all of them. */
 async function cbStanding(opts){
   const o = opts || {};
-  return cbRun(() => {
-    let q = sb.from('v_month_standing').select('*');
-    if (o.clientId) q = q.eq('client_id', o.clientId);
-    if (o.openOnly) q = q.eq('verdict', 'open');
-    return q.order('ends_on');
-  }, []);
+  if (typeof fnStanding !== 'function') return cbErr('The money side of Aviance OS did not load, so the months cannot be read. Reload the page.');
+  try { return await fnStanding(o); }
+  catch (e) { return cbErr(e); }
 }
 /* Who on the team looks after whom: {profileId: name}. */
 async function cbOwners(){
@@ -310,8 +331,25 @@ async function cbMoveStage(clientId, toStage, note){
   if (toStage === 'ended') { patch.ended_on = c.ended_on || cbToday(); if (n) patch.end_reason = n; }
   else if (fromKey === 'ended') { patch.ended_on = null; patch.end_reason = null; }
 
-  const up = await cbRun(() => sb.from('clients').update(patch).eq('id', clientId).select().single(), null);
-  if (!up.ok) return up;
+  /* ENDING IS NOT A STAGE CHANGE. wrapup.js's wuEndClient is the orderly ending:
+     it recounts and locks every month that has FINISHED (which is what raises a
+     refund the guarantee owes), leaves alone the months that have not, refuses
+     if a finished month cannot be judged, sets the date and the reason, and
+     pauses what is still sending. Until round 3 nothing in the browser called
+     it. This button wrote stage = 'ended' straight onto the row, so a client
+     could leave with a finished, short month still open — no verdict, no refund
+     row, nothing on Money — and Month end then told the owner to "close it from
+     the Ending screen", which has no button that closes anything. */
+  let ending = null, up;
+  if (toStage === 'ended' && typeof wuEndClient === 'function') {
+    const end = await wuEndClient(clientId, {reason: n, lastDay: patch.ended_on});
+    if (!end.ok) return end;
+    ending = end.data || null;
+    up = cbOk((ending && ending.client) || Object.assign({}, c, patch));
+  } else {
+    up = await cbRun(() => sb.from('clients').update(patch).eq('id', clientId).select().single(), null);
+    if (!up.ok) return up;
+  }
 
   const by = (typeof authUser !== 'undefined' && authUser && (authUser.uid || authUser.id)) || null;
   const hist = await cbRun(() => sb.from('client_stage_history').insert({
@@ -328,6 +366,7 @@ async function cbMoveStage(clientId, toStage, note){
   const lost = [!hist.ok ? 'the stage history' : '', !ev.ok ? 'their history' : ''].filter(Boolean);
   return cbOk({
     client:  up.data,
+    ending:  ending,
     history: hist.ok ? hist.data : null,
     event:   ev.ok ? ev.data : null,
     warning: lost.length ? 'Moved to ' + cbStageLabel(toStage) + ', but ' + cbList(lost) + ' could not be written down.' : ''
@@ -956,7 +995,8 @@ function cbRenderNeeds(rows, meta){
 /* Everything the main screen and the needs list both want, in one go. */
 async function cbLoadAll(force){
   if (cb.busy.all) return cb.busy.all;
-  if (!force && cb.clients && Date.now() - cb.at < CB_RELOAD_MS) return cbOk(cb.clients);
+  if (!force && !cb.listStale && cb.clients && Date.now() - cb.at < CB_RELOAD_MS) return cbOk(cb.clients);
+  cb.listStale = false;
   cb.busy.all = (async () => {
     const [clients, standing, owners, requests, hist, profiles, agreements, firsts] = await Promise.all([
       cbClients(), cbStanding(), cbOwners(), cbOpenRequests(), cbStageHistory(null),
@@ -1012,6 +1052,7 @@ async function cbLoadOne(clientId, force){
     const firstRow = (res) => res && res.ok && Array.isArray(res.data) && res.data.length ? res.data[0] : null;
     if (!client.ok) { cb.oneErr[clientId] = client.error; return client; }
     cb.one[clientId] = {
+      at: Date.now(),
       client: client.data, profile: profile.ok ? profile.data : null,
       months: months.ok ? months.data || [] : [], events: events.ok ? events.data || [] : [],
       history: hist.ok ? hist.data || [] : [], requests: reqs.ok ? reqs.data || [] : [],
@@ -1037,7 +1078,11 @@ const CB_VIEWS = ['clients', 'client', 'needsYou'];
 function cbPaint(){
   if (typeof render !== 'function' || typeof currentView === 'undefined') return;
   if (CB_VIEWS.indexOf(String(currentView || '')) < 0) return;
-  try { render(currentView); } catch (e) {}
+  /* `painting` tells the views this draw is ours, off rows that have just been
+     read — so they must not start another read, or the screen would read itself
+     for ever. */
+  cb.painting = true;
+  try { render(currentView); } catch (e) {} finally { cb.painting = false; }
 }
 function cbLoading(what){
   return '<div class="cb-loading" role="status">' + cbE('Loading ' + (what || 'the clients') + '…') + '</div>';
@@ -1093,7 +1138,34 @@ function viewClients(){
     if (!cb.tried) { cbThen(cbLoadAll(), 'the clients'); return cbLoading('the clients'); }
     return cbRenderClients([], {error: cb.err});   /* it was asked for and it would not come */
   }
+  /* What is held is drawn at once, and read again behind it when it is old or
+     another screen has said it changed. Before this the list was read ONCE per
+     session: CB_RELOAD_MS was only ever consulted on a path this function did
+     not take once it had rows. */
+  if (!cb.painting && !cb.busy.all && (cb.listStale || Date.now() - cb.at >= CB_RELOAD_MS)) cbRefreshAll();
   return cbRenderClients(cbRows(cb.clients, cbBag()), {error: cb.err});
+}
+/* Read again, and draw again only if what came back is different — a redraw
+   moves the page to the top and empties a box somebody is typing in. */
+function cbListSig(){
+  try { return JSON.stringify([cb.clients, cb.standing, cb.requests, cb.firstInv, cb.agreements, cb.err]); } catch (e) { return String(Date.now()); }
+}
+function cbOneSig(id){
+  try {
+    const o = Object.assign({}, cb.one[id] || {}); delete o.at; delete o.stale;
+    return JSON.stringify([o, cb.seats[id], cb.seatsErr[id], cb.cal[id], cb.calErr[id]]);
+  } catch (e) { return String(Date.now()); }
+}
+function cbRefreshAll(){
+  const before = cbListSig();
+  return cbLoadAll(true).then(() => { if (cbListSig() !== before) cbPaint(); }, () => {});
+}
+function cbRefreshOne(id){
+  const before = cbOneSig(id);
+  return cbLoadOne(id, true).then(() => {
+    if (cb.one[id]) cb.one[id].stale = false;
+    if (cbOneSig(id) !== before) cbPaint();
+  }, () => {});
 }
 
 /* ---- one client ----
@@ -1117,6 +1189,12 @@ function viewClient(clientId){
               'Try again', 'cbRetryClient(' + cbAttr(id) + ')');
   }
   if (!got) { cbThen(cbLoadOne(id), 'their page', id); return cbLoading('their page'); }
+  /* Their page is kept, and it used to be kept for good: opened once, it showed
+     the same months, invoices and logins until the browser was reloaded, whatever
+     had happened on the Calendar, Month end or Money since. It is still drawn at
+     once from what is held — and read again behind that when another screen has
+     marked it (cbStale) or it is older than the list is allowed to be. */
+  if (!cb.painting && !cb.busy['one:' + id] && (got.stale || Date.now() - (got.at || 0) >= CB_RELOAD_MS)) cbRefreshOne(id);
   const r = cbRow(got.client, {
     standing: got.months, owners: got.owners, requests: got.requests,
     profiles: got.profile ? {[id]: got.profile} : {},
@@ -1125,7 +1203,8 @@ function viewClient(clientId){
     firstInvoices: cbFirstOf(got.invoices) ? {[id]: cbFirstOf(got.invoices)} : {}
   });
   cbMountJourney(id);
-  return (got.err ? cbErrNote(got.err) : '') + cbRenderClient(got.client ? r : null, got.months, got.events,
+  const said = cb.endSaid && cb.endSaid.id === id ? cbNote(cb.endSaid.words, 'amber') : '';
+  return said + (got.err ? cbErrNote(got.err) : '') + cbRenderClient(got.client ? r : null, got.months, got.events,
     {admin: cbIsAdmin(), invoices: got.invoices, invoicesErr: got.invoicesErr,
      agreement: got.agreement, person: got.person, channel: got.channel,
      seats: cb.seats[id], seatsErr: cb.seatsErr[id],
@@ -1270,12 +1349,41 @@ async function cbMarkPaid(clientId, invoiceId, via){
   return r;
 }
 
-/* Move them, from the mover on their page. */
+/* What an ending did, in one sentence the owner can check against Money and
+   Month end. Pure. Every figure is one wuEndClient handed back. */
+function cbEndingWords(e){
+  if (!e) return '';
+  const left = Array.isArray(e.monthsLeftOpen) ? e.monthsLeftOpen : [];
+  const owed = cbInt(e.refundOutstanding);
+  const out = ['Ended.'];
+  out.push(cbInt(e.monthsLocked) === 1 ? '1 finished month is locked.' : cbInt(e.monthsLocked) + ' finished months are locked.');
+  out.push(owed > 0 ? cbUsd(owed) + ' in refunds is owed to them — it is on Money.' : 'No refund is owed.');
+  if (left.length) out.push((left.length === 1 ? 'Month ' + left[0].monthNo + ' had' : 'Months ' + cbList(left.map(m => String(m.monthNo))) + ' had') +
+    ' not finished and ' + (left.length === 1 ? 'was' : 'were') + ' left open: whether a month they cut short is owed back is yours to decide.');
+  if (e.providerStillRunning) out.push('Pause their campaigns in the sending tool too — Aviance OS cannot reach it.');
+  return out.join(' ');
+}
+
+/* Move them, from the mover on their page. One press at a time: two clicks
+   wrote the move, and its line in their history, twice. */
 async function cbDoMove(clientId, toStage){
+  const key = 'move:' + clientId;
+  if (cb.busy[key]) return cbErr('Still working on it.');
+  cb.busy[key] = true;
+  try { return await cbDoMoveOnce(clientId, toStage); }
+  finally { delete cb.busy[key]; }
+}
+async function cbDoMoveOnce(clientId, toStage){
   cbShowErr('cbMoveErr', '');
   const r = await cbMoveStage(clientId, toStage, cbField('cbMoveNote'));
   if (!r.ok) { cbShowErr('cbMoveErr', r.error); return r; }
-  if (r.data && r.data.warning) cbSay(r.data.warning);
+  if (r.data && r.data.ending) {
+    /* long, and it is about money: say it, and keep it on their page too */
+    const words = cbEndingWords(r.data.ending) + (r.data.warning ? ' ' + r.data.warning : '');
+    cb.endSaid = {id: String(clientId), words};
+    cbSay(words);
+  }
+  else if (r.data && r.data.warning) cbSay(r.data.warning);
   else cbSay('Moved to ' + cbStageLabel(toStage));
   delete cb.one[clientId];
   cb.clients = null; cb.tried = false;
