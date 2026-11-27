@@ -29,8 +29,8 @@ const JY_STEPS = [
   ['research',   'Research',          4,  'Research'],
   ['testing',    'Market testing',    11, 'Testing'],
   ['build',      'Build the campaign',13, 'Build'],
-  ['onboarding', 'Onboarding call',   13, 'Onboarding'],
-  ['launch',     'Launch',            14, 'Launch'],
+  ['onboarding', 'Launch call',       13, 'Launch call'],
+  ['launch',     'Live',              14, 'Live'],
 ];
 /* the one-word name a pill has room for */
 function jyShort(s){ const m = jyStepMeta(s && s.step); return m ? m[3] : (s && s.title) || 'Step' }
@@ -167,7 +167,7 @@ function jyActionFor(step){
     case 'research':   return ['Send ICP + angles for approval', 'jyAskApproval', 'icp'];
     case 'testing':    return ["Log today's numbers", 'jyAskTesting', ''];
     case 'build':      return ['Send copy for approval', 'jyAskApproval', 'copy'];
-    case 'onboarding': return ['Offer onboarding call times', 'jyOffer', 'onboarding'];
+    case 'onboarding': return ['Offer launch call times', 'jyOffer', 'onboarding'];
     default:           return null;
   }
 }

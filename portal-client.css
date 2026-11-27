@@ -389,3 +389,18 @@ a{color:inherit}
 .pc-back-paid .pc-back-top b{color:var(--pc-ink)}
 .pc-back-owed .pc-back-top b{color:var(--pc-red-text)}
 @media print{ .pc-back{display:none} }
+
+/* The sign-in screen leads with the mark, matching the hub and the team page:
+   one centred column, the mark big enough to be the first thing you see, the
+   form left-aligned inside it.
+   Only the sign-in: elsewhere the logo is a label, not the subject. */
+.pc-signin{max-width:408px;padding-top:12vh;padding-bottom:64px;text-align:center}
+.pc-signin .pc-logo{width:76px;height:76px;border-radius:16px;margin:0 auto 22px}
+.pc-signin .pc-h1{font-size:34px}
+.pc-signin .pc-form{text-align:left;margin-top:26px}
+.pc-signin .pc-under{text-align:center}
+@media(max-width:520px){
+  .pc-signin{padding-top:7vh}
+  .pc-signin .pc-logo{width:64px;height:64px}
+  .pc-signin .pc-h1{font-size:28px}
+}

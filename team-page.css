@@ -23,11 +23,13 @@ img{display:block;max-width:100%}
 .tmc-row{margin-top:var(--s5)}
 
 /* ---- the quiet pages: loading, sign in, something went wrong ---- */
-.tmc-notice{max-width:420px;margin:0 auto;padding:var(--s7) var(--s5) var(--s6);
-  min-height:100svh;display:flex;flex-direction:column;justify-content:center}
+/* A card, not a full-height stripe: these pages carry a border (brand.css), and
+   stretching it to the viewport drew a tall empty box around three lines. */
+.tmc-notice{max-width:420px;margin:12vh auto;padding:var(--s7) var(--s5) var(--s6);
+  display:flex;flex-direction:column;justify-content:center}
 .tmc-notice .tmc-logo{margin-bottom:var(--s5)}
 .tmc-h1{font-size:28px;line-height:1.15;font-weight:680;letter-spacing:-.02em;margin:0 0 var(--s2);overflow-wrap:break-word}
-.tmc-h1:focus{outline:none}
+.tmc-h1:focus,.tmc-h1:focus-visible{outline:none}
 .tmc-lede{font-size:var(--fs-strong);color:var(--muted);line-height:1.5}
 .tmc-under{margin-top:var(--s5)}
 
@@ -143,3 +145,18 @@ img{display:block;max-width:100%}
 }
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* The sign-in screen leads with the mark, the same way the hub's does, so the
+   three ways into Aviance look like one thing. Only the sign-in: inside the app
+   the logo stays small, where it is a label rather than the subject. */
+/* .tmc-notice already centres a 420px column, so the sign-in only needs the
+   big mark and the centred heading. The form stays left-aligned. */
+.tmc-signin{text-align:center}
+.tmc-signin .tmc-logo{width:76px;height:76px;border-radius:16px;margin:0 auto var(--s5)}
+.tmc-signin .tmc-h1{font-size:34px}
+.tmc-signin form,.tmc-signin .tmc-form{text-align:left;margin-top:var(--s5)}
+@media(max-width:520px){
+  .tmc-notice{margin:4vh 14px}
+  .tmc-signin .tmc-logo{width:64px;height:64px}
+  .tmc-signin .tmc-h1{font-size:28px}
+}

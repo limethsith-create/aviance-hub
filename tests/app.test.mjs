@@ -245,7 +245,14 @@ test('signing out clears what every screen was holding, and boot waits for the s
   assert.match(shellSrc, /getSession\(\);await pageReady\(\);if\(session\)await routeUser/);
 });
 
-test('the sign-in page states the offer as agreed', () => {
-  assert.ok(html.includes('Live within 2 weeks of kickoff, or the next month is <b>free</b>'));
+test('the sign-in page does not pitch, and never states the offer wrongly', () => {
+  /* The sign-in page used to carry a sales panel: a headline, three bullets and
+     the guarantee. Everyone who reaches it has already bought or already works
+     here, so it is one centred card now. The offer itself is still stated where
+     it binds — agreement_terms, mail_welcome and mail_pack in the database, and
+     the client's own portal — not on the owner's sign-in screen.
+     The guard against the offer drifting stays, and applies to the whole shell. */
   assert.ok(!/3 weeks/.test(html) && !/pilot/i.test(html));
+  assert.ok(!/We don't sell emails/.test(html), 'no sales pitch on the sign-in screen');
+  assert.match(html, /class="login-mark"/, 'the mark leads the sign-in card');
 });

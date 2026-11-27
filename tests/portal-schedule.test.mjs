@@ -74,7 +74,7 @@ test('expired or past times are disabled; onboarding wording', () => {
   const ex = P('psOfferHtml')(item({ status: 'expired', kind: 'onboarding' }), 'America/New_York', NOW);
   assert.equal((ex.match(/ disabled/g) || []).length, 3);
   assert.match(ex, /These times have gone/);
-  assert.match(ex, /onboarding call/);
+  assert.match(ex, /launch call/);  /* renamed from 'onboarding call' — the third call is the Launch call */
   const past = P('psOfferHtml')(item(), 'America/New_York', '2026-12-31T00:00:00Z');
   assert.match(past, /These times have gone/);
 });

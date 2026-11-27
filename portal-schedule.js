@@ -69,7 +69,7 @@ function psOfferHtml(item, viewerZone, now){
   const ui = psUi[id] || {};
   const state = psOfferState(meta, ui, opts);
   const picked = Number(ui.picked || meta.picked) || 0;
-  const what = meta.kind === 'onboarding' ? 'onboarding call' : 'kickoff';
+  const what = meta.kind === 'onboarding' ? 'launch call' : 'kickoff';
   const mins = opts.length && opts[0].minutes ? ' · ' + opts[0].minutes + ' min' : '';
   const head = state === 'booked' ? 'Booked' : state === 'expired' ? 'These times have gone' : 'Pick a time';
   const btns = opts.map((o) => {
