@@ -340,13 +340,6 @@ async function obChecklistMany(clients){
   }));
 }
 
-/* True only when every item is done. */
-async function obReady(clientId){
-  const ck = await obChecklist(clientId);
-  if (!ck.ok) return ck;
-  return obOk(Boolean(ck.data.ready));
-}
-
 /* Day one. Refuses unless every item is done, and says which one is missing.
    The month clock is the finance side's: fnStartSending sets the anchor and
    opens month one. We never work out a date or a fee here. */

@@ -379,20 +379,10 @@ function employeesForget() {
 function empA(v) { return esc(JSON.stringify(v == null ? '' : String(v))); }
 function empEl(id) { return typeof document !== 'undefined' ? document.getElementById(id) : null; }
 
-function empStatusLabel(status) {
-  return ({ active: 'Active', invited: 'Code sent', revoked: 'No access' })[String(status || '')] || 'Not set up';
-}
-function empStatusTone(status) {
-  return ({ active: 'ok', invited: 'wait', revoked: 'off' })[String(status || '')] || 'wait';
-}
 /* 'HH:MM' in the reader's own zone, from core.js. */
 const empTime = coreHm;
 /* coreAgo, and under a team member's name a time we do not have reads 'never'. */
 function empAgo(iso) { return coreAgo(iso, 'never') }
-function empLastSeenText(iso) {
-  const s = empAgo(iso);
-  return s === 'never' ? 'Not signed in yet' : 'Last seen ' + s;
-}
 /* The presence dot. Her page writes last_seen_at every few seconds while she has it open,
    so a fresh stamp really does mean "she is there now". */
 function empPresence(iso) {

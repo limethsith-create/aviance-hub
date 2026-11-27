@@ -86,7 +86,7 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), sandbox, { filename: 'core.js' });
 vm.runInContext(src('finance.js'), sandbox, { filename: 'finance.js' });
-vm.runInContext(src('onboarding.js') + `\n;globalThis.api={obChecklist,obReady,obStart,obInputs,obSaveInputs,obSignOff,obAgreement,obDraftAgreement,viewOnboarding,viewOnboardingClient,viewBilling,obRenderBilling,obRenderOnboarding,obRenderOnboardingClient,obLoadBilling,obLoadList,obLoadOne,ob,obSaveInputsFromForm,obSignOffFromForm,obStartGo,obRedrawOne};`, sandbox, { filename: 'onboarding.js' });
+vm.runInContext(src('onboarding.js') + `\n;globalThis.api={obChecklist,obStart,obInputs,obSaveInputs,obSignOff,obAgreement,obDraftAgreement,viewOnboarding,viewOnboardingClient,viewBilling,obRenderBilling,obRenderOnboarding,obRenderOnboardingClient,obLoadBilling,obLoadList,obLoadOne,ob,obSaveInputsFromForm,obSignOffFromForm,obStartGo,obRedrawOne};`, sandbox, { filename: 'onboarding.js' });
 const A = sandbox.api;
 
 /* ───────────── a client with every box ticked ───────────── */
@@ -133,7 +133,6 @@ test('all seven items read true from real rows, and the client is ready', async 
   assert.equal(r.data.items.filter((i) => !i.done).length, 0);
   assert.equal(r.data.ready, true);
   assert.equal(r.data.blocking, '');
-  assert.equal((await A.obReady(ID)).data, true);
 });
 
 /* Each item in turn: take away the row that proves it and nothing else. */
@@ -154,7 +153,6 @@ for (const [name, key, breakIt, words] of BREAKERS) {
     assert.equal(ck.data.ready, false, 'should not be ready');
     assert.equal(item(ck.data, key).done, false, key + ' should be undone');
     assert.equal(ck.data.items.filter((i) => !i.done).length >= 1, true);
-    assert.equal((await A.obReady(ID)).data, false);
     const started = shape(await A.obStart(ID));
     assert.equal(started.ok, false);
     assert.match(started.error, words);

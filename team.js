@@ -17,9 +17,7 @@
    throws; `error` is a plain sentence, safe to show a person; every screen
    renders correctly with zero rows.
 
-   Priority is 1..5 and 5 is the most urgent. tmWorkload() weighs an open task
-   by its priority, so five priority-1 chores do not look like a crisis and one
-   priority-5 does not hide in a long list.
+   Priority is 1..5 and 5 is the most urgent.
 
    Note on tmSetStatus(id, status): a person has a status (a line they write
    about what they are working on) and a task has a status (one of five fixed
@@ -59,7 +57,7 @@ const TM_PRIORITY_LABEL = {1:'Lowest', 2:'Low', 3:'Normal', 4:'High', 5:'Urgent'
 
 /* What each screen is holding right now. null means "not loaded yet". */
 const tmS = {
-  people:null, tasks:null, mine:null, clients:null, clientsErr:'',
+  people:null, tasks:null, clients:null, clientsErr:'',
   grants:null, grantErr:'', grantBusy:false,
   err:'', dept:'', who:'', busy:false, workSeq:0
 };
@@ -117,13 +115,6 @@ function tmEmpty(icon, title, sub, btn, action){
 /* Everyone with a profile, approved or not. */
 async function tmPeople(){
   return tmRun(() => sb.from('profiles').select('*').order('name'), []);
-}
-
-/* The people waiting to be let in. Nobody unapproved can see anything, so
-   this is the screen that matters most on day one. */
-async function tmPending(){
-  return tmRun(() => sb.from('profiles').select('*')
-    .eq('approved', false).order('created_at'), []);
 }
 
 /* Let somebody in. They keep whatever role the database gave them. */
@@ -406,66 +397,6 @@ function tmSortMine(rows, today){
   );
 }
 
-/* The signed-in person's open work, in the order they should pick it up. */
-async function tmMine(today){
-  const me = tmMeId();
-  if (!me) return tmErr('Sign in to see your own work.');
-  const r = await tmTasks({assignee: me, status: TM_OPEN_STATUSES});
-  if (!r.ok) return r;
-  return tmOk(tmSortMine(r.data, today));
-}
-
-/* ---- the two numbers that say where to look ----------------------- */
-
-/* A count per department of todo, doing, blocked and overdue, so it is
-   obvious which of the eight is drowning. All eight are always listed, even
-   the quiet ones. */
-async function tmByDepartment(today){
-  const r = await tmTasks({status: TM_OPEN_STATUSES});
-  if (!r.ok) return r;
-  const t = today || tmToday();
-  const rows = TM_DEPARTMENTS.map(d => ({
-    department: d, label: tmDeptLabel(d),
-    todo: 0, doing: 0, blocked: 0, overdue: 0, open: 0
-  }));
-  const by = {};
-  rows.forEach(x => { by[x.department] = x });
-  (r.data || []).forEach(task => {
-    const row = by[task.department];
-    if (!row) return;
-    if (row[task.status] !== undefined) row[task.status] += 1;
-    row.open += 1;
-    if (tmIsOverdue(task, t)) row.overdue += 1;
-  });
-  return tmOk(rows);
-}
-
-/* Open tasks per person, weighted by priority, so work can be moved off
-   whoever is buried. Heaviest first; people with nothing are still listed. */
-async function tmWorkload(today){
-  const p = await tmPeople();
-  if (!p.ok) return p;
-  const r = await tmTasks({status: TM_OPEN_STATUSES});
-  if (!r.ok) return r;
-  const t = today || tmToday();
-  const rows = (p.data || []).filter(x => x.approved).map(x => ({
-    id: x.id, name: tmPersonName(x), init: tmInitials(x), color: x.color || '',
-    title: x.title || '', role: x.role || '', status: x.status || '',
-    open: 0, weight: 0, overdue: 0
-  }));
-  const by = {};
-  rows.forEach(x => { by[String(x.id)] = x });
-  (r.data || []).forEach(task => {
-    const row = by[String(task.assignee)];
-    if (!row) return;
-    row.open += 1;
-    row.weight += (Number(task.priority) || 0);
-    if (tmIsOverdue(task, t)) row.overdue += 1;
-  });
-  rows.sort((a, b) => b.weight - a.weight || b.open - a.open || a.name.localeCompare(b.name));
-  return tmOk(rows);
-}
-
 /* ================= SCREENS ======================================== */
 
 /* Client names for the cards. A task without a client just shows nothing.
@@ -667,40 +598,8 @@ function tmFilterDept(d){ tmS.dept = TM_DEPARTMENTS.indexOf(String(d)) >= 0 ? St
 function tmFilterWho(id){ tmS.who = id ? String(id) : ''; tmS.tasks = null; tmPaint('tmWorkHost', tmRenderWork()); return tmLoadWork() }
 function tmClearFilters(){ tmS.dept = ''; tmS.who = ''; tmS.tasks = null; tmPaint('tmWorkHost', tmRenderWork()); return tmLoadWork() }
 
-/* ---- Just mine ------------------------------------------------------ */
-
-async function tmLoadMine(){
-  if (tmS.clients === null) await tmLoadClients();
-  if (tmS.people === null) { const p = await tmPeople(); tmS.people = p.ok ? p.data : [] }
-  const r = await tmMine();
-  tmS.err = r.ok ? '' : r.error;
-  tmS.mine = r.ok ? r.data : [];
-  tmPaint('tmMineHost', tmRenderMine());
-}
-
-function tmRenderMine(today){
-  if (tmS.mine === null) return tmLoading('your work');
-  const t = today || tmToday();
-  const rows = tmS.mine || [];
-  const err = tmS.err ? tmErrorCard(tmS.err, 'tmLoadMine()') : '';
-  if (!rows.length) {
-    return err + tmEmpty(tmIc('check'), 'Nothing on you',
-      'No open task is assigned to you. Anything new will show up here, the most urgent first.');
-  }
-  const late = rows.filter(x => tmIsOverdue(x, t)).length;
-  const head = `<div class="tm-head"><h3>Your work</h3>
-    <span class="tm-count">${rows.length}</span>
-    ${late ? `<span class="tm-count tm-count-late">${late} overdue</span>` : ''}</div>`;
-  return err + head + `<div class="tm-mine">${rows.map(x => tmTaskCard(x, t)).join('')}</div>`;
-}
-
-function viewMyWork(){
-  tmLoadMine();
-  return `<div id="tmMineHost">${tmRenderMine()}</div>`;
-}
-
 /* Forget everything on sign-out. */
 function tmForget(){
-  Object.assign(tmS, {people:null, tasks:null, mine:null, clients:null, clientsErr:'', grants:null, grantErr:'',
+  Object.assign(tmS, {people:null, tasks:null, clients:null, clientsErr:'', grants:null, grantErr:'',
     grantBusy:false, err:'', dept:'', who:'', busy:false, workSeq:tmS.workSeq + 1});
 }
