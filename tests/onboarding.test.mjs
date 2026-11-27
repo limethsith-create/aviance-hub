@@ -572,3 +572,15 @@ test('two presses on Save their inputs are one write; two presses on Start them 
   assert.ok(writes.filter((w) => w.table === 'clients' && w.payload && 'day1_on' in w.payload).length <= 1, 'day one is written at most once');
   assert.equal(toasts.filter((t) => /They are live/.test(t)).length, 1, 'and it is said once');
 });
+
+/* The Invoices screen and the client's own page show the same figures from
+   different reads. Raising, sending or paying an invoice here used to leave that
+   page on the old number until its own minute-old refresh came round. */
+test('raising, sending or paying an invoice marks the client page stale', () => {
+  const src = fs.readFileSync(new URL('../onboarding.js', import.meta.url), 'utf8');
+  for (const fn of ['obRaiseGo', 'obMarkSentGo', 'obMarkPaidGo']) {
+    const body = src.slice(src.indexOf('function ' + fn), src.indexOf('function ' + fn) + 900);
+    assert.match(body, /if \(r\.ok && typeof cbStale === 'function'\) cbStale\(\);/,
+      fn + ' must tell the client page its figures moved');
+  }
+});

@@ -769,15 +769,27 @@ function obDraftAgreementGo(clientId){ return coreOnce('ob:agreement:'+clientId,
 function obRaiseGo(monthId){ return coreOnce('ob:raise:'+monthId, async () => {
   const r = typeof fnRaiseInvoice === 'function' ? await fnRaiseInvoice(monthId, 0) : obErr('The finance side is not loaded.');
   obSay(r.ok ? (r.data ? 'The invoice is raised.' : 'Nothing to bill for that month — a three-month term bills on months one, four and seven.') : r.error);
+  /* The client's own page shows these same figures, and it only re-reads when
+     something marks it stale. Without this, raising, sending or paying an
+     invoice here left that page reading the old number for up to a minute. */
+  if (r.ok && typeof cbStale === 'function') cbStale();
   await obLoadBilling(); obPaint(obRenderBilling());
 }, typeof document !== 'undefined' ? document.activeElement : null) }
 function obMarkSentGo(invoiceId){ return coreOnce('ob:sent:'+invoiceId, async () => {
   const r = typeof fnMarkInvoiceSent === 'function' ? await fnMarkInvoiceSent(invoiceId) : obErr('The finance side is not loaded.');
   obSay(r.ok ? 'Marked as sent.' : r.error);
+  /* The client's own page shows these same figures, and it only re-reads when
+     something marks it stale. Without this, raising, sending or paying an
+     invoice here left that page reading the old number for up to a minute. */
+  if (r.ok && typeof cbStale === 'function') cbStale();
   await obLoadBilling(); obPaint(obRenderBilling());
 }, typeof document !== 'undefined' ? document.activeElement : null) }
 function obMarkPaidGo(invoiceId, via){ return coreOnce('ob:paid:'+invoiceId, async () => {
   const r = typeof fnMarkInvoicePaid === 'function' ? await fnMarkInvoicePaid(invoiceId, via || 'bank transfer') : obErr('The finance side is not loaded.');
   obSay(r.ok ? (typeof fnPaidWords === 'function' ? fnPaidWords(r.data) : 'Marked paid.') : r.error);
+  /* The client's own page shows these same figures, and it only re-reads when
+     something marks it stale. Without this, raising, sending or paying an
+     invoice here left that page reading the old number for up to a minute. */
+  if (r.ok && typeof cbStale === 'function') cbStale();
   await obLoadBilling(); obPaint(obRenderBilling());
 }, typeof document !== 'undefined' ? document.activeElement : null) }
