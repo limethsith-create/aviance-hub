@@ -229,3 +229,27 @@ test('Prospects: with the sending tool down three days, the screen says when it 
   /* an account in error is named even if its last read was recent */
   assert.match(A.prSyncNote([{ client_id: 'c1', status: 'error', last_synced_at: fresh }], '', now), /^The sending tool was last read/);
 });
+
+/* ═════════════ one copy of what may be attached ═════════════ */
+
+test('the upload rules are one list in core.js, and both chat screens hold that same list', () => {
+  const emp = load('employees.js', {}, ['EMP_OK_EXT', 'EMP_MAX_FILE']);
+  assert.equal(emp.A.EMP_OK_EXT, emp.s.CORE_FILE_EXTS, 'the owner’s screen holds core’s own array, not a copy');
+  assert.equal(emp.A.EMP_MAX_FILE, emp.s.CORE_FILE_MAX);
+  const tmc = load('team-page.js', { location: { hash: '', search: '', pathname: '/team.html' } }, ['TMC_EXTS', 'TMC_MAX_FILE']);
+  assert.equal(tmc.A.TMC_EXTS, tmc.s.CORE_FILE_EXTS, 'and so does her own page');
+  assert.equal(tmc.A.TMC_MAX_FILE, tmc.s.CORE_FILE_MAX);
+  assert.equal(emp.s.CORE_FILE_MAX, 10 * 1024 * 1024);
+  assert.deepEqual(Array.from(emp.s.CORE_FILE_EXTS), ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'pdf', 'docx', 'csv']);
+  /* neither file spells the list out again */
+  for (const f of ['employees.js', 'team-page.js', 'channels.js']) {
+    assert.doesNotMatch(read(f), /'heic', 'pdf', 'docx', 'csv'\]/, f + ' has its own copy of the list');
+    assert.doesNotMatch(read(f), /=\s*10\s*\*\s*1024\s*\*\s*1024/, f + ' has its own copy of the limit');
+  }
+});
+
+test('the staff chat asks for msg_kind once and has no second column list to fall back to', () => {
+  const src = read('employees.js');
+  assert.doesNotMatch(src, /EMP_MSG_COLS_OLD/);
+  assert.match(src, /msg_kind: 'chat'/, 'the send has always needed the column');
+});

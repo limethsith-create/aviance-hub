@@ -3,10 +3,9 @@
    Slack / Linear — no bots, no bubbles. Left: the channel list (clients, team, archived folded away, search).
    Middle: the messages (grouped by person and day, links clickable, images previewed, files as chips, edited /
    deleted marks, older messages load as you scroll up, a "New messages" divider, a typing line) and the composer.
-   Right: the client's numbers (a sheet on a phone).
 
    Data comes ONLY from the ch* functions of channels-api.js (CONTRACT.md "Hub data layer"); each returns
-   {ok, data, error} and never throws. `renderClientNumbers(el, clientId)` fills the side panel when something defines it.
+   {ok, data, error} and never throws.
      chListChannels() chMessages(id,{before,limit}) chSend(id,body,files) chEdit chDelete chMarkRead
      chSubscribe(id,{onMessage,onUpdate,onTyping}) → unsubscribe  chTyping(id)  chCreateChannel(name,memberIds)
      chRename chArchive chAddMember chRemoveMember chMembers chEnsureClientChannel(clientId,name) chFileUrl(path)
@@ -26,7 +25,7 @@
 
 /* ===================== 0. STATE ===================== */
 const CHV_PAGE=50;                    // messages per page
-const CHV_MAX_FILE=10*1024*1024;      // per file (the storage rule)
+const CHV_MAX_FILE=CORE_FILE_MAX;      // per file (the storage rule; one copy, in core.js)
 const CHV_MAX_FILES=5;                // per message
 const CHV_FILES_ON=false;             // no 'chat-files' bucket yet: sending files is switched off
 const CHV_NO_FILES="Sending files isn't switched on yet. Send the message as text, or paste a link to the file.";
@@ -49,7 +48,7 @@ const chv={
   drafts:{}, pending:[], cerr:'', unsure:{},
   typing:{}, typingTimer:null, unsub:null,
   q:'', hits:[], searchSeq:0, searchTimer:null,
-  panelSet:false, panelOpen:false, pane:'list',
+  pane:'list',
   archOpen:false, noChOpen:false, noChDone:{},
   urls:{}, urlWait:{},
   staff:null, staffErr:'', loadStaff:null,
@@ -123,7 +122,6 @@ function chvLinkify(text){
 /* ===================== 2. VIEW SHELL ===================== */
 function chvRootClass(){
   const c=['chv','chv-pane-'+chv.pane];
-  if(chv.panelOpen&&chvPanelClientId()&&chvFn('renderClientNumbers'))c.push('chv-panel-open');
   if(chvIsClient())c.push('chv-solo');
   return c.join(' ');
 }
@@ -160,7 +158,6 @@ async function chvInit(){
   if(!target&&chv.cur&&!chvFindCh(chv.cur))chvLeave();
   chv.pane=target||chv.cur?'thread':'list';
   if(chvIsClient()&&!target)chv.pane='thread';
-  if(!chv.panelSet){chv.panelSet=true;chv.panelOpen=!phone;}   // open beside the messages on a computer, closed on a phone
   chvPaintAll();
   if(target){await chvOpen(target,true);}
   else if(!chvIsClient()&&chvIsStaff())chvLoadNoChannel();
@@ -180,14 +177,12 @@ function chvUpdateTotal(){
   chv.unreadTotal=chv.chs.filter(c=>!c.archived).reduce((n,c)=>n+(Number(c.unread)||0),0);
   try{if(typeof renderNav==='function')renderNav();}catch(e){}
 }
-/* Paint everything (list, header, thread, composer, panel). */
+/* Paint everything (list, header, thread, composer). */
 function chvPaintAll(){
   const r=chvEl('chvRoot');if(!r)return;
   r.className=chvRootClass();
   r.innerHTML=`<aside class="chv-list" id="chvListPane">${chvListHTML()}</aside>
-    <section class="chv-main" id="chvMain">${chvMainHTML()}</section>
-    <aside class="chv-side" id="chvSide">${chvSideHTML()}</aside>`;
-  chvPaintPanel();
+    <section class="chv-main" id="chvMain">${chvMainHTML()}</section>`;
 }
 
 /* ===================== 3. LIST ===================== */
@@ -325,12 +320,10 @@ function chvMainHTML(){
 }
 function chvHeadHTML(c){
   const staff=chvIsStaff();
-  const showNums=c.kind==='client'&&chvFn('renderClientNumbers');
   return `${chvIsClient()?'':`<button type="button" class="chv-back" onclick="chvBack()" aria-label="Back to channels">Channels</button>`}
     <div class="chv-title"><h2>${esc(c.name||'Channel')}</h2><span class="chv-kind${c.kind==='client'?' client':''}">${c.kind==='client'?`Client channel · ${esc(c.company||c.name||'the client')} reads and writes here`:'Team'}${c.archived?' · Archived':''}</span></div>
     <div class="chv-actions">
       ${staff&&!c.archived?`<button type="button" class="chv-btn" onclick="chvMembers()">Members</button><button type="button" class="chv-btn" onclick="chvRename()">Rename</button><button type="button" class="chv-btn" onclick="chvArchive()">Archive</button>`:''}
-      ${showNums?`<button type="button" class="chv-btn${chv.panelOpen?' on':''}" onclick="chvTogglePanel()" aria-pressed="${chv.panelOpen?'true':'false'}">Numbers</button>`:''}
     </div>`;
 }
 function chvPaintHead(){const c=chvFindCh(chv.cur),h=chvEl('chvHead');if(c&&h)h.innerHTML=chvHeadHTML(c);}
@@ -911,27 +904,6 @@ function chvBotGone(id){
   try{if(typeof dr!=='undefined'&&typeof drSetCount==='function')drSetCount(Math.max(0,(Number(dr.count)||0)-1));}catch(e2){}
 }
 
-/* ===================== 9. SIDE PANEL: the client's numbers ===================== */
-function chvPanelClientId(){
-  const c=chvFindCh(chv.cur);if(!c||c.kind!=='client')return '';
-  return c.clientId||(chvIsClient()&&authUser.clientId)||'';
-}
-function chvSideHTML(){
-  const id=chvPanelClientId();
-  if(!id||!chvFn('renderClientNumbers'))return '';
-  return `<div class="chv-side-head"><h3>Numbers</h3><button type="button" class="chv-btn" onclick="chvTogglePanel()" aria-label="Close numbers">Close</button></div><div class="chv-side-body" id="chvNumbers"></div>`;
-}
-function chvPaintPanel(){
-  const id=chvPanelClientId();const host=chvEl('chvNumbers');
-  if(!id||!host||!chvFn('renderClientNumbers'))return;
-  if(!chv.panelOpen)return;
-  try{renderClientNumbers(host,id);}catch(e){}
-}
-function chvTogglePanel(){
-  chv.panelOpen=!chv.panelOpen;
-  chvSyncClasses();chvPaintHead();chvPaintPanel();
-}
-
 /* ===================== 10. LIFECYCLE (called by the shell) ===================== */
 /* Called by the shell's render() for every view: the Channels timer / unsubscribe, and the nav badge. */
 /* WHY chvPeek IS NOT FORCED HERE ANY MORE
@@ -986,6 +958,6 @@ function channelsForget(){
   channelsStopTimer();
   if(chv.unsub){try{chv.unsub();}catch(e){}chv.unsub=null;}
   clearTimeout(chv.searchTimer);clearTimeout(chv.typingTimer);
-  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',unsure:{},typing:{},q:'',hits:[],panelSet:false,panelOpen:false,pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,staffErr:'',unreadTotal:0,peekAt:0,wasOpen:false,creating:false,caught:'',seq:chv.seq+1});
+  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',unsure:{},typing:{},q:'',hits:[],pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,staffErr:'',unreadTotal:0,peekAt:0,wasOpen:false,creating:false,caught:'',seq:chv.seq+1});
   chvBotClear();
 }

@@ -27,8 +27,9 @@
 /* ===================== 0. STATE ===================== */
 const EMP_LIST_MS = 60000;                 // background refresh of the list + the sidebar badge
 const EMP_CHAT_MS = 10000;                 // the open chat, while the tab is in front
-const EMP_MAX_FILE = 10 * 1024 * 1024;     // 10 MB a file, as the bucket allows
-const EMP_OK_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'pdf', 'docx', 'csv'];
+/* What may be attached, and how big: one copy, in core.js, shared with her page. */
+const EMP_MAX_FILE = CORE_FILE_MAX;
+const EMP_OK_EXT = CORE_FILE_EXTS;
 const EMP_BUCKET = 'chat-files';
 const EMP_BODY_MAX = 4000;
 const EMP_ON_MS = 2 * 60 * 1000;           // green: she was here in the last two minutes
@@ -172,9 +173,12 @@ function empDocUrl(token) {
   return /^[A-Za-z0-9._~-]{8,512}$/.test(t) ? ('doc.html#' + t) : '';
 }
 
-const EMP_MSG_COLS = 'id,channel_id,author_user,author_person,body,attachment_url,created_at,msg_kind';
-const EMP_MSG_COLS_OLD = 'id,channel_id,author_user,author_person,body,attachment_url,created_at';
-let empMsgCols = EMP_MSG_COLS;
+/* There used to be a second list here without msg_kind, tried when the first
+   read failed on that column ("an older database"). The live database has the
+   column (checked 2026-11-27), and the send below has always written msg_kind
+   unconditionally — so on a database without it the chat could be read but
+   never written to. The fallback protected half of a screen. */
+const empMsgCols = 'id,channel_id,author_user,author_person,body,attachment_url,created_at,msg_kind';
 async function empMessages(channelId) {
   const s = empSb();
   if (!s) return { ok: false, data: null, error: 'Aviance is not ready yet. Please reload the page.', missing: false };
@@ -182,9 +186,7 @@ async function empMessages(channelId) {
   try {
     const ask = () => s.from('channel_messages').select(empMsgCols).eq('channel_id', channelId)
       .is('deleted_at', null).order('created_at', { ascending: true }).limit(300);
-    let r = await ask();
-    /* An older database without msg_kind: ask for the columns it does have. */
-    if (r && r.error && /msg_kind/.test(String(r.error.message || ''))) { empMsgCols = EMP_MSG_COLS_OLD; r = await ask(); }
+    const r = await ask();
     if (!r) return { ok: false, data: null, error: 'No answer from Aviance.', missing: false };
     if (r.error) return { ok: false, data: null, error: empPlain(r.error, "The messages didn't load. Try again."), missing: empMissing(r.error) };
     return { ok: true, data: (r.data || []).map(empMsgRow), error: null, missing: false };

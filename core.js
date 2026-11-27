@@ -496,3 +496,15 @@ function coreFresh(lastAt, now, maxMinutes){
   var mins = Math.max(0, Math.round((t - d.getTime()) / 60000));
   return { known: true, stale: mins > max, minutes: mins, ago: coreAgo(d, '', t) };
 }
+
+/* ===================== 9. WHAT MAY BE ATTACHED =====================
+   The kinds of file a chat will take and the size limit, said once. The owner's
+   Employees screen and the team member's own page each carried a copy of the
+   same nine extensions and the same 10 MB; they upload into the same bucket
+   under the same database rule, so a tenth kind added to one and not the other
+   would have meant she could send him a file he could not send back.
+
+   This is the browser's early word ("that kind of file", "that is too big")
+   before an upload starts. The bucket's own policy is still the rule. */
+var CORE_FILE_MAX  = 10 * 1024 * 1024;
+var CORE_FILE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'pdf', 'docx', 'csv'];

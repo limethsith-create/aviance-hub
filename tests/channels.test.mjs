@@ -21,7 +21,7 @@ function slice(html, id) {
   while ((x = re.exec(html))) { depth += x[1] ? -1 : (x[0].endsWith('/>') ? 0 : 1); if (!depth) return html.slice(m.index + m[0].length, x.index); }
   return html.slice(m.index + m[0].length);
 }
-const CHILD_IDS = ['chvListPane', 'chvListBody', 'chvMain', 'chvHead', 'chvThread', 'chvTyping', 'chvBot', 'chvComposer', 'chvSide', 'chvNumbers'];
+const CHILD_IDS = ['chvListPane', 'chvListBody', 'chvMain', 'chvHead', 'chvThread', 'chvTyping', 'chvBot', 'chvComposer'];
 function fakeEl(id) {
   let html = '';
   const el = { id, tagName: 'DIV', value: '', checked: false, textContent: '', style: {}, hidden: false, disabled: false, scrollTop: 0, scrollHeight: 1000, clientHeight: 400, _classes: new Set(), className: '',
@@ -59,7 +59,7 @@ let be;
 function reset(over = {}) {
   channelsForget();
   for (const k of Object.keys(elements)) delete elements[k];
-  globalThis.innerWidth = 1400; delete globalThis.renderClientNumbers; globalThis.location.hash = '';
+  globalThis.innerWidth = 1400; globalThis.location.hash = '';
   be = Object.assign({
     calls: [], subs: {}, unsubs: 0, typingCalls: 0, marked: [],
     channels: [
@@ -334,9 +334,8 @@ test('client mode without a channel yet says so', async () => {
   await show();
   assert.match(el('chvMain').innerHTML, /isn't ready yet/);
 });
-test('phone: list -> channel -> back toggles the pane class; the numbers panel is a sheet toggle', async () => {
+test('phone: list -> channel -> back toggles the pane class', async () => {
   reset(); asOwner(); globalThis.innerWidth = 400;
-  const seen = []; globalThis.renderClientNumbers = (e, id) => { seen.push(id); };
   await show({ c1: C1() });
   assert.equal(chv.cur, null); assert.equal(chv.pane, 'list');                   // phone starts on the list
   assert.match(el('chvRoot').className, /chv-pane-list/);
@@ -345,23 +344,10 @@ test('phone: list -> channel -> back toggles the pane class; the numbers panel i
   assert.match(el('chvHead').innerHTML, /chvBack\(\)/);
   chvBack();
   assert.match(el('chvRoot').className, /chv-pane-list/);
-  await chvOpen('c1');
-  assert.doesNotMatch(el('chvRoot').className, /chv-panel-open/);               // closed on a phone
-  chvTogglePanel();
-  assert.match(el('chvRoot').className, /chv-panel-open/);
-  assert.deepEqual(seen.pop(), 'stone-roofing');
-  chvTogglePanel(); assert.doesNotMatch(el('chvRoot').className, /chv-panel-open/);
 });
-test('numbers panel: shown on a computer when renderClientNumbers exists, nothing when it does not', async () => {
-  reset(); asOwner();
-  await show({ c1: C1() });
-  assert.doesNotMatch(el('chvRoot').className, /chv-panel-open/); assert.equal(el('chvSide').innerHTML, '');
-  assert.doesNotMatch(el('chvHead').innerHTML, /Numbers/);
-  reset(); asOwner(); const seen = []; globalThis.renderClientNumbers = (e, id) => seen.push(id);
-  await show({ c1: C1() });
-  assert.match(el('chvRoot').className, /chv-panel-open/); assert.deepEqual(seen, ['stone-roofing']);
-  await chvOpen('t1');                                                             // a team channel has no numbers
-  assert.doesNotMatch(el('chvRoot').className, /chv-panel-open/);
+test('the Numbers side panel is gone: nothing in the repo ever defined what filled it', () => {
+  const all = fs.readdirSync(root).filter((f) => /\.(js|html|css)$/.test(f)).map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
+  for (const gone of ['renderClientNumbers', 'chvTogglePanel', 'chv-panel-open', 'chv-side', 'chvNumbers']) assert.ok(!all.includes(gone), gone + ' is still in the site');
 });
 test('channel admin: new channel, rename, archive, members, start a client channel', async () => {
   reset(); asOwner(); await show({ c1: C1() });
