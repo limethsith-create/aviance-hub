@@ -60,14 +60,18 @@
     const email = form.querySelector('#pcInEmail').value.trim();
     const pw = form.querySelector('#pcInPw').value;
     const err = form.querySelector('#pcInErr'), btn = form.querySelector('#pcInBtn');
+    if (btn.disabled) return;
     btn.disabled = true; btn.textContent = 'Signing in…'; err.textContent = '';
-    const r = await pcSignIn(email, pw);
+    /* A limit on both asks. Signing in twice is harmless, so past the limit it
+       reads as no connection and the button comes back; it used to say
+       "Signing in…" until the tab was closed. */
+    const r = await pcRead(function(){ return pcSignIn(email, pw); }, 20000);
     if (!r.ok) { btn.disabled = false; btn.textContent = 'Sign in'; err.textContent = r.error; return; }
     enter(email);
   }
 
   async function enter(email){
-    const r = await pcHome();
+    const r = await pcRead(pcHome);
     if (!r.ok) {
       if (r.offline) { root.innerHTML = pcOfflineHtml(); return; }
       await pcSignOut();
@@ -158,7 +162,8 @@
     const html = pcThreadHtml(days);
     if (html === drawn && !toBottom) return;
     const near = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
-    if (html !== drawn) { thread.innerHTML = html; drawn = html; }
+    /* whoever is typing in a card keeps their cursor through the redraw */
+    if (html !== drawn) { pcKeepFocus(thread, function(){ thread.innerHTML = html; }); drawn = html; }
     if (toBottom || near) box.scrollTop = box.scrollHeight;
   }
 
@@ -204,9 +209,16 @@
     /* Never retried — it may already have been written, and a client seeing their
        own message twice is worse than seeing it once. But the button is always
        given back, or they could never write to us again without reloading. */
-    try { r = await pcSend(home.channel.id, home.person.id, text); }
+    const channel = home.channel.id, person = home.person.id;
+    try { r = await pcWrite(function(){ return pcSend(channel, person, text); }); }
     catch (e) { r = pcErr(e); }
     finally { sendBusy = false; btn.disabled = false; }
+    if (!r.ok && r.noAnswer) {
+      /* It may have gone. What was typed stays in the box, and the thread is read
+         again so they can see for themselves before sending it a second time. */
+      err.textContent = 'We did not hear back from Aviance, so we cannot tell whether that message went. Look for it in the thread above before you send it again.';
+      el.focus(); refresh(false); return;
+    }
     if (!r.ok) { err.textContent = 'That message did not go. ' + r.error; el.focus(); return; }
     /* keep whatever was typed while the message was on its way */
     el.value = el.value === raw ? '' : (el.value.indexOf(raw) === 0 ? el.value.slice(raw.length).replace(/^\s+/, '') : el.value);

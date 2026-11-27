@@ -65,6 +65,9 @@ const pct = {
   campaign: null, campaignAt: 0, campaignBusy: false, campaignFailed: false,
   calls: null, callsAt: 0, callsBusy: false, callsFailed: false,
   gone: {}, readMs: 0,          /* a test may shorten the limit on a read */
+  /* "blind": the database has no rule yet that lets a client read this, so an
+     empty answer means "we cannot see", not "there is nothing". See pctBlind. */
+  monthBlind: false, callsBlind: false,
 };
 
 /* The one escape, from core.js: strict, five characters, the single quote among them. */
@@ -216,6 +219,7 @@ function pctMonthNorm(m, j, now){
      (`between starts_on and ends_on`). A call booked at four o'clock on the
      last day still counts, so the month is only closed once the day is past. */
   const over = today > ends;
+  out.over = over;
   out.daysLeft = Math.max(0, Math.round((ends - today) / PCT_DAY_MS));
   /* THE ONE SUM. corePace in core.js does this arithmetic for both sides of the
      business: this line, which the client reads about their own month, and the
@@ -274,7 +278,9 @@ function pctStandingHtml(month, opts){
         '<div class="pcg-row">' +
           '<p class="pcg-fig"><b><em>' + pctEsc(pctFig(n.delivered)) + '</em> <i>of</i> ' + pctEsc(pctFig(n.promised)) + '</b>' +
             '<span>booked calls</span></p>' +
-          '<p class="pcg-fig pcg-days"><b>' + pctEsc(pctFig(n.daysLeft)) + '</b><span>' + (n.daysLeft === 1 ? 'day left' : 'days left') + '</span></p>' +
+          /* a month that is over does not have "0 days left": it ended, on a date */
+          (n.over ? '<p class="pcg-fig pcg-days pcg-fig-words"><b>Ended</b><span>' + pctEsc(pctDate(n.ends)) + '</span></p>'
+            : '<p class="pcg-fig pcg-days"><b>' + pctEsc(pctFig(n.daysLeft)) + '</b><span>' + (n.daysLeft === 1 ? 'day left' : 'days left') + '</span></p>') +
           (stamp ? '<p class="pcg-stamp">' + pctEsc(stamp) + '</p>' : '') +
         '</div>' +
         '<div class="pcg-bar"><span style="width:' + Math.round(n.share * 100) + '%"></span>' +
@@ -282,12 +288,40 @@ function pctStandingHtml(month, opts){
         '<p class="pcg-note">' + pctEsc(pctStandingNote(n)) + '</p>' +
       '</div></section>';
   }
-  /* month one has not started: say what is promised and when the clock starts */
   const big = n.promised > 0 ? pctFig(n.promised) : '';
+  /* A LATER month that has been opened but has not begun (month one ended
+     yesterday, month two starts tomorrow). This used to fall into the launch
+     panel below and told a client a month into the work "1 day to launch", gave
+     a launch day in the past, and quoted month one's refund for month two. */
+  if (n.monthNo > 1 && n.starts && n.daysLeft != null) {
+    return '<section class="pcg pcg-soon" aria-label="Your guarantee">' +
+      '<div class="pcg-in">' +
+        '<p class="pc-tag pcg-eyebrow">Month ' + pctEsc(n.monthNo) + ' · starts ' + pctEsc(pctDate(n.starts)) + '</p>' +
+        '<p class="pcg-rule" aria-hidden="true"></p>' +
+        '<div class="pcg-row">' +
+          (big ? '<p class="pcg-fig"><b>' + pctEsc(big) + '</b><span>booked calls promised</span></p>' : '') +
+          '<p class="pcg-fig pcg-days"><b>' + pctEsc(pctFig(n.daysLeft)) + '</b><span>' + (n.daysLeft === 1 ? 'day until it starts' : 'days until it starts') + '</span></p>' +
+        '</div>' +
+        '<p class="pcg-note">' + pctEsc('Month ' + n.monthNo + ' starts on ' + pctDate(n.starts) + '. Miss the number in it and we refund that month in full — money back, not credit.') + '</p>' +
+      '</div></section>';
+  }
+  /* Launched, and this page cannot see the month (pctBlind). "Not started ·
+     month one" would be the opposite of the truth, and so would any number, so
+     it says the one thing it knows and where to get the rest. */
+  if (o.blind && (n.live || (n.toLaunch != null && n.toLaunch < 0))) {
+    return '<section class="pcg pcg-soon" aria-label="Your guarantee">' +
+      '<div class="pcg-in">' +
+        '<p class="pc-tag pcg-eyebrow">Your guarantee</p>' +
+        '<p class="pcg-rule" aria-hidden="true"></p>' +
+        '<div class="pcg-row"><p class="pcg-fig pcg-fig-words"><b>Live</b><span>' + pctEsc(n.launch ? 'since ' + pctDate(n.launch) : 'your campaign is running') + '</span></p></div>' +
+        '<p class="pcg-note">' + pctEsc('Your campaign is running. This page cannot show your running call count yet, so it shows no number rather than a wrong one. Ask us in Chat and we will tell you exactly where the month stands.') + '</p>' +
+      '</div></section>';
+  }
+  /* month one has not started: say what is promised and when the clock starts */
   const when = n.launch ? pctDate(n.launch) : '';
   const days = n.daysLeft != null ? n.daysLeft : (n.toLaunch != null && n.toLaunch >= 0 ? n.toLaunch : null);
   if (!big && !when && days == null) return '';
-  return '<section class="pcg pcg-soon" aria-label="Your guarantee">' +
+  return '<section class="pcg pcg-soon pcg-pre" aria-label="Your guarantee">' +
     '<div class="pcg-in">' +
       '<p class="pc-tag pcg-eyebrow">Your guarantee</p>' +
       '<p class="pcg-rule" aria-hidden="true"></p>' +
@@ -564,6 +598,16 @@ function pctCallsEmptyHtml(month, opts){
   const o = opts || {};
   const n = month && month.state ? month : pctMonthNorm(null, null, o.now);
   const promised = n.promised > 0 ? n.promised : 0;
+  /* Launched, and this page cannot see their calls (pctBlind). "Your first call
+     has not been booked yet" to a client who took six of them is the confident
+     zero this file exists to avoid. */
+  if (o.blind && (n.have || n.live || (n.toLaunch != null && n.toLaunch < 0))) {
+    return '<section class="pcte" aria-label="Your booked calls">' +
+      '<p class="pc-tag">Booked calls</p><p class="pcte-rule" aria-hidden="true"></p>' +
+      '<h2 class="pcte-h">' + pctEsc('Your booked calls are not listed on this page yet.') + '</h2>' +
+      '<p class="pcte-lede">' + pctEsc('That is about this page, not about your calls. Every call we book is emailed to you with the name, the company and the time, and goes into your calendar. For the full list or the count so far, ask us in Chat.') + '</p>' +
+    '</section>';
+  }
   const head = n.have ? 'No calls booked yet this month.' : 'Your first call has not been booked yet.';
   const lede = n.have
     ? 'Sending has started. A prospect who replies and is a fit books straight into your calendar, and lands here the moment they do.'
@@ -756,6 +800,14 @@ const PCT_CSS = `
   .pcg-days b{font-size:24px}
   .pcg-stamp{margin-left:auto;padding:6px 9px;font-size:10px}
   .pcg-note{font-size:14px;margin-top:9px}
+  /* Before launch, on a phone, this panel and the launch plan under it took half
+     the screen between them and left the chat — where the kickoff times, the form
+     and the approvals all are — a strip a few lines tall. The plan already gives
+     the countdown, so here the panel keeps its figures and drops its paragraph;
+     the same sentence is on the Campaign tab. */
+  .pcg-pre .pcg-note{display:none}
+  .pcg-pre .pcg-fig-words b{font-size:24px}
+  .pcg-pre .pcg-fig b{font-size:26px}
   .pc-tabs-in{padding:0 8px}
   .pc-tab{padding:13px 10px 11px;font-size:11px;letter-spacing:.1em}
   .pc-sheet-in{padding:22px 14px 56px}
@@ -825,7 +877,7 @@ function pctPaintAll(){
      that their clock had not started yet. So a failed read says so, in the same
      words the other two panels use, and the retry button is right there. */
   const standing = pct.monthFailed ? pctFailHtml('where this month stands', 'Your guarantee')
-    : pctStandingHtml(m);
+    : pctStandingHtml(m, { blind: pct.monthBlind });
   if (standing !== pct.standing) pct.standing = pctPut('pcStanding', standing, pct.standing);
   /* A tab is drawn only once it has been asked AND answered. Before that it
      waits: telling a client "no calls yet" while their calls are still loading
@@ -836,7 +888,7 @@ function pctPaintAll(){
     : pct.campaignAt ? pctCampaignHtml(pct.campaign, m) : (pct.tab === 'campaign' ? pctWaitHtml() : '');
   if (campaign !== pct.campaignDrawn) pct.campaignDrawn = pctPut('pcCampaign', campaign, pct.campaignDrawn);
   const calls = pct.callsFailed ? pctFailHtml('your booked calls')
-    : pct.callsAt ? pctCallsHtml(pct.calls, m) : (pct.tab === 'calls' ? pctWaitHtml() : '');
+    : pct.callsAt ? pctCallsHtml(pct.calls, m, { blind: pct.callsBlind }) : (pct.tab === 'calls' ? pctWaitHtml() : '');
   if (calls !== pct.callsDrawn) pct.callsDrawn = pctPut('pcCalls', calls, pct.callsDrawn);
 }
 
@@ -913,8 +965,15 @@ async function pctAsk(ctx, name, args, fallback){
   if (!pct.gone[name] && ctx && typeof ctx.rpc === 'function') {
     const r = (await pctReadTwice(() => ctx.rpc(name, args || {}))).r;
     if (r && r.ok) return r.data == null ? null : r.data;
+    /* `missing` is set by pcErr in portal-client.js. The words themselves never
+       arrive here: pcPlain replaces the database's message before a client can
+       read it, so a test on the sentence (which is what this used to be) could
+       not match, the fallback below never ran, and every client was shown three
+       "We could not load…" panels for as long as these functions did not exist —
+       which is the live database today. The sentence is still tested, for a
+       caller that hands the raw message straight through. */
     const msg = String((r && r.error) || '');
-    if (!/could not find the function|does not exist|schema cache|not found/i.test(msg)) return PCT_FAIL;
+    if (!(r && r.missing) && !/could not find the function|does not exist|schema cache|not found/i.test(msg)) return PCT_FAIL;
     pct.gone[name] = true;
   }
   if (typeof fallback !== 'function') return PCT_FAIL;
@@ -942,6 +1001,16 @@ async function pctRows(sb, table, cols, clientId, shape){
   const res = await q.limit(PCT_MAX_ROWS);
   if (!res || res.error || !Array.isArray(res.data)) throw new Error('That table could not be read.');
   return res.data;
+}
+
+/* True when an empty answer cannot be trusted. The scoped function is missing, so
+   the answer came from reading the table directly — and in a database without
+   that function, row level security has no rule for a client either (both come
+   from the same update): the table answers with no rows and no error whether the
+   client has ten calls or none. Empty then means "we cannot see". An answer WITH
+   rows is believed either way. */
+function pctBlind(name, empty){
+  return !!(pct.gone[name] && empty);
 }
 
 function pctClientId(){
@@ -1022,13 +1091,21 @@ async function pctMount(ctx){
   if (who !== pct.who) {
     pct.who = who;
     pct.data = null; pct.at = 0; pct.drawn = ''; pct.open = false;
-    pct.month = null; pct.monthAt = 0; pct.monthFailed = false;
+    pct.month = null; pct.monthAt = 0; pct.monthFailed = false; pct.monthBlind = false; pct.callsBlind = false;
     pct.campaign = null; pct.campaignAt = 0; pct.campaignFailed = false; pct.campaignDrawn = '';
     pct.calls = null; pct.callsAt = 0; pct.callsFailed = false; pct.callsDrawn = '';
     pct.standing = '';
     ['pcTracker', 'pcStanding', 'pcCampaign', 'pcCalls'].forEach(id => { const b = pctBox(id); if (b) b.innerHTML = '' });
   }
   if (el && !el.firstChild) pct.drawn = '';   /* the chat was drawn again from scratch */
+  /* …and so were the other three boxes. Signing out and back in as the same
+     person rebuilds the page with them empty, while this file still remembered
+     what it had last put in each — so it saw "nothing changed" and drew nothing:
+     no guarantee line, and two blank tabs, until a figure happened to move. */
+  [['pcStanding', 'standing'], ['pcCampaign', 'campaignDrawn'], ['pcCalls', 'callsDrawn']].forEach(function(p){
+    const b = pctBox(p[0]);
+    if (b && !b.firstChild && pct[p[1]]) pct[p[1]] = '';
+  });
   if (typeof PC !== 'undefined' && PC && PC.tab) pct.tab = String(PC.tab);
   pctPaintAll();
 
@@ -1046,6 +1123,14 @@ async function pctMount(ctx){
     pctPaintAll();
   }
   const clientId = pctClientId();
+  /* The page calls this twice as it opens: once straight away and once when the
+     first messages arrive. If the second call got here while the first was still
+     waiting for portal_journey, it had no client id, the table read refused to
+     guess whose rows to ask for, and the guarantee line opened on "We could not
+     load where this month stands" and stayed there for half a minute. The call
+     that is waiting carries on down to here by itself once it knows, so this one
+     has nothing to add. */
+  if (!clientId && pct.busy) return;
   if (!pct.monthBusy && !(pct.monthAt && Date.now() - pct.monthAt < PCT_ASK_MS)) {
     pct.monthBusy = true;
     let m;
@@ -1058,6 +1143,7 @@ async function pctMount(ctx){
     pct.monthFailed = pctFailed(m);
     if (pct.monthFailed) m = null;
     pct.month = m || null;
+    pct.monthBlind = !pct.monthFailed && pctBlind('portal_month', !m);
     pctPaintAll();
   }
   if (pct.tab === 'campaign' && !pct.campaignBusy && !(pct.campaignAt && Date.now() - pct.campaignAt < PCT_ASK_MS)) {
@@ -1080,6 +1166,7 @@ async function pctMount(ctx){
     pct.callsAt = Date.now();
     pct.callsFailed = pctFailed(c);
     pct.calls = c && !pct.callsFailed ? pctCallsNorm(c, clientId) : null;
+    pct.callsBlind = !pct.callsFailed && pctBlind('portal_calls', !(pct.calls && pct.calls.any));
     pctPaintAll();
   }
 }
