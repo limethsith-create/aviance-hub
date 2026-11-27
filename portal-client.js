@@ -709,7 +709,17 @@ function pcErr(e){
   const m = (e && (e.message || e.error_description || e.msg || e.error)) || (typeof e === 'string' ? e : '');
   const raw = String(m == null ? '' : m);
   const offline = /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(raw);
-  return { ok: false, data: null, error: offline ? PC_OFFLINE : pcPlain(raw, e && e.code), offline };
+  /* `missing` is "the database does not have that rule yet" — a function or a
+     table that a later database update adds. pcPlain rightly turns the database's
+     own words for it into PC_WAIT before a client can read them, which is why it
+     has to be carried here as a fact: portal-tracker.js used to look for those
+     words in `error`, never found them, and so never fell back to reading the
+     tables. Every client then saw "We could not load…" on the guarantee line and
+     on both data tabs, on every visit, for as long as the update was not run. */
+  const code = String((e && e.code) || '');
+  const missing = !offline && (code === 'PGRST202' || code === '42883' || code === '42P01' || code === 'PGRST205'
+    || /could not find the (function|table)|function .* does not exist|relation .* does not exist/i.test(raw));
+  return { ok: false, data: null, error: offline ? PC_OFFLINE : pcPlain(raw, code), offline, missing };
 }
 
 /* A READ with a limit on it. The worst failure of the lot is the one that never
@@ -741,6 +751,71 @@ async function pcRead(fn, ms){
   }
   catch (e) { return pcErr(e); }
   finally { if (timer && typeof clearTimeout === 'function') clearTimeout(timer); }
+}
+
+/* A WRITE with a limit on it. pcRead's twin, and deliberately not the same thing.
+   A signature, a chat message, an approval or a set of form answers that never
+   answers used to leave its button reading "Signing…" / "Sending…" / "Approving…",
+   disabled, for ever: nothing thrown, nothing said, and no way on but a reload —
+   which on the pre-call form throws away four typed answers.
+
+   Past the limit this does NOT say it failed, because it may not have: the
+   request can have landed and only the answer been lost. It comes back as
+   {ok:false, noAnswer:true} with a sentence that says exactly that, and the
+   caller's job is to give the button back, keep what was typed, and go and READ
+   what is true. It never sends again by itself — a repeated write is a second
+   message or a second signature. The limit is long on purpose: for a write,
+   waiting is better than worrying them. Never throws. */
+const PC_WRITE_MS = 25000;
+const PC_NO_ANSWER = 'We did not hear back from Aviance, so we cannot tell whether that went through. Check before you try again.';
+const pcWriteOpts = { ms: 0 };          /* a test may shorten the limit */
+async function pcWrite(fn, ms){
+  const limit = Number(ms || pcWriteOpts.ms) > 0 ? Number(ms || pcWriteOpts.ms) : PC_WRITE_MS;
+  if (typeof fn !== 'function') return pcErr(PC_OFFLINE);
+  let timer = null;
+  const gone = {};
+  try {
+    const run = Promise.resolve().then(fn);
+    if (typeof setTimeout !== 'function') return await run;
+    const capped = new Promise((done) => { timer = setTimeout(() => done(gone), limit); });
+    const r = await Promise.race([run, capped]);
+    if (r === gone) return { ok: false, data: null, error: PC_NO_ANSWER, offline: false, noAnswer: true };
+    return r && typeof r === 'object' && 'ok' in r ? r : pcOk(r);
+  }
+  catch (e) { return pcErr(e); }
+  finally { if (timer && typeof clearTimeout === 'function') clearTimeout(timer); }
+}
+
+/* Redraw part of the page without taking the keyboard away from whoever is
+   typing in it. The thread is redrawn whole whenever it changes, and a card's
+   HTML carries what has been typed into it — so every poll (twenty seconds), and
+   every message that arrived, replaced the field under the client's cursor.
+   Focus fell to the page, and what they typed next went nowhere: half a sentence
+   of a change request, lost without a sign. This puts focus, the caret and the
+   field's own scroll back where they were, matched by id. Never throws. */
+function pcKeepFocus(scope, work){
+  const doc = typeof document !== 'undefined' ? document : null;
+  let keep = null;
+  try {
+    const a = doc && doc.activeElement;
+    if (a && a.id && scope && typeof scope.contains === 'function' && scope.contains(a)) {
+      keep = { id: a.id, top: a.scrollTop || 0, s: null, e: null };
+      try { keep.s = a.selectionStart; keep.e = a.selectionEnd; } catch (x) { /* not a text field */ }
+    }
+  } catch (x) { keep = null; }
+  try { work(); }
+  finally {
+    if (keep) {
+      try {
+        const b = doc.getElementById(keep.id);
+        if (b && b !== doc.activeElement && typeof b.focus === 'function') {
+          b.focus({ preventScroll: true });
+          if (keep.s != null && typeof b.setSelectionRange === 'function') b.setSelectionRange(keep.s, keep.e == null ? keep.s : keep.e);
+          if (keep.top) b.scrollTop = keep.top;
+        }
+      } catch (x) { /* the field is gone: nothing to give back */ }
+    }
+  }
 }
 
 /* Two clients, on purpose. 'anon' is for the link pages: it never looks at or
@@ -1030,9 +1105,12 @@ async function pcDrawRefunds(){
   }
   pcBack.failed = 0;
   const html = pcRefundsHtml(r.data);
-  if (html === pcBack.drawn) return;
   const box = pcRefundsBox();
   if (!box) return;
+  /* compared with what is ON THE PAGE, not with what was last put there: after
+     signing out and back in the box is a new, empty one, and "same as last time"
+     left a client who is owed money looking at no refund block at all */
+  if (html === pcBack.drawn && box.innerHTML === html) return;
   box.innerHTML = html;
   pcBack.drawn = html;
 }

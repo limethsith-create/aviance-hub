@@ -200,7 +200,16 @@ comment on function public.month_is_paid(uuid) is
 -- the owner reads when it is false. Every figure here is read off a row; the
 -- refund is v_month_standing's at_risk, which is the finance side's number.
 
-create or replace view public.v_months_to_close as
+-- ROUND 3: security_invoker. Without it this view runs as its owner, which is
+-- not subject to row security, and Supabase grants every new view in `public`
+-- to every signed-in user — so a CLIENT signed in to the portal could read
+--   select company, monthly_fee, refund_if_locked from v_months_to_close
+-- and get every other client's name, fee and refund. Proven on a local copy of
+-- the live schema (round3/3-findings.md). With it, the view shows a reader only
+-- what the tables underneath already let them see: the owner everything, a
+-- client nothing. month_end_close() is security definer and still reads it all.
+create or replace view public.v_months_to_close
+with (security_invoker = true) as
 with cfg as (
   select coalesce((select us_zone from public.calendar_settings where id = 1),
                   'America/New_York') as zone
@@ -399,6 +408,15 @@ declare
   v_owed   integer := 0;
   v_title  text;
 begin
+  -- ROUND 3: the clock and the owner run this; nobody else. It is security
+  -- definer and was granted to every signed-in user, so a client signed in to
+  -- the portal could call it — running the sweep, and getting back every other
+  -- client's name with the reason its month is held. The cron job and the
+  -- service role carry no user id, so they pass.
+  if auth.uid() is not null and not public.is_admin() then
+    raise exception 'Only the owner can run the month-end close.' using errcode = '42501';
+  end if;
+
   -- Two sweeps must never read the same month at once. The owner's own button
   -- goes straight to lock_month(), which takes the row lock, so this guards the
   -- cron against itself and against a retry.
@@ -427,7 +445,10 @@ begin
           format('Month %s ended on %s, %s day%s ago, with %s of %s calls delivered. %s%s',
                  r.month_no, to_char(r.ends_on, 'FMDD Mon YYYY'), r.days_over,
                  case when r.days_over = 1 then '' else 's' end,
-                 r.calls_delivered, r.calls_promised,
+                 -- the count lock_month would use, not the cached column: a held
+                 -- month is never recounted, so the cached number can say 0 of 5
+                 -- on a month that has 2 (ROUND 3, seen on the local copy)
+                 r.delivered_counted, r.calls_promised,
                  r.why_not,
                  case when r.refund_if_locked > 0
                       then format(' Locking it as it stands would refund $%s.',
@@ -598,7 +619,7 @@ begin
   if new.counts is distinct from old.counts then
     perform public.month_task(new.client_id,
       format('Locked month %s no longer matches its calls', m.month_no),
-      format('Month %s was locked on %s saying %s of %s calls delivered, with $%s refunded. A call in that month has changed since (%s, %s): it %s now. The locked number and the refund have NOT moved. Check the refund before it is paid.',
+      format('Month %s was locked on %s saying %s of %s calls delivered, and a refund of $%s raised. A call in that month has changed since (%s, %s): it %s now. The locked number and the refund have NOT moved. Check the refund before it is paid.',
              m.month_no, to_char(m.locked_at, 'FMDD Mon YYYY'),
              m.calls_delivered, m.calls_promised,
              to_char(coalesce(m.refund_due, 0), 'FM999,999,999'),
@@ -615,6 +636,74 @@ create trigger qualified_calls_locked_month
   after update on public.qualified_calls
   for each row
   execute function public.trg_locked_month_touched();
+
+-- ROUND 3: the same gap, by the other two doors. The trigger above sees an
+-- UPDATE. A call that already counts can also be INSERTED into a locked month's
+-- window (a call logged late) or DELETED out of it, and either one leaves the
+-- locked number unsupported with no row saying so — tried on the local copy:
+-- one insert and one delete inside a locked month, and client_events did not
+-- move. Same answer as above: allowed, recorded, raised, nothing re-opened.
+-- Only a call that COUNTS matters; one that does not yet count changes nothing
+-- until it is edited, and the trigger above sees that edit.
+create or replace function public.trg_locked_month_call_added_or_removed()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_zone  text := coalesce((select us_zone from public.calendar_settings where id = 1),
+                           'America/New_York');
+  q       public.qualified_calls;
+  m       public.client_months;
+  v_day   date;
+begin
+  if tg_op = 'DELETE' then q := old; else q := new; end if;
+  if not coalesce(q.counts, false) then return null; end if;
+  -- A client being deleted takes its calls with it (on delete cascade). That is
+  -- not an edit to a locked month, and there is no client left to hang an event
+  -- or a task on — writing one would make the delete itself fail.
+  if not exists (select 1 from public.clients where id = q.client_id) then return null; end if;
+
+  v_day := (coalesce(q.happened_at, q.booked_for) at time zone v_zone)::date;
+  select * into m from public.client_months
+   where client_id = q.client_id and v_day between starts_on and ends_on
+   order by month_no limit 1;
+  if m.id is null or m.locked_at is null then return null; end if;
+
+  insert into public.client_events (client_id, area, event, detail)
+  values (q.client_id, 'guarantee', 'locked_month_touched',
+          jsonb_build_object(
+            'month_id', m.id, 'month_no', m.month_no,
+            'locked_at', m.locked_at, 'month_verdict', m.verdict,
+            'month_says_delivered', m.calls_delivered,
+            'month_says_promised', m.calls_promised,
+            'month_refund_due', m.refund_due,
+            'call_id', q.id, 'prospect', q.prospect_name,
+            'booked_for', q.booked_for,
+            'change', case when tg_op = 'DELETE' then 'call removed' else 'call added' end,
+            'by', auth.uid()));
+
+  perform public.month_task(q.client_id,
+    format('Locked month %s no longer matches its calls', m.month_no),
+    format('Month %s was locked on %s saying %s of %s calls delivered, and a refund of $%s raised. A call that counts (%s, %s) has been %s since. The locked number and the refund have NOT moved. Check the refund before it is paid.',
+           m.month_no, to_char(m.locked_at, 'FMDD Mon YYYY'),
+           m.calls_delivered, m.calls_promised,
+           to_char(coalesce(m.refund_due, 0), 'FM999,999,999'),
+           coalesce(q.prospect_name, 'a prospect'),
+           to_char(q.booked_for, 'FMDD Mon YYYY'),
+           case when tg_op = 'DELETE' then 'removed from that month' else 'added to that month' end));
+  return null;
+end $$;
+
+drop trigger if exists qualified_calls_locked_month_rows on public.qualified_calls;
+create trigger qualified_calls_locked_month_rows
+  after insert or delete on public.qualified_calls
+  for each row
+  execute function public.trg_locked_month_call_added_or_removed();
+
+comment on function public.trg_locked_month_call_added_or_removed() is
+  'A call that counts, added to or removed from a LOCKED month, is allowed, recorded and raised — the same rule as trg_locked_month_touched, for insert and delete.';
 
 comment on function public.trg_locked_month_touched() is
   'An edit to a call inside a LOCKED month is allowed, recorded and raised. Writes a client_events row with the before and after, and a finance task when the change moves whether the call counts — because then the locked number and the refund behind it no longer match the calls. Nothing is re-opened and no refund is changed.';

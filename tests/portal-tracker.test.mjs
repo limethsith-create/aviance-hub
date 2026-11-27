@@ -721,8 +721,9 @@ test('nothing a client presses is ever retried for them', () => {
   const sched = fs.readFileSync(path.join(root, 'portal-schedule.js'), 'utf8');
   /* every write a client can trigger is awaited from exactly one place: there is
      no second attempt anywhere, so a dropped Send cannot become two messages */
-  for (const [what, src, call] of [['Send', send, 'await pcSend('],
-                                   ['Approve', steps, 'await pstDecide('], ['Send answers', steps, 'await pstSubmitForm('],
+  /* pcWrite / pstCapped put a time limit on each; like psCapped, they do not ask twice */
+  for (const [what, src, call] of [['Send', send, 'pcSend('],
+                                   ['Approve', steps, 'pstCapped(() => pstDecide('], ['Send answers', steps, 'pstCapped(() => pstSubmitForm('],
                                    /* psCapped puts a time limit on this one ask; it does not ask twice */
                                    ['Pick a time', sched, "ctx.rpc('portal_offer_pick'"]]) {
     assert.equal((src.split(call).length - 1), 1, what + ' is attempted from exactly one place');

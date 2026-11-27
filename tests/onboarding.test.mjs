@@ -86,7 +86,7 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(root, 'core.js'), 'utf8'), sandbox, { filename: 'core.js' });
 vm.runInContext(src('finance.js'), sandbox, { filename: 'finance.js' });
-vm.runInContext(src('onboarding.js') + `\n;globalThis.api={obChecklist,obReady,obStart,obInputs,obSaveInputs,obSignOff,obAgreement,obDraftAgreement,viewOnboarding,viewOnboardingClient,viewBilling,obRenderBilling,obRenderOnboarding,obRenderOnboardingClient,obLoadBilling,obLoadList,obLoadOne,ob};`, sandbox, { filename: 'onboarding.js' });
+vm.runInContext(src('onboarding.js') + `\n;globalThis.api={obChecklist,obStart,obInputs,obSaveInputs,obSignOff,obAgreement,obDraftAgreement,viewOnboarding,viewOnboardingClient,viewBilling,obRenderBilling,obRenderOnboarding,obRenderOnboardingClient,obLoadBilling,obLoadList,obLoadOne,ob,obSaveInputsFromForm,obSignOffFromForm,obStartGo,obRedrawOne};`, sandbox, { filename: 'onboarding.js' });
 const A = sandbox.api;
 
 /* ───────────── a client with every box ticked ───────────── */
@@ -133,7 +133,6 @@ test('all seven items read true from real rows, and the client is ready', async 
   assert.equal(r.data.items.filter((i) => !i.done).length, 0);
   assert.equal(r.data.ready, true);
   assert.equal(r.data.blocking, '');
-  assert.equal((await A.obReady(ID)).data, true);
 });
 
 /* Each item in turn: take away the row that proves it and nothing else. */
@@ -154,7 +153,6 @@ for (const [name, key, breakIt, words] of BREAKERS) {
     assert.equal(ck.data.ready, false, 'should not be ready');
     assert.equal(item(ck.data, key).done, false, key + ' should be undone');
     assert.equal(ck.data.items.filter((i) => !i.done).length >= 1, true);
-    assert.equal((await A.obReady(ID)).data, false);
     const started = shape(await A.obStart(ID));
     assert.equal(started.ok, false);
     assert.match(started.error, words);
@@ -521,4 +519,68 @@ test('one client, whole: the agreement is not read a second time for the same cl
     'the checklist read the client; the inputs and the agreement reuse it');
   assert.ok(r.data.agreement, 'and the agreement is still there');
   assert.ok(r.data.inputs, 'and so are the inputs');
+});
+
+/* ───────────── round three: a bad connection and a second click ───────────── */
+const down = () => {
+  const b = { select: () => b, insert: () => b, update: () => b, upsert: () => b, eq: () => b, in: () => b, order: () => b, limit: () => b, single: () => b, maybeSingle: () => b,
+    then: (res, rej) => Promise.resolve({ data: null, error: { message: 'TypeError: Failed to fetch' } }).then(res, rej) };
+  return { from: () => b, rpc: async () => ({ data: null, error: { message: 'TypeError: Failed to fetch' } }) };
+};
+
+test('a save that fails leaves the inputs form on the screen: nothing is re-read and nothing is redrawn', async () => {
+  await A.obLoadOne(ID);
+  painted = []; toasts = [];
+  sandbox.sb = down();
+  const r = await A.obSaveInputsFromForm();
+  assert.equal(r.ok, false);
+  assert.equal(painted.length, 0, 'the form used to be replaced by "We could not open this client", and everything typed went with it');
+  assert.ok(A.ob.one, 'the client is still open');
+  assert.equal(A.ob.oneErr, '');
+  assert.ok(toasts.some((t) => /reach the server/.test(t)), 'and the failure is said');
+  assert.ok(!toasts.some((t) => /saved/i.test(t)), 'a failed save never says saved');
+});
+
+test('a refresh that fails after a good write keeps the screen that was there, and says it may be out of date', async () => {
+  await A.obLoadOne(ID);
+  painted = []; toasts = [];
+  sandbox.sb = down();
+  const r = await A.obRedrawOne(ID);
+  assert.equal(r.ok, false);
+  assert.equal(painted.length, 0);
+  assert.ok(A.ob.one && !A.ob.oneErr);
+  assert.ok(toasts.some((t) => /could not be refreshed/.test(t)));
+  /* opening a client cold with the connection down still shows the failure, with a way to try again */
+  A.ob.one = null;
+  await A.obRedrawOne(ID);
+  assert.match(painted[painted.length - 1], /We could not open this client/);
+  assert.match(painted[painted.length - 1], /obRetryOne\(\)/);
+});
+
+test('two presses on Save their inputs are one write; two presses on Start them open month one once', async () => {
+  await A.obLoadOne(ID);
+  writes = [];
+  const a = A.obSaveInputsFromForm(), b = A.obSaveInputsFromForm();
+  assert.equal(a, b);
+  await a;
+  assert.equal(writes.filter((w) => w.table === 'client_profiles' && w.op === 'upsert').length, 1);
+  db = fullDb(); writes = [];   /* the save above wrote an empty form; start from a ready client */
+  const s1 = A.obStartGo(ID), s2 = A.obStartGo(ID);
+  assert.equal(s1, s2);
+  await s1;
+  assert.ok(writes.length > 0, 'the start did happen');
+  assert.ok(writes.filter((w) => w.table === 'clients' && w.payload && 'day1_on' in w.payload).length <= 1, 'day one is written at most once');
+  assert.equal(toasts.filter((t) => /They are live/.test(t)).length, 1, 'and it is said once');
+});
+
+/* The Invoices screen and the client's own page show the same figures from
+   different reads. Raising, sending or paying an invoice here used to leave that
+   page on the old number until its own minute-old refresh came round. */
+test('raising, sending or paying an invoice marks the client page stale', () => {
+  const src = fs.readFileSync(new URL('../onboarding.js', import.meta.url), 'utf8');
+  for (const fn of ['obRaiseGo', 'obMarkSentGo', 'obMarkPaidGo']) {
+    const body = src.slice(src.indexOf('function ' + fn), src.indexOf('function ' + fn) + 900);
+    assert.match(body, /if \(r\.ok && typeof cbStale === 'function'\) cbStale\(\);/,
+      fn + ' must tell the client page its figures moved');
+  }
 });

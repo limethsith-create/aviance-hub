@@ -7,6 +7,8 @@
 
 /* Inter (variable, latin), served from our own site so the strict CSP stays as it is. OFL-1.1, see fonts/Inter-LICENSE.txt. */
 @font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url("/fonts/inter-latin.woff2") format("woff2")}
+/* JetBrains Mono (variable, latin) for every figure, from our own site too, so the owner and the client read the same digits. OFL-1.1, see fonts/JetBrainsMono-LICENSE.txt. */
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:100 800;font-display:swap;src:url("/fonts/jetbrains-mono-latin.woff2") format("woff2")}
 :root{
   /* surfaces + text */
   /* cool ink neutrals: a faint navy cast so the page reads as one considered palette, not plain grey */

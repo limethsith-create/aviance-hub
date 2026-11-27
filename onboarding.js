@@ -340,13 +340,6 @@ async function obChecklistMany(clients){
   }));
 }
 
-/* True only when every item is done. */
-async function obReady(clientId){
-  const ck = await obChecklist(clientId);
-  if (!ck.ok) return ck;
-  return obOk(Boolean(ck.data.ready));
-}
-
 /* Day one. Refuses unless every item is done, and says which one is missing.
    The month clock is the finance side's: fnStartSending sets the anchor and
    opens month one. We never work out a date or a fee here. */
@@ -625,7 +618,7 @@ function obRenderAgreementCard(ag, clientId){
     ${row ? '' : `<button type="button" class="btn" onclick="obDraftAgreementGo(${obArg(clientId)})">Draft the agreement</button>`}</div>`;
 }
 function obRenderOnboardingClient(){
-  if (ob.oneErr) return `<div class="card ob-card"><b>We could not open this client</b><p class="muted">${obEsc(ob.oneErr)}</p></div>`;
+  if (ob.oneErr) return `<div class="card ob-card"><b>We could not open this client</b><p class="muted">${obEsc(ob.oneErr)}</p><p><button type="button" class="btn ghost" onclick="obRetryOne()">Try again</button></p></div>`;
   if (!ob.one) return `<div class="card ob-card"><b>Opening…</b><p class="muted">One moment.</p></div>`;
   const ck = ob.one.check || {};
   const name = obText(ck.client && ck.client.company) || 'This client';
@@ -718,48 +711,85 @@ function obFormFields(){
     senderName: v('obSenderName'), senderTitle: v('obSenderTitle'), timeZone: v('obTimeZone'),
   };
 }
+/* Re-read one client and draw them again — unless the re-read fails while a
+   good screen is already up. Then the screen stays (with whatever is typed in
+   it) and a line says it may be out of date; a failed refresh is not a reason
+   to take a working form away from somebody. */
+async function obRedrawOne(clientId){
+  const was = ob.one;
+  const r = await obLoadOne(clientId);
+  if (!r.ok && was) {
+    ob.one = was; ob.oneErr = '';
+    obSay('This screen could not be refreshed, so it may be out of date. ' + r.error);
+    return r;
+  }
+  obPaint(obRenderOnboardingClient());
+  return r;
+}
+function obRetryOne(){ return coreOnce('ob:retry', async () => { if (ob.clientId) { await obLoadOne(ob.clientId); obPaint(obRenderOnboardingClient()); } }) }
 function obShowInputsErr(msg){
   if (typeof errEl === 'function') errEl('obInputsErr', msg || '');
   if (msg) obSay(msg);
 }
-async function obSaveInputsFromForm(){
+function obSaveInputsFromForm(){ return coreOnce('ob:inputs', async () => {
   if (!ob.clientId) return;
   const r = await obSaveInputs(ob.clientId, obFormFields());
   obShowInputsErr(r.ok ? '' : r.error);
-  if (r.ok) obSay('Their inputs are saved.');
-  await obLoadOne(ob.clientId); obPaint(obRenderOnboardingClient());
-}
-async function obSignOffFromForm(){
+  /* A save that failed leaves the form exactly as it was typed. This used to
+     re-read the client and redraw whatever came back — and when the save failed
+     because the connection had gone, the re-read failed too, so the whole form
+     was replaced by "We could not open this client" and everything typed went
+     with it. */
+  if (!r.ok) return r;
+  obSay('Their inputs are saved.');
+  await obRedrawOne(ob.clientId);
+  return r;
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function obSignOffFromForm(){ return coreOnce('ob:inputs', async () => {
   if (!ob.clientId) return;
   const saved = await obSaveInputs(ob.clientId, obFormFields());
   if (!saved.ok) { obShowInputsErr(saved.error); return; }
   const r = await obSignOff(ob.clientId);
-  obShowInputsErr(r.ok ? '' : r.error);
   if (r.ok) obSay('Their inputs are signed off.');
-  await obLoadOne(ob.clientId); obPaint(obRenderOnboardingClient());
-}
-async function obStartGo(clientId){
+  await obRedrawOne(ob.clientId);
+  /* after the redraw, or the new form would be drawn over the sentence */
+  obShowInputsErr(r.ok ? '' : r.error);
+  return r;
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function obStartGo(clientId){ return coreOnce('ob:start:'+clientId, async () => {
   const r = await obStart(clientId);
   obSay(r.ok ? 'They are live. Month one is open.' : r.error);
-  await obLoadOne(clientId); obPaint(obRenderOnboardingClient());
-}
-async function obDraftAgreementGo(clientId){
+  await obRedrawOne(clientId);
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function obDraftAgreementGo(clientId){ return coreOnce('ob:agreement:'+clientId, async () => {
   const r = await obDraftAgreement(clientId);
   obSay(r.ok ? 'The agreement is drafted. Nothing has been sent.' : r.error);
-  await obLoadOne(clientId); obPaint(obRenderOnboardingClient());
-}
-async function obRaiseGo(monthId){
+  await obRedrawOne(clientId);
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function obRaiseGo(monthId){ return coreOnce('ob:raise:'+monthId, async () => {
   const r = typeof fnRaiseInvoice === 'function' ? await fnRaiseInvoice(monthId, 0) : obErr('The finance side is not loaded.');
   obSay(r.ok ? (r.data ? 'The invoice is raised.' : 'Nothing to bill for that month — a three-month term bills on months one, four and seven.') : r.error);
+  /* The client's own page shows these same figures, and it only re-reads when
+     something marks it stale. Without this, raising, sending or paying an
+     invoice here left that page reading the old number for up to a minute. */
+  if (r.ok && typeof cbStale === 'function') cbStale();
   await obLoadBilling(); obPaint(obRenderBilling());
-}
-async function obMarkSentGo(invoiceId){
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function obMarkSentGo(invoiceId){ return coreOnce('ob:sent:'+invoiceId, async () => {
   const r = typeof fnMarkInvoiceSent === 'function' ? await fnMarkInvoiceSent(invoiceId) : obErr('The finance side is not loaded.');
   obSay(r.ok ? 'Marked as sent.' : r.error);
+  /* The client's own page shows these same figures, and it only re-reads when
+     something marks it stale. Without this, raising, sending or paying an
+     invoice here left that page reading the old number for up to a minute. */
+  if (r.ok && typeof cbStale === 'function') cbStale();
   await obLoadBilling(); obPaint(obRenderBilling());
-}
-async function obMarkPaidGo(invoiceId, via){
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function obMarkPaidGo(invoiceId, via){ return coreOnce('ob:paid:'+invoiceId, async () => {
   const r = typeof fnMarkInvoicePaid === 'function' ? await fnMarkInvoicePaid(invoiceId, via || 'bank transfer') : obErr('The finance side is not loaded.');
   obSay(r.ok ? (typeof fnPaidWords === 'function' ? fnPaidWords(r.data) : 'Marked paid.') : r.error);
+  /* The client's own page shows these same figures, and it only re-reads when
+     something marks it stale. Without this, raising, sending or paying an
+     invoice here left that page reading the old number for up to a minute. */
+  if (r.ok && typeof cbStale === 'function') cbStale();
   await obLoadBilling(); obPaint(obRenderBilling());
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }

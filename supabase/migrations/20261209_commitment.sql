@@ -54,7 +54,12 @@
 --   'to_close'  ended, verdict still open. The money is spent; it needs
 --               lock_month, not a push.
 --   'not_begun' bought, not started. No pace to be behind yet.
-create or replace view v_commitment_months as
+-- ROUND 3: the three views below say security_invoker themselves. They were
+-- safe only by inheritance — v_month_standing underneath is an invoker view —
+-- and one careless `create or replace` of that view would have opened all
+-- three to every signed-in client. Now each stands on its own.
+create or replace view v_commitment_months
+with (security_invoker = true) as
 select
   s.*,
   case
@@ -80,7 +85,8 @@ comment on view v_commitment_months is
 
 -- The headline. One row. Deliberately NOT the same question as v_exposure, and
 -- named so nobody confuses them again.
-create or replace view v_commitment_now as
+create or replace view v_commitment_now
+with (security_invoker = true) as
 select
   count(*)                                                     as running_months,
   count(distinct client_id)                                    as running_clients,
@@ -103,7 +109,8 @@ comment on view v_commitment_now is
 
 -- The money that is already gone and only needs settling. Kept apart from the
 -- headline so the owner never confuses a loss with a risk.
-create or replace view v_commitment_to_close as
+create or replace view v_commitment_to_close
+with (security_invoker = true) as
 select
   count(*)                       as months,
   coalesce(sum(at_risk), 0)      as refunds_due,
@@ -126,7 +133,16 @@ grant select on v_commitment_months, v_commitment_now, v_commitment_to_close to 
 --
 -- Uncomment to apply.
 --
--- create or replace view v_month_standing as
+-- ROUND 3 — READ THIS BEFORE YOU UNCOMMENT ANYTHING. The first line below used
+-- to re-make v_month_standing with no `with (...)` clause. The live view carries
+-- security_invoker = true, and `create or replace view` WITHOUT that clause
+-- silently takes it off. Tried on a local copy of the live schema: after the
+-- block as it was written, a client signed in to the portal read every other
+-- client's company, plan and refund at risk from v_month_standing. The clause
+-- is now in the block. Do not remove it.
+--
+-- create or replace view v_month_standing
+-- with (security_invoker = true) as
 --  select m.id as month_id, c.id as client_id, c.company, c.plan, m.month_no,
 --         m.starts_on, m.ends_on, m.calls_promised, m.calls_delivered,
 --         greatest(m.calls_promised - m.calls_delivered, 0) as calls_short,

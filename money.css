@@ -7,7 +7,7 @@
 
 /* the four numbers at the top of a block */
 .mo-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
-.mo-tile{border:1px solid var(--line,#DCDCE0);border-radius:10px;padding:12px 14px;background:var(--mist,#F6F7F9)}
+.mo-tile{border:1px solid var(--line,var(--border,#DCDCE0));border-radius:10px;padding:12px 14px;background:var(--mist,var(--surface-2,#F6F7F9))}
 .mo-tile-t{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted,#63636A)}
 .mo-tile-n{font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:24px;font-weight:600;letter-spacing:-.02em;margin:4px 0 2px}
 .mo-tile-s{font-size:12px;color:var(--muted,#63636A);line-height:1.35}
@@ -15,7 +15,7 @@
 .mo-tile.mo-red .mo-tile-n{color:var(--red,#C42408)}
 
 /* one age band, or one group of refunds */
-.mo-band{border-top:1px solid var(--line,#DCDCE0);padding-top:12px;margin-top:14px}
+.mo-band{border-top:1px solid var(--line,var(--border,#DCDCE0));padding-top:12px;margin-top:14px}
 .mo-band:first-child{border-top:0;padding-top:0;margin-top:0}
 .mo-band-head{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
 .mo-band-head h4{font-size:13px;font-weight:600;letter-spacing:-.01em}
@@ -25,7 +25,7 @@
 
 .mo-list{list-style:none;margin:0;padding:0}
 .mo-row{display:grid;grid-template-columns:minmax(0,2fr) 110px minmax(0,2fr) auto;gap:12px;align-items:center;
-  padding:9px 0;border-top:1px solid var(--line,#DCDCE0)}
+  padding:9px 0;border-top:1px solid var(--line,var(--border,#DCDCE0))}
 .mo-row:first-child{border-top:0}
 .mo-who{display:flex;flex-direction:column;min-width:0}
 .mo-who b{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -346,7 +346,7 @@ body.dark .btn.ghost:focus-visible,body.dark .tb-btn:focus-visible{outline-color
   --pc-ink:#0A0A0C;--pc-paper:#FFFFFF;--pc-red:#E0290F;--pc-grey:#5C5C5C;
   --pc-line:rgba(0,0,0,.14);--pc-wash:#F6F6F6;
   --pc-sans:'Inter Tight','Inter',system-ui,-apple-system,sans-serif;
-  --pc-mono:'JetBrains Mono','Courier New',monospace;
+  --pc-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
 }
 .pc-h1{letter-spacing:-.038em;font-weight:800;line-height:1.0}
 .pc-tag{letter-spacing:.14em}

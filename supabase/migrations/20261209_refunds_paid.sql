@@ -51,7 +51,11 @@ comment on column public.refunds.paid_amount is
 comment on column public.refunds.paid_reference is
   'The bank / Wise / Payoneer reference for the transfer. What the owner quotes when a client says "we never got it".';
 
-create index if not exists refunds_owed_idx on public.refunds (status, created_at) where status = 'owed';
+-- ROUND 3: this was `create index if not exists refunds_owed_idx`. The live
+-- database already has an index of that name, on (status) alone, so the
+-- statement was skipped without a word and the index it describes was never
+-- made. A name of its own, so it is.
+create index if not exists refunds_owed_created_idx on public.refunds (status, created_at) where status = 'owed';
 
 -- ------------------------------------------------------------ 2. refund_pay()
 create or replace function public.refund_pay(
@@ -69,6 +73,8 @@ declare
   r public.refunds;
   c public.clients;
   v_amount integer;
+  v_before integer;
+  v_left   integer;
   v_via text := left(btrim(coalesce(p_via,'')), 60);
   v_ref  text := left(btrim(coalesce(p_reference,'')), 120);
 begin
@@ -76,14 +82,22 @@ begin
 
   select * into r from public.refunds where id = p_refund for update;
   if not found then raise exception 'That refund is not here any more.'; end if;
-  if r.status = 'paid'  then raise exception 'That refund is already marked paid.'; end if;
+  -- ROUND 3: a PART payment used to end the story. Paying $1,000 of a $3,000
+  -- refund marked the row paid, wrote "$2,000 of it is still owed" into the
+  -- event — and then refused the $2,000 for ever with "already marked paid".
+  -- (Run on a local copy of the live schema; round3/3-findings.md.) So the
+  -- rest of a part-paid refund can be paid: v_before is what has gone already,
+  -- v_left is what we still owe, and only a refund with nothing left is refused.
+  v_before := case when r.status = 'paid' then coalesce(r.paid_amount, r.amount) else 0 end;
+  v_left   := r.amount - v_before;
+  if r.status = 'paid' and v_left <= 0 then raise exception 'That refund is already marked paid.'; end if;
   if r.status = 'waived' then raise exception 'That refund was set aside, so it cannot be paid. Reopen it first.'; end if;
 
-  v_amount := coalesce(p_amount, r.amount);
+  v_amount := coalesce(p_amount, v_left);
   if v_amount <= 0 then raise exception 'Say how much was sent back.'; end if;
-  if v_amount > r.amount then
+  if v_amount > v_left then
     raise exception 'That is more than we owe. We owe $%, and you have entered $%.',
-      to_char(r.amount, 'FM999,999,990'), to_char(v_amount, 'FM999,999,990');
+      to_char(v_left, 'FM999,999,990'), to_char(v_amount, 'FM999,999,990');
   end if;
   if v_via = '' then raise exception 'Say how it was sent — bank transfer, Wise, Payoneer.'; end if;
 
@@ -91,8 +105,9 @@ begin
      set status = 'paid',
          paid_at = coalesce(p_on::timestamptz, now()),
          paid_via = v_via,
-         paid_amount = v_amount,
-         paid_reference = nullif(v_ref, '')
+         paid_amount = v_before + v_amount,
+         -- a second transfer has a second reference: keep both, inside the 120
+         paid_reference = nullif(left(concat_ws(', ', nullif(r.paid_reference, ''), nullif(v_ref, '')), 120), '')
    where id = r.id
   returning * into r;
 
@@ -100,8 +115,8 @@ begin
 
   insert into public.client_events(client_id, area, event, detail)
   values (r.client_id, 'refund', 'paid', jsonb_build_object(
-    'words', 'Refund of $' || to_char(r.paid_amount, 'FM999,999,990') || ' sent by ' || r.paid_via
-             || case when r.paid_reference is null then '' else ' (ref ' || r.paid_reference || ')' end
+    'words', 'Refund of $' || to_char(v_amount, 'FM999,999,990') || ' sent by ' || r.paid_via
+             || case when nullif(v_ref, '') is null then '' else ' (ref ' || v_ref || ')' end
              || case when r.paid_amount < r.amount
                      then '. $' || to_char(r.amount - r.paid_amount, 'FM999,999,990') || ' of it is still owed.'
                      else '.' end,
@@ -215,7 +230,7 @@ select
   c.monthly_fee,
   c.ended_on,
   coalesce(p.paid_in, 0)        as paid_in,
-  coalesce(r.owed, 0)           as refunds_owed,
+  coalesce(r.owed, 0)           as refunds_owed,   -- includes the unpaid rest of a part-paid refund
   coalesce(r.paid_out, 0)       as refunds_paid,
   coalesce(r.owed, 0) + coalesce(r.paid_out, 0) as refunds_total,
   coalesce(r.owed, 0) + coalesce(r.paid_out, 0) - coalesce(p.paid_in, 0) as over_by
@@ -226,7 +241,12 @@ left join (
 ) p on p.client_id = c.id
 left join (
   select client_id,
-         sum(case when status = 'owed' then amount else 0 end) as owed,
+         -- ROUND 3: a part-paid refund is status 'paid' with paid_amount below
+         -- amount, and the rest of it is still owed. Counting only status 'owed'
+         -- made that rest vanish from this view the moment the first part went.
+         sum(case when status = 'owed' then amount
+                  when status = 'paid' then greatest(amount - coalesce(paid_amount, amount), 0)
+                  else 0 end) as owed,
          sum(coalesce(paid_amount, case when status = 'paid' then amount else 0 end)) as paid_out
     from public.refunds group by client_id
 ) r on r.client_id = c.id;

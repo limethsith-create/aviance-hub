@@ -644,6 +644,9 @@ async function wuLoadEnding(){
    standing in for a mark, so an icon we do not have is simply absent. */
 function wuIcon(name){ return (typeof I !== 'undefined' && I && I[name]) || '' }
 
+/* A table that is wider than a phone scrolls inside its own box. wrapup.css is
+   not this file's to change, so the one rule it needs is carried here. */
+const WU_SCROLL = 'overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%';
 /* Clients ending or ended: the net figure and what is still outstanding. */
 function viewEnding(){
   if (wu.ending === null){ wuKick(wuLoadEnding); return '<div class="card wu-wait" role="status">Reading the final figures…</div>' }
@@ -667,13 +670,19 @@ function viewEnding(){
       <td>${ended ? 'Ended' : 'Ending'}${c.ended_on ? ' ' + wuE(wuDay(c.ended_on)) : ''}</td>
       <td class="wu-why">${wuE(c.end_reason || '—')}</td>
       <td class="wu-n ${r.net > 0 ? 'wu-up' : r.net < 0 ? 'wu-down' : ''}">${wuE(wuNetWords(r.net))}</td>
-      <td class="wu-why">${out.length ? wuE(out.join(' · ')) : 'Nothing outstanding'}</td>
+      <td class="wu-out">${out.length ? wuE(out.join(' · ')) : 'Nothing outstanding'}</td>
       <td><button type="button" class="btn ghost" onclick="viewEndingOpen(${wuAttr(c.id)})">Statement</button></td>
     </tr>`;
   }).join('');
+  /* AT PHONE WIDTH. wrapup.css hides `.wu-why` under 860px. Both the Why cell
+     AND the Outstanding cell carried that class and neither heading did, so on a
+     phone the money still outstanding vanished, every figure sat under the wrong
+     heading, and the Statement button ran off the edge. Now only Why carries it
+     — heading and cell together — and the table scrolls sideways inside its card
+     if it is still too wide. */
   return `<div class="card wu-card"><h3>Ending and ended</h3>
-    <table class="wu-table"><thead><tr><th>Client</th><th>When</th><th>Why</th><th>Net</th><th>Outstanding</th><th></th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+    <div style="${WU_SCROLL}"><table class="wu-table"><thead><tr><th>Client</th><th>When</th><th class="wu-why">Why</th><th>Net</th><th>Outstanding</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`;
 }
 function viewEndingOpen(clientId){
   if (typeof openModal === 'function') openModal(viewFinalStatement(clientId));
@@ -709,11 +718,11 @@ function viewFinalStatement(clientId){
   const body = lines || `<tr><td colspan="8">No months yet, so there is nothing to add up.</td></tr>`;
   return head + `<div class="wu-stmt-h"><h3>Final statement — ${wuE(c.company || '')}</h3>
       <span class="wu-sub">${wuE(c.plan || '')} ${wuE(c.term || '')}${c.ended_on ? ' · ended ' + wuE(wuDay(c.ended_on)) : ''}</span></div>
-    <table class="wu-table"><thead><tr><th>Period</th><th>Promised</th><th>Delivered</th><th>Verdict</th><th>Invoiced</th><th>Paid</th><th>Still owed</th><th>Refund</th></tr></thead>
+    <div style="${WU_SCROLL}"><table class="wu-table"><thead><tr><th>Period</th><th>Promised</th><th>Delivered</th><th>Verdict</th><th>Invoiced</th><th>Paid</th><th>Still owed</th><th>Refund</th></tr></thead>
       <tbody>${body}</tbody>
       <tfoot><tr><th>All of it</th><th class="wu-n">${d.callsPromised}</th><th class="wu-n">${d.callsDelivered}</th><th></th>
         <th class="wu-n">${wuE(wuUsd(d.invoiced))}</th><th class="wu-n">${wuE(wuUsd(d.paid))}</th>
-        <th class="wu-n">${wuE(wuUsd(d.owedToUs))}</th><th class="wu-n">${wuE(wuUsd(d.refunded + d.owedToThem))}</th></tr></tfoot></table>
+        <th class="wu-n">${wuE(wuUsd(d.owedToUs))}</th><th class="wu-n">${wuE(wuUsd(d.refunded + d.owedToThem))}</th></tr></tfoot></table></div>
     <p class="wu-net"><b>${wuE(wuNetWords(d.net))}</b></p>
     ${wuStmtWarn(d)}
     <div class="wu-print"><button type="button" class="btn ghost" onclick="window.print()">Print</button></div></div>`;

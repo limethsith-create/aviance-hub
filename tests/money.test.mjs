@@ -233,17 +233,43 @@ test('paying a refund goes to the database rule, with every fact', async () => {
 test('a database without the rule yet is written to directly, and loses no fact', async () => {
   reset();
   rpcError = { refund_pay: { message: 'Could not find the function public.refund_pay', code: 'PGRST202' } };
-  const r = await F('fnMarkRefundPaid')('r-owed', { amount: 30, via: 'bank transfer', reference: 'TRN-1' });
+  const r = await F('fnMarkRefundPaid')('r-owed', { amount: 50, via: 'bank transfer', reference: 'TRN-1', on: '2026-11-20' });
   assert.equal(r.ok, true);
   const wrote = calls.find((c) => c.table === 'refunds' && c.op === 'update');
   assert.equal(wrote.payload.status, 'paid');
   assert.equal(wrote.payload.paid_via, 'bank transfer');
   assert.match(wrote.payload.notes, /Month 1: 3 of 10 calls delivered\./, 'the reason it was raised survives');
-  assert.match(wrote.payload.notes, /Paid \$30 by bank transfer \(ref TRN-1\)\./);
-  assert.match(wrote.payload.notes, /\$20 of it is still owed\./);
+  assert.match(wrote.payload.notes, /Paid \$50 by bank transfer on 2026-11-20 \(ref TRN-1\)\./);
   /* the amount the guarantee raised is never touched */
   for (const k of ['amount', 'multiplier', 'reason', 'client_id', 'month_id']) assert.ok(!(k in wrote.payload), k);
   assert.match(F('fnRefundPaidWords')(r.data), /until the database update is applied/);
+  /* the day is the day that was picked, wherever it is read: noon UTC, not local midnight */
+  assert.equal(wrote.payload.paid_at, '2026-11-20T12:00:00.000Z');
+  /* and only a row that is still owed is written, so a second click finds nothing to write twice */
+  assert.ok(wrote.filters.some(([k, v]) => k === 'status' && v === 'owed'));
+});
+
+/* ROUND 3, seen in a browser against the live shape of the database (no
+   refund_pay, no paid_amount column): $1,000 recorded against a $3,000 refund
+   read "Recorded. That refund is settled.", "We owe $0", and the row said the
+   whole $3,000 had been sent. Two thirds of a client's money left the screen. */
+test('without the rule, a PART payment leaves the refund owed in full and writes the transfer down', async () => {
+  reset();
+  rpcError = { refund_pay: { message: 'Could not find the function public.refund_pay', code: 'PGRST202' } };
+  const r = await F('fnMarkRefundPaid')('r-owed', { amount: 30, via: 'Wise', reference: 'TRN-1', on: '2026-11-20' });
+  assert.equal(r.ok, true);
+  const wrote = calls.find((c) => c.table === 'refunds' && c.op === 'update');
+  assert.ok(!('status' in wrote.payload), 'the row is NOT marked paid: paid reads as paid in full');
+  assert.ok(!('paid_at' in wrote.payload));
+  assert.match(wrote.payload.notes, /Month 1: 3 of 10 calls delivered\./, 'the reason it was raised survives');
+  assert.match(wrote.payload.notes, /Part sent: \$30 by Wise on 2026-11-20 \(ref TRN-1\)\. \$20 still to send\./);
+  assert.equal(r.data.part_noted, true);
+  const words = F('fnRefundPaidWords')(r.data);
+  assert.match(words, /\$30 sent, \$20 still to send/);
+  assert.match(words, /still shows as owed in full/);
+  assert.ok(!/settled/.test(words), 'it must never say settled');
+  /* every screen still counts the whole of it as owed */
+  assert.equal(F('fnRefundStillOwed')({ status: 'owed', amount: 50, notes: wrote.payload.notes }), 50);
 });
 
 test('a refusal from the rule is passed on, not worked around', async () => {

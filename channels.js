@@ -3,10 +3,9 @@
    Slack / Linear — no bots, no bubbles. Left: the channel list (clients, team, archived folded away, search).
    Middle: the messages (grouped by person and day, links clickable, images previewed, files as chips, edited /
    deleted marks, older messages load as you scroll up, a "New messages" divider, a typing line) and the composer.
-   Right: the client's numbers (a sheet on a phone).
 
    Data comes ONLY from the ch* functions of channels-api.js (CONTRACT.md "Hub data layer"); each returns
-   {ok, data, error} and never throws. `renderClientNumbers(el, clientId)` fills the side panel when something defines it.
+   {ok, data, error} and never throws.
      chListChannels() chMessages(id,{before,limit}) chSend(id,body,files) chEdit chDelete chMarkRead
      chSubscribe(id,{onMessage,onUpdate,onTyping}) → unsubscribe  chTyping(id)  chCreateChannel(name,memberIds)
      chRename chArchive chAddMember chRemoveMember chMembers chEnsureClientChannel(clientId,name) chFileUrl(path)
@@ -26,7 +25,7 @@
 
 /* ===================== 0. STATE ===================== */
 const CHV_PAGE=50;                    // messages per page
-const CHV_MAX_FILE=10*1024*1024;      // per file (the storage rule)
+const CHV_MAX_FILE=CORE_FILE_MAX;      // per file (the storage rule; one copy, in core.js)
 const CHV_MAX_FILES=5;                // per message
 const CHV_FILES_ON=false;             // no 'chat-files' bucket yet: sending files is switched off
 const CHV_NO_FILES="Sending files isn't switched on yet. Send the message as text, or paste a link to the file.";
@@ -49,7 +48,7 @@ const chv={
   drafts:{}, pending:[], cerr:'', unsure:{},
   typing:{}, typingTimer:null, unsub:null,
   q:'', hits:[], searchSeq:0, searchTimer:null,
-  panelSet:false, panelOpen:false, pane:'list',
+  pane:'list',
   archOpen:false, noChOpen:false, noChDone:{},
   urls:{}, urlWait:{},
   staff:null, staffErr:'', loadStaff:null,
@@ -123,7 +122,6 @@ function chvLinkify(text){
 /* ===================== 2. VIEW SHELL ===================== */
 function chvRootClass(){
   const c=['chv','chv-pane-'+chv.pane];
-  if(chv.panelOpen&&chvPanelClientId()&&chvFn('renderClientNumbers'))c.push('chv-panel-open');
   if(chvIsClient())c.push('chv-solo');
   return c.join(' ');
 }
@@ -160,7 +158,6 @@ async function chvInit(){
   if(!target&&chv.cur&&!chvFindCh(chv.cur))chvLeave();
   chv.pane=target||chv.cur?'thread':'list';
   if(chvIsClient()&&!target)chv.pane='thread';
-  if(!chv.panelSet){chv.panelSet=true;chv.panelOpen=!phone;}   // open beside the messages on a computer, closed on a phone
   chvPaintAll();
   if(target){await chvOpen(target,true);}
   else if(!chvIsClient()&&chvIsStaff())chvLoadNoChannel();
@@ -180,14 +177,12 @@ function chvUpdateTotal(){
   chv.unreadTotal=chv.chs.filter(c=>!c.archived).reduce((n,c)=>n+(Number(c.unread)||0),0);
   try{if(typeof renderNav==='function')renderNav();}catch(e){}
 }
-/* Paint everything (list, header, thread, composer, panel). */
+/* Paint everything (list, header, thread, composer). */
 function chvPaintAll(){
   const r=chvEl('chvRoot');if(!r)return;
   r.className=chvRootClass();
   r.innerHTML=`<aside class="chv-list" id="chvListPane">${chvListHTML()}</aside>
-    <section class="chv-main" id="chvMain">${chvMainHTML()}</section>
-    <aside class="chv-side" id="chvSide">${chvSideHTML()}</aside>`;
-  chvPaintPanel();
+    <section class="chv-main" id="chvMain">${chvMainHTML()}</section>`;
 }
 
 /* ===================== 3. LIST ===================== */
@@ -325,12 +320,10 @@ function chvMainHTML(){
 }
 function chvHeadHTML(c){
   const staff=chvIsStaff();
-  const showNums=c.kind==='client'&&chvFn('renderClientNumbers');
   return `${chvIsClient()?'':`<button type="button" class="chv-back" onclick="chvBack()" aria-label="Back to channels">Channels</button>`}
     <div class="chv-title"><h2>${esc(c.name||'Channel')}</h2><span class="chv-kind${c.kind==='client'?' client':''}">${c.kind==='client'?`Client channel · ${esc(c.company||c.name||'the client')} reads and writes here`:'Team'}${c.archived?' · Archived':''}</span></div>
     <div class="chv-actions">
       ${staff&&!c.archived?`<button type="button" class="chv-btn" onclick="chvMembers()">Members</button><button type="button" class="chv-btn" onclick="chvRename()">Rename</button><button type="button" class="chv-btn" onclick="chvArchive()">Archive</button>`:''}
-      ${showNums?`<button type="button" class="chv-btn${chv.panelOpen?' on':''}" onclick="chvTogglePanel()" aria-pressed="${chv.panelOpen?'true':'false'}">Numbers</button>`:''}
     </div>`;
 }
 function chvPaintHead(){const c=chvFindCh(chv.cur),h=chvEl('chvHead');if(c&&h)h.innerHTML=chvHeadHTML(c);}
@@ -713,7 +706,7 @@ function chvEditKey(e){
   if(e.key==='Escape'){e.preventDefault();chvEditCancel();}
   else if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();chvEditSave();}
 }
-async function chvEditSave(){
+function chvEditSave(){ return coreOnce('chv:edit', async () => {
   const id=chv.editing;if(!id)return;
   const m=chv.msgs.find(x=>x.id===id);if(!m)return;
   const e=chvEl('chvEdit');const body=String(e?e.value:m.body||'').trim();
@@ -725,19 +718,19 @@ async function chvEditSave(){
   const i=chv.msgs.findIndex(x=>x.id===id);
   if(i>=0)chv.msgs[i]=Object.assign({},chv.msgs[i],{body,editedAt:(r.data&&r.data.editedAt)||new Date(chvNow()).toISOString()});
   chvPaintThread(true);
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 function chvDelete(id){
   const m=chv.msgs.find(x=>x.id===id);if(!m||m.userId!==chvMe())return;
   openModal(`<div class="modal-head"><div><h3>Delete this message?</h3><p>It will show as deleted for everyone in the channel.</p></div></div>
     <div class="modal-foot"><button class="btn ghost" type="button" onclick="closeModal()">Cancel</button><button class="btn" type="button" onclick="chvDoDelete(${chvA(id)})">Delete</button></div>`);
 }
-async function chvDoDelete(id){
+function chvDoDelete(id){ return coreOnce('chv:delete:'+id, async () => {
   closeModal();
   const r=await chvCall('chDelete',id);
   if(!r.ok){toast(r.error||"The message wasn't deleted. Try again.");return;}
   const i=chv.msgs.findIndex(x=>x.id===id);
   if(i>=0){chv.msgs[i]=Object.assign({},chv.msgs[i],{deleted:true,body:'',attachments:[]});chvPaintThread(true);}
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 /* ===================== 8. CHANNEL ADMIN (staff) ===================== */
 async function chvLoadStaffList(){
@@ -789,26 +782,26 @@ function chvRename(){
     <div class="modal-foot"><button class="btn ghost" type="button" onclick="closeModal()">Cancel</button><button class="btn" type="button" onclick="chvDoRename()">Save</button></div>`);
   const n=chvEl('chvRenameName');if(n&&n.focus)n.focus();
 }
-async function chvDoRename(){
+function chvDoRename(){ return coreOnce('chv:rename', async () => {
   const c=chvFindCh(chv.cur);if(!c)return;
   const name=String((chvEl('chvRenameName')||{}).value||'').trim();
   if(!name)return chvModalErr('Give the channel a name.');
   const r=await chvCall('chRename',c.id,name);
   if(!r.ok)return chvModalErr(r.error||"The name didn't change. Try again.");
   c.name=name;closeModal();chvPaintHead();chvPaintList();
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 function chvArchive(){
   const c=chvFindCh(chv.cur);if(!c||!chvIsStaff())return;
   openModal(`<div class="modal-head"><div><h3>Archive ${esc(c.name||'this channel')}?</h3><p>It moves to Archived. People can still read it, but no one can write in it${c.kind==='client'?'. The client will no longer see it':''}.</p></div></div>
     <div class="modal-foot"><button class="btn ghost" type="button" onclick="closeModal()">Cancel</button><button class="btn" type="button" onclick="chvDoArchive()">Archive channel</button></div>`);
 }
-async function chvDoArchive(){
+function chvDoArchive(){ return coreOnce('chv:archive', async () => {
   const c=chvFindCh(chv.cur);if(!c)return;
   const r=await chvCall('chArchive',c.id);
   closeModal();
   if(!r.ok){toast(r.error||"The channel wasn't archived. Try again.");return;}
   c.archived=true;c.unread=0;chvUpdateTotal();chvPaintAll();toast('Channel archived');
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 async function chvMembers(){
   const c=chvFindCh(chv.cur);if(!c||!chvIsStaff())return;
   openModal(`<div class="modal-head"><div><h3>Members of ${esc(c.name||'channel')}</h3></div></div><div class="modal-body" id="chvMemBody"><div class="chv-skel"></div></div>
@@ -829,18 +822,18 @@ async function chvPaintMembers(){
     ${addable.length?`<div class="field"><label for="chvAddSel">Add a team member</label><div class="chv-addrow"><select id="chvAddSel">${addable.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><button type="button" class="btn" onclick="chvAddMember()">Add</button></div></div>`:''}
     <div id="chvModalErr" class="chv-err" role="alert" hidden></div>`;
 }
-async function chvAddMember(){
+function chvAddMember(){ return coreOnce('chv:member', async () => {
   const c=chvFindCh(chv.cur);const sel=chvEl('chvAddSel');if(!c||!sel||!sel.value)return;
   const r=await chvCall('chAddMember',c.id,sel.value);
   if(!r.ok)return chvModalErr(r.error||"That person wasn't added. Try again.");
   chvPaintMembers();
-}
-async function chvRemoveMember(uid){
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function chvRemoveMember(uid){ return coreOnce('chv:member', async () => {
   const c=chvFindCh(chv.cur);if(!c)return;
   const r=await chvCall('chRemoveMember',c.id,uid);
   if(!r.ok)return chvModalErr(r.error||"That person wasn't removed. Try again.");
   chvPaintMembers();
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 /* ===================== 8b. THE BOT'S DRAFTS (staff, client channels) =====================
    Pending drafts for the open channel sit just above the composer: edit, Send or Discard. Nothing reaches the client
@@ -911,27 +904,6 @@ function chvBotGone(id){
   try{if(typeof dr!=='undefined'&&typeof drSetCount==='function')drSetCount(Math.max(0,(Number(dr.count)||0)-1));}catch(e2){}
 }
 
-/* ===================== 9. SIDE PANEL: the client's numbers ===================== */
-function chvPanelClientId(){
-  const c=chvFindCh(chv.cur);if(!c||c.kind!=='client')return '';
-  return c.clientId||(chvIsClient()&&authUser.clientId)||'';
-}
-function chvSideHTML(){
-  const id=chvPanelClientId();
-  if(!id||!chvFn('renderClientNumbers'))return '';
-  return `<div class="chv-side-head"><h3>Numbers</h3><button type="button" class="chv-btn" onclick="chvTogglePanel()" aria-label="Close numbers">Close</button></div><div class="chv-side-body" id="chvNumbers"></div>`;
-}
-function chvPaintPanel(){
-  const id=chvPanelClientId();const host=chvEl('chvNumbers');
-  if(!id||!host||!chvFn('renderClientNumbers'))return;
-  if(!chv.panelOpen)return;
-  try{renderClientNumbers(host,id);}catch(e){}
-}
-function chvTogglePanel(){
-  chv.panelOpen=!chv.panelOpen;
-  chvSyncClasses();chvPaintHead();chvPaintPanel();
-}
-
 /* ===================== 10. LIFECYCLE (called by the shell) ===================== */
 /* Called by the shell's render() for every view: the Channels timer / unsubscribe, and the nav badge. */
 /* WHY chvPeek IS NOT FORCED HERE ANY MORE
@@ -986,6 +958,6 @@ function channelsForget(){
   channelsStopTimer();
   if(chv.unsub){try{chv.unsub();}catch(e){}chv.unsub=null;}
   clearTimeout(chv.searchTimer);clearTimeout(chv.typingTimer);
-  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',unsure:{},typing:{},q:'',hits:[],panelSet:false,panelOpen:false,pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,staffErr:'',unreadTotal:0,peekAt:0,wasOpen:false,creating:false,caught:'',seq:chv.seq+1});
+  Object.assign(chv,{chs:[],loaded:false,err:null,loading:false,cur:null,want:null,msgs:[],hasMore:false,loadingOlder:false,msgsErr:null,msgsLoading:false,divId:null,newBelow:0,editing:null,sending:false,drafts:{},pending:[],cerr:'',unsure:{},typing:{},q:'',hits:[],pane:'list',archOpen:false,noChOpen:false,noChDone:{},urls:{},urlWait:{},staff:null,staffErr:'',unreadTotal:0,peekAt:0,wasOpen:false,creating:false,caught:'',seq:chv.seq+1});
   chvBotClear();
 }
