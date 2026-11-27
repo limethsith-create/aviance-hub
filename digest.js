@@ -65,6 +65,27 @@ async function dgQuery(table, build, whenEmpty){
   if (!client || typeof client.from !== 'function') return dgErr('The database is not connected yet.');
   return dgRun(() => build(client.from(table)), whenEmpty);
 }
+/* A query over a table that only grows, read a page at a time. The database
+   answers one page (1,000 rows) to a read with no range and does not say there
+   was more, so a whole-table read goes quietly short. This reads until a short
+   page and FAILS in words at its ceiling — a part is never passed on as the
+   whole. `build` must order by something unique. */
+const DG_PAGE = 1000;
+const DG_MAX_PAGES = 20;
+async function dgPaged(table, build, what){
+  const all = [];
+  for (let i = 0; i < DG_MAX_PAGES; i++) {
+    const r = await dgQuery(table, q => {
+      const x = build(q);
+      return x && typeof x.range === 'function' ? x.range(i * DG_PAGE, i * DG_PAGE + DG_PAGE - 1) : x;
+    }, []);
+    if (!r.ok) return r;
+    const rows = dgRows(r);
+    for (const row of rows) all.push(row);
+    if (rows.length < DG_PAGE) return dgOk(all);
+  }
+  return dgErr('There are more ' + (what || 'rows') + ' than this screen can read in one go, so it is not showing a part of them as the whole.');
+}
 /* The list a query gave us, or an empty list. */
 function dgRows(res){ return res && res.ok && Array.isArray(res.data) ? res.data : []; }
 /* Did a source answer at all? Used to tell "0" apart from "we do not know". */
@@ -162,13 +183,19 @@ function dgCallWho(call){
 
 /* Every month row for a client, newest last. Through finance.js when it is loaded. */
 async function dgStanding(clientId){
-  const viaFinance = await dgAsk('fnStanding', clientId ? {clientId} : {});
-  if (viaFinance.ok) return dgOk(Array.isArray(viaFinance.data) ? viaFinance.data : []);
-  const direct = await dgQuery('v_month_standing', q => {
+  /* finance.js reads this a page at a time and refuses in words when there is
+     more than it can read. When it said no, the answer here used to be a second
+     try straight at the view with no paging — which hands back the first 1,000
+     months as if they were all of them. A refusal is passed on as it came. */
+  if (dgHas('fnStanding')) {
+    const viaFinance = await dgAsk('fnStanding', clientId ? {clientId} : {});
+    return viaFinance.ok ? dgOk(Array.isArray(viaFinance.data) ? viaFinance.data : []) : viaFinance;
+  }
+  const direct = await dgPaged('v_month_standing', q => {
     let x = q.select('*');
     if (clientId) x = x.eq('client_id', clientId);
-    return x.order('ends_on');
-  }, []);
+    return x.order('ends_on').order('month_id');
+  }, 'months');
   return direct.ok ? dgOk(dgRows(direct)) : direct;
 }
 /* The month that is running now: the open one, else the last one that ended. */
@@ -282,7 +309,13 @@ function dgExposureNotStarted(rows, now){
 
 /* What locking a short month costs, read off the finance side — never worked out here. */
 function dgRefundIfLocked(month){
-  const due = dgPickNum(month, ['refund_due', 'refund_amount', 'refund']);
+  /* `at_risk` last, and it matters: v_month_standing has no refund_due column
+     (checked live 2026-11-27), and for a month that is still open its at_risk is
+     exactly what lock_month would raise on the count as it stands. Without it
+     every row of Month end read "—" and the screen said "The total refund is not
+     known yet" beside buttons that would raise thousands, while the commitment
+     board on Today printed the figure from the same row. */
+  const due = dgPickNum(month, ['refund_due', 'refund_amount', 'refund', 'at_risk']);
   let mult = dgPickNum(month, ['refund_multiplier', 'multiplier', 'refund_x']);
   if (mult === null && due !== null && due > 0) {
     const fee = dgPickNum(month, ['monthly_fee', 'fee', 'month_fee']);
@@ -694,6 +727,24 @@ async function dgFridayUpdate(clientId, now, pre){
 }
 
 /* Every live client's update, ready to review before anything goes out. */
+/* The earliest instant a call can matter to this week's drafts: the start of the
+   oldest month any of them is reporting on, or the start of the week, whichever
+   is earlier — less two days, because a month's edge is a US date and a call is
+   a UTC instant. Pure. */
+const DG_CALLS_FALLBACK_DAYS = 45;
+function dgCallsFloor(months, now){
+  const at = dgNow(now);
+  let floor = dgWeek(at).from.getTime();
+  let known = false;
+  (months || []).forEach(m => {
+    const s = dgParse(m && dgPick(m, ['starts_on']));
+    if (!s) return;
+    known = true;
+    if (s.getTime() < floor) floor = s.getTime();
+  });
+  if (!known) floor = Math.min(floor, at.getTime() - DG_CALLS_FALLBACK_DAYS * 86400000);
+  return new Date(floor - 2 * 86400000).toISOString();
+}
 async function dgFridayAll(now){
   const clients = await dgAsk('fnClients');
   const list = clients.ok ? clients : await dgQuery('clients', q => q.select('*'), []);
@@ -716,13 +767,24 @@ async function dgFridayAll(now){
     dgRows(res).forEach(r => { const k = r && dgPick(r, [key || 'client_id']); if (k != null) (m[k] = m[k] || []).push(r); });
     return m;
   };
-  const [allStanding, allCalls, allSummary] = ids.length ? await Promise.all([
+  const [allStanding, allSummary] = ids.length ? await Promise.all([
     dgStanding(null),
-    /* fnCalls only answers about one client, so the whole list is read here. */
-    dgQuery('qualified_calls', q => q.select('*').in('client_id', ids), []),
     dgQuery('v_outreach_summary', q => q.select('*').in('client_id', ids), []),
-  ]) : [dgOk([]), dgOk([]), dgOk([])];
-  const standingBy = byId(allStanding), callsBy = byId(allCalls), sumBy = byId(allSummary);
+  ]) : [dgOk([]), dgOk([])];
+  const standingBy = byId(allStanding), sumBy = byId(allSummary);
+  /* THE CALLS, FROM THE DAY THEY CAN FIRST MATTER, A PAGE AT A TIME. This read
+     every call ever made for every live client with no date and no order. The
+     database hands back 1,000 and stops, so once the book passed its thousandth
+     call the update that goes to a CLIENT read "Booked this week 0 · Turned up
+     0" for clients who had calls that week. A draft only looks at the month that
+     is running and the week it reports, so nothing older than the earliest of
+     those is asked for; and what is asked for is read to the end. */
+  const at0 = dgNow(now);
+  const floor = dgCallsFloor(live.map(c => dgCurrentMonth(standingBy[c.id] || [], at0)), at0);
+  const allCalls = ids.length
+    ? await dgPaged('qualified_calls', q => q.select('*').in('client_id', ids).gte('booked_for', floor).order('id'), 'booked calls')
+    : dgOk([]);
+  const callsBy = byId(allCalls);
   /* A source that did not answer stays "did not answer" for every client, so a
      database that is down still shows a dash and never a made-up zero. */
   const slice = (res, map, id) => (res.ok ? dgOk(map[id] || []) : res);
@@ -843,8 +905,8 @@ async function dgMonthCloseFromStanding(now){
 
   const clients = await dgAsk('fnClients');
   const clientsQ = clients.ok ? clients : await dgQuery('clients', q => q.select('*'), []);
-  const nameOf = {};
-  dgRows(clientsQ).forEach(c => { if (c && c.id) nameOf[c.id] = dgName(c); });
+  const nameOf = {}, feeOf = {};
+  dgRows(clientsQ).forEach(c => { if (c && c.id) { nameOf[c.id] = dgName(c); feeOf[c.id] = dgPickNum(c, ['monthly_fee']); } });
 
   const months = [];
   dgRows(standing).forEach(m => {
@@ -854,7 +916,10 @@ async function dgMonthCloseFromStanding(now){
     const ended = ends ? dgDayStart(ends) < dgDayStart(at) : (left !== null && left < 0);
     if (!ended) return;                                            /* only months whose end date has passed */
     const v = dgVerdict(m, null, at);
-    const refund = dgRefundIfLocked(m);
+    /* the fee rides on the client row, not the view: hand it over so the "At"
+       column can read back the multiplier finance used, rather than show a dash */
+    const fee = feeOf[dgPick(m, ['client_id'])];
+    const refund = dgRefundIfLocked(fee === null || fee === undefined || dgPickNum(m, ['monthly_fee']) !== null ? m : Object.assign({}, m, {monthly_fee: fee}));
     months.push({
       monthId: dgPick(m, ['id', 'month_id']),
       clientId: dgPick(m, ['client_id']),
@@ -928,7 +993,7 @@ function dgRenderHome(data){
         '<span class="dg-row-sub">' + dgEsc(s.line) + '</span>' +
         dgBar(s.delivered, s.promised, s.state) + '</div>' +
         '<div class="dg-row-side"><span class="dg-amount">' + dgEsc(s.shortBy === null ? DG_DASH : dgShow(s.shortBy) + ' ' + dgPlural(s.shortBy, 'call') + ' short') + '</span>' +
-        '<span class="dg-row-sub">' + dgEsc(s.refund.amount ? dgUsd(s.refund.amount) + ' at ' + dgMultWords(s.refund.multiplier) + ' if it locks short' : 'no refund worked out yet') + '</span></div>' +
+        '<span class="dg-row-sub">' + dgEsc(s.refund.amount ? dgUsd(s.refund.amount) + (s.refund.multiplier === null || s.refund.multiplier === undefined ? '' : ' at ' + dgMultWords(s.refund.multiplier)) + ' if it locks short' : 'no refund worked out yet') + '</span></div>' +
         '<div class="dg-row-act">' + dgLink('Open this client', "dgOpenClient('" + dgEsc(String(s.clientId || '')) + "')", true) + '</div></li>').join('') + '</ul>'
     : '<p class="dg-none">No month is running short. Nothing needs a person here.</p>';
 
@@ -1004,7 +1069,10 @@ function dgOverWords(days){
   return n + ' days ago';
 }
 function dgCloseTable(rows, withButton){
-  return '<table class="dg-table"><thead><tr><th>Client</th><th>Month</th><th>Calls</th><th>Ended</th>' +
+  /* The Lock button is the last column, and at phone width the table is wider
+     than the screen: the one button on Month end was cut in half at the right
+     edge with no way to reach it. The table scrolls sideways inside this box. */
+  return '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%"><table class="dg-table"><thead><tr><th>Client</th><th>Month</th><th>Calls</th><th>Ended</th>' +
     '<th>Refund if locked</th><th>At</th><th>' + (withButton ? '' : 'Waiting on') + '</th></tr></thead><tbody>' +
     rows.map(x =>
       '<tr><td>' + dgEsc(x.company) + '</td><td>' + dgEsc(x.monthNo === null ? DG_DASH : String(x.monthNo)) + '</td>' +
@@ -1020,7 +1088,7 @@ function dgCloseTable(rows, withButton){
           dgLink('Open this client', "dgOpenClient('" + dgEsc(String(x.clientId || '')) + "')") + ' ' +
           dgLink('Lock it anyway', "dgLockMonth('" + dgEsc(String(x.monthId || '')) + "')")) +
       '</td></tr>').join('') +
-    '</tbody></table>';
+    '</tbody></table></div>';
 }
 function dgRenderMonthEnd(data){
   const d = data || {};
@@ -1031,11 +1099,13 @@ function dgRenderMonthEnd(data){
   const how = d.engine
     ? 'Aviance closes these by itself, every hour. A month that has ended, has every call marked and was paid for locks on its own, raises its refund and puts it on your list. The ones below are what the clock will not decide for you.'
     : 'Nothing closes a month on its own yet — the month-end schedule is in a database update that has not been applied. Until it is, every month on this screen waits for the button beside it.';
+  const last = d.lastClose
+    ? '<p class="' + (d.lastClose.ok ? 'dg-total' : 'dg-missing') + '" role="status" id="dgLastClose" tabindex="-1">' + dgEsc(d.lastClose.says) + '</p>' : '';
   if (!months.length && !held.length) {
-    return '<div class="dg-screen"><p class="dg-none">No month has ended and is waiting to be locked.</p>' +
+    return '<div class="dg-screen">' + last + '<p class="dg-none">No month has ended and is waiting to be locked.</p>' +
       '<p class="dg-note-foot">' + dgEsc(how) + '</p>' + dgMissingLine(d.missing) + '</div>';
   }
-  return '<div class="dg-screen">' +
+  return '<div class="dg-screen">' + last +
     '<p class="dg-note-foot">' + dgEsc(how) + '</p>' +
     (months.length
       ? '<div class="dg-head"><h3>Ready to close</h3>' +
@@ -1061,7 +1131,7 @@ function dgRenderMonthEnd(data){
 /* index.html routes 'home', 'friday' and 'monthEnd' here. A view function must
    return HTML at once, so each one hands back its host and then fills it from
    real queries. Nothing is drawn from a number held over from last time. */
-const dg = {screen: 'home', drafts: [], needs: null, needsAt: 0};
+const dg = {screen: 'home', drafts: [], needs: null, needsAt: 0, closing: {}, lastClose: null};
 
 function dgSkeleton(){ return '<div class="dg-screen" aria-busy="true"><p class="dg-none">Counting…</p></div>'; }
 function dgHost(screen){
@@ -1071,7 +1141,9 @@ function dgHost(screen){
 }
 function viewHome(){ return dgHost('home'); }
 function viewFriday(){ return dgHost('friday'); }
-function viewMonthEnd(){ return dgHost('monthEnd'); }
+/* Arriving at Month end starts clean: what the last close said belongs to the
+   visit it happened on. dgLockMonth repaints through dgMount, not through here. */
+function viewMonthEnd(){ dg.lastClose = null; return dgHost('monthEnd'); }
 
 function dgPaint(html){
   if (typeof document === 'undefined' || !document.getElementById) return false;
@@ -1088,7 +1160,7 @@ async function dgMount(screen){
       dgPaint(dgRenderFriday(r.ok ? r.data : {drafts: [], missing: ['this week\'s drafts']}));
     } else if (dg.screen === 'monthEnd') {
       const r = await dgMonthClose();
-      dgPaint(dgRenderMonthEnd(r.ok ? r.data : {months: [], missing: ['the month standings']}));
+      dgPaint(dgRenderMonthEnd(Object.assign({}, r.ok ? r.data : {months: [], missing: ['the month standings']}, {lastClose: dg.lastClose})));
     } else {
       const r = await dgHome();
       if (r.ok) { dg.needs = dgNeedsCount(r.data); dg.needsAt = Date.now(); }
@@ -1136,20 +1208,48 @@ function dgGo(what){
    there, and fall back to locking alone when it is not, so this button keeps
    working on a build without it. Either way this screen writes no sequence of
    its own: the money side owns the order. */
+/* The button that was pressed went with the old table. Put the keyboard on the
+   sentence that says what happened, so the next Tab is the next month and not
+   the top of the sidebar. */
+function dgFocusSaid(){
+  if (typeof document === 'undefined' || !document.getElementById) return;
+  const el = document.getElementById('dgLastClose');
+  if (el && typeof el.focus === 'function') { try { el.focus({preventScroll: true}); } catch (e) { /* nothing to focus */ } }
+}
 async function dgLockMonth(monthId){
   if (!monthId) return;
-  if (dgHas('fnCloseMonth')) {
-    const c = await dgAsk('fnCloseMonth', monthId);
-    /* fnCloseMonth refuses in a sentence the owner can act on — show it as it
-       came, and do not then try to lock the month behind its back. */
-    if (dgHas('toast')) toast(c.ok ? 'Month closed. Any refund it owes is raised, and the next month is opened and invoiced.' : c.error);
-    dgMount('monthEnd');
-    return;
-  }
-  if (!dgHas('fnLockMonth')) { if (dgHas('toast')) toast('The money side is not loaded, so nothing was locked.'); return; }
-  const r = await dgAsk('fnLockMonth', monthId);
-  if (dgHas('toast')) toast(r.ok ? 'Month locked. Any refund it owes is now raised.' : r.error);
-  dgMount('monthEnd');
+  /* One press per month. A second click while the first is still going used to
+     run the whole close again beside it — see fnCloseMonth for what that opened. */
+  const key = String(monthId);
+  if (dg.closing[key]) return;
+  dg.closing[key] = true;
+  try {
+    if (dgHas('fnCloseMonth')) {
+      const c = await dgAsk('fnCloseMonth', monthId);
+      /* SAY WHAT ACTUALLY HAPPENED. fnCloseMonth answers ok with a sentence in
+         `says` for every outcome, and several of them are refusals: a 3-month
+         term reaching month four ("nothing has been raised"), a client who has
+         left ("no new month was opened"), an invoice that could not be raised.
+         This used to throw that sentence away and announce "the next month is
+         opened and invoiced" for all of them — on the one screen where the owner
+         needs to know whether a client is still being billed. The sentence is
+         long, so it is also kept at the top of the screen, not only in a toast. */
+      const says = c.ok ? ((c.data && c.data.says) || 'The month is locked.') : c.error;
+      dg.lastClose = {ok: !!c.ok, says};
+      if (dgHas('toast')) toast(says);
+      if (dgHas('cbStale')) { try { cbStale(); } catch (e) { /* the clients screen is not loaded */ } }
+      await dgMount('monthEnd');
+      dgFocusSaid();
+      return;
+    }
+    if (!dgHas('fnLockMonth')) { if (dgHas('toast')) toast('The money side is not loaded, so nothing was locked.'); return; }
+    const r = await dgAsk('fnLockMonth', monthId);
+    const says = r.ok ? 'Month locked. Any refund it owes is now raised.' : r.error;
+    dg.lastClose = {ok: !!r.ok, says};
+    if (dgHas('toast')) toast(says);
+    await dgMount('monthEnd');
+    dgFocusSaid();
+  } finally { delete dg.closing[key]; }
 }
 function dgCopyDraft(i){
   const d = dg.drafts[i];

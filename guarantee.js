@@ -324,15 +324,15 @@ function guBoardHtml(b){
 
   const extras = [];
   if (d.toClose.length) extras.push(d.toClose.length + (d.toClose.length === 1 ? ' month has' : ' months have') +
-    ' ended and is still open' + (d.closeCost.total ? ', holding ' + guUsd(d.closeCost.total) + ' that is already spent' : '') +
+    ' ended and ' + (d.toClose.length === 1 ? 'is' : 'are') + ' still open' + (d.closeCost.total ? ', holding ' + guUsd(d.closeCost.total) + ' that is already spent' : '') +
     '. That money cannot be saved, only settled.');
   if (d.before.length) extras.push(d.before.length + (d.before.length === 1 ? ' month has' : ' months have') +
-    ' been bought and has not started. Not counted above: there is no pace to be behind yet.');
+    ' been bought and ' + (d.before.length === 1 ? 'has' : 'have') + ' not started. Not counted above: there is no pace to be behind yet.');
 
   const recon = !d.dbGot
     ? '<p class="gu-fail">' + guEsc('The all-months exposure total did not come through, so the reconciliation below is a dash rather than a zero.') + '</p>'
     : '<p class="gu-recon">' + guEsc('For comparison, the database’s own all-months total: ' + guUsdOr(d.dbAtRiskTotal) +
-        ' across ' + guNumOr(d.dbOpenMonths) + ' open months, of which ' + guUsdOr(d.dbAtRiskMonthOne) +
+        ' across ' + guNumOr(d.dbOpenMonths) + (d.dbOpenMonths === 1 ? ' open month' : ' open months') + ', of which ' + guUsdOr(d.dbAtRiskMonthOne) +
         ' is month one at double the fee. That figure counts every open month on the book — including months that have not started and months that ended and were never closed — so it is bigger than the headline on purpose. The headline is only the money a decision today can still move.') + '</p>';
 
   return '<section class="gu" aria-label="What is promised this month">' +

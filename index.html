@@ -549,7 +549,7 @@ const views={
   clients:{fn:()=>V('viewClients'),title:'Clients',sub:'Who is where, and what needs you'},
   client:{fn:()=>V('viewClient',currentClientId),title:'Client',sub:'',back:()=>render('clients')},
   needsYou:{fn:()=>V('viewNeedsYou'),title:'Needs you',sub:'What is actually behind',back:()=>render('clients')},
-  clientPeople:{fn:()=>V('viewClientPeople',currentClientId),title:'Their people',sub:'Who from their business can sign in',back:()=>render('clients')},
+  clientPeople:{fn:()=>V('viewClientPeople',currentClientId),title:'Their people',sub:'Who from their business can sign in',back:()=>render(currentClientId?'client':'clients')},
   prospects:{fn:()=>V('viewProspects'),title:'Prospects',sub:'Every business we are emailing, and every reply',wide:true},
   prospect:{fn:()=>V('viewProspect',currentThreadId),title:'Prospect',sub:'',back:()=>render('prospects')},
   onboarding:{fn:()=>V('viewOnboarding'),title:'Onboarding checklist',sub:'What is blocking each new client',back:()=>render('clients')},
@@ -616,9 +616,16 @@ function render(v){
   if(!views[v]||!authUser)return;
   if(!hubAllowed(v))v=hubProspectSeat()?'prospects':'home';
   const view=views[v];if(!view)return;
-  currentView=v;
   const box=document.getElementById('content');
-  const paint=html=>{box.innerHTML=`<div class="view${view.wide?' wide':''}">${html}</div>`;};
+  /* A screen that draws ITSELF again after a button (a stage move, an invoice
+     marked paid) throws away the button that had the keyboard's focus, and the
+     browser drops focus to the top of the document: the next Tab starts from the
+     sidebar again. Keep it in the screen. Only for a redraw of the same screen —
+     arriving from the sidebar leaves focus on the sidebar, where the person is. */
+  const held=currentView===v&&typeof box.contains==='function'&&box.contains(document.activeElement);
+  currentView=v;
+  const paint=html=>{box.innerHTML=`<div class="view${view.wide?' wide':''}">${html}</div>`;
+    if(held&&!box.contains(document.activeElement)&&typeof box.focus==='function'){try{box.focus({preventScroll:true});}catch(e){}}};
   const out=view.fn();
   if(out&&typeof out.then==='function'){   // a screen that reads before it draws: say so, then fill it in if they are still on it
     paint('<div class="card view-loading" role="status">Loading\u2026</div>');

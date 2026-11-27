@@ -402,8 +402,10 @@ test('a failed recount never turns a write that worked into an error', async () 
    refuse out loud rather than pass a part off as the whole. */
 test('fnStanding source pages its read and fails loudly at the ceiling', () => {
   const src = fs.readFileSync(new URL('../finance.js', import.meta.url), 'utf8');
-  const body = src.slice(src.indexOf('async function fnStanding'), src.indexOf('async function fnStanding') + 1600);
-  assert.match(body, /\.range\(/, 'reads a page at a time');
-  assert.match(body, /rows\.length < FN_STANDING_PAGE/, 'stops on a short page');
-  assert.match(body, /not showing a part of them as the whole/, 'refuses in words at the ceiling');
+  const body = src.slice(src.indexOf('function fnStanding'), src.indexOf('function fnStanding') + 900);
+  assert.match(body, /fnPaged\(/, 'reads a page at a time');
+  assert.match(body, /\.order\('month_id'\)/, 'a unique tie-break, so a page cannot repeat or skip a month');
+  const pager = src.slice(src.indexOf('async function fnPaged'), src.indexOf('async function fnPaged') + 900);
+  assert.match(pager, /rows\.length < FN_PAGE/, 'stops on a short page');
+  assert.match(pager, /not showing a part of them as the whole/, 'refuses in words at the ceiling');
 });

@@ -24,8 +24,8 @@
    decided about.
 
    NO MONEY RULE LIVES HERE. Every figure comes from the database through
-   finance.js (fnOwed, fnRefundsForScreen, fnMoneyBack, fnMarkRefundPaid,
-   fnCloseMonth). This file reads, sorts and draws. Data functions return
+   finance.js (fnOwed, fnRefundsForScreen, fnMoneyBack, fnMarkRefundPaid).
+   This file reads, sorts and draws. Data functions return
    {ok,data,error} and never throw; render functions are pure.
 
    Loaded after finance.js. Every global is prefixed `mo`, except viewMoney,
@@ -135,7 +135,11 @@ function moRefundRowHtml(r){
     <span class="mo-who"><b>${moEsc(r.company || 'A client')}</b><span class="mo-sub">${moEsc(r.month_no == null ? '' : 'Month ' + r.month_no)}${r.client_ended_on ? ' · they have left' : ''}</span></span>
     <span class="mo-amt fig">${moEsc(moUsd(r.amount))}</span>
     <span class="mo-when"><span class="pill ${pill}">${moEsc((typeof FN_REFUND_WORDS === 'object' && FN_REFUND_WORDS[state]) || 'Owed')}</span>
-      <span class="mo-sub">${moEsc(moHas('fnRefundLine') ? fnRefundLine(r) : '')}</span></span>
+      <span class="mo-sub">${moEsc(moHas('fnRefundLine') ? fnRefundLine(r) : '')}</span>${
+        /* a part payment noted on a row that is still owed, or a payment recorded
+           before the database could hold its reference (see fnMarkRefundPaid):
+           the notes are the only place that fact lives, so they are shown here */
+        (state === 'owed' || (state === 'paid' && !r.paid_reference)) && String(r.notes || '').trim() ? `<span class="mo-sub">${moEsc(String(r.notes).trim())}</span>` : ''}</span>
     <span class="mo-acts">${btn}</span></li>`;
 }
 
@@ -222,28 +226,61 @@ function moGo(view){
 function viewMoney(){
   mo.owed = null; mo.refunds = null; mo.back = null; mo.gaps = null; mo.err = '';
   Promise.resolve(moLoad()).then(() => moPaint()).catch(() => {});
-  return `<div id="moHost">${moBodyHtml()}</div>`;
+  return `<div id="moHost" tabindex="-1">${moBodyHtml()}</div>`;
 }
 function moPaint(){
   const h = typeof document !== 'undefined' && document.getElementById ? document.getElementById('moHost') : null;
+  /* The button that was pressed is about to be thrown away with the rest of the
+     screen. Without this the keyboard's focus fell to the top of the document
+     after every Mark paid, and the next Tab started from the sidebar. */
+  const held = !!(h && typeof h.contains === 'function' && h.contains(document.activeElement));
   if (h) h.innerHTML = moBodyHtml();
+  if (held && typeof h.focus === 'function' && !h.contains(document.activeElement)) { try { h.focus({preventScroll: true}); } catch (e) { /* not focusable here */ } }
+  /* The sidebar badge is counted from what this screen just read. The sidebar
+     was drawn BEFORE the read came back, so it showed no number while the owner
+     was looking at five things that needed him, and went on showing the old
+     number after he had cleared them. */
+  if (h && moHas('renderNav')) { try { renderNav(); } catch (e) { /* signed out */ } }
 }
 async function moReload(){ await moLoad(); moPaint(); }
 function moSay(msg){ if (msg && moHas('toast')) toast(msg); }
 
 /* ---- the buttons -------------------------------------------------- */
 
-async function moSendGo(invoiceId){
-  if (!moHas('fnMarkInvoiceSent')) return moSay(MO_NOT_LOADED);
-  const r = await fnMarkInvoiceSent(invoiceId);
-  moSay(r.ok ? 'Marked as sent.' : r.error);
-  await moReload();
+/* ONE PRESS AT A TIME, PER THING. The database refuses a second mark_paid, so
+   nothing was paid twice — but the refusal arrived after the success and its
+   toast replaced it: the owner clicked Paid, it worked, and the screen told him
+   "That invoice is already marked paid." A refund recorded without the database
+   rule had no such refusal and wrote its note twice. A press while the same
+   thing is still going is dropped, and says nothing. */
+const moBusy = {};
+async function moOnce(key, fn){
+  if (moBusy[key]) return moErr('Still working on it.');
+  moBusy[key] = true;
+  try { return await fn(); } finally { delete moBusy[key]; }
 }
-async function moPaidGo(invoiceId){
-  if (!moHas('fnMarkInvoicePaid')) return moSay(MO_NOT_LOADED);
-  const r = await fnMarkInvoicePaid(invoiceId, 'bank transfer');
-  moSay(r.ok ? (moHas('fnPaidWords') ? fnPaidWords(r.data) : 'Marked paid.') : r.error);
-  await moReload();
+/* The clients screen keeps its own copy of invoices and months. Tell it. */
+function moChanged(){ if (moHas('cbStale')) { try { cbStale(); } catch (e) { /* not loaded */ } } }
+
+function moSendGo(invoiceId){
+  return moOnce('sent:' + invoiceId, async () => {
+    if (!moHas('fnMarkInvoiceSent')) return moSay(MO_NOT_LOADED);
+    const r = await fnMarkInvoiceSent(invoiceId);
+    moSay(r.ok ? 'Marked as sent.' : r.error);
+    if (r.ok) moChanged();
+    await moReload();
+    return r;
+  });
+}
+function moPaidGo(invoiceId){
+  return moOnce('paid:' + invoiceId, async () => {
+    if (!moHas('fnMarkInvoicePaid')) return moSay(MO_NOT_LOADED);
+    const r = await fnMarkInvoicePaid(invoiceId, 'bank transfer');
+    moSay(r.ok ? (moHas('fnPaidWords') ? fnPaidWords(r.data) : 'Marked paid.') : r.error);
+    if (r.ok) moChanged();
+    await moReload();
+    return r;
+  });
 }
 
 /* Recording a refund payment. Four facts, because "status = paid" on its own is
@@ -257,10 +294,12 @@ function moPayFormHtml(r){
   const methods = (typeof FN_REFUND_METHODS !== 'undefined' ? FN_REFUND_METHODS : ['bank transfer']);
   return `<div class="modal-head"><div><h3>Record the refund</h3>
       <p>${moEsc((r.company || 'This client') + ' — the guarantee raised ' + moUsd(r.amount)
-        + (r.month_no == null ? '' : ' for month ' + r.month_no) + '. Nothing is sent from here; this records the transfer you made.')}</p></div></div>
+        + (r.month_no == null ? '' : ' for month ' + r.month_no) + '.'
+        + (moNum(r.still_owed) > 0 && moNum(r.still_owed) < moNum(r.amount) ? ' ' + moUsd(moNum(r.amount) - moNum(r.still_owed)) + ' of it has gone already; ' + moUsd(r.still_owed) + ' is left.' : '')
+        + ' Nothing is sent from here; this records the transfer you made.')}</p></div></div>
     <div class="modal-body">
       <div class="field row2">
-        <div><label for="moPayAmt">How much you sent</label><input id="moPayAmt" type="number" min="1" step="1" value="${moEsc(String(Math.round(moNum(r.amount))))}" inputmode="numeric"></div>
+        <div><label for="moPayAmt">How much you sent</label><input id="moPayAmt" type="number" min="1" step="1" value="${moEsc(String(Math.round(moNum(r.still_owed == null ? r.amount : r.still_owed))))}" inputmode="numeric"></div>
         <div><label for="moPayOn">When</label><input id="moPayOn" type="date" value="${moEsc(today)}" max="${moEsc(today)}"></div>
       </div>
       <div class="field"><label for="moPayVia">How you sent it</label>
@@ -286,7 +325,8 @@ function moPayEntry(){
   const v = id => (moHas('val') ? val(id) : '');
   return {amount: v('moPayAmt'), via: v('moPayVia'), reference: v('moPayRef'), on: v('moPayOn')};
 }
-async function moPayGo(refundId){
+function moPayGo(refundId){ return moOnce('refund:' + refundId, () => moPayGoOnce(refundId)); }
+async function moPayGoOnce(refundId){
   const r = moFindRefund(refundId);
   if (!r) return moSay('That refund is not on this screen any more. Refresh and try again.');
   const entry = moPayEntry();
@@ -299,15 +339,4 @@ async function moPayGo(refundId){
   moSay(moHas('fnRefundPaidWords') ? fnRefundPaidWords(out.data) : 'Recorded.');
   await moReload();
   return out;
-}
-
-/* Closing a month from here: lock it, open the next one, raise its invoice.
-   fnCloseMonth refuses in words where the answer is not settled (a 3-month term
-   reaching a new term, a client who has left) rather than guessing. */
-async function moCloseMonthGo(monthId){
-  if (!moHas('fnCloseMonth')) return moSay(MO_NOT_LOADED);
-  const r = await fnCloseMonth(monthId);
-  moSay(r.ok ? (r.data && r.data.says) || 'The month is locked.' : r.error);
-  await moReload();
-  return r;
 }

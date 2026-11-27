@@ -1386,6 +1386,11 @@ function mtRenderMeeting(data){
       : esc('Nothing came back from the calendar for this one.')]);
     kv.push(['Did they show up?', !call
       ? esc('No booked sales call matched this time.')
+      /* A cancelled call is not waiting for an answer and never will be: the
+         red "Nobody has answered yet" on it read as work still to do. */
+      : status === 'cancelled' && !call.verdict_at
+        ? '<span class="pill grey">'+esc('Cancelled')+'</span> <small class="mt-hint">'
+          + esc('It was called off, so there is nothing to answer.')+'</small>'
       : !call.verdict_at
         ? '<span class="pill red">'+esc('Nobody has answered yet')+'</span> <small class="mt-hint">'
           + esc('Until somebody says, this call does not count towards the month.')+'</small>'
@@ -1395,6 +1400,7 @@ function mtRenderMeeting(data){
     kv.push(['The money side', !call
       ? 'No booked sales call matched this time.'
       : call.counts === true ? 'Counted as delivered for the month.'
+      : status === 'cancelled' && !call.verdict_at ? 'Not counted: the call was cancelled.'
       : !call.verdict_at ? 'Not counted, because nobody has answered yet.'
       : call.happened && call.matched_icp === false ? 'Not counted: it did not match their profile.'
       : 'Not counted for the month.']);
@@ -2046,9 +2052,13 @@ async function mtLoadMeeting(id){
 }
 /* After a button changed a meeting: the meeting again, then the calendar. */
 async function mtAfterMeeting(id){
+  /* The client's own page counts its month from the same calls. Tell it. */
+  mtToldClients();
   await mtLoadMeeting(id);
   if(mt.cal) await mtLoadCal(true);
 }
+
+function mtToldClients(){ try{ if(typeof cbStale === 'function') cbStale() }catch(e){} return true }
 
 function viewNoShows(){
   mtLoadNoShows();
@@ -2249,6 +2259,8 @@ const MT_REFRESH_MS = 60000;    /* the Calendar reads itself again this often, w
 const MT_NEW_MS = 24*36e5;      /* how long a new booking rings the bell */
 const MT_LOOKBACK_DAYS = 30;    /* how far back the bell looks for calls with no outcome */
 
+const MT_BELL_STATUSES = ['booked', 'requested'];
+const MT_BELL_MAX = 200;
 /* What the bell says, from rows. Pure. Newest booking first, then the calls to mark. */
 function mtBellItems(bookings, meetings, now, st){
   const s = st || mtSettingsNow(), at = now || mtNow(), t = at.getTime();
@@ -2295,12 +2307,27 @@ async function mtBellLoad(){
       const [made, past, ms] = await Promise.all([
         mtRun(() => sb.from('discovery_bookings').select(bkCols).gte('created_at', dayAgo), []),
         mtRun(() => sb.from('discovery_bookings').select(bkCols).gte('call_at', since).lt('call_at', now.toISOString()), []),
-        mtRun(() => sb.from('meetings').select(msCols).gte('starts_at', since).lt('starts_at', now.toISOString()), []),
+        /* ONLY WHAT THE BELL CAN SHOW. It lists calls that have been and gone
+           with no outcome, and nothing else — but it read every meeting of the
+           last 30 days, every minute: 838 rows at 100 clients, and past 1,000 the
+           database cut the answer and calls waiting for an outcome fell off the
+           bell without a word. A meeting needs an outcome only while it is still
+           'booked' or 'requested' (mtMeetingNeedsOutcome), so that is all that is
+           asked for; newest first, and capped, so if the cap is ever reached it
+           is the oldest that wait, and the bell says there are more. */
+        mtRun(() => sb.from('meetings').select(msCols).in('status', MT_BELL_STATUSES)
+          .gte('starts_at', since).lt('starts_at', now.toISOString())
+          .order('starts_at', {ascending:false}).limit(MT_BELL_MAX), []),
       ]);
       if(!made.ok && !past.ok && !ms.ok) return made;
       const seen = {}, rows = [];
       (made.ok ? made.data||[] : []).concat(past.ok ? past.data||[] : []).forEach(b=>{ if(b && b.id != null && !seen[b.id]){ seen[b.id] = 1; rows.push(b) } });
       mt.bell = mtBellItems(rows, ms.ok ? ms.data||[] : [], now, st);
+      /* the read came back full: there are more behind it, and the bell says so
+         rather than showing a part as the whole */
+      if(ms.ok && (ms.data||[]).length >= MT_BELL_MAX)
+        mt.bell.push({key:'', ms:0, kind:'outcome', t:'More calls are waiting for an outcome than the bell can list',
+          s:'These are the newest '+MT_BELL_MAX+'. The Calendar has every one of them.'});
       mt.bellAt = Date.now();
       try{ if(typeof updateNotifBadge === 'function') updateNotifBadge(); }catch(e){}
       return mtOk(mt.bell);
@@ -2566,6 +2593,7 @@ async function mtVerdictClick(meetingId, callId, showed){
   }, done);
   if(r.ok && r.data && r.data.said && typeof toast === 'function') toast(r.data.said);
   await mtLoadAwaiting();
+  if(r.ok) mtToldClients();
   if(r.ok && meetingId) await mtAfterMeeting(meetingId);
   else if(r.ok && mt.cal) await mtLoadCal(true);
   return r;

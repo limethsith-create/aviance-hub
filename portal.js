@@ -331,6 +331,35 @@ function ptDaysOld(v, now){
 }
 const PT_INVITE_TONE = {pending:'blue', accepted:'green', expired:'amber', revoked:'grey'};
 
+/* The list of invites. Pure: the result of ptInvites in, HTML out. It is its own
+   piece so it can be drawn again by itself after an invite is made — the whole
+   screen cannot be, because that would wipe the link that is shown only once. */
+function ptInviteListHtml(invites){
+  if (!invites || !invites.ok) return ptAlert(invites && invites.error);
+  if (!invites.data.length) return ptEmpty('No invites yet', 'An invite makes a link to their own portal. It is shown once, for you to copy and send.');
+  return `<ul class="pt-list">` + invites.data.map(i => `<li class="pt-row">
+      <span class="pt-name">${ptEsc(i.email || '')}${ptTag(PT_INVITE_TONE[i.state] || 'grey', i.stateWords)}</span>
+      <span class="pt-sub">${ptEsc((i.portal_role === 'manager' ? 'Manager' : 'Viewer') + ' · ' + (i.state === 'accepted' ? 'joined ' + ptWhen(i.accepted_at) : 'expires ' + ptWhen(i.expires_at)))}</span>
+      <span class="pt-acts">
+        ${i.state === 'pending' ? `<button type="button" class="pt-link" onclick="ptRevokeFromRow(${ptA(i.id)})">Revoke</button>` : ''}
+        ${i.state === 'expired' || i.state === 'revoked' ? `<button type="button" class="pt-link" onclick="ptResendFromRow(${ptA(i.id)})">Send again</button>` : ''}
+      </span>
+    </li>`).join('') + `</ul>`;
+}
+/* Read the invites again and redraw only the list. An invite just made was not
+   on the screen that made it: no row, no "Waiting for them", no Revoke — the
+   owner could not see that it had taken a login, or take it back, without
+   leaving the page and coming back. */
+async function ptRefreshInviteList(clientId){
+  const box = ptEl('ptInviteList');
+  if (!box || !clientId) return false;
+  const invites = await ptInvites(clientId);
+  const now = ptEl('ptInviteList');
+  if (!now) return false;
+  now.innerHTML = ptInviteListHtml(invites);
+  return true;
+}
+
 /* Their people: who is primary, their invites and each invite's real state. */
 async function viewClientPeople(clientId){
   if (!ptCanSee(clientId)) return ptNoAccess();
@@ -345,17 +374,7 @@ async function viewClientPeople(clientId){
       ${p.is_primary ? '' : `<button type="button" class="pt-link" onclick="ptPrimaryFromRow(${ptA(clientId)},${ptA(p.id)})">Make primary</button>`}
     </li>`).join('') + `</ul>`;
 
-  let inviteHtml;
-  if (!invites.ok) inviteHtml = ptAlert(invites.error);
-  else if (!invites.data.length) inviteHtml = ptEmpty('No invites yet', 'An invite makes a link to their own portal. It is shown once, for you to copy and send.');
-  else inviteHtml = `<ul class="pt-list">` + invites.data.map(i => `<li class="pt-row">
-      <span class="pt-name">${ptEsc(i.email || '')}${ptTag(PT_INVITE_TONE[i.state] || 'grey', i.stateWords)}</span>
-      <span class="pt-sub">${ptEsc((i.portal_role === 'manager' ? 'Manager' : 'Viewer') + ' · ' + (i.state === 'accepted' ? 'joined ' + ptWhen(i.accepted_at) : 'expires ' + ptWhen(i.expires_at)))}</span>
-      <span class="pt-acts">
-        ${i.state === 'pending' ? `<button type="button" class="pt-link" onclick="ptRevokeFromRow(${ptA(i.id)})">Revoke</button>` : ''}
-        ${i.state === 'expired' || i.state === 'revoked' ? `<button type="button" class="pt-link" onclick="ptResendFromRow(${ptA(i.id)})">Send again</button>` : ''}
-      </span>
-    </li>`).join('') + `</ul>`;
+  const inviteHtml = `<div id="ptInviteList" data-pt-client="${ptEsc(clientId)}">${ptInviteListHtml(invites)}</div>`;
 
   const form = `<div class="pt-form">
     <div class="pt-field"><label for="ptInviteEmail">Email address</label><input id="ptInviteEmail" type="email" autocomplete="off" placeholder="name@theircompany.com"></div>
@@ -414,7 +433,7 @@ async function ptRowDo(key, fn, done){
   let out;
   try { out = await fn(); } finally { delete ptBusy[key]; }
   ptSay(out.ok ? done : out.error);
-  if (out.ok) ptRedraw();
+  if (out.ok) { ptInviteChanged(); ptRedraw(); }
   return out;
 }
 function ptPrimaryFromRow(clientId, personId){ return ptRowDo('primary:' + personId, () => ptSetPrimary(clientId, personId), 'They are the primary contact now.'); }
@@ -432,13 +451,24 @@ async function ptInviteFromForm(clientId){
   if (e) e.value = '';
   ptShowInviteOnce(out.data);
   ptSay('Invite made. Copy the link now — it is only shown this once.');
+  ptInviteChanged(clientId);
+  await ptRefreshInviteList(clientId);
   return out;
 }
+/* The client's own page counts logins from the same rows. Tell it they moved. */
+function ptInviteChanged(clientId){
+  try { if (typeof cbStale === 'function') cbStale(clientId); } catch (e) {}
+}
 async function ptResendFromRow(id){
-  const out = await ptResendInvite(id);
+  if (ptBusy['resend:' + id]) return ptErr('Still working on it.');   // two clicks made two invites and revoked the first
+  ptBusy['resend:' + id] = true;
+  let out;
+  try { out = await ptResendInvite(id); } finally { delete ptBusy['resend:' + id]; }
   if (!out.ok) { ptSay(out.error); return out; }
   ptShowInviteOnce(out.data);
   ptSay('A new invite is made and the old link no longer works. Copy the new link now.');
+  ptInviteChanged(out.data && out.data.client_id);
+  await ptRefreshInviteList(out.data && out.data.client_id);
   return out;
 }
 

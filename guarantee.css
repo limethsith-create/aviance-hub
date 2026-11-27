@@ -10,8 +10,8 @@
 
 .gu-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:0 0 16px}
 .gu-tile{border:1px solid var(--border,#DCDCE0);border-radius:10px;padding:11px 12px;
-  background:var(--mist,#F6F7F9);display:flex;flex-direction:column;gap:3px;min-width:0}
-.gu-tile-l{font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#63636A)}
+  background:var(--mist,var(--surface-2,#F6F7F9));display:flex;flex-direction:column;gap:3px;min-width:0}
+.gu-tile-l{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#63636A)}
 .gu-tile-v{font-size:1.55rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
 .gu-tile.gu-warn{border-color:var(--red,#C42408)}
 .gu-tile.gu-warn .gu-tile-v{color:var(--red,#C42408)}
@@ -28,7 +28,7 @@ body.dark .gu-tile.gu-warn .gu-tile-v{color:#E0290F}
 .gu-row-figs,.gu-row-side{display:flex;flex-direction:column;gap:2px;text-align:right;white-space:nowrap}
 .gu-count{font-size:1.05rem;font-weight:700;font-variant-numeric:tabular-nums}
 .gu-money{font-size:1rem;font-weight:700;font-variant-numeric:tabular-nums}
-.gu-stamp{font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#63636A)}
+.gu-stamp{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#63636A)}
 .gu-row-act .btn{white-space:nowrap}
 
 .gu-row.gu-gone{border-left-color:var(--red,#C42408)}
