@@ -282,7 +282,7 @@ async function tmLoadGrants(){
   tmPaint('tmGrantHost', tmRenderGrants());
 }
 
-async function tmDoGrant(){
+function tmDoGrant(){ return coreOnce('tm:grant', async () => {
   const pick = (id) => { const el = typeof document !== 'undefined' && document.getElementById ? document.getElementById(id) : null; return el ? el.value : '' };
   tmS.grantBusy = true;
   let r;
@@ -294,13 +294,13 @@ async function tmDoGrant(){
   if (typeof toast === 'function') toast(r.ok ? 'They can see that client\u2019s prospects now.' : r.error);
   if (r.ok) { tmS.grants = null; await tmLoadGrants() }
   return r;
-}
-async function tmDoRevoke(id){
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function tmDoRevoke(id){ return coreOnce('tm:revoke:'+id, async () => {
   const r = await tmGrantRevoke(id);
   if (typeof toast === 'function') toast(r.ok ? 'Taken back.' : r.error);
   if (r.ok) { tmS.grants = null; await tmLoadGrants() }
   return r;
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 /* ================= WORK QUEUE ===================================== */
 
@@ -564,19 +564,19 @@ function viewTeam(){
   return `<div id="tmTeamHost">${tmRenderTeam()}</div>`;
 }
 
-async function tmDoApprove(id){
+function tmDoApprove(id){ return coreOnce('tm:approve:'+id, async () => {
   const r = await tmApprove(id);
   if (!r.ok) { if (typeof toast === 'function') toast(r.error); return r }
   if (typeof toast === 'function') toast('They can sign in now.');
   await tmLoadTeam();
   return r;
-}
-async function tmDoSetRole(id, role){
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function tmDoSetRole(id, role){ return coreOnce('tm:role:'+id, async () => {
   const r = await tmSetRole(id, role);
   if (typeof toast === 'function') toast(r.ok ? 'Role saved.' : r.error);
   if (r.ok) await tmLoadTeam();
   return r;
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 /* ---- The work queue ------------------------------------------------ */
 

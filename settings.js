@@ -36,16 +36,22 @@ function stWrap(res,whenEmpty){ return coreWrap(res, whenEmpty, stErr, 'No answe
 async function stRun(fn,whenEmpty){ try{ return stWrap(await fn(),whenEmpty) }catch(e){ return stErr(e) } }
 
 /* ---- You ---- */
+/* The shell keeps the signed-in person as authUser.uid (index.html routeUser).
+   This card asked for authUser.id, which the shell never sets, so in the real
+   hub it answered "You are not signed in." to the owner on his own Settings
+   page, every time, and his name, title and phone could not be edited at all.
+   Both spellings are read, as team.js and clientbook.js already do. */
+function stMeId(){ try{ return String((typeof authUser!=='undefined'&&authUser&&(authUser.uid||authUser.id))||'') }catch(e){ return '' } }
 async function stMe(){
-  if(!authUser||!authUser.id)return stErr('You are not signed in.');
-  return stRun(()=>sb.from('profiles').select('*').eq('id',authUser.id).maybeSingle(),null);
+  const me=stMeId(); if(!me)return stErr('You are not signed in.');
+  return stRun(()=>sb.from('profiles').select('*').eq('id',me).maybeSingle(),null);
 }
 async function stSaveMe(fields){
-  if(!authUser||!authUser.id)return stErr('You are not signed in.');
+  const me=stMeId(); if(!me)return stErr('You are not signed in.');
   const allow=['name','title','loc','phone'];
   const patch={}; allow.forEach(k=>{ if(fields&&fields[k]!==undefined)patch[k]=String(fields[k]||'').trim() });
   if(!patch.name)return stErr('Put your name in before saving.');
-  return stRun(()=>sb.from('profiles').update(patch).eq('id',authUser.id).select().maybeSingle(),null);
+  return stRun(()=>sb.from('profiles').update(patch).eq('id',me).select().maybeSingle(),null);
 }
 
 /* ---- The calendar ---- */
@@ -109,15 +115,25 @@ function stKeyRef(provider,label){
 }
 function stOutProviderName(p){ const hit=ST_OUT_PROVIDERS.find(x=>x[0]===String(p)); return hit?hit[1]:String(p||'') }
 /* 'needs_key' is not a fault, it is a thing the owner has not done yet, so it reads as a to-do. */
-function stOutState(a){
+/* 'ok' is what the sync wrote the last time it ran, not proof that it is still running. An
+   account that was read fine on Monday and has not been read since still says 'ok' on Thursday,
+   and this used to print "Reading" beside it — a normal-looking row over three-day-old figures.
+   So 'ok' is only "Reading" while the last read is recent (coreFresh: three missed fifteen-minute
+   ticks); past that it says it has stopped, in red, with how long ago. */
+function stOutState(a,now){
   const s=String((a&&a.status)||'');
-  if(s==='ok')return {word:'Reading',cls:''};
+  if(s==='ok'){
+    const f=coreFresh(a&&a.last_synced_at,now);
+    if(!f.known)return {word:'Never read',cls:'st-err',why:'It is connected but nothing has been read from it yet. The sync runs every fifteen minutes; if this has not changed in an hour, the sync is not running.'};
+    if(f.stale)return {word:'Stopped reading',cls:'st-err',why:'Last read '+f.ago+'. The sync runs every fifteen minutes, so it has stopped. Everything Aviance OS shows for this client’s campaign and prospects is as it stood then.'};
+    return {word:'Reading',cls:''};
+  }
   if(s==='needs_key')return {word:'Waiting for its key',cls:'st-ro'};
   if(s==='paused')return {word:'Paused',cls:'st-ro'};
   if(s==='error')return {word:'Could not read',cls:'st-err'};
   return {word:s||'—',cls:'st-ro'};
 }
-function stWhen(v){ return v?String(v).slice(0,16).replace('T',' ')+' UTC':'never' }
+function stWhen(v,now){ const f=coreFresh(v,now); return v?String(v).slice(0,16).replace('T',' ')+' UTC'+(f.known?' · '+f.ago:''):'never' }
 
 function stValidOutreach(f){
   const g=f||{};
@@ -403,7 +419,7 @@ async function stLoadPay(){
   const el=document.getElementById('stPay'); if(!el)return;
   stShowPay(await stPay());
 }
-async function stSubmitPay(){
+function stSubmitPay(){ return coreOnce('st:pay', async () => {
   const msg=document.getElementById('stPayMsg'); if(msg)msg.textContent='Saving…';
   const r=await stSavePay(stReadPay());
   if(!r.ok){ if(msg)msg.textContent=r.error; return r }
@@ -411,7 +427,7 @@ async function stSubmitPay(){
   const again=document.getElementById('stPayMsg'); if(again)again.textContent='Saved.';
   if(typeof toast==='function')toast('The payment details are saved.');
   return r;
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 /* ---- Screens ---- */
 function stRow(label,html,hint){
@@ -454,7 +470,7 @@ async function stLoadBiz(){
   const el=document.getElementById('stBiz'); if(!el)return;
   stShowBiz(await stBiz());
 }
-async function stSubmitBiz(){
+function stSubmitBiz(){ return coreOnce('st:biz', async () => {
   const msg=document.getElementById('stBizMsg'); if(msg)msg.textContent='Saving…';
   const f={};
   ST_BIZ_FIELDS.forEach(([k])=>{ const e=document.getElementById('stBiz_'+k); if(e)f[k]=e.value });
@@ -468,7 +484,7 @@ async function stSubmitBiz(){
      on the other. */
   if(typeof toast==='function')toast('Your business details are saved.');
   return r;
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 async function stLoadMe(){
   const el=document.getElementById('stMe'); if(!el)return;
@@ -483,12 +499,12 @@ async function stLoadMe(){
     +stRow('What you can do',`<span class="st-ro">${esc(stRoleWord(m.role))}</span>`,'Only the owner can change this')
     +`<div class="st-act"><button class="btn" onclick="stSubmitMe()">Save</button><span id="stMeMsg" class="st-msg"></span></div>`;
 }
-async function stSubmitMe(){
+function stSubmitMe(){ return coreOnce('st:me', async () => {
   const msg=document.getElementById('stMeMsg'); if(msg)msg.textContent='Saving…';
   const r=await stSaveMe({name:val('stName'),title:val('stTitle'),loc:val('stLoc'),phone:val('stPhone')});
   if(msg)msg.textContent=r.ok?'Saved.':r.error;
   if(r.ok&&typeof toast==='function')toast('Your details are saved.');
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 const ST_DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 async function stLoadCal(){
@@ -508,7 +524,7 @@ async function stLoadCal(){
     +stRow('Meeting link',`<input id="stLink" value="${esc(c.meeting_link||'')}" placeholder="https://…">`)
     +`<div class="st-act"><button class="btn" onclick="stSubmitCal()">Save</button><span id="stCalMsg" class="st-msg"></span></div>`;
 }
-async function stSubmitCal(){
+function stSubmitCal(){ return coreOnce('st:cal', async () => {
   const msg=document.getElementById('stCalMsg'); if(msg)msg.textContent='Saving…';
   const days=Array.prototype.slice.call(document.querySelectorAll('.stDay')).filter(b=>b.checked).map(b=>Number(b.value));
   const r=await stSaveCalendar({open_time:val('stOpen'),close_time:val('stClose'),days,
@@ -516,7 +532,7 @@ async function stSubmitCal(){
     us_zone:val('stUsZone'),owner_zone:val('stOwnZone'),meeting_link:val('stLink')});
   if(msg)msg.textContent=r.ok?'Saved.':r.error;
   if(r.ok&&typeof toast==='function')toast('The calendar is saved.');
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
 
 /* Pure render. Everything escaped, and the only thing said about the key is its NAME. */
 /* `clientsErr` is the difference between "you have no clients yet" and "your
@@ -533,7 +549,7 @@ function stRenderOut(rows,clients,clientsErr){
         <td>${esc(stOutProviderName(a.provider))}</td><td>${esc(a.label||'')}</td>
         <td>${esc(a.external_id||'—')}</td>
         <td><code>${esc(a.key_ref||stKeyRef(a.provider,a.label))}</code></td>
-        <td><span class="${esc(st.cls)}">${esc(st.word)}</span>${a.last_error?`<small class="st-err">${esc(a.last_error)}</small>`:''}</td>
+        <td><span class="${esc(st.cls)}">${esc(st.word)}</span>${st.why?`<small class="st-err">${esc(st.why)}</small>`:''}${a.last_error?`<small class="st-err">${esc(a.last_error)}</small>`:''}</td>
         <td>${esc(stWhen(a.last_synced_at))}
           <div class="st-act"><button class="btn" onclick="stTogglePause('${esc(a.id)}',${a.status==='paused'?'false':'true'})">${a.status==='paused'?'Resume':'Pause'}</button></div></td></tr>` }).join('')
       +`</tbody></table>`;
@@ -555,15 +571,15 @@ async function stLoadOut(){
   if(!r.ok){ el.innerHTML=`<p class="st-err">${esc(r.error)}</p>`; return }
   el.innerHTML=stRenderOut(r.data||[],c.ok?(c.data||[]):[],c.ok?'':c.error);
 }
-async function stSubmitOut(){
+function stSubmitOut(){ return coreOnce('st:out', async () => {
   const msg=document.getElementById('stOutMsg'); if(msg)msg.textContent='Connecting…';
   const r=await stConnectOutreach({client_id:val('stOutClient'),provider:val('stOutProvider'),
     label:val('stOutLabel'),external_id:val('stOutExt')});
   if(msg)msg.textContent=r.ok?('Connected. Now set the secret '+stKeyRef(val('stOutProvider'),val('stOutLabel'))+' in Supabase.'):r.error;
   if(r.ok){ if(typeof toast==='function')toast('Account connected. Set its key in Supabase.'); stLoadOut() }
-}
-async function stTogglePause(id,paused){
+}, typeof document !== 'undefined' ? document.activeElement : null) }
+function stTogglePause(id,paused){ return coreOnce('st:pause:'+id, async () => {
   const r=await stPauseOutreach(id,paused===true||paused==='true');
   if(!r.ok&&typeof toast==='function')toast(r.error);
   stLoadOut();
-}
+}, typeof document !== 'undefined' ? document.activeElement : null) }
