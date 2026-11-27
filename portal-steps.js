@@ -273,6 +273,25 @@ async function pstSubmitForm(ctx, values){
   return r;
 }
 
+/* A write with a limit on it: pcWrite from portal-client.js. An approval or a set
+   of answers that never came back used to leave the card on "Approving…" /
+   "Sending…" with its buttons dead, for good. On its own (a test, or this file
+   loaded alone) the work simply runs. */
+function pstCapped(work){
+  return typeof pcWrite === 'function' ? pcWrite(work) : Promise.resolve().then(work);
+}
+/* We did not hear back. It may have gone and it may not, so the card says that,
+   keeps everything typed, gives its buttons back — and then the cards' state is
+   READ again, which is what settles it: if the write landed, the card turns into
+   its "Approved" / "Done" stamp by itself and there is nothing to press twice. */
+const PST_UNSURE = 'We did not hear back from Aviance, so we cannot tell whether that went through. We are checking now — if this card does not change in a moment, press the button again.';
+function pstUnsure(ctx, u, key){
+  u.error = PST_UNSURE;
+  pstRedraw(key || undefined);
+  pstState.at = 0; pstState.seen = '';
+  if (ctx && typeof ctx.refresh === 'function') { try { ctx.refresh(); } catch (e) { /* the next poll reads it */ } }
+}
+
 /* ---- wiring into the portal (PC from portal-client.js) --------------------------------------- */
 
 function pstCardFor(key){
@@ -292,7 +311,11 @@ function pstRedraw(key){
     if (!html) return;
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
-    if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild);
+    const next = tmp.firstElementChild;
+    if (!next) return;
+    /* the comment above always promised this; pcKeepFocus is what does it */
+    const swap = () => el.replaceWith(next);
+    if (typeof pcKeepFocus === 'function' && el.parentNode) pcKeepFocus(el.parentNode, swap); else swap();
   });
 }
 
@@ -322,9 +345,10 @@ if (typeof PC !== 'undefined' && PC) {
     let r;
     /* An approval is a write: never sent twice. The card always becomes usable
        again, or a client could not approve anything without reloading. */
-    try { r = await pstDecide(ctx, id, u.name, decision, u.note); }
+    try { r = await pstCapped(() => pstDecide(ctx, id, u.name, decision, u.note)); }
     catch (e) { r = pstErr(e); }
     finally { u.busy = false }
+    if (!r.ok && r.noAnswer) return pstUnsure(ctx, u, key);
     if (!r.ok) { u.error = r.error; pstRedraw(key); return; }
     pstState.approvals[id] = Object.assign({}, pstState.approvals[id] || {}, r.data);
     u.open = false; pstRedraw(key);
@@ -351,9 +375,10 @@ if (typeof PC !== 'undefined' && PC) {
     const vals = Object.assign({}, pstState.form || {}, u.values || {});
     u.busy = true; u.error = ''; pstRedraw();
     let r;
-    try { r = await pstSubmitForm(ctx, vals); }
+    try { r = await pstCapped(() => pstSubmitForm(ctx, vals)); }
     catch (e) { r = pstErr(e); }
     u.busy = false;
+    if (!r.ok && r.noAnswer) return pstUnsure(ctx, u, '');
     if (!r.ok) { u.error = r.error; pstRedraw(); return; }
     pstState.form = r.data; u.values = {};
     pstRedraw();

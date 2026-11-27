@@ -83,7 +83,8 @@
   async function load(){
     show(pcLoadingHtml());
     if (STAFF_TOKEN.test(token)) return loadStaff();
-    const r = await pcDocGet(token);
+    /* a limit, like every other first read: this used to say "Loading" for ever */
+    const r = await pcRead(function(){ return pcDocGet(token); });
     if (!r.ok) {
       doc = null;
       document.title = 'Aviance';
@@ -117,7 +118,15 @@
     err.textContent = bad;
     if (bad) { (agree.checked || pcSignProblem(name.value, true) ? name : agree).focus(); return; }
     busy = true; btn.disabled = true; btn.textContent = 'Signing…';
-    const r = await pcDocSign(token, name.value, navigator.userAgent);
+    const typed = name.value;
+    let r = await pcWrite(function(){ return pcDocSign(token, typed, navigator.userAgent); });
+    if (!r.ok && r.noAnswer) {
+      /* The signature may have landed and only the answer been lost. Do not ask
+         them to sign twice: read the agreement again and show what is true. */
+      const now = await pcRead(function(){ return pcDocGet(token); });
+      if (now.ok && now.data && now.data.kind === 'agreement' && now.data.status === 'signed') r = now;
+      else r = { ok: false, error: 'We did not hear back from Aviance, so your signature may not have been recorded. Your name is still here — press the button again in a moment.' };
+    }
     busy = false;
     if (!r.ok) {
       btn.disabled = false; btn.textContent = 'Sign agreement';
