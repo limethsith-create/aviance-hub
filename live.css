@@ -1,0 +1,30 @@
+/* The Live screen: who is on the website right now. Quiet by default, loud
+   only for the one thing worth interrupting a morning — somebody booking. */
+.lv-list{list-style:none;margin:0;padding:0;border:1px solid var(--border)}
+.lv-row{display:grid;grid-template-columns:14px 1fr auto auto;gap:12px;align-items:center;
+  padding:13px 16px;border-bottom:1px solid var(--border-soft)}
+.lv-row:last-child{border-bottom:0}
+.lv-hot{background:var(--red-wash,rgba(196,36,8,.05))}
+
+/* A dot that breathes, so a glance tells you the screen is live rather than
+   frozen. It stops for anyone who asked their machine for less movement. */
+.lv-dot{width:9px;height:9px;background:var(--green,#1B7F4B);display:block;
+  animation:lvPulse 2.4s ease-in-out infinite}
+.lv-hot .lv-dot{background:var(--red-brand,#C42408)}
+@keyframes lvPulse{0%,100%{opacity:1}50%{opacity:.28}}
+@media(prefers-reduced-motion:reduce){.lv-dot{animation:none}}
+
+.lv-who{min-width:0}
+.lv-who b{display:block;font-weight:600}
+.lv-sub{display:block;font-size:var(--fs-min);color:var(--muted);margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lv-when{font-family:var(--mono);font-size:var(--fs-min);color:var(--muted);
+  font-variant-numeric:tabular-nums}
+.lv-none{padding:22px}
+.lv-none p{margin:8px 0 0;color:var(--muted);font-size:var(--fs-small);line-height:1.6}
+.lv-foot{margin-top:14px;font-size:var(--fs-min);color:var(--muted);line-height:1.65}
+
+@media(max-width:620px){
+  .lv-row{grid-template-columns:14px 1fr auto;row-gap:6px}
+  .lv-stage{grid-column:2/4}
+}

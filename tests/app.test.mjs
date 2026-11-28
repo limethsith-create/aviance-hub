@@ -136,10 +136,10 @@ test('index.html loads no file twice, none for a removed screen, and npm run che
   assert.ok(!/<link[^>]+fonts\.googleapis\.com\/css2[^>]+rel="stylesheet">/.test(html), 'the web fonts do not block the first paint');
 });
 
-test('the sidebar: eleven plain places for the owner, each with its own icon, most used first', () => {
+test('the sidebar: twelve plain places for the owner, each with its own icon, most used first', () => {
   const { run } = shell('admin');
   const items = plain(run('navItems()'));
-  assert.deepEqual(items.map((i) => i.label), ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Prospects', 'Employees', 'Onboarding', 'Money', 'Documents', 'Settings']);
+  assert.deepEqual(items.map((i) => i.label), ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Prospects', 'Live', 'Employees', 'Onboarding', 'Money', 'Documents', 'Settings']);
   assert.equal(new Set(items.map((i) => i.icon)).size, items.length, 'no two places share an icon');
   for (const i of items) { assert.ok(i.icon.startsWith('<svg'), i.label + ' has an icon'); assert.match(i.label, /^[A-Z][a-z]+$/); }
   // every screen that is not a place sits under one, with a way back
@@ -155,7 +155,7 @@ test('a team member who is not the owner is offered no owner-only place, in the 
   const labels = plain(run('navItems().map(i=>i.label)'));
   assert.deepEqual(labels, ['Today', 'Calendar', 'Replies', 'Clients', 'Channels', 'Prospects', 'Onboarding', 'Money']);
   const found = plain(run("cmdkEntities().filter(x=>x.type==='Screens').map(x=>x.label)"));
-  for (const l of ['Employees', 'Documents', 'Settings']) assert.ok(!found.includes(l), l);
+  for (const l of ['Employees', 'Documents', 'Settings', 'Live']) assert.ok(!found.includes(l), l);
   assert.ok(found.includes('Calendar') && found.includes('Team'));
   const owner = shell('admin');
   const all = plain(owner.run("cmdkEntities().filter(x=>x.type==='Screens').map(x=>x.label)"));
@@ -189,11 +189,11 @@ test('the phone tab bar never holds more than five: four places and More, which 
     if (role === 'admin') assert.match(tabs[4], /class="badge red" title="something is waiting in Employees, Onboarding"[^>]*>2</);
     else assert.match(tabs[4], /class="badge amber" title="something is waiting in Onboarding"[^>]*>1</);
     // the sidebar still lists every place
-    assert.equal(el('navArea').innerHTML.split('<button class="nav-item').length - 1, role === 'admin' ? 11 : 8);
+    assert.equal(el('navArea').innerHTML.split('<button class="nav-item').length - 1, role === 'admin' ? 12 : 8);
     run('openMore()');
     const sheet = el('modal').innerHTML;
     const rows = [...sheet.matchAll(/<span>([^<]+)<\/span>/g)].map((m) => m[1]);
-    assert.deepEqual(rows, [...(role === 'admin' ? ['Channels', 'Prospects', 'Employees', 'Onboarding', 'Money', 'Documents', 'Settings'] : ['Channels', 'Prospects', 'Onboarding', 'Money']),
+    assert.deepEqual(rows, [...(role === 'admin' ? ['Channels', 'Prospects', 'Live', 'Employees', 'Onboarding', 'Money', 'Documents', 'Settings'] : ['Channels', 'Prospects', 'Onboarding', 'Money']),
       'Find a client or a screen', 'Switch light / dark', 'Sign out']);
     assert.ok(sheet.includes(`onclick="closeModal();render('journey')" aria-current="page"`));
     assert.ok(sheet.includes('onclick="closeModal();logout()"'), 'a phone can sign out');

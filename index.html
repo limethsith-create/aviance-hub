@@ -280,6 +280,7 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
 <link rel="stylesheet" href="brand.css">
 <link rel="stylesheet" href="motion.css">
 <link rel="stylesheet" href="signin.css">
+<link rel="stylesheet" href="live.css">
 </head>
 <body>
 <!-- Dark, if this device chose it, before anything is painted. -->
@@ -530,6 +531,7 @@ const views={
   monthEnd:{fn:()=>V('viewMonthEnd'),title:'Month end',sub:'Close the months and settle what is owed',back:()=>render('money')},
   ending:{fn:()=>V('viewEnding'),title:'Ending',sub:'Clients on their way out, and the final figure',back:()=>render('money')},
   dataDeletion:{fn:()=>V('viewDataDeletion'),title:'Data deletion',sub:'What goes, and what we keep',back:()=>render('ending')},
+  live:{fn:()=>V('viewLive'),title:'Live',sub:'Who is on aviance.online right now',owner:true},
   documents:{fn:()=>V('viewDocuments'),title:'Documents',sub:'Everything a client receives, live',owner:true},
   settings:{fn:()=>V('viewSettings'),title:'Settings',sub:'You, the calendar, and how you are paid',owner:true},
 };
@@ -582,7 +584,7 @@ function hubIsClient(){return !!(authUser&&authUser.role==='client');}
 /* Screens that have to re-read when they are opened, rather than showing what
    they held last time. wuOnRender was written for this list and was never in
    it, so Ending and Data deletion showed stale numbers until a reload. */
-const RENDER_HOOKS=['mtOnRender','channelsOnRender','empOnRender','wuOnRender'];
+const RENDER_HOOKS=['mtOnRender','channelsOnRender','empOnRender','wuOnRender','lvOnRender'];
 function render(v){
   if(!views[v]||!authUser)return;
   if(!hubAllowed(v))v=hubProspectSeat()?'prospects':'home';
@@ -628,7 +630,7 @@ function parseDeepLink(h){
   if(h==='onboarding'||h==='journey')return {view:'journey'};
   if(h==='alerts'||h==='settings'||/^settings\//.test(h))return {view:'settings'};
   if(h==='inquiries')return {view:'calendar'};
-  if(['calendar','channels','drafts','employees','documents','prospects'].includes(h))return {view:h};
+  if(['calendar','channels','drafts','employees','documents','prospects','live','money'].includes(h))return {view:h};
   const m=h.match(/^(inquiry|calendar|channels|prospect|people)\/([^/?#&=]+)$/);if(!m)return null;
   let id='';try{id=decodeURIComponent(m[2]);}catch(e){return null;}
   return /^[A-Za-z0-9_.:-]{1,120}$/.test(id)?{view:m[1],id}:null;
@@ -657,6 +659,9 @@ function hubStandalone(){try{return (typeof navigator!=='undefined'&&navigator.s
 /* ---- Navigation: the places, most used first. The same list fills the sidebar on a computer and the tab bar on a
    phone. A phone has room for five, so it shows the first four and "More", which opens the rest as a sheet.
    Badges: red = that many need you, amber = that many are waiting. Website bookings are on the Calendar. ---- */
+/* The Live badge goes amber for people reading and red the moment one of them
+   is booking. Safe because the sidebar draws before live.js has read anything. */
+function lvNavToneSafe(){try{return typeof lvNavTone==='function'?lvNavTone():'amber'}catch(e){return 'amber'}}
 function navItems(){
   const n=k=>{try{return typeof window[k]==='function'?(window[k]()||''):''}catch(e){return ''}};
   const say=(c,one,many)=>c?c+' '+(String(c)==='1'?one:many):'';
@@ -668,6 +673,7 @@ function navItems(){
     {view:'clients',icon:I.clients,label:'Clients',badge:'',also:['client','needsYou','clientPeople','onboarding','onboardingClient']},
     {view:'channels',icon:I.chat,label:'Channels',badge:ch,tone:'red',badgeTitle:ch?ch+' unread':''},
     {view:'prospects',icon:I.inquiry,label:'Prospects',badge:'',also:['prospect']},
+    {view:'live',icon:I.pulse,label:'Live',badge:n('lvNavCount'),tone:lvNavToneSafe(),badgeTitle:'people on aviance.online right now'},
     {view:'employees',icon:I.people,label:'Employees',badge:emp,tone:'red',badgeTitle:say(emp,'unread message from your staff','unread messages from your staff')},
     {view:'journey',icon:I.steps,label:'Onboarding',badge:late,tone:'amber',badgeTitle:say(late,'step is running late','steps are running late')},
     {view:'money',icon:I.money,label:'Money',badge:money,tone:'red',badgeTitle:say(money,'payment or refund needs you','payments and refunds need you'),also:['billing','monthEnd','ending','dataDeletion']},
@@ -980,6 +986,7 @@ boot();
 <script src="team.js"></script>
 <script src="onboarding.js"></script>
 <script src="money.js"></script>
+<script src="live.js"></script>
 <script src="digest.js"></script>
 <script src="guarantee.js"></script>
 <script src="wrapup.js"></script>
