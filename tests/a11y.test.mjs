@@ -139,7 +139,7 @@ test('every control in the shell has an accessible name, and none of them is a b
   assert.match(html, /<button type="button" class="search" onclick="openCmdk\(\)"[^>]*aria-label="/);
   assert.match(html, /class="cmdk-item [^"]*" id="cmdkOpt\$\{i\}" role="option" aria-selected=/);
   assert.match(html, /<button type="button" class="notif-item" onclick="runNotif\(\$\{i\}\)"/);
-  assert.match(html, /<button type="button" class="forgot-link"/);
+  assert.match(html, /<button type="button" class="forgot-link[^"]*"/);
   assert.ok(!/<a class="forgot-link/.test(html), 'the forgot link is a button, not an <a> with no href');
   /* nothing left in the shell that takes a click but no Tab */
   const divClicks = [...html.matchAll(/<(div|span|li|tr|td)\b([^>]*\bonclick=[^>]*)>/g)]

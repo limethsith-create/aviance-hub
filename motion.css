@@ -1,0 +1,61 @@
+/* motion.css — the movement vocabulary, taken from aviance.online.
+   Four moves, used everywhere, so the hub moves the way the website moves:
+
+     mo-rise   a line of type climbing out from behind a mask
+     mo-in     a block fading up a few pixels
+     mo-wipe   a rule drawing itself left to right
+     mo-mark   the logo settling into place
+
+   Rules of the house:
+   - Nothing moves after the person starts typing. Everything here runs once,
+     on open, and finishes inside 900ms.
+   - Nothing that moves delays input: fields are typeable from frame one, so
+     the animation only touches opacity and transform, never visibility or
+     pointer-events.
+   - Order is meaning: the mark, then what the screen is, then what to do.
+   - Somebody who asked their machine for less movement gets none. */
+
+:root{
+  --mo-settle:cubic-bezier(.16,.9,.3,1);   /* arrives and stays put */
+  --mo-drive:cubic-bezier(.6,0,.2,1);      /* leaves with intent */
+  --mo-step:70ms;                          /* one place in the queue */
+}
+
+/* A line of type climbing out from behind its own edge. The mask is the
+   wrapper's overflow; the span is what moves. Needs a block that is exactly
+   as tall as the line, so the letters are hidden before they rise. */
+.mo-rise{display:block;overflow:hidden}
+.mo-rise>span{display:block;transform:translateY(112%);
+  animation:moRise .72s var(--mo-settle) forwards;
+  animation-delay:calc(var(--mo-i,0) * var(--mo-step))}
+@keyframes moRise{to{transform:none}}
+
+/* A block arriving: up a little, into view. */
+.mo-in{opacity:0;transform:translateY(14px);
+  animation:moIn .5s var(--mo-settle) forwards;
+  animation-delay:calc(var(--mo-i,0) * var(--mo-step))}
+@keyframes moIn{to{opacity:1;transform:none}}
+
+/* A rule drawing itself. */
+.mo-wipe{transform:scaleX(0);transform-origin:left center;
+  animation:moWipe .6s var(--mo-drive) forwards;
+  animation-delay:calc(var(--mo-i,0) * var(--mo-step))}
+@keyframes moWipe{to{transform:none}}
+
+/* The mark settling: it comes in a touch small and grows the last few per
+   cent, which reads as weight rather than as a pop. */
+.mo-mark{opacity:0;transform:scale(.88);
+  animation:moMark .62s var(--mo-settle) forwards;
+  animation-delay:calc(var(--mo-i,0) * var(--mo-step))}
+@keyframes moMark{to{opacity:1;transform:none}}
+
+/* The boot screen handing over: it leaves upward, the way the website's
+   splash does, instead of blinking out. */
+.mo-handoff{animation:moHandoff .5s var(--mo-drive) forwards}
+@keyframes moHandoff{to{transform:translateY(-100%);visibility:hidden}}
+
+@media(prefers-reduced-motion:reduce){
+  .mo-rise>span,.mo-in,.mo-wipe,.mo-mark,.mo-handoff{animation:none!important}
+  .mo-rise>span,.mo-in,.mo-wipe,.mo-mark{opacity:1!important;transform:none!important}
+  .mo-handoff{display:none!important}
+}

@@ -414,7 +414,10 @@ for (const page of ['doc.html', 'join.html', 'portal.html']) {
     assert.equal(want[0], 'core.js', 'core.js loads before anything that uses it');
     assert.ok(scripts[0].startsWith('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@'));
     assert.deepEqual(scripts.slice(1), want);
-    assert.deepEqual([...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map((m) => m[1]), ['portal-client.css']);
+    assert.deepEqual([...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map((m) => m[1]),
+      /* The portal carries the sign-in's own look and the shared movement; the
+         document and invite pages have no sign-in and take neither. */
+      page === 'portal.html' ? ['portal-client.css', 'motion.css', 'signin.css'] : ['portal-client.css']);
     for (const f of HUB) assert.ok(!html.includes('"' + f + '"'), `${page} must not load ${f}`);
     assert.ok(!/fonts\.googleapis|fonts\.gstatic/.test(html), 'fonts come from this site only');
     assert.ok(!/location\.search|[?&]token=/.test(html), 'a token never rides in a query string');

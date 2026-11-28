@@ -193,22 +193,8 @@ h1,h2,h3,h4{font-weight:600}
    The old screen was a two-panel pitch: a headline, three bullets and the
    guarantee. That is marketing, and the people who reach this screen have
    already bought or already work here. */
-.login-wrap{width:408px;max-width:100%;background:var(--surface);border:1px solid var(--border)}
-.login-mark{display:flex;justify-content:center;margin-bottom:20px}
-.login-mark .logo{width:84px;height:84px;border-radius:18px;border:1px solid var(--border)}
-.login-card{padding:38px 34px 32px;display:flex;flex-direction:column}
-.login-eyebrow{font-size:var(--fs-min);color:var(--red-deep);font-weight:600;margin-bottom:9px;text-align:center;letter-spacing:.08em;text-transform:uppercase}
-.login-title{font-size:23px;font-weight:600;color:var(--text);margin-bottom:6px;text-align:center}
-.login-desc{font-size:var(--fs-small);color:var(--muted);margin-bottom:24px;line-height:1.55;text-align:center}
-.login-err{font-size:var(--fs-small);color:var(--red);min-height:20px;margin:2px 0 10px;line-height:1.5}
-.login-app-note{font-size:var(--fs-small);color:var(--text);background:var(--surface-2);border-left:3px solid var(--red-brand);padding:9px 11px;margin:-10px 0 18px;line-height:1.5}
-.login-hint{margin-top:18px;padding-top:15px;border-top:1px solid var(--border-soft);font-size:var(--fs-min);color:var(--muted);line-height:1.6;text-align:center}
-.login-ok{font-size:var(--fs-small);color:var(--green);background:var(--green-bg);border:1px solid var(--green);padding:9px 11px;margin:2px 0 12px;line-height:1.5}
 /* What shows while a screen that reads before it draws is still reading. */
 .view-loading{padding:16px 20px;color:var(--muted);font-size:var(--fs-small)}
-.forgot-link{display:block;text-align:right;font-size:var(--fs-min);color:var(--muted);margin:-4px 0 12px;cursor:pointer;width:100%;background:none;border:0;padding:0;font-family:inherit}
-.forgot-link:hover{color:var(--red-deep);text-decoration:underline}
-@media(max-width:760px){.login-wrap{width:100%;max-width:408px}.login-card{padding:28px 22px 24px}.login-mark .logo{width:72px;height:72px}}
 
 /* MODAL / TOAST */
 .modal-wrap{position:fixed;inset:0;z-index:260;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;padding:18px}
@@ -292,6 +278,8 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
      stylesheet, rightly, and this hub is all script anyway — with script off
      there is no screen for a font to be missing from. -->
 <link rel="stylesheet" href="brand.css">
+<link rel="stylesheet" href="motion.css">
+<link rel="stylesheet" href="signin.css">
 </head>
 <body>
 <!-- Dark, if this device chose it, before anything is painted. -->
@@ -304,17 +292,18 @@ body.dark [style*="background:#0000000f"]{background:rgba(255,255,255,.12)!impor
 <div id="login" class="login-screen" style="display:none">
   <div class="login-wrap">
     <div class="login-card">
-      <div class="login-mark"><div class="logo" role="img" aria-label="Aviance"></div></div>
-      <div class="login-title">Aviance OS</div>
-      <div class="login-desc">Sign in to continue.</div>
+      <div class="login-mark mo-mark"><div class="logo" role="img" aria-label="Aviance"></div></div>
+      <h1 class="login-title mo-rise" style="--mo-i:2"><span>Aviance OS<span class="dot">.</span></span></h1>
+      <div class="login-rule mo-wipe" style="--mo-i:4" aria-hidden="true"></div>
+      <div class="login-desc mo-in" style="--mo-i:5">Sign in to continue.</div>
       <div id="loginAppNote" class="login-app-note" style="display:none">First time in the app? Sign in once here.</div>
-      <div class="field"><label for="loginEmail">Email</label><input id="loginEmail" type="email" placeholder="you@email.com" autocomplete="username" aria-describedby="loginErr" onkeydown="if(event.key==='Enter')doLogin()"></div>
-      <div class="field"><label for="loginPass">Password</label><input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password" aria-describedby="loginErr" onkeydown="if(event.key==='Enter')doLogin()"></div>
-      <button type="button" class="forgot-link" onclick="forgotPassword()">Forgot password?</button>
+      <div class="field mo-in" style="--mo-i:6"><label for="loginEmail">Email</label><input id="loginEmail" type="email" placeholder="you@email.com" autocomplete="username" aria-describedby="loginErr" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <div class="field mo-in" style="--mo-i:7"><label for="loginPass">Password</label><input id="loginPass" type="password" placeholder="••••••••" autocomplete="current-password" aria-describedby="loginErr" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <button type="button" class="forgot-link mo-in" style="--mo-i:8" onclick="forgotPassword()">Forgot password?</button>
       <div id="loginErr" class="login-err" role="alert" aria-live="assertive"></div>
       <div id="resetOk" class="login-ok" role="status" aria-live="polite" style="display:none">Recovery link sent — check your inbox.</div>
-      <button class="btn" style="width:100%;justify-content:center;padding:11px" onclick="doLogin()">Sign in</button>
-      <div class="login-hint">Aviance OS is for the Aviance team. New here? <button type="button" class="login-link" onclick="openSignUp()">Create an account</button> — the owner approves it.</div>
+      <button class="btn mo-in" style="width:100%;justify-content:center;padding:11px;--mo-i:9" onclick="doLogin()">Sign in</button>
+      <div class="login-hint mo-in" style="--mo-i:10">Aviance OS is for the Aviance team. New here? <button type="button" class="login-link" onclick="openSignUp()">Create an account</button> — the owner approves it.</div>
       <div id="signUpBox" class="" style="display:none;margin-top:16px">
         <div class="field"><label for="suName">Your name</label><input id="suName" placeholder="Your full name" autocomplete="name" aria-describedby="suErr"></div>
         <div class="field"><label for="suEmail">Email</label><input id="suEmail" type="email" placeholder="you@email.com" autocomplete="email" aria-describedby="suErr"></div>
@@ -767,7 +756,20 @@ async function routeUser(errId){
   document.getElementById('loginPass').value='';
   enterApp();
 }
-function hideBoot(){const b=document.getElementById('bootScreen');if(b)b.style.display='none';}
+/* The boot screen leaves upward and uncovers what is behind it, the way the
+   website's splash does, rather than blinking out. If the machine is set to
+   less movement the rule in motion.css hides it outright, so this still ends
+   with the screen gone either way. */
+let bootGoing=false;
+function hideBoot(){
+  const b=document.getElementById('bootScreen');
+  if(!b||bootGoing)return;
+  bootGoing=true;
+  if(b.classList&&b.classList.add)b.classList.add('mo-handoff');
+  const done=()=>{b.style.display='none';};
+  if(b.addEventListener)b.addEventListener('animationend',done,{once:true});
+  setTimeout(done,700);   /* belt and braces: no animation, no event */
+}
 function enterApp(){
   hideBoot();
   document.getElementById('login').style.display='none';document.getElementById('app').style.display='grid';

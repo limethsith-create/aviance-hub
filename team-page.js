@@ -220,8 +220,11 @@ function tmcSeenLine(me, now){
 
 /* ---- HTML builders (pure, everything escaped) ----------------------- */
 
-function tmcLogoHtml(){
-  return `<img class="tmc-logo" src="${TMC_LOGO}" width="36" height="36" alt="Aviance">`;
+function tmcLogoHtml(extra){
+  /* extra carries the entrance class on the sign-in; elsewhere the mark is a
+     label and does not move. */
+  const cls = extra ? ` ${extra}` : '';
+  return `<img class="tmc-logo${cls}" src="${TMC_LOGO}" width="36" height="36" alt="Aviance">`;
 }
 
 function tmcNoticeHtml(title, text, extra){
@@ -241,10 +244,15 @@ function tmcOfflineHtml(){
    anything else in the hub: the only way in is a code he gave her. */
 function tmcSignInHtml(state){
   const s = state || {};
-  return `<main class="tmc-notice tmc-signin">${tmcLogoHtml()}
-    <h1 class="tmc-h1" tabindex="-1">Sign in.</h1>
-    <p class="tmc-lede">Your private line to ${tmcEsc(TMC_OWNER)} at Aviance.</p>
-    <form class="tmc-form" id="tmcInForm" novalidate>
+  /* The staff door: the same family as the hub and the portal, a shade
+     quieter — paper, no red until the button. The --mo-i numbers are the
+     order things arrive in; the moves themselves live in motion.css. */
+  return `<main class="tmc-notice tmc-signin">${tmcLogoHtml('mo-mark')}
+    <p class="tmc-eyebrow mo-in" style="--mo-i:2">Aviance · Team</p>
+    <h1 class="tmc-h1 mo-rise" style="--mo-i:3" tabindex="-1"><span>Sign in.</span></h1>
+    <div class="tmc-rule mo-wipe" style="--mo-i:5" aria-hidden="true"></div>
+    <p class="tmc-lede mo-in" style="--mo-i:6">Your private line to ${tmcEsc(TMC_OWNER)} at Aviance.</p>
+    <form class="tmc-form mo-in" style="--mo-i:7" id="tmcInForm" novalidate>
       <div class="tmc-field">
         <label class="tmc-label" for="tmcInEmail">Email</label>
         <input class="tmc-input" id="tmcInEmail" name="email" type="email" autocomplete="username"
@@ -259,7 +267,7 @@ function tmcSignInHtml(state){
       <p class="tmc-err" id="tmcInErr" role="alert" aria-live="assertive">${tmcEsc(s.error || '')}</p>
       <button type="submit" class="tmc-btn tmc-wide" id="tmcInBtn"${s.busy ? ' disabled' : ''}>${s.busy ? 'Signing in…' : 'Sign in'}</button>
     </form>
-    <p class="tmc-small tmc-under">No code yet, or it has stopped working? Ask ${tmcEsc(TMC_OWNER)}.</p>
+    <p class="tmc-small tmc-under mo-in" style="--mo-i:9">No code yet, or it has stopped working? Ask ${tmcEsc(TMC_OWNER)}.</p>
   </main>`;
 }
 

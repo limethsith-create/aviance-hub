@@ -260,13 +260,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:ins
 .empty h3{font-size:19px;font-weight:700;letter-spacing:-.025em}
 
 /* sign in: black panel, red eyebrow, big tight title */
-.login-screen{background:var(--surface)}
-.login-wrap{border:1px solid var(--line);box-shadow:var(--sh-lg)}
 /* The mark is the subject here, so it carries no box: no border, no white tile. */
-.login-mark .logo{border:0!important;background-color:transparent!important;box-shadow:none}
-.login-eyebrow{color:var(--brand)}
-.login-title{font-size:30px;font-weight:800;letter-spacing:-.035em;line-height:1.05}
-.login-app-note{border-left:3px solid var(--brand)}
 
 /* phone: tab bar keeps the black floor and 44px targets */
 @media(max-width:860px){

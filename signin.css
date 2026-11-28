@@ -1,0 +1,95 @@
+/* signin.css — the three front doors.
+   One family, three characters. All three: the mark first and big, the name
+   of the place, two fields, one red button, everything else quiet.
+     Hub     the owner's door — black, the most confident of the three
+     Team    the staff door — paper, a shade quieter, no red but the button
+     Portal  the client's door — warm sand, the one a customer sees
+   The shared moves live in motion.css. */
+
+/* ─── Hub: black ────────────────────────────────────────────────────────── */
+.login-screen{background:#0A0A0C;padding:20px}
+.login-wrap{width:408px;max-width:100%;background:transparent;border:0}
+.login-card{padding:0;display:flex;flex-direction:column}
+
+.login-mark{display:flex;justify-content:center;margin-bottom:26px}
+.login-mark .logo{width:88px;height:88px}
+
+.login-title{font-size:40px;font-weight:900;letter-spacing:-.035em;line-height:1.04;
+  color:#fff;text-align:center;margin:0 0 10px}
+.login-title .dot{color:#E0290F}
+.login-rule{height:2px;background:#E0290F;margin:0 auto 22px;width:56px}
+.login-desc{font-size:var(--fs-small);color:rgba(255,255,255,.62);text-align:center;
+  margin-bottom:28px;line-height:1.55}
+
+/* The fields on black. Scoped to the screen so nothing else inherits it. */
+.login-screen .field label{color:rgba(255,255,255,.72)}
+.login-screen .field input{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.22);
+  color:#fff}
+.login-screen .field input::placeholder{color:rgba(255,255,255,.34)}
+.login-screen .field input:focus{border-color:#fff;box-shadow:0 0 0 1px #fff;background:rgba(255,255,255,.1)}
+.login-screen .btn{background:#E0290F;color:#fff;border-color:#E0290F}
+.login-screen .btn:hover{background:#fff;color:#0A0A0C;border-color:#fff}
+.login-screen .btn.ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.4)}
+.login-screen .btn.ghost:hover{background:#fff;color:#0A0A0C}
+.login-screen :focus-visible{outline-color:#fff!important}
+
+.login-eyebrow{font-family:var(--mono);font-size:var(--fs-min);color:rgba(255,255,255,.5);
+  font-weight:500;margin-bottom:9px;text-align:center;letter-spacing:.14em;text-transform:uppercase}
+.login-err{font-size:var(--fs-small);color:#FF6B52;min-height:20px;margin:2px 0 10px;line-height:1.5}
+.login-ok{font-size:var(--fs-small);color:#fff;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.3);padding:9px 11px;margin:2px 0 12px;line-height:1.5}
+.login-app-note{font-size:var(--fs-small);color:rgba(255,255,255,.8);background:rgba(255,255,255,.06);
+  border-left:3px solid #E0290F;padding:9px 11px;margin:-10px 0 18px;line-height:1.5}
+.login-hint{margin-top:22px;padding-top:17px;border-top:1px solid rgba(255,255,255,.16);
+  font-size:var(--fs-min);color:rgba(255,255,255,.52);line-height:1.6;text-align:center}
+.login-hint .login-link{color:#fff;text-decoration:underline;background:none;border:0;
+  padding:0;font:inherit;cursor:pointer}
+.forgot-link{display:block;text-align:right;font-size:var(--fs-min);color:rgba(255,255,255,.5);
+  margin:-4px 0 14px;cursor:pointer;width:100%;background:none;border:0;padding:0;font-family:inherit}
+.forgot-link:hover{color:#fff;text-decoration:underline}
+
+/* The boot screen is the same black, so the handover is one surface moving,
+   not two screens swapping. */
+.boot-screen{background:#0A0A0C;color:rgba(255,255,255,.55)}
+
+@media(max-width:760px){
+  .login-mark .logo{width:74px;height:74px}
+  .login-title{font-size:33px}
+}
+
+/* ─── Team: paper, quieter ──────────────────────────────────────────────── */
+.tmc-signin{text-align:center}
+.tmc-signin .tmc-logo{width:76px;height:76px;margin:0 auto var(--s5);
+  border:0;background-color:transparent;box-shadow:none}
+.tmc-signin .tmc-h1{font-size:36px;font-weight:900;letter-spacing:-.03em;line-height:1.06}
+.tmc-signin .tmc-eyebrow{font-family:var(--mono);font-size:var(--fs-min);letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:var(--s3)}
+.tmc-signin .tmc-rule{height:2px;width:44px;background:var(--text);margin:var(--s3) auto var(--s5)}
+.tmc-signin form,.tmc-signin .tmc-form{text-align:left;margin-top:var(--s5)}
+
+/* ─── Portal: warm ──────────────────────────────────────────────────────── */
+.pc-signin{max-width:408px;padding-top:11vh;padding-bottom:64px;text-align:center}
+.pc-signin .pc-logo{width:80px;height:80px;margin:0 auto 24px;
+  border:0;background-color:transparent;box-shadow:none}
+.pc-signin .pc-h1{font-size:38px;font-weight:900;letter-spacing:-.032em;line-height:1.05}
+.pc-signin .pc-h1 .dot{color:var(--red-brand,#C42408)}
+.pc-signin .pc-rule{height:2px;width:50px;background:var(--red-brand,#C42408);margin:14px auto 20px}
+.pc-signin .pc-form{text-align:left;margin-top:26px}
+.pc-signin .pc-under{text-align:center}
+/* The sand ground belongs to the sign-in and leaves with it, so it is keyed
+   off the screen being on the page rather than a class somebody has to
+   remember to take off again. */
+body:has(.pc-signin){background:#F4EFE9}
+body.dark:has(.pc-signin),:root[data-theme="dark"] body:has(.pc-signin){background:var(--bg)}
+
+@media(max-width:520px){
+  .pc-signin{padding-top:6vh}
+  .pc-signin .pc-logo{width:66px;height:66px}
+  .pc-signin .pc-h1{font-size:30px}
+  .tmc-signin .tmc-logo{width:66px;height:66px}
+  .tmc-signin .tmc-h1{font-size:29px}
+}
+
+/* Two short lines, evenly split, rather than a long line and an orphan. */
+.login-desc,.pc-signin .pc-lede,.tmc-signin .tmc-lede,.login-hint,
+.pc-signin .pc-under,.tmc-signin .tmc-under{text-wrap:balance}
