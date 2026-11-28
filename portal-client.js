@@ -441,8 +441,11 @@ function pcPaidHtml(d, plan){
 
 /* ---- HTML builders (everything escaped) ----------------------------- */
 
-function pcLogoHtml(){
-  return `<img class="pc-logo" src="${PC_LOGO}" width="44" height="44" alt="Aviance">`;
+function pcLogoHtml(extra){
+  /* extra carries the entrance class on the sign-in; everywhere else the mark
+     is a label in the bar and does not move. */
+  const cls = extra ? ` ${extra}` : '';
+  return `<img class="pc-logo${cls}" src="${PC_LOGO}" width="44" height="44" alt="Aviance">`;
 }
 
 /* The mark and the wordmark beside it. The <img> carries the name for a screen

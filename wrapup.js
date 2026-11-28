@@ -461,14 +461,6 @@ async function wuMarkSent(id){
     .eq('id', id).select().single(), null);
 }
 
-async function wuHandovers(clientId){
-  return wuRun(() => {
-    let q = sb.from('handovers').select('*').order('created_at', {ascending:false});
-    if (clientId) q = q.eq('client_id', clientId);
-    return q;
-  }, []);
-}
-
 /* ---- 4. deleting their data --------------------------------------- */
 
 /* WHAT GOES, WHAT IS KEPT, AND WHY

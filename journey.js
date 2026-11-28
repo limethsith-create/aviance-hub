@@ -259,7 +259,18 @@ function jyFreeMonthWords(n){
   if (!jyOwesFreeMonth(n)) return '';
   const d = Math.abs(jyInt(n.days_to_launch));
   return 'Past day 14 by ' + d + (d === 1 ? ' day' : ' days') +
-    ': the agreement makes their next month free. Nothing applies that on its own — raise it on their next invoice.';
+    ': the agreement makes their next month free.';
+}
+/* The button beside those words. A month of fee is too much money to move on a
+   date comparison, so nothing grants it on its own — but the owner should not
+   have to remember it at invoice time either. Pressing this credits one
+   month's fee, which comes off their next invoice: on a monthly plan that
+   makes the month free, and on a 3-month term it takes one month off the next
+   block. Same money either way. */
+function jyFreeMonthButton(n){
+  if (!jyOwesFreeMonth(n)) return '';
+  return '<button type="button" class="btn ghost jy-free" onclick="jyGiveFreeMonth(' +
+    jyAttr(n.client_id) + ',' + jyAttr(n.company) + ')">Credit the free month</button>';
 }
 
 function jyLaunchBadge(n){
@@ -284,7 +295,8 @@ function jyRenderBoardRow(j, today){
       (n.steps.length ? n.steps.map(s => jyPill(s, {next: nx && s.step === nx.step})).join('') : '<li class="jy-none">Not started</li>') +
     '</ol>' +
     jyLaunchBadge(n) +
-    (jyOwesFreeMonth(n) ? '<p class="jy-sub" role="alert"><b class="jy-late-t">' + jyE(jyFreeMonthWords(n)) + '</b></p>' : '') +
+    (jyOwesFreeMonth(n) ? '<p class="jy-sub jy-free-row" role="alert"><b class="jy-late-t">' +
+      jyE(jyFreeMonthWords(n)) + '</b> ' + jyFreeMonthButton(n) + '</p>' : '') +
     '<div class="jy-row-foot">' +
       '<div class="jy-row-next">' +
         (nx ? '<span class="jy-next-l">Next</span><span class="jy-next-t">' + jyE(nx.title) + '</span>' +
@@ -553,6 +565,24 @@ async function jyMark(clientId, step, status){
   await jyAfter(clientId, r.data);
   return r;
 }
+/* Credit the free month the agreement owes. Asked for once, out loud, because
+   it moves a month of fee: a stray click here is money. */
+async function jyGiveFreeMonth(clientId, company){
+  if (!clientId) return jyErr('Pick the client first.');
+  const who = String(company || 'this client');
+  if (typeof confirm === 'function' &&
+      !confirm('Credit ' + who + ' one free month? It comes off their next invoice.')) {
+    return jyErr('Left alone.');
+  }
+  const r = await jyOnce('free:' + clientId, () =>
+    (typeof fnGrantFreeMonth === 'function'
+      ? fnGrantFreeMonth(clientId, 'Launch ran past day 14.')
+      : Promise.resolve(jyErr('The money screens are not loaded on this page.'))));
+  jySay(r.ok ? 'One free month credited — it comes off their next invoice.' : r.error);
+  if (r.ok) await jyAfter(clientId, null);
+  return r;
+}
+
 /* One press, one request: a double click on these must never queue two drafts for the client. */
 async function jyOnce(key, fn){
   if (jy.busy[key]) return jyErr('Still working on it.');

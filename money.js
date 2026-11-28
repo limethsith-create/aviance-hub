@@ -102,6 +102,11 @@ function moOwedRowHtml(r){
   const btns = [];
   if (r.unsent && moHas('fnMarkInvoiceSent')) btns.push(`<button type="button" class="btn" onclick="moSendGo(${moAttr(r.id)})">Mark sent</button>`);
   if (moHas('fnMarkInvoicePaid')) btns.push(`<button type="button" class="btn ghost" onclick="moPaidGo(${moAttr(r.id)})">Mark paid</button>`);
+  /* Money arrives in pieces more often than anyone plans for. "Part paid" is
+     not a status, it is a number: how much has come in. The invoice settles
+     itself the moment that number reaches the total. */
+  if (moHas('fnRecordPayment')) btns.push(`<button type="button" class="btn ghost" onclick="moPartGo(${moAttr(r.id)})">Part paid…</button>`);
+  const part = moHas('fnPartPaidWords') ? fnPartPaidWords(r) : '';
   const late = r.daysLate;
   const word = r.unsent ? 'never sent'
     : late == null ? 'no due date'
@@ -109,7 +114,7 @@ function moOwedRowHtml(r){
     : late === 0 ? 'due today' : 'due in ' + (-late) + (late === -1 ? ' day' : ' days');
   return `<li class="mo-row">
     <span class="mo-who"><b>${moEsc(r.company || 'A client')}</b><span class="mo-sub">${moEsc(r.number || '')}</span></span>
-    <span class="mo-amt fig">${moEsc(moUsd(r.amount))}</span>
+    <span class="mo-amt fig">${moEsc(moUsd(r.amount))}${part ? `<span class="mo-sub">${moEsc(part)}</span>` : ''}</span>
     <span class="mo-when">${moEsc(word)}${r.due_on ? `<span class="mo-sub">due ${moEsc(String(r.due_on).slice(0,10))}</span>` : ''}</span>
     <span class="mo-acts">${btns.join('')}</span></li>`;
 }
@@ -277,6 +282,28 @@ function moPaidGo(invoiceId){
     if (!moHas('fnMarkInvoicePaid')) return moSay(MO_NOT_LOADED);
     const r = await fnMarkInvoicePaid(invoiceId, 'bank transfer');
     moSay(r.ok ? (moHas('fnPaidWords') ? fnPaidWords(r.data) : 'Marked paid.') : r.error);
+    if (r.ok) moChanged();
+    await moReload();
+    return r;
+  });
+}
+
+/* Part of an invoice has arrived. One number is asked for, in the same place
+   the rest of the money is handled, and the database refuses more than is
+   still due rather than this screen guessing. */
+function moPartGo(invoiceId){
+  return moOnce('part:' + invoiceId, async () => {
+    if (!moHas('fnRecordPayment')) return moSay(MO_NOT_LOADED);
+    const typed = typeof prompt === 'function'
+      ? prompt('How much arrived? Dollars, numbers only.') : null;
+    if (typed == null || String(typed).trim() === '') return moSay('Left alone.');
+    const amount = Number(String(typed).replace(/[^0-9.]/g, ''));
+    const r = await fnRecordPayment(invoiceId, amount, 'bank transfer');
+    moSay(r.ok
+      ? (r.data && r.data.still_due > 0
+          ? moUsd(r.data.paid_so_far) + ' in — ' + moUsd(r.data.still_due) + ' still due.'
+          : (moHas('fnPaidWords') ? fnPaidWords(r.data) : 'Paid in full.'))
+      : r.error);
     if (r.ok) moChanged();
     await moReload();
     return r;

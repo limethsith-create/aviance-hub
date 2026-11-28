@@ -66,7 +66,7 @@ test('contrast: red as TEXT on a dark ground is the bright red, because #E0290F 
   assert.ok(ratio('#FF5C3D', '#101015') >= 4.5, 'the bright red IS AA on the dark surface');
   assert.ok(/--red-bright:#FF5C3D/.test(brand), 'the bright red is still a token');
   const block = brand.slice(brand.indexOf('body.dark :focus-visible'));
-  for (const sel of ['body.dark a:hover', 'body.dark .section-head .count', 'body.dark .login-eyebrow', 'body.dark .tab.active'])
+  for (const sel of ['body.dark a:hover', 'body.dark .section-head .count', 'body.dark .tab.active'])
     assert.ok(block.includes(sel), sel + ' takes the bright red in the dark theme');
 });
 
@@ -139,7 +139,7 @@ test('every control in the shell has an accessible name, and none of them is a b
   assert.match(html, /<button type="button" class="search" onclick="openCmdk\(\)"[^>]*aria-label="/);
   assert.match(html, /class="cmdk-item [^"]*" id="cmdkOpt\$\{i\}" role="option" aria-selected=/);
   assert.match(html, /<button type="button" class="notif-item" onclick="runNotif\(\$\{i\}\)"/);
-  assert.match(html, /<button type="button" class="forgot-link"/);
+  assert.match(html, /<button type="button" class="forgot-link[^"]*"/);
   assert.ok(!/<a class="forgot-link/.test(html), 'the forgot link is a button, not an <a> with no href');
   /* nothing left in the shell that takes a click but no Tab */
   const divClicks = [...html.matchAll(/<(div|span|li|tr|td)\b([^>]*\bonclick=[^>]*)>/g)]

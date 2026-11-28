@@ -140,3 +140,8 @@
 .jy-toast-go{margin-left:var(--s2);padding:4px 10px;min-height:30px;border:1px solid rgba(255,255,255,.35);border-radius:var(--r-xs);
   background:transparent;color:#fff;font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
 .jy-toast-go:hover{background:rgba(255,255,255,.12)}
+
+/* The free month the agreement owes: the words and the button that applies it
+   sit on one line, so the cost and the fix are never in two places. */
+.jy-free-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.jy-free-row .jy-free{min-height:30px;padding:4px 10px;font-size:var(--fs-min)}

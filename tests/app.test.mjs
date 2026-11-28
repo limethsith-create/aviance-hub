@@ -254,5 +254,5 @@ test('the sign-in page does not pitch, and never states the offer wrongly', () =
      The guard against the offer drifting stays, and applies to the whole shell. */
   assert.ok(!/3 weeks/.test(html) && !/pilot/i.test(html));
   assert.ok(!/We don't sell emails/.test(html), 'no sales pitch on the sign-in screen');
-  assert.match(html, /class="login-mark"/, 'the mark leads the sign-in card');
+  assert.match(html, /class="login-mark[^"]*"/, 'the mark leads the sign-in card');
 });

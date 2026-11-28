@@ -92,9 +92,6 @@ h1,h2,h3,h4{letter-spacing:-.011em;color:var(--text)}
 @media(max-width:860px){.modal{border-radius:12px 12px 0 0}}
 
 /* ---- sign in ---- */
-.login-wrap{border-radius:14px;overflow:hidden}
-.login-mark .logo{box-shadow:none}
-.login-eyebrow{text-transform:none;letter-spacing:0;font-size:var(--fs-small)}
 
 /* ---- phone tab bar ---- */
 @media(max-width:860px){.tabbar{box-shadow:0 -1px 0 var(--border)}.tab.active svg{color:var(--brand)}}

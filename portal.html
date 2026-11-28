@@ -11,6 +11,8 @@
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="portal-client.css">
+<link rel="stylesheet" href="motion.css">
+<link rel="stylesheet" href="signin.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
 <script src="core.js"></script>
 <script src="portal-client.js"></script>
@@ -41,10 +43,14 @@
   function showSignIn(message, email){
     stopChat();
     document.title = 'Aviance — sign in';
-    root.innerHTML = `<main class="pc-wrap pc-notice pc-signin">${pcLogoHtml()}
-      <h1 class="pc-h1" tabindex="-1">Sign in.</h1>
-      <p class="pc-lede">Your direct line to the Aviance team.</p>
-      <form class="pc-form" id="pcInForm" novalidate>
+    /* The door a customer sees: the warmest of the three. Same bones as the
+       hub and the team page, a sand ground and the red kept for the button
+       and the full stop. --mo-i is the order things arrive in. */
+    root.innerHTML = `<main class="pc-wrap pc-notice pc-signin">${pcLogoHtml('mo-mark')}
+      <h1 class="pc-h1 mo-rise" style="--mo-i:2" tabindex="-1"><span>Welcome back<span class="dot">.</span></span></h1>
+      <div class="pc-rule mo-wipe" style="--mo-i:4" aria-hidden="true"></div>
+      <p class="pc-lede mo-in" style="--mo-i:5">Your direct line to the Aviance team.</p>
+      <form class="pc-form mo-in" style="--mo-i:6" id="pcInForm" novalidate>
         <div class="pc-field"><label class="pc-label" for="pcInEmail">Email</label>
           <input class="pc-input" id="pcInEmail" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required value="${pcEsc(email || '')}"></div>
         <div class="pc-field"><label class="pc-label" for="pcInPw">Password</label>

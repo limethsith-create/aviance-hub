@@ -198,17 +198,6 @@ body.dark .btn{background:var(--brand);color:var(--brand-ink);border-color:var(-
 .notif-head{font-weight:650}
 
 /* ---- sign in: ink panel on the left, the form on the right ---- */
-.login-screen{background:var(--bg)}
-.login-wrap{border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--sh-lg)}
-.login-eyebrow{color:var(--brand);text-transform:uppercase;letter-spacing:.04em}
-.login-title{font-size:var(--fs-title);font-weight:650;letter-spacing:-.01em}
-.login-desc{font-size:var(--fs-base)}
-.login-app-note{border-radius:var(--r-sm);border-left-color:var(--brand)}
-.login-ok{border-radius:var(--r-sm)}
-.login-err{font-size:var(--fs-base)}
-.login-link,.forgot-link{color:var(--muted)}
-.login-link:hover,.forgot-link:hover{color:var(--brand)}
-.login-hint{font-size:var(--fs-base)}
 
 /* ---- phone: tab bar on the surface with a top hairline ---- */
 @media(max-width:860px){

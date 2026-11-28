@@ -297,6 +297,56 @@ async function fnMarkInvoicePaid(invoiceId, via){
   const how = String(via || '').trim().slice(0,60);
   return fnRun(() => sb.rpc('mark_paid', {p_invoice: invoiceId, p_via: how || null}), null);
 }
+/* Part of it arrived. An invoice can be half paid without the hub having to
+   pretend it is either untouched or settled: the amount that has come in is a
+   number on the invoice, and the invoice settles itself — portal, welcome
+   email and all — the moment that number reaches the total.
+   -> {invoice_id, client_id, paid_so_far, still_due, welcome_sent} */
+async function fnRecordPayment(invoiceId, amount, via){
+  if (!invoiceId) return fnErr('Pick the invoice first.');
+  const n = Math.round(Number(amount));
+  if (!Number.isFinite(n) || n <= 0) return fnErr('How much arrived? It has to be more than zero.');
+  const how = String(via || '').trim().slice(0,60);
+  return fnRun(() => sb.rpc('record_payment',
+    {p_invoice: invoiceId, p_amount: n, p_via: how || null}), null);
+}
+
+/* How much of an invoice is still owed, and whether part of it has arrived.
+   An older row with no amount_paid reads as nothing paid, which is what it
+   meant before the column existed. */
+function fnPaidSoFar(row){
+  const n = Math.round(Number(row && row.amount_paid));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function fnStillDue(row){
+  const r = row || {};
+  if (fnInvoicePaid(r)) return 0;
+  const total = Math.round(Number(r.amount)) || 0;
+  return Math.max(total - fnPaidSoFar(r), 0);
+}
+function fnPartPaid(row){
+  return !fnInvoicePaid(row) && fnPaidSoFar(row) > 0;
+}
+/* The words for a part-paid invoice, in money the owner reads the same way
+   everywhere else on the screen. */
+function fnPartPaidWords(row){
+  if (!fnPartPaid(row)) return '';
+  return fnUsd(fnPaidSoFar(row)) + ' of ' + fnUsd(Math.round(Number((row||{}).amount)) || 0)
+       + ' in — ' + fnUsd(fnStillDue(row)) + ' still due.';
+}
+
+/* A free month the agreement owes them. It is a credit against their next
+   invoice, which on a monthly plan makes that month free and on a 3-month
+   term takes one month's fee off the next block — the same money either way,
+   without reshaping a term that counts in threes.
+   The owner grants it on purpose; nothing moves a month of fee on its own.
+   -> {client_id, credit_owed} */
+async function fnGrantFreeMonth(clientId, reason){
+  if (!clientId) return fnErr('Pick the client first.');
+  return fnRun(() => sb.rpc('grant_free_month',
+    {p_client: clientId, p_reason: String(reason || '').slice(0,200) || null}), null);
+}
+
 /* What to tell the person who clicked Paid. */
 function fnPaidWords(data){
   return data && data.welcome_sent === true
