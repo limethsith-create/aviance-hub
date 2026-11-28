@@ -66,7 +66,7 @@ test('contrast: red as TEXT on a dark ground is the bright red, because #E0290F 
   assert.ok(ratio('#FF5C3D', '#101015') >= 4.5, 'the bright red IS AA on the dark surface');
   assert.ok(/--red-bright:#FF5C3D/.test(brand), 'the bright red is still a token');
   const block = brand.slice(brand.indexOf('body.dark :focus-visible'));
-  for (const sel of ['body.dark a:hover', 'body.dark .section-head .count', 'body.dark .login-eyebrow', 'body.dark .tab.active'])
+  for (const sel of ['body.dark a:hover', 'body.dark .section-head .count', 'body.dark .tab.active'])
     assert.ok(block.includes(sel), sel + ' takes the bright red in the dark theme');
 });
 

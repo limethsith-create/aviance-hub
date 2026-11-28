@@ -49,13 +49,17 @@
   animation-delay:calc(var(--mo-i,0) * var(--mo-step))}
 @keyframes moMark{to{opacity:1;transform:none}}
 
+/* A screen arriving. Short, small, and never on a redraw: see render(). */
+.mo-view{animation:moView .34s var(--mo-settle) both}
+@keyframes moView{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
 /* The boot screen handing over: it leaves upward, the way the website's
    splash does, instead of blinking out. */
 .mo-handoff{animation:moHandoff .5s var(--mo-drive) forwards}
 @keyframes moHandoff{to{transform:translateY(-100%);visibility:hidden}}
 
 @media(prefers-reduced-motion:reduce){
-  .mo-rise>span,.mo-in,.mo-wipe,.mo-mark,.mo-handoff{animation:none!important}
-  .mo-rise>span,.mo-in,.mo-wipe,.mo-mark{opacity:1!important;transform:none!important}
+  .mo-rise>span,.mo-in,.mo-wipe,.mo-mark,.mo-handoff,.mo-view{animation:none!important}
+  .mo-rise>span,.mo-in,.mo-wipe,.mo-mark,.mo-view{opacity:1!important;transform:none!important}
   .mo-handoff{display:none!important}
 }

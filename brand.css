@@ -92,7 +92,7 @@
 .mt-dot,.cb-dot,.emp-dot{border-radius:999px!important}
 
 /* one micro-label recipe, used by name below */
-.dc-gname,.cmdk-group,.login-eyebrow,.field label,.field.row2>div label,
+.dc-gname,.cmdk-group,.field label,.field.row2>div label,
 .badge,.pill,.tmc-label,.tmc-tag,.kbd,.section-head .count,
 .cb-head,.cb-tile small,.dg-tile-l{
   font-family:var(--mono);
@@ -328,7 +328,6 @@ body.dark :focus-visible{outline-color:#fff}
    marks and the focus ring keep #E0290F. */
 body.dark a:hover,:root[data-theme="dark"] a:hover,
 body.dark .section-head .count,:root[data-theme="dark"] .section-head .count,
-body.dark .login-eyebrow,:root[data-theme="dark"] .login-eyebrow,
 body.dark .tab.active,:root[data-theme="dark"] .tab.active{color:var(--red-bright)}
 body.dark .btn.ghost:focus-visible,body.dark .tb-btn:focus-visible{outline-color:#fff!important}
 

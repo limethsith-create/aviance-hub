@@ -579,7 +579,10 @@ function hubAllowed(v){
 /* Kept for the screens that ask. The shell itself never holds a client: routeUser sends one to portal.html. */
 function hubIsClient(){return !!(authUser&&authUser.role==='client');}
 /* What each screen's file wants to hear after any screen is drawn (its timers, its badge). */
-const RENDER_HOOKS=['mtOnRender','channelsOnRender','empOnRender'];
+/* Screens that have to re-read when they are opened, rather than showing what
+   they held last time. wuOnRender was written for this list and was never in
+   it, so Ending and Data deletion showed stale numbers until a reload. */
+const RENDER_HOOKS=['mtOnRender','channelsOnRender','empOnRender','wuOnRender'];
 function render(v){
   if(!views[v]||!authUser)return;
   if(!hubAllowed(v))v=hubProspectSeat()?'prospects':'home';
@@ -590,9 +593,15 @@ function render(v){
      browser drops focus to the top of the document: the next Tab starts from the
      sidebar again. Keep it in the screen. Only for a redraw of the same screen —
      arriving from the sidebar leaves focus on the sidebar, where the person is. */
-  const held=currentView===v&&typeof box.contains==='function'&&box.contains(document.activeElement);
+  const sameView=currentView===v;
+  const held=sameView&&typeof box.contains==='function'&&box.contains(document.activeElement);
+  /* A screen that is ARRIVING fades up a few pixels; a screen redrawing itself
+     after a button does not. Animating a redraw would make the whole page move
+     every time he marks something done, which reads as a glitch rather than as
+     movement. prefers-reduced-motion turns even the arrival off, in motion.css. */
+  const entering=sameView?'':' mo-view';
   currentView=v;
-  const paint=html=>{box.innerHTML=`<div class="view${view.wide?' wide':''}">${html}</div>`;
+  const paint=html=>{box.innerHTML=`<div class="view${view.wide?' wide':''}${entering}">${html}</div>`;
     if(held&&!box.contains(document.activeElement)&&typeof box.focus==='function'){try{box.focus({preventScroll:true});}catch(e){}}};
   const out=view.fn();
   if(out&&typeof out.then==='function'){   // a screen that reads before it draws: say so, then fill it in if they are still on it

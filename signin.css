@@ -33,8 +33,6 @@
 .login-screen .btn.ghost:hover{background:#fff;color:#0A0A0C}
 .login-screen :focus-visible{outline-color:#fff!important}
 
-.login-eyebrow{font-family:var(--mono);font-size:var(--fs-min);color:rgba(255,255,255,.5);
-  font-weight:500;margin-bottom:9px;text-align:center;letter-spacing:.14em;text-transform:uppercase}
 .login-err{font-size:var(--fs-small);color:#FF6B52;min-height:20px;margin:2px 0 10px;line-height:1.5}
 .login-ok{font-size:var(--fs-small);color:#fff;background:rgba(255,255,255,.08);
   border:1px solid rgba(255,255,255,.3);padding:9px 11px;margin:2px 0 12px;line-height:1.5}
