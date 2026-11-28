@@ -162,7 +162,12 @@ test('finance.js knows the withdrawn code in exactly one place, and carries no c
   const src = fs.readFileSync(path.join(root, 'finance.js'), 'utf8');
   assert.equal((src.match(/pilot/gi) || []).length, 1, 'one guard, nothing else');
   assert.ok(src.includes("const FN_RETIRED_PLANS = ['pilot'];"));
-  assert.ok(!/credit/i.test(src), 'no credit of any kind');
+  /* "credit" now means one thing only: the free month the agreement owes a
+     client, applied against their next invoice. The withdrawn pilot's credit
+     is gone, and this keeps it gone — every use here is the free month. */
+  for (const m of src.match(/.{0,40}credit.{0,40}/gi) || []) {
+    assert.ok(!/pilot/i.test(m), 'no pilot credit: ' + m);
+  }
   assert.equal(typeof globalThis.fnAddClient, 'undefined', 'the unused add-a-client path is gone; close_won makes clients');
 });
 

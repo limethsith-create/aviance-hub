@@ -637,7 +637,10 @@ test('a launch past day 14 says what it costs, not just that it is late', () => 
   assert.equal(ctx.jyOwesFreeMonth(late), true);
   assert.match(ctx.jyFreeMonthWords(late), /Past day 14 by 3 days/);
   assert.match(ctx.jyFreeMonthWords(late), /next month free/);
-  assert.match(ctx.jyFreeMonthWords(late), /raise it on their next invoice/);
+  /* The words say what it costs; the button beside them is what applies it.
+     Nothing grants a month of fee on a date comparison alone. */
+  assert.match(ctx.jyFreeMonthButton(late), /Credit the free month/);
+  assert.match(ctx.jyFreeMonthButton(late), /jyGiveFreeMonth/);
   const row = ctx.jyRenderBoardRow({ client_id: 'c1', company: 'Harbor Co', paid_on: '2026-11-06',
     launch_on: '2026-11-20', steps }, '2026-11-23');
   assert.match(strip(row), /next month free/);

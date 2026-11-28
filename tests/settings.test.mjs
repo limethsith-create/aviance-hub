@@ -200,7 +200,7 @@ test('stRenderPay: the rails in the order he should think about them, and every 
   const h = stRenderPay(PAY_SHIPPED);
   const t = text(h);
   for (const w of ['Bank wire (USD)', 'Second bank account', 'Payoneer', 'Card link', 'PayPal (last resort)',
-    'Shown first', 'Currency', 'Payment terms', 'Save']) assert.ok(t.includes(w), 'missing: ' + w);
+    'Shown first', 'Payment terms', 'Save']) assert.ok(t.includes(w), 'missing: ' + w);
   for (const k of ALL_KINDS) assert.ok(h.includes('id="stPay_on_' + k + '"'), k + ' can be switched on');
 
   /* the wire is a wire TO a bank abroad: beneficiary, SWIFT, branch address, correspondent bank */
@@ -223,8 +223,11 @@ test('stRenderPay: the rails in the order he should think about them, and every 
   assert.ok(h.includes('id="stPay_payoneer_link"') && h.includes('id="stPay_payoneer_account_number"'));
   assert.ok(h.includes('id="stPay_paypal_link"') && h.includes('id="stPay_paypal_email"'));
   assert.ok(h.includes('id="stPay_card_link_link"') && !h.includes('id="stPay_card_link_account_number"'));
-  assert.ok(h.includes('id="stPayPref"') && h.includes('id="stPayCurrency"') && h.includes('id="stPayTerms"'));
-  assert.ok(h.includes('value="USD"') && h.includes('value="Net 7"'));
+  assert.ok(h.includes('id="stPayPref"') && h.includes('id="stPayTerms"'));
+  /* No currency box: every plan is priced in USD and each invoice carries its
+     own currency, so the field changed nothing and could only be got wrong. */
+  assert.ok(!h.includes('stPayCurrency'));
+  assert.ok(h.includes(`value="Net 7"`));
   for (const shown of ['Bank transfer', 'Bank transfer (second account)', 'Card or online checkout']) assert.ok(t.includes(shown), shown);
 
   /* empty, null and nasty values draw without holes */
@@ -366,7 +369,7 @@ test('the Payment details card loads, and Save reads the rails off the screen', 
   el('stPay_bank_wire_swift').value = 'TESTTEST';
   el('stPay_bank_wire_intermediary_bank').value = 'Example Correspondent Bank, New York';
   el('stPay_bank_wire_intermediary_swift').value = 'TESTUS33';
-  el('stPayPref').value = 'bank_wire'; el('stPayCurrency').value = 'USD'; el('stPayTerms').value = 'Net 7'; el('stPayMsg');
+  el('stPayPref').value = 'bank_wire'; el('stPayTerms').value = 'Net 7'; el('stPayMsg');
   const got = stReadPay();
   assert.equal(got.pay_methods.bank_wire.on, true);
   assert.equal(got.pay_methods.bank_wire.account_number, '0000 0000 0000');

@@ -392,7 +392,6 @@ function stRenderPay(data){
   const opts=ST_PAY_KINDS.map(([k,,shown])=>`<option value="${esc(k)}"${pick===k?' selected':''}>${esc(shown)}</option>`).join('');
   return `<p class="st-pay-status ${status.ok?'good':'bad'}" role="status" style="${status.ok?ST_PAY_CSS.ok:ST_PAY_CSS.bad}">${esc(status.text)}</p>
     ${stRow('Shown first',`<select id="stPayPref"><option value="">— none —</option>${opts}</select>`,'The one a client sees large; the rest read as “or”')}
-    ${stRow('Currency',`<input id="stPayCurrency" value="${esc(st.currency)}" maxlength="3" class="st-pay-cur" style="max-width:92px">`,'A three-letter code. Every plan is priced in USD.')}
     ${stRow('Payment terms',`<input id="stPayTerms" value="${esc(st.terms)}" placeholder="Net 7">`,'Printed on the invoice beside the due date')}
     <div class="st-pay-ms" style="${ST_PAY_CSS.ms}">${blocks}</div>
     <div class="st-act"><button class="btn" onclick="stSubmitPay()">Save</button><span id="stPayMsg" class="st-msg"></span></div>`;
@@ -400,7 +399,11 @@ function stRenderPay(data){
 function stReadPay(){
   const f={pay_methods:{},
     pay_preferred:(document.getElementById('stPayPref')||{}).value||'',
-    pay_currency:(document.getElementById('stPayCurrency')||{}).value||'',
+    /* Every plan is priced in USD and every invoice carries its own currency,
+       so the box here changed nothing and could only be got wrong. It is gone;
+       the stored setting stays USD so anything reading it still reads a
+       sensible value. */
+    pay_currency:'USD',
     pay_terms:(document.getElementById('stPayTerms')||{}).value||''};
   ST_PAY_KINDS.forEach(([k])=>{
     const box=document.getElementById('stPay_on_'+k);
